@@ -336,6 +336,23 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         } catch (Throwable failure) { failDirect(failure); throw failure; }
     }
 
+    /** Publish a fixed batch result buffer without creating a List view on the Matcher thread. */
+    public void publishDirectResults(
+            com.surprising.aeron.service.matching.CoreMatchingResult[] results, int count) {
+        try {
+            if (results == null || count != batchPlanCount || count <= 0 || count > results.length)
+                throw new IllegalStateException("direct matcher batch is incomplete");
+            com.surprising.aeron.service.matching.CoreMatchingResult previous = null;
+            for (int index = 0; index < count; index++) {
+                var result = results[index];
+                buildDirectItem(index, result, previous);
+                previous = result;
+            }
+            firstDirectResult = results[0]; lastDirectResult = previous;
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
     private void buildDirectItem(int index, com.surprising.aeron.service.matching.CoreMatchingResult result,
                                  com.surprising.aeron.service.matching.CoreMatchingResult previous) {
         if (!direct || directPublished || result == null) throw new IllegalStateException("invalid direct publication");

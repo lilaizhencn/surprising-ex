@@ -185,8 +185,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     boolean pipelined;
     /** 本批是否必须逐项准入，以保持批内资金或订单依赖。 */
     boolean sequentialAdmission;
-    /** matcher 写入的批量结果；完成交接后 owner 才读取。 */
-    final List<com.surprising.aeron.service.matching.CoreMatchingResult> pipelinedMatchingResults;
+    /** Matcher 写入的批量结果；固定槽位在批上下文内复用，完成交接后 Owner 才读取。 */
+    final CoreMatchingResult[] pipelinedMatchingResults;
+    int pipelinedMatchingResultCount;
     /** matcher 报告的批量失败，随完成通知交给 owner。 */
     Throwable pipelinedMatchingFailure;
     /** 本批派发到各 Lane 的结算事件；收集完成前不得复用。 */
@@ -281,7 +282,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
         deferredSettlementItemIndexes = new int[capacity];
-        pipelinedMatchingResults = new ArrayList<>(capacity);
+        pipelinedMatchingResults = new CoreMatchingResult[capacity];
         preparedClientUsers = new long[capacity];
         preparedClientIds = new String[capacity];
         preparedClientKeys = new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
@@ -354,7 +355,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         commitStage = CommitStage.WAITING;
         pipelined = false;
         sequentialAdmission = false;
-        pipelinedMatchingResults.clear();
+        java.util.Arrays.fill(pipelinedMatchingResults, 0, pipelinedMatchingResultCount, null);
+        pipelinedMatchingResultCount = 0;
         pipelinedMatchingFailure = null;
         settlementEvent = null;
         cancelEvent = null;

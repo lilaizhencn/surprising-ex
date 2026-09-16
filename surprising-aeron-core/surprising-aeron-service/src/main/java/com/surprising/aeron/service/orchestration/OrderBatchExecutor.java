@@ -299,23 +299,24 @@ final class OrderBatchExecutor {
     com.surprising.aeron.service.matching.CoreMatchingResult
             submitPreparedPipelinedPlaceBatch(
                     CommandSlot pending, OrderBatchPending batch, long userId, int shard) {
-        List<com.surprising.aeron.service.matching.CoreMatchingResult> results =
-                batch.pipelinedMatchingResults;
-        results.clear();
+        batch.pipelinedMatchingResultCount = 0;
         try {
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 com.surprising.aeron.service.matching.CoreMatchingOrder matchingOrder =
                         batch.preparedMatchingOrders[index];
-                results.add(owner.matchingAdapter.placeWithEvidence(
+                if (batch.pipelinedMatchingResultCount == batch.pipelinedMatchingResults.length)
+                    throw new IllegalStateException("place batch result buffer is full");
+                batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount++] =
+                        owner.matchingAdapter.placeWithEvidence(
                         shard, pending.sequence(), pending.command().header().commandId(),
                         command.instrumentChangeId(), pending.command().header().submittedAtEpochMillis(),
-                        userId, matchingOrder));
+                        userId, matchingOrder);
             }
             if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
-                for (int index = 0; index < results.size(); index++) {
-                    var result = results.get(index);
+                for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
+                    var result = batch.pipelinedMatchingResults[index];
                     var item = batch.items.get(index);
                     item.realtimeTakerOrder = batch.preparedAdmittedOrders[index];
                     item.executionEvents = result.matcherEvents();
@@ -328,10 +329,11 @@ final class OrderBatchExecutor {
                     item.resultCode = result.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
                     batch.collectChangedOrderIds(item, userId, result);
                 }
-                batch.lastMatchingResult = results.getLast();
-                batch.settlementEvent.publishDirectResults(results);
+                batch.lastMatchingResult = batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount - 1];
+                batch.settlementEvent.publishDirectResults(
+                        batch.pipelinedMatchingResults, batch.pipelinedMatchingResultCount);
             }
-            return results.getFirst();
+            return batch.pipelinedMatchingResults[0];
         } catch (RuntimeException failure) {
             batch.pipelinedMatchingFailure = failure;
             throw failure;
@@ -601,20 +603,22 @@ final class OrderBatchExecutor {
         batch.itemSettlementEvent = direct;
         owner.runtimeState.dispatchDirectMatcherSettlement(direct);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
-            batch.pipelinedMatchingResults.clear();
+            batch.pipelinedMatchingResultCount = 0;
             for (int index = start; index < chunkEnd; index++) {
                 OrderBatchItem item = batch.items.get(index);
                 var result = owner.matchingAdapter.cancelWithEvidence(shard, pending.sequence(),
                         pending.command().header().commandId(), item.orderId, item.cancelInstrumentChangeId,
                         pending.command().header().submittedAtEpochMillis(),
                         pending.command().header().userId(), item.cancelSymbol);
-                batch.pipelinedMatchingResults.add(result);
+                if (batch.pipelinedMatchingResultCount == batch.pipelinedMatchingResults.length)
+                    throw new IllegalStateException("cancel chunk result buffer is full");
+                batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount++] = result;
                 item.status = result.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
                 item.resultCode = result.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
                 if (owner.commits.matchingResultNeedsRecovery(pending, result)) break;
             }
-            direct.publishDirectResults(batch.pipelinedMatchingResults);
-            return batch.pipelinedMatchingResults.getFirst();
+            direct.publishDirectResults(batch.pipelinedMatchingResults, batch.pipelinedMatchingResultCount);
+            return batch.pipelinedMatchingResults[0];
         }, direct);
     }
 
@@ -636,8 +640,8 @@ final class OrderBatchExecutor {
                     batch, pending, matchingResult, clusterTimestamp, clusterPosition);
         }
         if (batch.kind == OrderBatchKind.CANCEL) {
-            if (batch.pipelinedMatchingResults.isEmpty()
-                    || batch.pipelinedMatchingResults.getFirst() != matchingResult) {
+            if (batch.pipelinedMatchingResultCount == 0
+                    || batch.pipelinedMatchingResults[0] != matchingResult) {
                 throw failOrderBatch(batch, pending, "cancel chunk completion identity mismatch", null);
             }
             var event = batch.itemSettlementEvent;
@@ -649,7 +653,8 @@ final class OrderBatchExecutor {
             }
             owner.runtimeState.releaseMatcherSettlement(event);
             batch.itemSettlementEvent = null;
-            for (var result : batch.pipelinedMatchingResults) {
+            for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
+                var result = batch.pipelinedMatchingResults[index];
                 if (owner.commits.matchingResultNeedsRecovery(pending, result)) {
                     throw failOrderBatch(batch, pending, "cancel chunk matcher divergence", null);
                 }
@@ -664,7 +669,8 @@ final class OrderBatchExecutor {
             if (batch.nextIndex != batch.cancellationChunkEnd) {
                 throw failOrderBatch(batch, pending, "cancel chunk completion count mismatch", null);
             }
-            batch.pipelinedMatchingResults.clear();
+            java.util.Arrays.fill(batch.pipelinedMatchingResults, 0, batch.pipelinedMatchingResultCount, null);
+            batch.pipelinedMatchingResultCount = 0;
         } else {
             applyCompletedOrderBatchItem(batch, pending, matchingResult);
         }
@@ -752,15 +758,15 @@ final class OrderBatchExecutor {
     void applyPipelinedPlaceBatchResults(
             OrderBatchPending batch, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult firstMatchingResult) {
-        List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults =
-                batch.pipelinedMatchingResults;
-        if (matchingResults == null || matchingResults.size() != batch.items.size()
-                || matchingResults.getFirst().nativeCommand().matcherSequence()
+        if (batch.pipelinedMatchingResultCount != batch.items.size()
+                || batch.pipelinedMatchingResultCount == 0
+                || batch.pipelinedMatchingResults[0].nativeCommand().matcherSequence()
                 != firstMatchingResult.nativeCommand().matcherSequence()) {
             throw failOrderBatch(batch, pending, "pipelined matcher batch result is incomplete", null);
         }
-        for (int index = 0; index < matchingResults.size(); index++) {
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult = matchingResults.get(index);
+        for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
+            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult =
+                    batch.pipelinedMatchingResults[index];
             if (owner.commits.matchingResultNeedsRecovery(pending, matchingResult)) {
                 throw failOrderBatch(batch, pending,
                         "matcher continuation returned " + matchingResult.resultCode(), null);

@@ -267,6 +267,11 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 
 每类命令先划分“Lane 局部状态”和“Owner 全局事实”，禁止为每条业务线创建独立协调器。
 
+#### 阶段 7.1a：批量结果传输先固定化
+
+状态：**已完成（100%）**。CANCEL batch 和流水 PLACE batch 已使用 `OrderBatchPending` 内预分配的
+`CoreMatchingResult[]` 及计数器；Matcher direct publish 不再把数组包装成 `List`，Owner 侧完成校验、遍历和回收也只访问固定槽位。批量 admission 的 Owner 等待和逐项迁移仍属于后续 7.1b，不在本子阶段虚报完成。
+
 ## 正确性门槛
 
 压测前必须全部通过：
@@ -328,4 +333,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 5（Lane 就地状态更新）：已完成。订单、reservation、position 和账户状态在 Lane 内复用对象就地更新；只有发布边界生成不可变 after-image，终态 route 清理单独处理，避免 Owner/Matcher 间重复物化。
 - 阶段 6（紧凑终态提交）：已完成。Lane 直接提供 primitive changed-key 集合和单笔响应 after-image；Owner 不再重走 settlement plan、不再为单笔终态重新查找运行时订单或编码响应，只合并 Delta 并完成全局有序提交。REPLACE/AMEND 双订单和 batch 仍保留兼容语义，待阶段 7 迁移。
 - 阶段 4～6 验收：JDK 27 编译及服务模块全量回归通过，`931 tests, 0 failures, 0 errors, 1 skipped`；普通撮合、跨 Lane 结算、批量原子性、恢复和 admission 目标测试通过。未执行吞吐压测。
+- 阶段 7.1a（批量结果固定槽位）：已完成。`OrderBatchPending` 的批量 Matcher 结果由复用 `CoreMatchingResult[]` 承载，CANCEL/流水 PLACE 的 Matcher direct publish 和 Owner 收集不再经过 `ArrayList`。
+- 阶段 7.1a 验收：JDK 27 下批量/恢复/直达结算目标测试通过；服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
 - 下一阶段为阶段 7：按同一模型迁移剩余 batch、风控/强平、资金费/结算、ADL、交割和期权等命令，完成后再统一压测。
