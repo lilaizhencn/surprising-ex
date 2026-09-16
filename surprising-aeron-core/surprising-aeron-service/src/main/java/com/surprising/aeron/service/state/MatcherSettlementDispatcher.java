@@ -114,8 +114,10 @@ final class MatcherSettlementDispatcher {
         if (!owner.accountLanesStarted && !event.ready())
             throw new IllegalStateException("asynchronous matcher requires running account Lanes");
         event.markDispatched();
-        for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
-            if ((mask & 1L << laneId) == 0) continue;
+        long lanes = mask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             if (!owner.accountLanesStarted) event.execute(owner.accountLanes[laneId]);
             else {
                 owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -222,10 +224,11 @@ final class MatcherSettlementDispatcher {
             throw new IllegalStateException("batch item settlement is not ready to collect");
         owner.assertAccountLanesHealthy();
         // Sequential items share a funds boundary: merge endpoints before collecting the item.
-        for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
-            if ((event.requiredLaneMask() & (1L << laneId)) != 0) {
-                owner.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
-            }
+        long lanes = event.requiredLaneMask();
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
+            owner.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
         }
         return owner.collectMatcherSettlement(event, null, terminalOrderSink);
     }
@@ -308,8 +311,10 @@ final class MatcherSettlementDispatcher {
                     plans, batch.settlementCount(), owner, identities, instruments,
                     baseAssetIds, quoteAssetIds, settleAssetIds, owner.accountLanes.length);
             event.resultTarget = batch instanceof LaneOrderResultTarget target ? target : null;
-            for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
-                if ((batchLaneMask & 1L << laneId) == 0) continue;
+            long lanes = batchLaneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
                 if (!owner.accountLanesStarted
                         || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
                     event.execute(owner.accountLanes[laneId]);

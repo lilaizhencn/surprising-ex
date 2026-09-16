@@ -1160,16 +1160,22 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         RuntimeFundsDelta collectFundsDelta(long laneMask) {
             aggregateFundsDelta.clear();
-            for (int laneId = 0; laneId < laneFundsDeltas.length; laneId++) {
-                if ((laneMask & 1L << laneId) != 0) aggregateFundsDelta.add(laneFundsDeltas[laneId]);
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
+                aggregateFundsDelta.add(laneFundsDeltas[laneId]);
             }
             return aggregateFundsDelta.toDelta();
         }
 
         void appendFundsDelta(long laneMask, RuntimeFundsAccumulator target) {
             if (target == null) throw new IllegalArgumentException("funds accumulator is required");
-            for (int laneId = 0; laneId < laneFundsDeltas.length; laneId++) {
-                if ((laneMask & 1L << laneId) != 0) target.add(laneFundsDeltas[laneId]);
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
+                target.add(laneFundsDeltas[laneId]);
             }
         }
 

@@ -728,8 +728,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         observedCompletedLaneMask = 0;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];
-        else for (int laneId = 0; laneId < laneCount; laneId++) {
-            LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
+        else {
+            long lanes = routedLaneMask();
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
+                LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
+            }
         }
     }
 }
