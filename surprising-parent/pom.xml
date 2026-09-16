@@ -20,7 +20,7 @@
     <description>Parent POM and centralized dependency management for all Surprising modules</description>
 
     <properties>
-        <java.version>25</java.version>
+        <java.version>27</java.version>
         <surprising.version>1.0.0-SNAPSHOT</surprising.version>
         <rpc.version>1.0.0-SNAPSHOT</rpc.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -128,15 +128,15 @@
                 <version>3.6.3</version>
                 <executions>
                     <execution>
-                        <id>require-jdk-25</id>
+                        <id>require-jdk-27</id>
                         <goals>
                             <goal>enforce</goal>
                         </goals>
                         <configuration>
                             <rules>
                                 <requireJavaVersion>
-                                    <version>[25,26)</version>
-                                    <message>Surprising EX must be built with JDK 25.</message>
+                                    <version>[27,28)</version>
+                                    <message>Surprising EX must be built with JDK 27.</message>
                                 </requireJavaVersion>
                             </rules>
                         </configuration>

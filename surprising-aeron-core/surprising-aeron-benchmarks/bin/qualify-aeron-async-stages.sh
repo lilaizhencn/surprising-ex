@@ -41,13 +41,16 @@ MATCHER_STAGE_LANES="${ASYNC_MATCHER_STAGE_LANES:-1}"
 ONLY_STAGE="${ASYNC_ONLY_STAGE:-}"
 SKIP_BUILD="${ASYNC_SKIP_BUILD:-false}"
 
-DEFAULT_JAVA_HOME="/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home"
+DEFAULT_JAVA_HOME="/Users/atomex/.sdkman/candidates/java/27.0.0-amzn"
 JAVA_HOME_SELECTED="${SURPRISING_JAVA_HOME:-${JAVA_HOME:-}}"
 if [[ -z "${JAVA_HOME_SELECTED}" && -d "${DEFAULT_JAVA_HOME}" ]]; then JAVA_HOME_SELECTED="${DEFAULT_JAVA_HOME}"; fi
-if [[ -z "${JAVA_HOME_SELECTED}" ]]; then echo "Set SURPRISING_JAVA_HOME to JDK 25 HotSpot." >&2; exit 2; fi
+if [[ -z "${JAVA_HOME_SELECTED}" ]]; then echo "Set SURPRISING_JAVA_HOME to JDK 27 HotSpot." >&2; exit 2; fi
 JAVA="${JAVA_HOME_SELECTED}/bin/java"; JFR="${JAVA_HOME_SELECTED}/bin/jfr"; JCMD="${JAVA_HOME_SELECTED}/bin/jcmd"
 JAVA_VERSION="$(${JAVA} -version 2>&1)"
-if [[ "${JAVA_VERSION}" != *'version "25.'* || "${JAVA_VERSION}" != *HotSpot* ]]; then echo "Requires HotSpot JDK 25:" >&2; echo "${JAVA_VERSION}" >&2; exit 2; fi
+if [[ "${JAVA_VERSION}" != *'version "27'* \
+    || ( "${JAVA_VERSION}" != *HotSpot* && "${JAVA_VERSION}" != *'OpenJDK 64-Bit Server VM'* ) ]]; then
+  echo "Requires HotSpot JDK 27:" >&2; echo "${JAVA_VERSION}" >&2; exit 2;
+fi
 [[ -x "${JFR}" && -x "${JCMD}" ]] || { echo "JFR/jcmd unavailable under ${JAVA_HOME_SELECTED}" >&2; exit 2; }
 case "${COLLECTOR}" in
   ZGC) GC_FLAG=(-XX:+UseZGC) ;;

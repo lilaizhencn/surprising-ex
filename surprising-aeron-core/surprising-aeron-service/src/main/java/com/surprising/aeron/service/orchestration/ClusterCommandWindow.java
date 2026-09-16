@@ -3,6 +3,8 @@ package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import io.aeron.cluster.service.ClientSession;
 
@@ -16,7 +18,9 @@ import io.aeron.cluster.service.ClientSession;
  */
 public final class ClusterCommandWindow {
     public static final int DEFAULT_CAPACITY = 256;
-    private static final int MAX_CANDIDATE_ORDERS = CancelOrderBatchCommand.MAX_ORDERS;
+    /** Exact order identities retained by an admitted entry for cancellation fencing. */
+    private static final int MAX_TRACKED_ORDER_IDS = Math.max(
+            PlaceOrderBatchCommand.MAX_ORDERS, CancelOrderBatchCommand.MAX_ORDERS);
 
     /** Owner ingress fences are limited to exact orders and the submitting account Lane. */
     public enum Conflict { NONE, ORDER, ACCOUNT }
@@ -34,12 +38,12 @@ public final class ClusterCommandWindow {
     private long lastMatchingSequence;
     private int lastMatchingPhysical = -1;
 
-    private final long[] candidateOrders = new long[MAX_CANDIDATE_ORDERS];
     private long candidateUser;
     private IngressRoute candidateRoute;
+    /** Request whose decoded value produced candidateRoute; prevents stale scratch reuse. */
+    private CoreMessage routedSource;
     private CoreMessage decodedSource;
     private DecodedMatchingCommand decoded;
-    private int candidateOrderCount;
 
     public ClusterCommandWindow() {
         this(Integer.parseInt(System.getProperty("surprising.aeron.owner-command-window",
@@ -61,7 +65,7 @@ public final class ClusterCommandWindow {
     public void resetCandidate(long userId) {
         candidateUser = userId;
         candidateRoute = null;
-        candidateOrderCount = 0;
+        routedSource = null;
         conflict = Conflict.NONE;
     }
 
@@ -69,19 +73,12 @@ public final class ClusterCommandWindow {
     public IngressRoute route(int matcherShard, long userLaneBit) {
         if (candidateUser <= 0 || matcherShard < 0 || userLaneBit == 0)
             throw new IllegalArgumentException("invalid ingress route");
+        routedSource = decodedSource;
         candidateRoute = new IngressRoute(candidateUser, matcherShard, userLaneBit, 0);
         return candidateRoute;
     }
 
     public IngressRoute route() { return candidateRoute; }
-
-    /** Keep exact order identities for cancellation and idempotent retry fencing. */
-    public void candidateOrder(long orderId) {
-        if (orderId <= 0) return;
-        if (candidateOrderCount >= MAX_CANDIDATE_ORDERS)
-            throw new IllegalArgumentException("too many candidate orders");
-        candidateOrders[candidateOrderCount++] = orderId;
-    }
 
     public boolean conflicts() { return conflictingPrefixSize() != 0; }
 
@@ -93,11 +90,7 @@ public final class ClusterCommandWindow {
     public int conflictingPrefixSize() {
         conflict = Conflict.NONE;
         int exactPrefix = 0;
-        for (int i = 0; i < candidateOrderCount; i++) {
-            long slot = orderSlots.get(candidateOrders[i]);
-            if (slot != 0)
-                exactPrefix = Math.max(exactPrefix, (((int) slot - 1 - head) & indexMask) + 1);
-        }
+        exactPrefix = exactOrderPrefix(exactPrefix);
         // A Lane is a FIFO executor shared by many users.  It is not a command
         // dependency: fencing the whole lane here reduces a 256-slot window to
         // roughly one in-flight command per lane.  Only the same user's Owner
@@ -115,6 +108,34 @@ public final class ClusterCommandWindow {
         }
         if (exactPrefix != 0) conflict = Conflict.ORDER;
         return exactPrefix;
+    }
+
+    /**
+     * Exact cancellation/retry fencing is derived from the already decoded command.  The window
+     * no longer keeps a second candidate-order scratch collection for the current ingress item.
+     */
+    private int exactOrderPrefix(int prefix) {
+        if (routedSource == null || routedSource != decodedSource || decoded == null) return prefix;
+        CoreMessageType type = decodedSource.header().messageType();
+        switch (type) {
+            case PLACE_ORDER -> prefix = maxOrderPrefix(prefix, decoded.placeOrder().orderId());
+            case CANCEL_ORDER -> prefix = maxOrderPrefix(prefix, decoded.cancelOrder().orderId());
+            case PLACE_ORDER_BATCH -> {
+                for (var order : decoded.placeOrderBatch().orders())
+                    prefix = maxOrderPrefix(prefix, order.orderId());
+            }
+            case CANCEL_ORDER_BATCH -> {
+                for (var order : decoded.cancelOrderBatch().orders())
+                    prefix = maxOrderPrefix(prefix, order.orderId());
+            }
+            default -> { }
+        }
+        return prefix;
+    }
+
+    private int maxOrderPrefix(int prefix, long orderId) {
+        long slot = orderSlots.get(orderId);
+        return slot == 0 ? prefix : Math.max(prefix, (((int) slot - 1 - head) & indexMask) + 1);
     }
 
     public DecodedMatchingCommand decoded(CoreMessage request) {
@@ -152,14 +173,37 @@ public final class ClusterCommandWindow {
         entry.position = position;
         entry.route = candidateRoute;
         int physical = (head + size - 1) & indexMask;
-        entry.orderCount = candidateOrderCount;
-        for (int i = 0; i < candidateOrderCount; i++) {
-            long orderId = candidateOrders[i];
-            entry.orders[i] = orderId;
-            orderSlots.put(orderId, physical + 1L);
-        }
+        entry.orderCount = copyTrackedOrderIds(entry, physical);
         entry.physicalSlot = physical;
         return entry;
+    }
+
+    /** Store only exact identities belonging to this admitted command entry. */
+    private int copyTrackedOrderIds(Entry entry, int physical) {
+        if (routedSource == null || routedSource != decodedSource || decoded == null) return 0;
+        int count = 0;
+        switch (decodedSource.header().messageType()) {
+            case PLACE_ORDER -> count = trackOrderId(entry, count, decoded.placeOrder().orderId(), physical);
+            case CANCEL_ORDER -> count = trackOrderId(entry, count, decoded.cancelOrder().orderId(), physical);
+            case PLACE_ORDER_BATCH -> {
+                for (var order : decoded.placeOrderBatch().orders())
+                    count = trackOrderId(entry, count, order.orderId(), physical);
+            }
+            case CANCEL_ORDER_BATCH -> {
+                for (var order : decoded.cancelOrderBatch().orders())
+                    count = trackOrderId(entry, count, order.orderId(), physical);
+            }
+            default -> { }
+        }
+        return count;
+    }
+
+    private int trackOrderId(Entry entry, int count, long orderId, int physical) {
+        if (orderId <= 0) return count;
+        if (count >= MAX_TRACKED_ORDER_IDS) throw new IllegalArgumentException("too many tracked order IDs");
+        entry.orders[count] = orderId;
+        orderSlots.put(orderId, physical + 1L);
+        return count + 1;
     }
 
     /** Bind the assigned core sequence and index the response callback. */
@@ -255,7 +299,7 @@ public final class ClusterCommandWindow {
 
     public static final class Entry {
         /** Only exact identities needed for cancellation/retry fencing. */
-        public final long[] orders = new long[MAX_CANDIDATE_ORDERS];
+        public final long[] orders = new long[MAX_TRACKED_ORDER_IDS];
         public int orderCount;
         public IngressRoute route;
         public ClientSession session;

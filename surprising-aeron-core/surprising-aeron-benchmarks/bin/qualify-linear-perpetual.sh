@@ -11,7 +11,7 @@ MODE="${1:-all}"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -r "${TEMP_DIR}"' EXIT
 
-DEFAULT_JAVA_HOME="/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home"
+DEFAULT_JAVA_HOME="/Users/atomex/.sdkman/candidates/java/27.0.0-amzn"
 if [[ -n "${SURPRISING_JAVA_HOME:-}" ]]; then
   QUALIFICATION_JAVA_HOME="${SURPRISING_JAVA_HOME}"
 elif [[ -d "${DEFAULT_JAVA_HOME}" ]]; then
@@ -19,15 +19,16 @@ elif [[ -d "${DEFAULT_JAVA_HOME}" ]]; then
 elif [[ -n "${JAVA_HOME:-}" ]]; then
   QUALIFICATION_JAVA_HOME="${JAVA_HOME}"
 else
-  echo "Set SURPRISING_JAVA_HOME to an Oracle GraalVM HotSpot JDK 25 installation." >&2
+  echo "Set SURPRISING_JAVA_HOME to a JDK 27 HotSpot installation." >&2
   exit 2
 fi
 
 JAVA="${QUALIFICATION_JAVA_HOME}/bin/java"
 MAVEN="${MAVEN:-mvn}"
 JAVA_VERSION="$(${JAVA} -version 2>&1)"
-if [[ "${JAVA_VERSION}" != *'java version "25.'* || "${JAVA_VERSION}" != *'HotSpot'* ]]; then
-  echo "Qualification requires HotSpot JDK 25; found:" >&2
+if [[ "${JAVA_VERSION}" != *'version "27'* \
+    || ( "${JAVA_VERSION}" != *'HotSpot'* && "${JAVA_VERSION}" != *'OpenJDK 64-Bit Server VM'* ) ]]; then
+  echo "Qualification requires HotSpot JDK 27; found:" >&2
   echo "${JAVA_VERSION}" >&2
   exit 2
 fi

@@ -16,10 +16,10 @@ JFR_HOME="${SURPRISING_JAVA_HOME:-${JAVA_HOME:-}}"
 JAVA_BIN="${JFR_HOME:+${JFR_HOME}/bin/}java"
 JFR_BIN="${JFR_HOME:+${JFR_HOME}/bin/}jfr"
 JAVA_VERSION="$(${JAVA_BIN} -version 2>&1)"
-if [[ ( "${JAVA_VERSION}" != *'version "25"'* && "${JAVA_VERSION}" != *'version "25.'* ) \
+if [[ "${JAVA_VERSION}" != *'version "27'* \
     || "${JAVA_VERSION}" == *'OpenJ9'* ]] \
     || [[ "${JAVA_VERSION}" != *'HotSpot'* && "${JAVA_VERSION}" != *'OpenJDK 64-Bit Server VM'* ]]; then
-  echo "JFR analysis requires HotSpot JDK 25; found:" >&2
+  echo "JFR analysis requires HotSpot JDK 27; found:" >&2
   echo "${JAVA_VERSION}" >&2
   exit 2
 fi

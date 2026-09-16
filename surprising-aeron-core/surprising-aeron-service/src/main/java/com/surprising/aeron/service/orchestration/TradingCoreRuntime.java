@@ -695,7 +695,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     PlaceOrderCommand command = decoded.placeOrder();
                     int shard = decoded.matcherShard(matchingAdapter, command.symbol());
                     window.route(shard, runtimeState.topology().accountLaneMask(user));
-                    window.candidateOrder(command.orderId());
                     return rememberPipelineRoute(window, true);
                 }
                 case CANCEL_ORDER -> {
@@ -703,7 +702,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     var route = activeOrderIndex.activeOrderRoute(orderId);
                     if (route == null || route.userId() != user || route.symbol() == null
                             || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                    window.candidateOrder(orderId);
                     window.route(matchingAdapter.matcherShardId(route.symbol()),
                             runtimeState.topology().accountLaneMask(user));
                     return rememberPipelineRoute(window, true);
@@ -712,12 +710,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     int shard = -1;
                     for (var order : decoded.placeOrderBatch().orders()) {
                         int current = decoded.matcherShard(matchingAdapter, order.symbol());
+                        // A mixed-shard batch remains on the deterministic sequential item path;
+                        // each item becomes its own fixed matcher submission.  The Owner only
+                        // resolves the static symbol route and never scans active orders.
                         if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         if (shard < 0) {
                             shard = current;
                             window.route(shard, runtimeState.topology().accountLaneMask(user));
                         }
-                        window.candidateOrder(order.orderId());
                     }
                     if (shard < 0) return rememberPipelineRoute(window, false);
                     return rememberPipelineRoute(window, true);
@@ -728,8 +728,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         var route = activeOrderIndex.activeOrderRoute(order.orderId());
                         if (route == null || route.userId() != user || route.symbol() == null
                                 || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                        window.candidateOrder(order.orderId());
                         int current = matchingAdapter.matcherShardId(route.symbol());
+                        // The minimum order route index is the only allowed per-item lookup for
+                        // cancellation. Mixed shards use the existing deterministic sequential
+                        // chunk path instead of building an Owner-side candidate collection.
                         if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         shard = current;
                     }

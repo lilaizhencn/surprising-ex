@@ -44,7 +44,7 @@ if [[ "$jfr_settings" != "profile" && "$jfr_settings" != "default" ]]; then
   exit 2
 fi
 if [[ -z "${JAVA_HOME:-}" || ! -x "$JAVA_HOME/bin/java" ]]; then
-  echo "JDK 25 is required (JAVA_HOME must name a JDK)" >&2
+  echo "JDK 27 is required (JAVA_HOME must name a JDK)" >&2
   exit 25
 fi
 
@@ -54,10 +54,10 @@ feature_version=$(property java.specification.version)
 java_vendor=$(property java.vendor)
 vm_name=$(property java.vm.name)
 runtime_version=$(property java.runtime.version)
-if [[ "$feature_version" != "25" || "$java_vendor" != "Eclipse Adoptium" \
+if [[ "$feature_version" != "27" \
   || ( "$vm_name" != *HotSpot* && "$vm_name" != "OpenJDK 64-Bit Server VM" ) \
   || ! -x "$JAVA_HOME/bin/jfr" ]]; then
-  echo "Temurin 25 required: feature=${feature_version:-unknown} vendor=${java_vendor:-unknown} vm=${vm_name:-unknown} runtime=${runtime_version:-unknown}" >&2
+  echo "JDK 27 HotSpot required: feature=${feature_version:-unknown} vendor=${java_vendor:-unknown} vm=${vm_name:-unknown} runtime=${runtime_version:-unknown}" >&2
   exit 25
 fi
 

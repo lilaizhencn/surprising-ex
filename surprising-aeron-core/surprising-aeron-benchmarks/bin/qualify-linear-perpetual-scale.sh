@@ -8,8 +8,8 @@ JAR="${REPO_ROOT}/${MODULE}/target/product-core-benchmarks.jar"
 RUN_ID="${QUALIFICATION_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ARTIFACT_DIR="${QUALIFICATION_ARTIFACT_DIR:-${REPO_ROOT}/target/qualification/${RUN_ID}-scale}"
 MODE="${1:-all}"
-JAVA_HOME_25="${SURPRISING_JAVA_HOME:-/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home}"
-JAVA="${JAVA_HOME_25}/bin/java"
+JAVA_HOME_27="${SURPRISING_JAVA_HOME:-/Users/atomex/.sdkman/candidates/java/27.0.0-amzn}"
+JAVA="${JAVA_HOME_27}/bin/java"
 MAVEN="${MAVEN:-mvn}"
 HEAP="${QUALIFICATION_HEAP:-8g}"
 PROBE_WARMUP="${PROBE_WARMUP_CYCLES:-1}"
@@ -41,17 +41,16 @@ if (( MATCHING_ENGINES < 1 || MATCHING_ENGINES > 64
 fi
 
 JAVA_VERSION="$(${JAVA} -version 2>&1)"
-if [[ ( "${JAVA_VERSION}" != *'version "25"'* && "${JAVA_VERSION}" != *'version "25.'* ) \
+if [[ "${JAVA_VERSION}" != *'version "27'* \
     || "${JAVA_VERSION}" == *'OpenJ9'* ]] \
     || [[ "${JAVA_VERSION}" != *'HotSpot'* && "${JAVA_VERSION}" != *'OpenJDK 64-Bit Server VM'* ]]; then
-  echo "Scale qualification requires HotSpot JDK 25; found:" >&2
+  echo "Scale qualification requires HotSpot JDK 27; found:" >&2
   echo "${JAVA_VERSION}" >&2
   exit 2
 fi
-MAVEN_VERSION="$(JAVA_HOME="${JAVA_HOME_25}" PATH="${JAVA_HOME_25}/bin:${PATH}" "${MAVEN}" -version 2>&1)"
-if [[ ( "${MAVEN_VERSION}" != *'Java version: 25,'* \
-    && "${MAVEN_VERSION}" != *'Java version: 25.'* ) || "${MAVEN_VERSION}" == *'OpenJ9'* ]]; then
-  echo "Scale qualification requires Maven to run on HotSpot-compatible JDK 25; found:" >&2
+MAVEN_VERSION="$(JAVA_HOME="${JAVA_HOME_27}" PATH="${JAVA_HOME_27}/bin:${PATH}" "${MAVEN}" -version 2>&1)"
+if [[ "${MAVEN_VERSION}" != *'Java version: 27,'* || "${MAVEN_VERSION}" == *'OpenJ9'* ]]; then
+  echo "Scale qualification requires Maven to run on HotSpot-compatible JDK 27; found:" >&2
   echo "${MAVEN_VERSION}" >&2
   exit 2
 fi
@@ -96,7 +95,7 @@ run_targeted_tests() {
   local benchmark_marker="${ARTIFACT_DIR}/maven-benchmark-tests.start"
 
   : > "${protocol_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
+  JAVA_HOME="${JAVA_HOME_27}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl surprising-aeron-core/surprising-aeron-protocol -am \
     -Dtest="${protocol_tests}" -Dsurefire.failIfNoSpecifiedTests=false test \
     | tee "${ARTIFACT_DIR}/maven-protocol-tests.log"
@@ -105,7 +104,7 @@ run_targeted_tests() {
     "${protocol_tests}" "${protocol_marker}" "${ARTIFACT_DIR}/surefire-protocol.tsv"
 
   : > "${service_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
+  JAVA_HOME="${JAVA_HOME_27}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl surprising-aeron-core/surprising-aeron-service -am \
     -Dtest="${service_tests}" -Dsurefire.failIfNoSpecifiedTests=false test \
     | tee "${ARTIFACT_DIR}/maven-service-tests.log"
@@ -114,7 +113,7 @@ run_targeted_tests() {
     "${service_tests}" "${service_marker}" "${ARTIFACT_DIR}/surefire-service.tsv"
 
   : > "${gateway_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
+  JAVA_HOME="${JAVA_HOME_27}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl surprising-gateway -am \
     -Dtest="${gateway_tests}" \
     -Dsurefire.failIfNoSpecifiedTests=false test \
@@ -124,7 +123,7 @@ run_targeted_tests() {
     "${gateway_tests}" "${gateway_marker}" "${ARTIFACT_DIR}/surefire-gateway.tsv"
 
   : > "${benchmark_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
+  JAVA_HOME="${JAVA_HOME_27}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl "${MODULE}" -am -Dtest="${benchmark_tests}" \
     -Dsurefire.failIfNoSpecifiedTests=false test \
     | tee "${ARTIFACT_DIR}/maven-benchmark-tests.log"
@@ -134,7 +133,7 @@ run_targeted_tests() {
 }
 
 package_benchmark() {
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
+  JAVA_HOME="${JAVA_HOME_27}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl "${MODULE}" -am -DskipTests clean package | tee "${ARTIFACT_DIR}/maven-package.log"
   jar tf "${JAR}" | grep -qx 'META-INF/BenchmarkList'
   jar tf "${JAR}" | grep -qx 'META-INF/CompilerHints'
@@ -144,7 +143,7 @@ capture_nmt_baseline() {
   local process_pid="$1" prefix="$2"
   for _ in {1..100}; do
     kill -0 "${process_pid}" 2>/dev/null || break
-    if "${JAVA_HOME_25}/bin/jcmd" "${process_pid}" \
+    if "${JAVA_HOME_27}/bin/jcmd" "${process_pid}" \
         VM.native_memory baseline > "${prefix}-nmt-baseline.txt" 2>&1; then
       return 0
     fi
@@ -158,7 +157,7 @@ capture_process_nmt() {
   local process_pid="$1" prefix="$2"
   capture_nmt_baseline "${process_pid}" "${prefix}"
   while kill -0 "${process_pid}" 2>/dev/null; do
-    "${JAVA_HOME_25}/bin/jcmd" "${process_pid}" VM.native_memory summary.diff \
+    "${JAVA_HOME_27}/bin/jcmd" "${process_pid}" VM.native_memory summary.diff \
       > "${prefix}-nmt-summary.diff.tmp" 2>/dev/null || true
     if [[ -s "${prefix}-nmt-summary.diff.tmp" ]]; then
       mv "${prefix}-nmt-summary.diff.tmp" "${prefix}-nmt-summary.diff.txt"
@@ -318,7 +317,7 @@ run_soak() {
   capture_nmt_baseline "${soak_pid}" "${ARTIFACT_DIR}/scale-soak"
   (
     while kill -0 "${soak_pid}" 2>/dev/null; do
-      "${JAVA_HOME_25}/bin/jcmd" "${soak_pid}" VM.native_memory summary.diff \
+      "${JAVA_HOME_27}/bin/jcmd" "${soak_pid}" VM.native_memory summary.diff \
         > "${ARTIFACT_DIR}/scale-soak-nmt-summary.diff.tmp" 2>/dev/null || true
       if [[ -s "${ARTIFACT_DIR}/scale-soak-nmt-summary.diff.tmp" ]]; then
         mv "${ARTIFACT_DIR}/scale-soak-nmt-summary.diff.tmp" \
@@ -465,7 +464,7 @@ run_owner_commit() {
   [[ -s "${ARTIFACT_DIR}/owner-commit-profile-gc.log" ]]
   [[ -s "${ARTIFACT_DIR}/owner-commit-nmt-baseline.txt" ]]
   [[ -s "${ARTIFACT_DIR}/owner-commit-nmt-summary.diff.txt" ]]
-  REQUIRE_OWNER_MEASUREMENTS=true JAVA_HOME="${JAVA_HOME_25}" \
+  REQUIRE_OWNER_MEASUREMENTS=true JAVA_HOME="${JAVA_HOME_27}" \
     JFR_SETTINGS_FILE="${JFR_SETTINGS_FILE}" "${JFR_ANALYZER}" \
     "${ARTIFACT_DIR}/owner-commit.jfr" "${ARTIFACT_DIR}/owner-commit-jfr-analysis"
 }
