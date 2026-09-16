@@ -212,15 +212,22 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     }
 
     private void reset() {
+        long lanes = requiredLaneMask;
         if (triggerCancelIds != null) {
-            for (int laneId = 0; laneId < triggerCancelIds.length; laneId++) {
+            long triggerLanes = lanes;
+            while (triggerLanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(triggerLanes);
+                triggerLanes &= triggerLanes - 1;
                 if (triggerCancelIds[laneId] != null) triggerCancelIds[laneId].clear();
                 canceledTriggers[laneId] = 0;
             }
         }
 
         if (metadataOrderIds != null) {
-            for (int laneId = 0; laneId < metadataOrderIds.length; laneId++) {
+            long metadataLanes = lanes;
+            while (metadataLanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(metadataLanes);
+                metadataLanes &= metadataLanes - 1;
                 if (metadataOrderIds[laneId] == null) continue;
                 if (stampedOrders[laneId] != null)
                     java.util.Arrays.fill(stampedOrders[laneId], 0,
@@ -230,12 +237,14 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         }
         metadataTimestamp = metadataPosition = 0;
 
-        for (LongArrayList users : usersByLane) users.clear();
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
+            usersByLane[laneId].clear();
+            LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
+        }
         runtime = null;
         coreSequence = 0;
         requiredLaneMask = 0;
-        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
-            LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
-        }
     }
 }
