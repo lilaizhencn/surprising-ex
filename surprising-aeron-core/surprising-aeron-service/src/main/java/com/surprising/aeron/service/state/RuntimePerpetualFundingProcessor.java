@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.UUID;
+import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 public final class RuntimePerpetualFundingProcessor {
 
@@ -34,8 +35,8 @@ public final class RuntimePerpetualFundingProcessor {
                                              UUID chunkCommandId, TradingRuntimeState runtime,
                                              RuntimeIdentityRegistry identities) {
         FundingWork work = prepare(command, indexedUserIds, chunkCommandId, runtime, identities);
-        Object[] results = runtime.executeLifecycleSettlements(work.selectedUserIds, Long::longValue,
-                ignored -> work.applyLane());
+        Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.selectedUserIds.size(),
+                work::applyLane);
         return work.finish(results);
     }
 
@@ -111,6 +112,7 @@ public final class RuntimePerpetualFundingProcessor {
         private final ArrayList<Long> selectedUserIds;
         private final boolean chunked;
         private final long laneMask;
+        private final LongArrayList[] usersByLane;
         /** 一次派发一次终态，重复轮询不重复收付资金费。 */
         private boolean started;
         private FundingResult result;
@@ -123,13 +125,16 @@ public final class RuntimePerpetualFundingProcessor {
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
             this.userPage = userPage; this.selectedUserIds = userPage.userIds();
             this.chunked = chunkCommandId != null;
+            this.usersByLane = groupUsers(selectedUserIds, runtime);
             long mask = 0;
-            for (long user : selectedUserIds) mask |= runtime.topology().accountLaneMask(user);
+            for (int lane = 0; lane < usersByLane.length; lane++) {
+                if (!usersByLane[lane].isEmpty()) mask |= 1L << lane;
+            }
             laneMask = mask;
         }
 
-        private LaneFundingResult applyLane() {
-            return RuntimePerpetualFundingProcessor.applyLane(command, selectedUserIds, runtime,
+        private LaneFundingResult applyLane(int laneId) {
+            return RuntimePerpetualFundingProcessor.applyLane(command, usersByLane[laneId], runtime,
                     instrument, symbolId, settleAssetId, fundingMark);
         }
 
@@ -138,13 +143,10 @@ public final class RuntimePerpetualFundingProcessor {
             if (result != null) return true;
             if (!started) {
                 started = true;
-                if (laneMask != 0) runtime.dispatchControlLanes(laneMask, ignored -> applyLane());
+                if (laneMask != 0) runtime.dispatchControlLanes(laneMask, this::applyLane);
             }
             if (laneMask != 0 && !runtime.pollControlLanes()) return false;
-            Object[] results = new Object[runtime.topology().accountLaneCount()];
-            for (int lane = 0; lane < results.length; lane++)
-                if ((laneMask & (1L << lane)) != 0) results[lane] = runtime.controlLaneResult(lane);
-            result = finish(results);
+            result = finish();
             return true;
         }
 
@@ -180,21 +182,46 @@ public final class RuntimePerpetualFundingProcessor {
             return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                     nextCursorUserId, selectedUserIds.size()));
         }
+
+        private FundingResult finish() {
+            ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
+            RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+            for (int lane = 0; lane < usersByLane.length; lane++) {
+                if ((laneMask & (1L << lane)) == 0) continue;
+                Object value = runtime.controlLaneResult(lane);
+                if (!(value instanceof LaneFundingResult laneResult)) continue;
+                payments.addAll(laneResult.payments());
+                treasuryDelta.merge(laneResult.treasuryDelta());
+                for (long userId : laneResult.changedUserIds()) runtime.markBalanceChanged(userId, settleAssetId);
+            }
+            treasuryDelta.apply(runtime.treasury());
+            boolean complete = !chunked || userPage.complete();
+            long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
+            if (complete) runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
+            else runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
+                    command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
+                    userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
+            return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
+                    nextCursorUserId, selectedUserIds.size()));
+        }
     }
 
-    private static LaneFundingResult applyLane(ApplyFundingCommand command, Iterable<Long> selectedUserIds,
+    private static LaneFundingResult applyLane(ApplyFundingCommand command, LongArrayList selectedUserIds,
                                                TradingRuntimeState runtime, CoreInstrumentState instrument,
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
         ArrayList<Long> changedUserIds = new ArrayList<>();
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        for (Long userId : selectedUserIds) {
-            if (userId == null || !runtime.currentLaneOwns(userId)) continue;
-            NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+        for (int userIndex = 0; userIndex < selectedUserIds.size(); userIndex++) {
+            long userId = selectedUserIds.get(userIndex);
+            LongArrayList positionKeys = runtime.positionKeysForUserAndSymbolPrimitive(userId, symbolId);
             if (positionKeys.isEmpty()) continue;
             long requestedDelta = 0;
-            for (long positionKey : positionKeys) {
+            for (int positionIndex = 0; positionIndex < positionKeys.size(); positionIndex++) {
+                long positionKey = positionKeys.get(positionIndex);
                 PositionRuntime position = runtime.position(positionKey);
                 long positionDelta = kernel.fundingDeltaUnits(instrument,
                         position.signedQuantitySteps(), markPriceTicks, command.fundingRatePpm());
@@ -216,7 +243,8 @@ public final class RuntimePerpetualFundingProcessor {
             }
 
             long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
-            for (long positionKey : positionKeys) {
+            for (int positionIndex = 0; positionIndex < positionKeys.size(); positionIndex++) {
+                long positionKey = positionKeys.get(positionIndex);
                 PositionRuntime position = runtime.position(positionKey);
                 long amount = kernel.fundingDeltaUnits(instrument,
                         position.signedQuantitySteps(), markPriceTicks, command.fundingRatePpm());
@@ -240,6 +268,13 @@ public final class RuntimePerpetualFundingProcessor {
             }
         }
         return new LaneFundingResult(payments, changedUserIds, treasuryDelta);
+    }
+
+    private static LongArrayList[] groupUsers(ArrayList<Long> userIds, TradingRuntimeState runtime) {
+        LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
+        for (int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
+        for (long userId : userIds) groups[runtime.topology().accountLaneId(userId)].add(userId);
+        return groups;
     }
 
     public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,

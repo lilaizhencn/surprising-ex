@@ -404,7 +404,8 @@ public final class MatcherSettlementPlan {
         return size + 1;
     }
 
-    private static final class OrderIdView extends AbstractList<Long> implements RandomAccess {
+    private static final class OrderIdView extends AbstractList<Long>
+            implements RandomAccess, com.surprising.aeron.service.command.support.PrimitiveLongView {
         private final MatcherSettlementPlan plan;
 
         private OrderIdView(MatcherSettlementPlan plan) { this.plan = plan; }
@@ -417,6 +418,15 @@ public final class MatcherSettlementPlan {
 
         @Override
         public int size() { return plan.orderCount; }
+
+        @Override
+        public int primitiveSize() { return plan.orderCount; }
+
+        @Override
+        public long primitiveValueAt(int index) {
+            if (index < 0 || index >= plan.orderCount) throw new IndexOutOfBoundsException(index);
+            return plan.orderIds[index];
+        }
     }
 
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

@@ -26,7 +26,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private PlaceBatchIntentSource source;
     private ResolvedPlaceOrder[] orders;
     private long[] openInterestSteps;
-    private RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities;
+    private boolean[] lifecycleSettled;
+    private boolean[] fundingInProgress;
     private RuntimeIdentityRegistry.PreparedClientKey[] clientKeys;
     private int[] symbolIds;
     private int[] assetIds;
@@ -49,18 +50,19 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
 
     PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, ResolvedPlaceOrder[] orders,
-            long[] openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
+            long[] openInterestSteps, boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
             ReservationRuntime[] admittedReservations, int itemCount, int laneId,
             TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
-                || openInterestSteps == null || admissionIdentities == null || clientKeys == null || symbolIds == null
+                || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
+                || clientKeys == null || symbolIds == null
                 || assetIds == null || matchingOrders == null || admittedOrders == null
                 || admittedReservations == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > openInterestSteps.length
-                || itemCount > admissionIdentities.length
+                || itemCount > lifecycleSettled.length || itemCount > fundingInProgress.length
                 || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
                 || itemCount > matchingOrders.length || itemCount > admittedOrders.length
                 || itemCount > admittedReservations.length || laneId < 0 || runtime == null || changes == null) {
@@ -74,7 +76,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.orders = orders;
         this.source = source;
         this.openInterestSteps = openInterestSteps;
-        this.admissionIdentities = admissionIdentities;
+        this.lifecycleSettled = lifecycleSettled;
+        this.fundingInProgress = fundingInProgress;
         this.clientKeys = clientKeys;
         this.symbolIds = symbolIds;
         this.assetIds = assetIds;
@@ -117,7 +120,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         assetIds[index] = runtime.productLine().isDerivative() ? decision.settleAssetId()
                                 : resolved.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
                                 ? decision.quoteAssetId() : decision.baseAssetId();
-                        admissionIdentities[index] = decision.context().admissionFlags();
+                        lifecycleSettled[index] = decision.context().lifecycleSettled();
+                        fundingInProgress[index] = decision.context().fundingInProgress();
                         openInterestSteps[index] = decision.openInterestSteps();
                         matchingOrders[index] = new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
                                 resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
@@ -125,10 +129,11 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     ResolvedPlaceOrder order = orders[index];
                     var key = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
                     clientKeys[index] = key;
-                    var flags = admissionIdentities[index];
-                    var identity = RuntimeOrderAdmission.identityInLane(lane, identities, userId, order, key, flags);
-                    if (source != null && runtime.productLine().isDerivative() && identity.positionKey() != null) {
-                        var position = lane.positions.get(identity.positionKey());
+                    String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
+                            ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
+                    long positionKey = identities.findPositionKeyValueInLane(lane, userId, positionIdentity);
+                    if (source != null && runtime.productLine().isDerivative() && positionKey != 0) {
+                        var position = lane.positions.get(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
                             var summary = lane.admissionOrderIndex(symbolIds[index]).inspect(userId, order.symbol(),
@@ -140,7 +145,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     }
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, userId, order, openInterestSteps[index],
-                            lane.admissionOrderIndex(symbolIds[index]), identity);
+                            lane.admissionOrderIndex(symbolIds[index]), key.key(), symbolIds[index], positionKey,
+                            lifecycleSettled[index], fundingInProgress[index]);
                     runtime.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
                             coreSequence, null, timestamp, position);
@@ -186,7 +192,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         source = null;
         orders = null;
         openInterestSteps = null;
-        admissionIdentities = null;
+        lifecycleSettled = null;
+        fundingInProgress = null;
         clientKeys = null;
         symbolIds = null;
         assetIds = null;

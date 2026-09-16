@@ -55,84 +55,68 @@ public final class InsuranceAllocationPolicy {
                                         RuntimeIdentityRegistry identities,
                                         Iterable<Long> candidateIds,
                                         long liquidationId) {
-        if (runtime == null || identities == null || candidateIds == null) {
-            throw new IllegalArgumentException("insurance allocation inputs are required");
-        }
-        LiquidationRuntime target = runtime.liquidation(liquidationId);
-        if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return 0;
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(target.symbolId()));
-        if (instrument == null || instrument.changeId() != target.instrumentChangeId()) return 0;
-        int assetId = identities.assetId(instrument.settleAsset());
-        BigInteger total = BigInteger.ZERO;
-        int rank = 0;
-        boolean found = false;
-        for (Long id : candidateIds) {
-            LiquidationRuntime claim = eligible(runtime, identities, id, assetId);
-            if (claim == null) continue;
-            total = total.add(BigInteger.valueOf(claim.deficitUnits()));
-            if (compare(claim, target, identities) < 0) rank++;
-            if (claim.liquidationId() == liquidationId) found = true;
-        }
-        if (!found || total.signum() == 0) return 0;
-        BigInteger available = BigInteger.valueOf(Math.max(0, runtime.treasury().insurance(assetId))).min(total);
-        if (available.signum() == 0) return 0;
-        if (available.equals(total)) return target.deficitUnits();
-        BigInteger allocated = BigInteger.ZERO;
-        long targetBase = 0;
-        for (Long id : candidateIds) {
-            LiquidationRuntime claim = eligible(runtime, identities, id, assetId);
-            if (claim == null) continue;
-            BigInteger share = available.multiply(BigInteger.valueOf(claim.deficitUnits())).divide(total);
-            allocated = allocated.add(share);
-            if (claim.liquidationId() == liquidationId) targetBase = share.longValueExact();
-        }
-        // The remainder goes to the same deterministic prefix as allocations(), without sorting
-        // or constructing a result map for unrelated assets. Recompute after each settled claim.
-        return targetBase + (rank < available.subtract(allocated).intValueExact() ? 1 : 0);
-    }
-
-    private static LiquidationRuntime eligible(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                               Long id, int assetId) {
-        if (id == null) return null;
-        LiquidationRuntime claim = runtime.liquidation(id);
-        if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return null;
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(claim.symbolId()));
-        return instrument != null && instrument.changeId() == claim.instrumentChangeId()
-                && identities.assetId(instrument.settleAsset()) == assetId ? claim : null;
-    }
-
-    private static int compare(LiquidationRuntime left, LiquidationRuntime right,
-                               RuntimeIdentityRegistry identities) {
-        int order = Long.compare(left.triggerPriceSequence(), right.triggerPriceSequence());
-        if (order == 0) order = Long.compare(left.userId(), right.userId());
-        if (order == 0) order = identities.symbol(left.symbolId()).compareTo(identities.symbol(right.symbolId()));
-        if (order == 0) order = Integer.compare(left.positionSide().ordinal(), right.positionSide().ordinal());
-        return order == 0 ? Long.compare(left.liquidationId(), right.liquidationId()) : order;
+        return resolve(runtime, identities, candidateIds, liquidationId).expectedCoverage();
     }
 
     public static boolean isNext(TradingRuntimeState runtime,
                                  RuntimeIdentityRegistry identities,
                                  Iterable<Long> candidateIds,
                                  long liquidationId) {
-        LiquidationRuntime target = runtime.liquidation(liquidationId);
-        if (target == null) return false;
-        CoreInstrumentState targetInstrument = runtime.instrument(identities.symbol(target.symbolId()));
-        if (targetInstrument == null) return false;
-        int targetAssetId = identities.assetId(targetInstrument.settleAsset());
-        LiquidationRuntime first = null;
-        for (Long candidateId : candidateIds) {
-            if (candidateId == null) continue;
-            LiquidationRuntime liquidation = runtime.liquidation(candidateId);
-            if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
-                continue;
-            }
-            CoreInstrumentState instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
-            if (instrument == null || instrument.changeId() != liquidation.instrumentChangeId()) continue;
-            if (identities.assetId(instrument.settleAsset()) != targetAssetId) continue;
-            if (first == null || compare(liquidation, first, identities) < 0) first = liquidation;
-        }
-        return first != null && first.liquidationId() == liquidationId;
+        return resolve(runtime, identities, candidateIds, liquidationId).next();
     }
+
+    /** One candidate pass supplies both deterministic priority and coverage. */
+    public static Resolution resolve(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                      Iterable<Long> candidateIds, long liquidationId) {
+        if (runtime == null || identities == null || candidateIds == null) {
+            throw new IllegalArgumentException("insurance allocation inputs are required");
+        }
+        LiquidationRuntime target = runtime.liquidation(liquidationId);
+        if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
+            return new Resolution(false, 0);
+        }
+        CoreInstrumentState targetInstrument = runtime.instrument(identities.symbol(target.symbolId()));
+        if (targetInstrument == null || targetInstrument.changeId() != target.instrumentChangeId()) {
+            return new Resolution(false, 0);
+        }
+        int assetId = identities.assetId(targetInstrument.settleAsset());
+        ArrayList<Claim> claims = new ArrayList<>();
+        for (Long id : candidateIds) {
+            if (id == null) continue;
+            LiquidationRuntime claim = runtime.liquidation(id);
+            if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
+            CoreInstrumentState instrument = runtime.instrument(identities.symbol(claim.symbolId()));
+            if (instrument != null && instrument.changeId() == claim.instrumentChangeId()
+                    && identities.assetId(instrument.settleAsset()) == assetId) {
+                claims.add(new Claim(claim, identities.symbol(claim.symbolId())));
+            }
+        }
+        if (claims.isEmpty()) return new Resolution(false, 0);
+        claims.sort(CLAIM_ORDER);
+        int targetIndex = -1;
+        BigInteger total = BigInteger.ZERO;
+        for (int index = 0; index < claims.size(); index++) {
+            Claim claim = claims.get(index);
+            total = total.add(BigInteger.valueOf(claim.liquidation().deficitUnits()));
+            if (claim.liquidation().liquidationId() == liquidationId) targetIndex = index;
+        }
+        if (targetIndex < 0 || total.signum() == 0) return new Resolution(false, 0);
+        BigInteger available = BigInteger.valueOf(Math.max(0, runtime.treasury().insurance(assetId))).min(total);
+        if (available.signum() == 0) return new Resolution(targetIndex == 0, 0);
+        if (available.equals(total)) return new Resolution(targetIndex == 0, target.deficitUnits());
+        BigInteger allocated = BigInteger.ZERO;
+        long targetBase = 0;
+        for (Claim claim : claims) {
+            BigInteger share = available.multiply(BigInteger.valueOf(claim.liquidation().deficitUnits()))
+                    .divide(total);
+            allocated = allocated.add(share);
+            if (claim.liquidation().liquidationId() == liquidationId) targetBase = share.longValueExact();
+        }
+        int remainder = available.subtract(allocated).intValueExact();
+        return new Resolution(targetIndex == 0, targetBase + (targetIndex < remainder ? 1 : 0));
+    }
+
+    public record Resolution(boolean next, long expectedCoverage) { }
 
     public static long expectedCoverage(TradingCoreState state, long liquidationId) {
         if (state == null || liquidationId <= 0) {

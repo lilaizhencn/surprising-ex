@@ -775,6 +775,8 @@ final class OrderedCommitCoordinator {
             int index, applied, pending, obsolete, processedOrders;
             int remaining = batch.maxCancelOrders();
             java.util.function.BooleanSupplier accountWork;
+            List<com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
+                    executionRequests;
             RiskScanCoordinator riskWork;
             long beforeRiskRevision;
             boolean riskStarted;
@@ -785,6 +787,7 @@ final class OrderedCommitCoordinator {
                     accountWork = null;
                     requestCommitPublication();
                 }
+                if (executionRequests == null) executionRequests = new ArrayList<>();
                 while (index < batch.actions().size()) {
                     var action = batch.actions().get(index++);
                     var liquidation = owner.runtimeState.liquidation(action.liquidationId());
@@ -816,12 +819,21 @@ final class OrderedCommitCoordinator {
                     }
                     if (nextCursor == 0) applied++; else pending++;
                     if (owner.runtimeState.asynchronousCommands()) {
-                        accountWork = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
-                                .beginExecution(single, orders, nextCursor, owner.runtimeState, owner.identities);
-                        return false;
+                        executionRequests.add(new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
+                                .ExecutionRequest(single, orders, nextCursor));
+                        continue;
                     }
                     if (nextCursor != 0) owner.liquidations.advanceLiquidationCancellationRuntime(single, orders, nextCursor);
                     else owner.liquidations.executeLiquidationRuntime(single, orders);
+                }
+                if (!executionRequests.isEmpty()) {
+                    if (owner.runtimeState.asynchronousCommands()) {
+                        accountWork = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
+                                .beginExecutionBatch(executionRequests, owner.runtimeState, owner.identities);
+                        executionRequests = new ArrayList<>();
+                        return false;
+                    }
+                    executionRequests.clear();
                 }
                 int completedRiskWork = 0;
                 if (!riskStarted) {

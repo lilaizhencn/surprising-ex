@@ -42,7 +42,8 @@ public final class RuntimeOrderAdmission {
             if (excluded != null) excludedSymbol = identities.symbol(excluded.symbolId());
         }
         return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
-                excludedOrderId, identity, excludedSymbol);
+                excludedOrderId, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                identity.lifecycleSettled(), identity.fundingInProgress(), excludedSymbol);
     }
 
     public static AdmissionIdentity admissionIdentity(
@@ -58,19 +59,10 @@ public final class RuntimeOrderAdmission {
         int symbolId = order.symbolId();
         boolean lifecycleSettled = symbolId >= 0
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0;
-        return new AdmissionIdentity(identities.findClientKey(userId, order.clientOrderId()),
-                symbolId < 0 ? null : symbolId,
-                identities.findPositionKey(userId, positionIdentity), lifecycleSettled,
+        return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
+                symbolId,
+                identities.findPositionKeyValue(userId, positionIdentity), lifecycleSettled,
                 symbolId >= 0 && runtime.treasury().fundingProgress(symbolId) != null);
-    }
-
-    static AdmissionIdentity identityInLane(AccountLaneState lane, RuntimeIdentityRegistry identities,
-                                            long userId, ResolvedPlaceOrder order,
-                                            RuntimeIdentityRegistry.PreparedClientKey key, AdmissionIdentity flags) {
-        String position = order.positionSide() == CorePositionSide.NET
-                ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
-        return new AdmissionIdentity(key.key() == 0 ? null : key.key(), flags.symbolId(),
-                identities.findPositionKeyInLane(lane, userId, position), flags.lifecycleSettled(), flags.fundingInProgress());
     }
 
     public static long requiredReservationPrepared(
@@ -80,19 +72,32 @@ public final class RuntimeOrderAdmission {
             throw new IllegalArgumentException("invalid prepared runtime order admission input");
         }
         return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
-                0, identity, null);
+                0, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                identity.lifecycleSettled(), identity.fundingInProgress(), null);
+    }
+
+    public static long requiredReservationPrepared(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders,
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress) {
+        if (runtime == null || order == null || activeOrders == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
+        }
+        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+                0, clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
     private static long requiredReservation(
             TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
-            AdmissionIdentity identity, String excludedSymbol) {
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
         if (runtime.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }
-        Long clientOrderId = identity.clientKey() == null
-                ? null : runtime.orderIdByClient(userId, identity.clientKey());
-        if (clientOrderId != null && clientOrderId != excludedOrderId) {
+        long clientOrderId = clientKey == 0 ? 0 : runtime.orderIdByClientValue(userId, clientKey);
+        if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
         CoreInstrumentState instrument = runtime.instrument(order.symbol());
@@ -100,16 +105,16 @@ public final class RuntimeOrderAdmission {
                 || !instrument.equals(order.instrument())) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }
-        if (identity.lifecycleSettled()) {
+        if (lifecycleSettled) {
             throw rejected("INSTRUMENT_SETTLED", "instrument is already settled");
         }
-        if (identity.fundingInProgress()) {
+        if (fundingInProgress) {
             throw rejected("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
         validateReservation(runtime.productLine().isDerivative(), instrument, order);
         UserRuntime user = runtime.user(userId);
         CorePositionMode positionMode = user == null ? CorePositionMode.ONE_WAY : user.positionMode();
-        PositionRuntime position = identity.positionKey() == null ? null : runtime.position(identity.positionKey());
+        PositionRuntime position = positionKey == 0 ? null : runtime.position(positionKey);
         OrderRuntime excluded = excludedOrderId == 0 ? null : runtime.order(excludedOrderId);
         if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
                 || !order.symbol().equals(excludedSymbol))) {
@@ -291,7 +296,8 @@ public final class RuntimeOrderAdmission {
         }
     }
 
+    /** Primitive admission flags; zero means no client/position identity and -1 means no symbol. */
     public record AdmissionIdentity(
-            Long clientKey, Integer symbolId, Long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
+            long clientKey, int symbolId, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
     }
 }

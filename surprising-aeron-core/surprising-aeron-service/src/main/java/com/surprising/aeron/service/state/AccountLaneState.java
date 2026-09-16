@@ -12,6 +12,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
+import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 import java.util.Map;
 
 public final class AccountLaneState {
@@ -37,7 +38,8 @@ public final class AccountLaneState {
     final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<LongHashSet> positionKeysByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    final IntObjectHashMap<LongObjectHashMap<LongHashSet>> positionKeysBySymbolAndUser
+    /** Open position keys stay sorted in primitive storage; scans no longer build a boxed TreeSet. */
+    final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
     final LongObjectHashMap<LongLongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);

@@ -35,7 +35,7 @@ public final class CoreOrderDecisionResolver {
     /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
     public record Context(CoreInstrumentState instrument, int symbolId, MarkPriceRuntime mark,
                           CoreFeeRate fee, long clusterTimestamp, boolean lifecycleSettled,
-                          RuntimeOrderAdmission.AdmissionIdentity admissionFlags) { }
+                          boolean fundingInProgress) { }
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, String symbol, long clusterTimestamp) {
@@ -47,28 +47,13 @@ public final class CoreOrderDecisionResolver {
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.resolveFee(userId, symbol, clusterTimestamp, instrument), clusterTimestamp,
                 runtime.treasury().lifecycleSettlement(symbolId) != 0,
-                new RuntimeOrderAdmission.AdmissionIdentity(null, symbolId, null,
-                        runtime.treasury().lifecycleSettlement(symbolId) != 0,
-                        runtime.treasury().fundingProgress(symbolId) != null));
+                runtime.treasury().fundingProgress(symbolId) != null);
     }
 
     public static ResolvedPlaceOrder resolve(Context context, PlaceOrderCommand intent) {
         if (context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         return resolveValues(context.instrument(), context.symbolId(), context.mark(), context.fee(),
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
-    }
-
-    /**
-     * Admission flags are needed by the asynchronous lane event, but creating a
-     * full decision Context for a single command only to obtain these flags is
-     * unnecessary. Keep this small accessor on the owner path.
-     */
-    public static RuntimeOrderAdmission.AdmissionIdentity admissionFlags(
-            TradingRuntimeState runtime, int symbolId) {
-        runtime.assertOwner();
-        boolean lifecycleSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
-        return new RuntimeOrderAdmission.AdmissionIdentity(null, symbolId, null,
-                lifecycleSettled, runtime.treasury().fundingProgress(symbolId) != null);
     }
 
     private static ResolvedPlaceOrder resolveValues(CoreInstrumentState instrument, int symbolId,

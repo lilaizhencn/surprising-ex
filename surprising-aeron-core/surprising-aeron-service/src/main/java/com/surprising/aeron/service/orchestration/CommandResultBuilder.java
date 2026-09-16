@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.command.ImmutableLongArrayList;
+import com.surprising.aeron.service.command.support.PrimitiveLongView;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
@@ -209,8 +209,7 @@ final class CommandResultBuilder {
             commandSingleOrder = null;
             commandOrderSources.clear();
             for (int index = 0; index < commandChangedOrderIds.size(); index++) {
-                long orderId = commandChangedOrderIds instanceof ImmutableLongArrayList primitive
-                        ? primitive.valueAt(index) : commandChangedOrderIds.get(index);
+                long orderId = primitiveOrderId(commandChangedOrderIds, index);
                 OrderRuntime order = owner.responseOrder(orderId);
                 if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
             }
@@ -226,8 +225,7 @@ final class CommandResultBuilder {
             if (orderIds.add(view.orderId())) views.add(view);
         }
         for (int orderIndex = 0; orderIndex < commandChangedOrderIds.size(); orderIndex++) {
-            long orderId = commandChangedOrderIds instanceof ImmutableLongArrayList primitive
-                    ? primitive.valueAt(orderIndex) : commandChangedOrderIds.get(orderIndex);
+            long orderId = primitiveOrderId(commandChangedOrderIds, orderIndex);
             var order = owner.responseOrder(orderId);
             if (order == null) continue;
             CoreOrderStateView view = owner.orderView(order);
@@ -244,6 +242,11 @@ final class CommandResultBuilder {
         }
         commandOrderViews = List.copyOf(views);
         commandSingleOrder = null;
+    }
+
+    private static long primitiveOrderId(List<Long> orderIds, int index) {
+        if (orderIds instanceof PrimitiveLongView primitive) return primitive.primitiveValueAt(index);
+        return orderIds.get(index);
     }
 
     void materializeResponseOrders(long... orderIds) {

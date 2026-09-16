@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
+
 import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
 
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
@@ -731,6 +733,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         return executeLaneMutations(selectedLaneMask, Long.bitCount(selectedLaneMask), false, operation);
     }
 
+    /** Execute an already-partitioned owner settlement without rescanning its values. */
+    public Object[] executeOwnerSettlements(long selectedLaneMask, int workItems,
+                                            java.util.function.IntFunction<Object> operation) {
+        assertOwner();
+        return executeLaneMutations(selectedLaneMask, workItems, false, operation);
+    }
+
     public <E> Object[] executeLifecycleSettlements(Iterable<E> values,
                                                     java.util.function.ToLongFunction<E> ownerUserId,
                                                     java.util.function.IntFunction<Object> operation) {
@@ -747,6 +756,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             workItems++;
             selectedLaneMask |= topology.accountLaneMask(userId);
         }
+        return executeLaneMutations(selectedLaneMask, workItems, true, operation);
+    }
+
+    /** Execute an already-partitioned lifecycle batch without rescanning its values. */
+    public Object[] executeLifecycleSettlements(long selectedLaneMask, int workItems,
+                                                java.util.function.IntFunction<Object> operation) {
+        assertOwner();
         return executeLaneMutations(selectedLaneMask, workItems, true, operation);
     }
 
@@ -1565,7 +1581,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (coreSequence <= 0 || userIds == null) throw new IllegalArgumentException("invalid lane apply");
         clearLaneUserScratch();
-        for (Long userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
+        addLaneUsers(userIds);
         return dispatchLaneMutationFromScratch(coreSequence);
     }
 
@@ -1581,8 +1597,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (coreSequence <= 0 || userIds == null || orderIds == null || timestamp < 0 || position < 0)
             throw new IllegalArgumentException("invalid account metadata commit");
         clearLaneUserScratch();
-        for (Long userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
+        addLaneUsers(userIds);
         return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position);
+    }
+
+    private void addLaneUsers(Iterable<Long> userIds) {
+        if (userIds instanceof ImmutableLongArrayList primitive) {
+            primitive.forEachLong(userId -> { if (userId > 0) addLaneUser(userId); });
+            return;
+        }
+        for (Long userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
     }
 
     void clearLaneUserScratch() {
@@ -1703,7 +1727,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, ResolvedPlaceOrder order, java.util.UUID commandId,
-            long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
+            long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
             int symbolId, int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
@@ -1716,7 +1740,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceAdmissionEvent();
         event.prepare(
-                coreSequence, userId, order, commandId, openInterestSteps, identity,
+                coreSequence, userId, order, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
                 symbolId, assetId, laneId, this, identities, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
@@ -1740,7 +1764,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
             long coreSequence, long userId, java.util.UUID commandId,
             ResolvedPlaceOrder[] orders, long[] openInterestSteps,
-            RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
+            boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
             OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
@@ -1755,7 +1779,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
-        event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, admissionIdentities,
+        event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, lifecycleSettled, fundingInProgress,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
                 admittedReservations, itemCount, laneId, this, changes, identities, source, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -2917,11 +2941,28 @@ public final class TradingRuntimeState implements AutoCloseable {
     public NavigableSet<Long> positionKeysForUserAndSymbol(long userId, int symbolId) {
         assertOwner();
         return onLane(userId, lane -> {
-            LongObjectHashMap<LongHashSet> byUser = lane.positionKeysBySymbolAndUser.get(symbolId);
-            LongHashSet keys = byUser == null ? null : byUser.get(userId);
+            LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
+                    lane.positionKeysBySymbolAndUser.get(symbolId);
+            org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser == null ? null : byUser.get(userId);
             return keys == null ? Collections.emptyNavigableSet()
                     : Collections.unmodifiableNavigableSet(toSortedSet(keys));
         });
+    }
+
+    /**
+     * Lane-scoped primitive access for lifecycle scans. The returned list belongs to the current
+     * Lane and must only be consumed before the command scope exits.
+     */
+    org.eclipse.collections.impl.list.mutable.primitive.LongArrayList positionKeysForUserAndSymbolPrimitive(
+            long userId, int symbolId) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null || scoped.laneId() != topology.accountLaneId(userId)) {
+            throw new IllegalStateException("primitive position index access requires owning Lane scope");
+        }
+        LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
+                scoped.positionKeysBySymbolAndUser.get(symbolId);
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser == null ? null : byUser.get(userId);
+        return keys == null ? EMPTY_POSITION_KEYS : keys;
     }
 
     public LiquidationRuntime liquidation(long liquidationId) {
@@ -3456,10 +3497,16 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public Long orderIdByClient(long userId, long clientKey) {
         assertOwner();
+        long orderId = orderIdByClientValue(userId, clientKey);
+        return orderId == 0 ? null : orderId;
+    }
+
+    public long orderIdByClientValue(long userId, long clientKey) {
+        assertOwner();
         return onLane(userId, lane -> {
             LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
             return userClientOrders == null || !userClientOrders.containsKey(clientKey)
-                    ? null : userClientOrders.get(clientKey);
+                    ? 0L : userClientOrders.get(clientKey);
         });
     }
 
@@ -4739,17 +4786,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private static void indexOpenPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
         if (position.signedQuantitySteps() == 0) return;
-        LongObjectHashMap<LongHashSet> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
+        LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
+                lane.positionKeysBySymbolAndUser.get(position.symbolId());
         if (byUser == null) {
             byUser = new LongObjectHashMap<>();
             lane.positionKeysBySymbolAndUser.put(position.symbolId(), byUser);
         }
-        LongHashSet keys = byUser.get(position.userId());
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser.get(position.userId());
         if (keys == null) {
-            keys = new LongHashSet(2);
+            keys = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(2);
             byUser.put(position.userId(), keys);
         }
-        keys.add(positionKey);
+        int index = keys.binarySearch(positionKey);
+        if (index < 0) keys.addAtIndex(-index - 1, positionKey);
     }
 
     static void unindexPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
@@ -4759,9 +4808,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private static void unindexOpenPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
         if (position.signedQuantitySteps() == 0) return;
-        LongObjectHashMap<LongHashSet> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
-        LongHashSet keys = byUser == null ? null : byUser.get(position.userId());
-        if (keys == null || !keys.remove(positionKey)) return;
+        LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
+                lane.positionKeysBySymbolAndUser.get(position.symbolId());
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys =
+                byUser == null ? null : byUser.get(position.userId());
+        if (keys == null) return;
+        int index = keys.binarySearch(positionKey);
+        if (index < 0) return;
+        keys.removeAtIndex(index);
         if (keys.isEmpty()) byUser.remove(position.userId());
         if (byUser.isEmpty()) lane.positionKeysBySymbolAndUser.remove(position.symbolId());
     }
@@ -4770,9 +4824,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         balancesChanged = true;
     }
 
-    static TreeSet<Long> toSortedSet(LongHashSet values) {
+    private static final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList EMPTY_POSITION_KEYS =
+            new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(0);
+
+    static TreeSet<Long> toSortedSet(org.eclipse.collections.impl.list.mutable.primitive.LongArrayList values) {
         TreeSet<Long> sorted = new TreeSet<>();
-        values.forEach(sorted::add);
+        for (int index = 0; index < values.size(); index++) sorted.add(values.get(index));
         return sorted;
     }
 

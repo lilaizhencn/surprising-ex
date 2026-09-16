@@ -33,6 +33,7 @@ import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /** 撮合命令准入：校验订单与生命周期依赖，登记延后命令，不提交未完成结算。 */
 final class MatchingCommandAdmission {
@@ -42,7 +43,7 @@ final class MatchingCommandAdmission {
     MatchingCommandAdmission(TradingCoreRuntime owner) { this.owner = owner; }
 
     /** 在途清算或交割的资源范围，防止真实资金依赖交错。 */
-    LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
+    LongObjectHashMap<List<LifecycleScope>> pendingLifecycleScopes;
 
     /** 尚不具备执行条件的匹配命令及其日志时间位置。 */
     LinkedHashMap<Long, DeferredMatching> deferredMatching;

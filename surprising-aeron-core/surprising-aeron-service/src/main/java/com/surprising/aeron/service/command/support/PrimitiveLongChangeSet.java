@@ -45,8 +45,10 @@ public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
             for (int index = 0; index < primitive.size; index++) changed |= add(primitive.values[index]);
             return changed;
         }
-        if (values instanceof ImmutableLongArrayList primitive) {
-            for (int index = 0; index < primitive.size(); index++) changed |= add(primitive.valueAt(index));
+        if (values instanceof PrimitiveLongView primitive) {
+            for (int index = 0; index < primitive.primitiveSize(); index++) {
+                changed |= add(primitive.primitiveValueAt(index));
+            }
             return changed;
         }
         for (Long value : values) changed |= add(value);

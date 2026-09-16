@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 public final class RuntimeSettlementProcessor {
 
@@ -91,8 +92,10 @@ public final class RuntimeSettlementProcessor {
         ArrayList<Long> selectedUserIds = userPage.userIds();
         boolean moreUsers = chunked && !userPage.complete();
         int assetId = identities.assetId(instrument.settleAsset());
-        Object[] prepared = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
-                ignored -> prepareLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+        LongArrayList[] usersByLane = groupUsers(selectedUserIds, runtime);
+        long userLaneMask = laneMask(usersByLane);
+        Object[] prepared = runtime.executeLifecycleSettlements(userLaneMask, selectedUserIds.size(),
+                lane -> prepareLane(runtime, instrument, kernel, command, usersByLane[lane], symbolId, assetId));
         @SuppressWarnings("unchecked")
         List<UserSettlement>[] plans = new List[runtime.topology().accountLaneCount()];
         long requiredInsurance = 0;
@@ -116,7 +119,7 @@ public final class RuntimeSettlementProcessor {
         if (requiredInsurance != 0) runtime.treasury().setInsurance(assetId,
                 Math.subtractExact(runtime.treasury().insurance(assetId), requiredInsurance),
                 runtime.treasury().insuranceDeficit(assetId));
-        Object[] laneResults = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
+        Object[] laneResults = runtime.executeLifecycleSettlements(userLaneMask, selectedUserIds.size(),
                 lane -> applyLane(runtime, assetId, plans[lane]));
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (Object value : laneResults) {
@@ -202,6 +205,8 @@ public final class RuntimeSettlementProcessor {
         private final List<CoreOrderState> selectedOrders;
         private final boolean moreOrders;
         private final ArrayList<Long> selectedUserIds;
+        private final LongArrayList[] usersByLane;
+        private final ArrayList<CoreOrderState>[] ordersByLane;
         private final boolean usersComplete;
         private final long orderLaneMask;
         private final long userLaneMask;
@@ -221,20 +226,21 @@ public final class RuntimeSettlementProcessor {
             this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
             this.moreOrders = moreOrders;
             this.selectedUserIds = userPage.userIds(); this.usersComplete = userPage.complete();
-            long orderMask = 0;
-            for (CoreOrderState order : selectedOrders) orderMask |= runtime.topology().accountLaneMask(order.userId());
-            this.orderLaneMask = orderMask;
-            long userMask = 0;
-            for (long userId : selectedUserIds) userMask |= runtime.topology().accountLaneMask(userId);
-            this.userLaneMask = userMask;
+            this.ordersByLane = groupOrders(selectedOrders, runtime);
+            this.orderLaneMask = laneMask(ordersByLane);
+            this.usersByLane = groupUsers(selectedUserIds, runtime);
+            this.userLaneMask = laneMask(usersByLane);
             this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
         }
 
+        @SuppressWarnings("unchecked")
         private SettlementWork(TradingRuntimeState runtime, CoreSettlementProgressView result) {
             this.command = null; this.chunkCommandId = null;
             this.runtime = runtime; this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
             this.moreOrders = false; this.selectedUserIds = new ArrayList<>();
+            this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
+            this.ordersByLane = (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
             this.usersComplete = true;
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
         }
@@ -248,8 +254,8 @@ public final class RuntimeSettlementProcessor {
             if (phase == Phase.DONE) return true;
             switch (phase) {
                 case CANCEL -> {
-                    runtime.dispatchControlLanes(orderLaneMask, ignored -> {
-                        cancelOrdersOnLane(runtime, selectedOrders);
+                    runtime.dispatchControlLanes(orderLaneMask, lane -> {
+                        cancelOrdersOnLane(runtime, ordersByLane[lane]);
                         return null;
                     });
                     phase = Phase.PREPARE;
@@ -278,7 +284,7 @@ public final class RuntimeSettlementProcessor {
                         return true;
                     }
                     runtime.dispatchControlLanes(userLaneMask, lane ->
-                            prepareLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+                            prepareLane(runtime, instrument, kernel, command, usersByLane[lane], symbolId, assetId));
                     phase = Phase.APPLY;
                     return false;
                 }
@@ -403,11 +409,12 @@ public final class RuntimeSettlementProcessor {
 
     private static List<UserSettlement> prepareLane(TradingRuntimeState runtime, CoreInstrumentState instrument,
                                                     ProductTradingRules kernel, SettleInstrumentCommand command,
-                                                    Iterable<Long> users, int symbolId, int assetId) {
+                                                    LongArrayList users, int symbolId, int assetId) {
         ArrayList<UserSettlement> plans = new ArrayList<>();
-        for (long userId : users) {
-            if (!runtime.currentLaneOwns(userId) || runtime.user(userId) == null) continue;
-            var indexedKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+        for (int userIndex = 0; userIndex < users.size(); userIndex++) {
+            long userId = users.get(userIndex);
+            if (runtime.user(userId) == null) continue;
+            LongArrayList indexedKeys = runtime.positionKeysForUserAndSymbolPrimitive(userId, symbolId);
             if (indexedKeys.isEmpty()) continue;
             long[] keys = new long[indexedKeys.size()];
             PositionRuntime[] positions = new PositionRuntime[keys.length];
@@ -417,7 +424,8 @@ public final class RuntimeSettlementProcessor {
             long locked = balance.lockedUnits();
             long crossPnl = 0, crossMargin = 0, totalPnl = 0, insurance = 0;
             int index = 0;
-            for (long key : indexedKeys) {
+            for (int positionIndex = 0; positionIndex < indexedKeys.size(); positionIndex++) {
+                long key = indexedKeys.get(positionIndex);
                 PositionRuntime position = runtime.position(key);
                 if (position == null || position.signedQuantitySteps() == 0) continue;
                 long pnl = instrument.contractType().isPerpetual()
@@ -504,10 +512,11 @@ public final class RuntimeSettlementProcessor {
 
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
         if (orders == null || orders.isEmpty()) return;
-        runtime.executeOwnerSettlements(orders, CoreOrderState::userId, ignored -> {
-            cancelOrdersOnLane(runtime, orders);
-            return null;
-        });
+        @SuppressWarnings("unchecked") ArrayList<CoreOrderState>[] ordersByLane =
+                groupOrders(orders, runtime);
+        long laneMask = laneMask(ordersByLane);
+        runtime.executeOwnerSettlements(laneMask, orders.size(),
+                lane -> { cancelOrdersOnLane(runtime, ordersByLane[lane]); return null; });
     }
 
     private static void cancelOrdersOnLane(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
@@ -518,6 +527,41 @@ public final class RuntimeSettlementProcessor {
             if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
             runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
         }
+    }
+
+    private static LongArrayList[] groupUsers(ArrayList<Long> userIds, TradingRuntimeState runtime) {
+        LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
+        for (int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
+        for (long userId : userIds) groups[runtime.topology().accountLaneId(userId)].add(userId);
+        return groups;
+    }
+
+    private static long laneMask(LongArrayList[] groups) {
+        long mask = 0;
+        for (int lane = 0; lane < groups.length; lane++) if (!groups[lane].isEmpty()) mask |= 1L << lane;
+        return mask;
+    }
+
+    private static long laneMask(ArrayList<CoreOrderState>[] groups) {
+        long mask = 0;
+        for (int lane = 0; lane < groups.length; lane++) {
+            if (groups[lane] != null && !groups[lane].isEmpty()) mask |= 1L << lane;
+        }
+        return mask;
+    }
+
+    private static ArrayList<CoreOrderState>[] groupOrders(Collection<CoreOrderState> orders,
+                                                            TradingRuntimeState runtime) {
+        @SuppressWarnings("unchecked") ArrayList<CoreOrderState>[] groups =
+                (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
+        for (CoreOrderState order : orders) {
+            if (order == null) continue;
+            int lane = runtime.topology().accountLaneId(order.userId());
+            ArrayList<CoreOrderState> group = groups[lane];
+            if (group == null) groups[lane] = group = new ArrayList<>();
+            group.add(order);
+        }
+        return groups;
     }
 
     private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime,

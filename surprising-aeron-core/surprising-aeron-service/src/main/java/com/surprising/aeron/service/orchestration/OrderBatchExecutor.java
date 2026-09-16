@@ -264,7 +264,8 @@ final class OrderBatchExecutor {
             CommandSlot pending, OrderBatchPending batch) {
         batch.placeBatchAdmissionEvent = owner.runtimeState.dispatchPlaceBatchAdmission(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
-                batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
+                batch.preparedOrders, batch.preparedOpenInterestSteps,
+                batch.preparedLifecycleSettled, batch.preparedFundingInProgress,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
                 batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch,

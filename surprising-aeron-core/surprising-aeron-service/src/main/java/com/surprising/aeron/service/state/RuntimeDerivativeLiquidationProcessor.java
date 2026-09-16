@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 
 import java.util.Collection;
+import java.util.List;
 
 /** Account mutations run on their Lane; Owner applies the treasury delta after account completion. */
 public final class RuntimeDerivativeLiquidationProcessor {
@@ -49,6 +50,159 @@ public final class RuntimeDerivativeLiquidationProcessor {
         return execute(command, canceledOrders, nextCursorOrderId, runtime, identities, true);
     }
 
+    /** A validated account stage that can be coalesced with other liquidation stages. */
+    public record ExecutionRequest(ExecuteLiquidationCommand command,
+                                   Collection<CoreOrderState> canceledOrders,
+                                   long nextCursorOrderId) {
+        public ExecutionRequest {
+            if (command == null || nextCursorOrderId < 0) {
+                throw new IllegalArgumentException("invalid liquidation batch request");
+            }
+        }
+    }
+
+    /**
+     * Dispatch several independent liquidation account stages together. Each Account Lane
+     * still owns all of its mutations, while the Owner pays one dispatch/poll cost for the batch.
+     */
+    public static java.util.function.BooleanSupplier beginExecutionBatch(
+            List<ExecutionRequest> requests, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (requests == null || requests.isEmpty() || runtime == null || identities == null) {
+            throw new IllegalArgumentException("invalid liquidation execution batch");
+        }
+        runtime.assertOwner();
+        BatchExecutionStage[] stages = new BatchExecutionStage[requests.size()];
+        long laneMask = 0;
+        for (int index = 0; index < requests.size(); index++) {
+            stages[index] = BatchExecutionStage.prepare(requests.get(index), runtime, identities);
+            laneMask |= 1L << stages[index].laneId;
+        }
+        RuntimeTreasuryDelta[] results = new RuntimeTreasuryDelta[stages.length];
+        runtime.dispatchControlLanes(laneMask, lane -> {
+            for (int index = 0; index < stages.length; index++) {
+                BatchExecutionStage stage = stages[index];
+                if (stage.laneId == lane) results[index] = stage.apply();
+            }
+            return results;
+        });
+        return () -> {
+            if (!runtime.pollControlLanes()) return false;
+            for (int index = 0; index < stages.length; index++) {
+                BatchExecutionStage stage = stages[index];
+                finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
+                        results[index], stage.canceledCount);
+            }
+            return true;
+        };
+    }
+
+    private static final class BatchExecutionStage {
+        private final ExecuteLiquidationCommand command;
+        private final long[] orderIds;
+        private final long nextCursorOrderId;
+        private final int canceledCount;
+        private final boolean advance;
+        private final boolean obsolete;
+        private final TradingRuntimeState runtime;
+        private final LiquidationRuntime liquidation;
+        private final CoreInstrumentState instrument;
+        private final int assetId;
+        private final long positionKey;
+        private final int laneId;
+        private final long userId;
+
+        private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
+                                    long nextCursorOrderId, boolean advance, boolean obsolete,
+                                    TradingRuntimeState runtime, LiquidationRuntime liquidation,
+                                    CoreInstrumentState instrument, int assetId, long positionKey) {
+            this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
+            this.canceledCount = orderIds == null ? 0 : orderIds.length;
+            this.advance = advance; this.obsolete = obsolete; this.runtime = runtime;
+            this.liquidation = liquidation; this.instrument = instrument; this.assetId = assetId;
+            this.positionKey = positionKey; this.userId = liquidation.userId();
+            this.laneId = runtime.topology().accountLaneId(userId);
+        }
+
+        private static BatchExecutionStage prepare(ExecutionRequest request,
+                                                    TradingRuntimeState runtime,
+                                                    RuntimeIdentityRegistry identities) {
+            if (!runtime.productLine().isDerivative()) {
+                throw new IllegalArgumentException("liquidation requires derivative product");
+            }
+            ExecuteLiquidationCommand command = request.command();
+            Collection<CoreOrderState> canceledOrders = request.canceledOrders();
+            long nextCursorOrderId = request.nextCursorOrderId();
+            LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
+            if (liquidation == null) {
+                throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+            }
+            boolean advance = nextCursorOrderId != 0;
+            if (advance) {
+                if (liquidation.status() == CoreLiquidationState.Status.ORDERED
+                        && liquidation.nextCancelOrderId() != command.cursorOrderId()) {
+                    throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
+                            "liquidation cancellation cursor does not match state");
+                }
+            } else {
+                if (liquidation.status() != CoreLiquidationState.Status.PLANNED
+                        && liquidation.status() != CoreLiquidationState.Status.ORDERED) {
+                    throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
+                }
+                validatePrice(runtime, liquidation, command);
+            }
+            boolean obsolete = !advance && !executable(runtime, liquidation, identities);
+            int count = obsolete || canceledOrders == null ? 0 : canceledOrders.size();
+            long[] orderIds = count == 0 ? null : new long[count];
+            if (count != 0) {
+                int index = 0;
+                for (CoreOrderState order : canceledOrders) {
+                    if (order == null || order.userId() != liquidation.userId()) {
+                        throw new IllegalArgumentException("liquidation cancellation must belong to its account");
+                    }
+                    orderIds[index++] = order.orderId();
+                }
+            }
+            CoreInstrumentState instrument = advance || obsolete ? null : requireInstrument(runtime,
+                    identities.symbol(liquidation.symbolId()), liquidation.instrumentChangeId());
+            int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
+            long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
+                    positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
+            return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance, obsolete,
+                    runtime, liquidation, instrument, assetId, positionKey);
+        }
+
+        private RuntimeTreasuryDelta apply() {
+            for (int index = 0; index < canceledCount; index++) {
+                long orderId = orderIds[index];
+                OrderRuntime order = runtime.order(orderId);
+                if (order == null || order.userId() != liquidation.userId() || order.canceled()
+                        || order.remainingQuantitySteps() == 0) {
+                    throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
+                }
+                ReservationRuntime reservation = runtime.reservation(orderId);
+                if (reservation == null) {
+                    throw new IllegalStateException("runtime liquidation reservation is missing: " + orderId);
+                }
+                runtime.cancelOrder(orderId, liquidation.userId(), reservation.reservedUnits());
+            }
+            if (obsolete) {
+                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
+                runtime.advanceUserRevision(liquidation.userId());
+                return null;
+            }
+            if (advance) {
+                runtime.replaceLiquidation(new LiquidationRuntime(liquidation.liquidationId(), liquidation.userId(),
+                        liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(),
+                        liquidation.instrumentChangeId(), liquidation.triggerPriceSequence(),
+                        liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
+                        liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
+                        liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
+                return null;
+            }
+            return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
+        }
+    }
+
     private static java.util.function.BooleanSupplier execute(ExecuteLiquidationCommand command,
             Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
@@ -57,78 +211,22 @@ public final class RuntimeDerivativeLiquidationProcessor {
             throw new IllegalArgumentException("invalid liquidation account stage");
         }
         runtime.assertOwner();
-        LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
-        if (liquidation == null)
-            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-        boolean advance = nextCursorOrderId != 0;
-        if (advance) {
-            if (liquidation.status() == CoreLiquidationState.Status.ORDERED
-                    && liquidation.nextCancelOrderId() != command.cursorOrderId())
-                throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
-                        "liquidation cancellation cursor does not match state");
-        } else {
-            if (liquidation.status() != CoreLiquidationState.Status.PLANNED
-                    && liquidation.status() != CoreLiquidationState.Status.ORDERED)
-                throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
-            validatePrice(runtime, liquidation, command);
-        }
-        boolean obsolete = !advance && !executable(runtime, liquidation, identities);
-        int count = obsolete || canceledOrders == null ? 0 : canceledOrders.size();
-        long[] orderIds = count == 0 ? null : new long[count];
-        if (count != 0) {
-            int index = 0;
-            for (CoreOrderState order : canceledOrders) {
-                if (order == null || order.userId() != liquidation.userId())
-                    throw new IllegalArgumentException("liquidation cancellation must belong to its account");
-                orderIds[index++] = order.orderId();
-            }
-        }
-        CoreInstrumentState instrument = advance || obsolete ? null : requireInstrument(runtime,
-                identities.symbol(liquidation.symbolId()), liquidation.instrumentChangeId());
-        int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
-        long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
-                positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
-        int laneId = runtime.topology().accountLaneId(liquidation.userId());
-        java.util.function.IntFunction<Object> accountWork = ignored -> {
-            for (int index = 0; index < count; index++) {
-                long orderId = orderIds[index];
-                OrderRuntime order = runtime.order(orderId);
-                if (order == null || order.userId() != liquidation.userId() || order.canceled()
-                        || order.remainingQuantitySteps() == 0)
-                    throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
-                ReservationRuntime reservation = runtime.reservation(orderId);
-                if (reservation == null)
-                    throw new IllegalStateException("runtime liquidation reservation is missing: " + orderId);
-                runtime.cancelOrder(orderId, liquidation.userId(), reservation.reservedUnits());
-            }
-            if (obsolete) {
-                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
-                runtime.advanceUserRevision(liquidation.userId());
-            } else if (advance) {
-                runtime.replaceLiquidation(new LiquidationRuntime(liquidation.liquidationId(), liquidation.userId(),
-                        liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(),
-                        liquidation.instrumentChangeId(), liquidation.triggerPriceSequence(),
-                        liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
-                        liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
-                        liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
-            } else {
-                return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
-            }
-            return null;
-        };
+        BatchExecutionStage stage = BatchExecutionStage.prepare(
+                new ExecutionRequest(command, canceledOrders, nextCursorOrderId), runtime, identities);
+        java.util.function.IntFunction<Object> accountWork = ignored -> stage.apply();
         if (asynchronous) {
-            runtime.dispatchControlLanes(1L << laneId, accountWork);
+            runtime.dispatchControlLanes(1L << stage.laneId, accountWork);
             return () -> {
                 if (!runtime.pollControlLanes()) return false;
-                finishExecution(runtime, liquidation.userId(), assetId, positionKey,
-                        (RuntimeTreasuryDelta) runtime.controlLaneResult(laneId), count);
+                finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
+                        (RuntimeTreasuryDelta) runtime.controlLaneResult(stage.laneId), stage.canceledCount);
                 return true;
             };
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(1L << laneId, 1, false, accountWork);
-        finishExecution(runtime, liquidation.userId(), assetId, positionKey,
-                (RuntimeTreasuryDelta) results[laneId], count);
+        Object[] results = runtime.executeLaneMutations(1L << stage.laneId, 1, false, accountWork);
+        finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
+                (RuntimeTreasuryDelta) results[stage.laneId], stage.canceledCount);
         return null;
     }
 
@@ -268,13 +366,13 @@ public final class RuntimeDerivativeLiquidationProcessor {
                             "insurance coverage must be within liquidation deficit");
                 }
                 int assetId = identities.assetId(instrument.settleAsset());
-                if (!InsuranceAllocationPolicy.isNext(runtime, identities, candidateIds,
-                        liquidation.liquidationId())) {
+                InsuranceAllocationPolicy.Resolution allocation = InsuranceAllocationPolicy.resolve(
+                        runtime, identities, candidateIds, liquidation.liquidationId());
+                if (!allocation.next()) {
                     throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
                             "insurance claims must resolve in deterministic priority order");
                 }
-                long expectedCoverage = InsuranceAllocationPolicy.expectedCoverage(
-                        runtime, identities, candidateIds, liquidation.liquidationId());
+                long expectedCoverage = allocation.expectedCoverage();
                 if (command.coveredUnits() != expectedCoverage) {
                     throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH",
                             "insurance coverage does not match deterministic allocation");

@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.function.Function;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
@@ -47,7 +48,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             new InMemorySerializationProcessor();
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
-    private final Set<Long> users = ConcurrentHashMap.newKeySet();
+    /** Matcher user registry is primitive and guarded only at the async API boundary. */
+    private final LongHashSet users = new LongHashSet();
     private final Set<Integer> registeredSymbols = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final LaneTopology topology;
@@ -72,6 +74,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private final ThreadLocal<MatcherCommandScope> commandScope =
             ThreadLocal.withInitial(MatcherCommandScope::new);
+
+    private synchronized void recordUser(long userId) {
+        users.add(userId);
+    }
+
+    /** Snapshot/hash are cold boundaries; materialize the protocol Set only here. */
+    private synchronized Set<Long> snapshotUsers() {
+        Set<Long> snapshot = new java.util.TreeSet<>();
+        users.forEach((long userId) -> snapshot.add(userId));
+        return snapshot;
+    }
 
     public DeterministicExchangeCoreAdapter() {
         this(true);
@@ -144,7 +157,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             });
             // 路由表也含尚未创建订单簿的 symbol，不能作为 native 注册完成的证据。
             // 恢复后的首次使用仍经 ensureSymbol；native 对已有订单簿的注册是幂等操作。
-            users.addAll(snapshot.users());
+            snapshot.users().forEach(users::add);
             List<CoreOrderState> restoredOrders = new ArrayList<>();
             activeOrders.forEach(restoredOrders::add);
             restoredSnapshot = snapshot;
@@ -256,7 +269,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private exchange.core2.core.common.MatcherResult placeNative(long userId, CoreMatchingOrder command) {
         int symbolId = ensureSymbol(command.symbol());
-        users.add(userId);
+        recordUser(userId);
         return engine(symbolId).place(
                 commandScope.get().aeronTimestamp, command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
@@ -266,7 +279,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private exchange.core2.core.common.MatcherResult placeNative(long userId, ResolvedPlaceOrder command) {
         int symbolId = ensureSymbol(command.symbol());
-        users.add(userId);
+        recordUser(userId);
         return engine(symbolId).place(
                 commandScope.get().aeronTimestamp, command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
@@ -363,7 +376,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             }
             symbolFutures.add(ensureSymbolAsync(symbol));
         }
-        users.add(userId);
+        recordUser(userId);
         CompletableFuture<?>[] futures = new CompletableFuture<?>[symbolFutures.size()];
         for (int index = 0; index < symbolFutures.size(); index++) {
             futures[index] = symbolFutures.get(index);
@@ -381,7 +394,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             }
             ensureSymbol(symbol);
         }
-        users.add(userId);
+        recordUser(userId);
     }
 
     public CompletableFuture<CoreMatchingResult> executeWithEvidence(
@@ -600,7 +613,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, CoreMatchingOrder command) {
         Integer symbolId = symbols.get(command.symbol());
-        users.add(userId);
+        recordUser(userId);
         if (symbolId != null) return submitDirectPlace(userId, symbolId, command);
         return ensureSymbolAsync(command.symbol())
                 .thenCompose(registered -> submitDirectPlace(userId, registered, command));
@@ -765,7 +778,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
         Integer symbolId = symbols.get(symbol);
-        users.add(userId);
+        recordUser(userId);
         if (symbolId != null) return submitDirectCancel(userId, orderId, symbolId);
         return ensureSymbolAsync(symbol)
                 .thenCompose(registered -> submitDirectCancel(userId, orderId, registered));
@@ -792,13 +805,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, String symbol) {
         int symbolId = ensureSymbol(symbol);
-        users.add(userId);
+        recordUser(userId);
         return engine(symbolId).cancel(commandScope.get().aeronTimestamp, orderId, symbolId, userId);
     }
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
                                                                     CoreMatchingOrder replacement) {
-        users.add(userId);
+        recordUser(userId);
         return ensureSymbolAsync(symbol).thenCompose(symbolId ->
                     submitDirectCancel(userId, orderId, symbolId).thenCompose(cancelResult -> {
                         if (!cancelResult.accepted()) {
@@ -823,7 +836,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CoreMatchingResult replaceOrder(long userId, long orderId, String symbol,
                                            CoreMatchingOrder replacement) {
-        users.add(userId);
+        recordUser(userId);
         CoreMatchingResult cancelled = cancel(userId, orderId, symbol);
         if (!cancelled.accepted()) return cancelled;
         CoreMatchingResult placed = place(userId, replacement);
@@ -839,7 +852,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String symbol,
                                                                long newPriceTicks) {
         Integer symbolId = symbols.get(symbol);
-        users.add(userId);
+        recordUser(userId);
         if (symbolId != null) return submitDirectMove(userId, orderId, symbolId, newPriceTicks);
         return ensureSymbolAsync(symbol)
                 .thenCompose(registered -> submitDirectMove(userId, orderId, registered, newPriceTicks));
@@ -898,14 +911,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                     serializationProcessor.exportSnapshot(snapshotId);
             long matcherSequence = modules.stream()
                     .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence).max().orElseThrow();
+            Set<Long> userSnapshot = snapshotUsers();
             return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
                     MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
                     matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(), hashes.bookHash(),
                     MatcherSnapshot.symbolRegistryHash(symbols), topology.symbolRouteHash(symbols),
-                    MatcherSnapshot.userRegistryHash(users), MatcherSnapshot.instrumentRegistryHash(state),
+                    MatcherSnapshot.userRegistryHash(userSnapshot), MatcherSnapshot.instrumentRegistryHash(state),
                     MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
                     MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
-                    symbols, users, modules);
+                    symbols, userSnapshot, modules);
         } finally {
             serializationProcessor.removeSnapshot(snapshotId);
         }
@@ -963,17 +977,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                     long matcherSequence = modules.stream()
                                             .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
                                             .max().orElseThrow();
+                                    Set<Long> userSnapshot = snapshotUsers();
                                     return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
                                             MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
                                             matcherEvidence.snapshot(), businessStateHash,
                                             hashes.engineHash(), hashes.bookHash(),
                                             MatcherSnapshot.symbolRegistryHash(symbols),
                                             topology.symbolRouteHash(symbols),
-                                            MatcherSnapshot.userRegistryHash(users),
+                                            MatcherSnapshot.userRegistryHash(userSnapshot),
                                             MatcherSnapshot.instrumentRegistryHash(state),
                                             MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
                                             MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
-                                            symbols, users, modules);
+                                            symbols, userSnapshot, modules);
                                 } finally {
                                     serializationProcessor.removeSnapshot(snapshotId);
                                 }

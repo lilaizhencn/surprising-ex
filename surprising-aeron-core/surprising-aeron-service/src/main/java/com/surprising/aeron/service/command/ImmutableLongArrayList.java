@@ -7,7 +7,8 @@ import java.util.RandomAccess;
 import java.util.function.LongConsumer;
 
 /** Immutable List compatibility view backed by primitive storage. */
-public final class ImmutableLongArrayList extends AbstractList<Long> implements RandomAccess {
+public final class ImmutableLongArrayList extends AbstractList<Long>
+        implements RandomAccess, com.surprising.aeron.service.command.support.PrimitiveLongView {
 
     private static final ImmutableLongArrayList EMPTY = new ImmutableLongArrayList(new long[0], true);
     private final long[] values;
@@ -49,6 +50,9 @@ public final class ImmutableLongArrayList extends AbstractList<Long> implements 
     public long valueAt(int index) {
         return values[index];
     }
+
+    @Override public int primitiveSize() { return values.length; }
+    @Override public long primitiveValueAt(int index) { return values[index]; }
 
     public boolean containsLong(long value) {
         for (long candidate : values) if (candidate == value) return true;

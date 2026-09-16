@@ -22,7 +22,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private ResolvedPlaceOrder order;
     private UUID commandId;
     private long openInterestSteps;
-    private RuntimeOrderAdmission.AdmissionIdentity identity;
+    private boolean lifecycleSettled;
+    private boolean fundingInProgress;
     private RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
     private int symbolId;
     private int assetId;
@@ -43,11 +44,11 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     }
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
-                                long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
+                                long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
                                 int symbolId, int assetId, int laneId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
-                || identity == null || symbolId < 0 || assetId < 0
+                || symbolId < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
@@ -58,7 +59,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.order = order;
         this.commandId = commandId;
         this.openInterestSteps = openInterestSteps;
-        this.identity = identity;
+        this.lifecycleSettled = lifecycleSettled;
+        this.fundingInProgress = fundingInProgress;
         this.preparedClientKey = null;
         this.identities = identities;
         if (publication != null) publication.clear();
@@ -81,7 +83,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
         order = null;
         commandId = null;
-        identity = null;
+        lifecycleSettled = false;
+        fundingInProgress = false;
         preparedClientKey = null;
         runtime = null;
         identities = null;
@@ -104,10 +107,13 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
             runtime.enterLaneCommandScope(lane);
             try {
                 preparedClientKey = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
-                identity = RuntimeOrderAdmission.identityInLane(lane, identities, userId, order, preparedClientKey, identity);
+                String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
+                        ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
+                long positionKey = identities.findPositionKeyValueInLane(lane, userId, positionIdentity);
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, userId, order, openInterestSteps,
-                        lane.admissionOrderIndex(symbolId), identity);
+                        lane.admissionOrderIndex(symbolId), preparedClientKey.key(), symbolId, positionKey,
+                        lifecycleSettled, fundingInProgress);
                 runtime.placeOrderInLane(lane, userId, order, commandId,
                         requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedUser = lane.users.get(userId);
@@ -147,7 +153,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         if (runtime != null) runtime.releaseAdmissionExpectation(laneId);
         order = null;
         commandId = null;
-        identity = null;
+        lifecycleSettled = false;
+        fundingInProgress = false;
         preparedClientKey = null;
         runtime = null;
         identities = null;

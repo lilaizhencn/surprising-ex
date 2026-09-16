@@ -202,9 +202,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             preparedClientKeyValues;
     /** 本批预备的 OpenInterestSteps 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final long[] preparedOpenInterestSteps;
-    /** 本批预备的 AdmissionIdentities 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity[]
-            preparedAdmissionIdentities;
+    /** 本批准入生命周期旗标；用 primitive 数组避免每项创建中间身份对象。 */
+    final boolean[] preparedLifecycleSettled;
+    final boolean[] preparedFundingInProgress;
     /** 本批预备的 SymbolIds 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final int[] preparedSymbolIds;
     /** 本批预备的 AssetIds 缓冲；派发后必须等待完成交接才能清空或复用。 */
@@ -290,8 +290,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedClientKeyValues =
                 new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
         preparedOpenInterestSteps = new long[capacity];
-        preparedAdmissionIdentities =
-                new com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity[capacity];
+        preparedLifecycleSettled = new boolean[capacity];
+        preparedFundingInProgress = new boolean[capacity];
         preparedSymbolIds = new int[capacity];
         preparedAssetIds = new int[capacity];
         preparedMatchingOrders = new CoreMatchingOrder[capacity];
@@ -361,7 +361,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         placeBatchAdmissionEvent = null;
         java.util.Arrays.fill(preparedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
-        java.util.Arrays.fill(preparedAdmissionIdentities, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedLifecycleSettled, 0, preparedCount, false);
+        java.util.Arrays.fill(preparedFundingInProgress, 0, preparedCount, false);
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, null);
         java.util.Arrays.fill(preparedMatchingOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);

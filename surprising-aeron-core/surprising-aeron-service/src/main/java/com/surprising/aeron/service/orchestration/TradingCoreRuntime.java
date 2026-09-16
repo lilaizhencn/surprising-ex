@@ -491,7 +491,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.probeValue = probeValue;
         this.resultLedger = new CommandResultLedger(commandResults);
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
-        admissions.pendingLifecycleScopes = new LinkedHashMap<>();
+        admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
         admissions.deferredMatching = new LinkedHashMap<>();
         snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
         this.exportState = exportState;
@@ -2764,10 +2764,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long timestamp, long position) {
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState, identities, userId,
                 command, currentClusterTimestamp);
-        var admissionFlags = CoreOrderDecisionResolver.admissionFlags(runtimeState, resolved.symbolId());
         int assetId = identities.assetId(resolved.reservationAsset());
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
-                openInterestIndex.openInterestSteps(resolved.symbol()), admissionFlags,
+                openInterestIndex.openInterestSteps(resolved.symbol()),
+                runtimeState.treasury().lifecycleSettlement(resolved.symbolId()) != 0,
+                runtimeState.treasury().fundingProgress(resolved.symbolId()) != null,
                 resolved.symbolId(), assetId, identities, timestamp, position);
     }
 
