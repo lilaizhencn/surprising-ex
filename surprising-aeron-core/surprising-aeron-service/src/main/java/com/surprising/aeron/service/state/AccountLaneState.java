@@ -38,6 +38,8 @@ public final class AccountLaneState {
     final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<LongHashSet> positionKeysByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    /** Risk scan output is reused per logical Lane, including synchronous multi-Lane callers. */
+    RiskLiquidationBatch riskLiquidationBatch;
     /** Open position keys stay sorted in primitive storage; scans no longer build a boxed TreeSet. */
     final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();

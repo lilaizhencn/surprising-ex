@@ -562,6 +562,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         controlLanes.dispatch(laneMask, AccountLaneOperationType.RISK, operation);
     }
 
+    RiskLiquidationBatch riskLiquidationBatch(int capacity) {
+        AccountLaneState lane = laneCommandScope.get();
+        if (lane == null || capacity <= 0 || capacity > 4_096) {
+            throw new IllegalStateException("risk liquidation batch requires an owning Lane scope");
+        }
+        RiskLiquidationBatch batch = lane.riskLiquidationBatch;
+        if (batch == null || batch.capacity() < capacity) {
+            batch = new RiskLiquidationBatch(capacity);
+            lane.riskLiquidationBatch = batch;
+        }
+        batch.reset();
+        return batch;
+    }
+
     public boolean pollControlLanes() { return controlLanes.poll(); }
 
     public Object controlLaneResult(int laneId) { return controlLanes.result(laneId); }
@@ -613,7 +627,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             return operation.apply(scoped);
         }
         if (ownerLaneAccess) return inLaneCommandScope(accountLanes[laneId], operation);
-        if (!accountLanesStarted) return operation.apply(accountLanes[laneId]);
+        // Even before permanent Lane workers start, execute through the same scope
+        // used by worker-owned calls.  Risk scans and other lane-local processors
+        // rely on that scope to access per-lane reusable scratch state safely.
+        if (!accountLanesStarted) return inLaneCommandScope(accountLanes[laneId], operation);
         if (asynchronousCommandScope)
             throw new org.agrona.concurrent.AgentTerminationException(
                     new IllegalStateException("asynchronous command requires Lane execution ownership"));

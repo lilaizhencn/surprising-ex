@@ -13,21 +13,13 @@ final class RiskLaneProcessor {
     /** 每条永久 Lane 复用一份计算临时变量，不跨线程共享。 */
     private static final ThreadLocal<PositionRiskScratch> POSITION_RISK =
             ThreadLocal.withInitial(PositionRiskScratch::new);
-    /** A risk lane has at most one scan slice in flight; retain its bounded output arrays. */
-    private static final ThreadLocal<RiskLiquidationBatch> LIQUIDATIONS =
-            ThreadLocal.withInitial(() -> new RiskLiquidationBatch(8));
     private RiskLaneProcessor() { }
     static Page scan(TradingRuntimeState runtime, RiskScanRuntime initial,
                                         PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
                                         CoreInstrumentState changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RuntimeIdentityRegistry identities, long expectedUserRevision, long expectedMarketRevision) {
-        RiskLiquidationBatch creations = LIQUIDATIONS.get();
-        if (creations.capacity() < maxWork) {
-            creations = new RiskLiquidationBatch(maxWork);
-            LIQUIDATIONS.set(creations);
-        }
-        creations.reset();
+        RiskLiquidationBatch creations = runtime.riskLiquidationBatch(maxWork);
         RiskScanRuntime progress = initial;
         int remaining = maxWork;
         long userRevision = expectedUserRevision;
