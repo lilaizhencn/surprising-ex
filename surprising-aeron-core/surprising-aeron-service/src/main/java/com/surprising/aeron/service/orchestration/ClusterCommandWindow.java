@@ -98,11 +98,16 @@ public final class ClusterCommandWindow {
             if (slot != 0)
                 exactPrefix = Math.max(exactPrefix, (((int) slot - 1 - head) & indexMask) + 1);
         }
-        long candidateLane = candidateRoute == null ? 0 : candidateRoute.userLaneBit();
-        if (candidateLane != 0) {
+        // A Lane is a FIFO executor shared by many users.  It is not a command
+        // dependency: fencing the whole lane here reduces a 256-slot window to
+        // roughly one in-flight command per lane.  Only the same user's Owner
+        // preparation must wait for its prior terminal state; the Lane queue
+        // already serializes different users on the same lane.
+        long candidateUserId = candidateRoute == null ? 0 : candidateRoute.userId();
+        if (candidateUserId != 0) {
             for (int i = size - 1; i >= exactPrefix; i--) {
                 IngressRoute route = get(i).route;
-                if (route != null && (route.userLaneBit() & candidateLane) != 0) {
+                if (route != null && route.userId() == candidateUserId) {
                     conflict = Conflict.ACCOUNT;
                     return i + 1;
                 }
