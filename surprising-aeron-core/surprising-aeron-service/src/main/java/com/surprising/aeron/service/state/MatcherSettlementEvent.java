@@ -90,6 +90,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         final CoreInstrumentState[] instruments;
         final OrderRuntime[] admittedOrders;
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
+        /** Number of slots populated by the current preparation, not backing capacity. */
+        private int activeSize;
         BatchStorage(int size) {
             plans = new MatcherSettlementPlan[size];
             for (int i = 0; i < size; i++) plans[i] = new MatcherSettlementPlan();
@@ -97,11 +99,18 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             admittedOrders = new OrderRuntime[size];
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
+        void activate(int size) {
+            if (size <= 0 || size > plans.length) throw new IllegalArgumentException("invalid active batch size");
+            activeSize = size;
+        }
         void clear() {
             metadataSlots.clear();
-            for (MatcherSettlementPlan plan : plans) plan.clearReferences();
-            java.util.Arrays.fill(instruments, null);
-            java.util.Arrays.fill(admittedOrders, null);
+            for (int index = 0; index < activeSize; index++) {
+                plans[index].clearReferences();
+                instruments[index] = null;
+                admittedOrders[index] = null;
+            }
+            activeSize = 0;
         }
     }
     BatchStorage batchStorage(int size) {
@@ -109,6 +118,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (size <= 0) throw new IllegalArgumentException("settlement batch must not be empty");
         if (batchStorage == null || batchStorage.plans.length < size)
             batchStorage = new BatchStorage(size);
+        batchStorage.activate(size);
         return batchStorage;
     }
     void discardBatchStorage() {
