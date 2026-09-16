@@ -1893,14 +1893,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     continue;
                 }
                 if (batch == null || batch.placeBatchAdmissionEvent == null) {
-                    // Ordinary PLACE completion is consumed from this notification.  Matcher
-                    // submission already happened; this only publishes the admission outcome
-                    // to the ordered head and to its queued direct settlement.
-                    collectPlaceAdmissionIfReady(pending);
+                    // Ordinary PLACE admissions publish on the dedicated receipt-ready queue.
+                    // This cursor is reserved for the legacy pipelined batch admission path;
+                    // never collect an ordinary event a second time from the wrong queue.
                     continue;
                 }
-                if (batch == null || batch.placeBatchAdmissionEvent == null
-                        || pending.isMatchingSubmitted()
+                if (pending.isMatchingSubmitted()
                         || batch.finishing() || batch.nextIndex >= batch.items.size()) {
                     // Ordinary PLACE admissions are already submitted to Matcher.  The queue
                     // entry is only a wake-up cursor; ordered commit reads event.complete().
