@@ -1777,7 +1777,21 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (!accountLanesStarted) {
             throw new IllegalStateException("asynchronous place admission requires Account Lane workers");
         }
-        releaseOwnerLaneAccess();
+        // Standalone/test callers keep the historical synchronous contract. Cluster ingress
+        // enters asynchronousCommandScope and always uses the SPSC queue, so production never
+        // waits here. A standalone call first takes the Lane handoff explicitly; otherwise the
+        // worker could still own the lane and the admission would be left without a completion
+        // signal for the synchronous API.
+        boolean inline = !asynchronousCommands();
+        if (inline && !ownerLaneAccess) {
+            while (!tryAcquireOwnerLaneAccess()) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IllegalStateException("synchronous Account Lane handoff interrupted");
+                }
+                Thread.onSpinWait();
+            }
+        }
+        if (!inline) releaseOwnerLaneAccess();
         int laneId = topology.accountLaneId(userId);
         ensurePlaceAdmissionDispatchCapacity(laneId);
         PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
@@ -1788,9 +1802,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
-            laneWorkers[laneId].submit(event);
+            if (inline) {
+                event.execute(accountLanes[laneId]);
+                releaseOwnerLaneAccess();
+            } else {
+                laneWorkers[laneId].submit(event);
+            }
         } catch (RuntimeException | Error failure) {
-            event.discard();
+            if (!event.complete()) event.discard();
             placeAdmissionEventPool.addFirst(event);
             throw failure;
         }
@@ -5495,6 +5514,20 @@ public final class TradingRuntimeState implements AutoCloseable {
                 identities, timestamp, position, cancellations, target);
     }
 
+    /**
+     * Prepares the direct settlement slot before a normal PLACE admission has published its
+     * mutable OrderRuntime.  The dispatcher builds a detached order value for Matcher proof;
+     * the Account Lane binds its authoritative order from the admission mailbox before applying
+     * the result.
+     */
+    public MatcherSettlementEvent prepareDirectMatcherSettlement(
+            long sequence, long laneMask, PlaceAdmissionEvent admission,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget target) {
+        return settlements.prepareDirectAdmission(sequence, laneMask, admission, commandId, shard,
+                identities, timestamp, position, cancellations, target);
+    }
+
     public MatcherSettlementEvent prepareDirectMatcherSettlement(long coreSequence, long commitSequence,
             long laneMask, OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId,
             int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
@@ -5541,6 +5574,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
             RuntimeIdentityRegistry identities) { return settlements.dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence, commitTimestamp, commitClusterPosition, plan, matchingResult, identities); }
     public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
+    public void discardMatcherSettlement(MatcherSettlementEvent event) { settlements.discardMatcherSettlement(event); }
     public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
             long sequence, long laneMask, long orderId, CoreMatchingResult result,
             RuntimeIdentityRegistry identities) {

@@ -81,6 +81,18 @@ final class OrderedCommitCoordinator {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || !owner.hasPendingMatchingRejection(sequence)) return null;
+        CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
+        var direct = pending.settlementEvent();
+        if (pending.isMatchingSubmitted()) {
+            // Lane rejection can race with the Matcher admission fence. Keep the ordered
+            // command alive until the in-flight Matcher token has published; recycling the slot
+            // earlier lets the worker publish into a newly claimed sequence.
+            if (direct != null && direct.direct()) {
+                if (!direct.complete()) return null;
+            } else if (laneContext.matchingResult() == null && laneContext.matchingCompletion() == null) {
+                return null;
+            }
+        }
         CoreResultCode resultCode = owner.laneCommandContexts.required(sequence).matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.commitMatchingSequence(sequence);
@@ -90,6 +102,24 @@ final class OrderedCommitCoordinator {
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, sequence, requiredExportSequence, stateHash,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+        if (direct != null && direct.direct()) {
+            // A rejected admission still consumed one Matcher evidence sequence.  Advance the
+            // Owner's prefix ledger before recycling the direct event so restored runtimes see
+            // the same Matcher cursor as the live runtime.
+            if (direct.directResultAvailable()) {
+                CoreMatchingResult matcherResult = direct.firstDirectResult();
+                validateMatchingEvidence(pending, matcherResult);
+                applyMatcherProgress(matcherResult);
+            }
+            owner.runtimeState.discardMatcherSettlement(pending.takeSettlementEvent());
+        } else if (pending.isMatchingSubmitted()) {
+            CoreMatchingResult matcherResult = laneContext.matchingResult();
+            if (matcherResult == null) matcherResult = laneContext.matchingCompletion();
+            if (matcherResult != null) {
+                validateMatchingEvidence(pending, matcherResult);
+                applyMatcherProgress(matcherResult);
+            }
+        }
         owner.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 sequence, requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
@@ -118,6 +148,17 @@ final class OrderedCommitCoordinator {
         clusterPosition = pending.commitFenceClusterPosition();
         owner.currentClusterPosition = clusterPosition;
         CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
+        // The standalone completion API may receive a Matcher result before the asynchronous
+        // admission notification.  Consume only a completed notification; never build a
+        // settlement plan from an order that the Account Lane has not published yet.
+        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null
+                && !owner.collectPlaceAdmissionIfReady(pending)) {
+            // The standalone completion API may have consumed the matcher mailbox token before
+            // the asynchronous admission notification arrived. Keep the same immutable result
+            // in the sequence context so a later ordered retry does not lose it.
+            laneContext.publishMatchingCompletion(matchingResult);
+            return null;
+        }
         // Matcher releases the route before publishing Lane readiness. A command slot cannot
         // be recycled while its producer still owns it; transport retirement is independent.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct()
@@ -993,6 +1034,12 @@ final class OrderedCommitCoordinator {
 
     boolean matchingCommitReady(CommandSlot pending) {
         if (pending == null) return false;
+        // Ordinary PLACE admissions and Matcher execution run concurrently.  Resolve the Lane
+        // publication only at the ordered head; no Owner-side admission pump may submit or wait
+        // for this command.  A rejection still waits for the already-submitted Matcher token to
+        // retire before the slot is recycled.
+        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null
+                && !collectPlaceAdmissionIfReady(pending)) return false;
         OrderBatchPending batch = pending.orderBatch;
         // A matcher result alone does not make a batch ready while its Lane work is outstanding.
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
@@ -1002,7 +1049,13 @@ final class OrderedCommitCoordinator {
             return batch.settlementEvent.complete();
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
-        if (owner.hasPendingMatchingRejection(pending.sequence())) return true;
+        if (owner.hasPendingMatchingRejection(pending.sequence())) {
+            if (!pending.isMatchingSubmitted()) return true;
+            if (pending.settlementEvent() != null && pending.settlementEvent().direct())
+                return pending.settlementEvent().complete();
+            CommandSlot context = owner.laneCommandContexts.required(pending.sequence());
+            return context.matchingResult() != null || context.hasMatchingCompletion();
+        }
         // Direct Matcher->Lane events have no Owner matching-result slot.  Their Lane completion
         // bit is the authoritative ordered-commit readiness signal.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct())
@@ -1010,6 +1063,15 @@ final class OrderedCommitCoordinator {
         if (pending.hasLaneContinuation()) return pending.laneContinuationComplete();
         CommandSlot context = pending;
         return context.hasMatchingCompletion() || context.matchingResult() != null;
+    }
+
+    /**
+     * Collect one completed ordinary PLACE admission at the ordered commit head.  The event is
+     * already immutable and complete before this method is called; all reservation/publication
+     * semantics remain unchanged while the old per-shard submission poll disappears.
+     */
+    private boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
+        return owner.collectPlaceAdmissionIfReady(pending);
     }
 
     void drainMatcherSettlementCompletions() {
@@ -1126,6 +1188,17 @@ final class OrderedCommitCoordinator {
                 pending.establishCommitFence(clusterTimestamp, clusterPosition);
                 CoreResponse response;
                 if (owner.hasPendingMatchingRejection(sequence)) {
+                    if (pending.isMatchingSubmitted()
+                            && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
+                        if (!pending.settlementEvent().complete()) break;
+                    } else if (pending.isMatchingSubmitted()) {
+                        CommandSlot context = owner.laneCommandContexts.required(sequence);
+                        if (context.matchingResult() == null && context.takeMatchingCompletion() == null) {
+                            // The Matcher was intentionally allowed to run ahead of the Lane. Do
+                            // not retire the command slot until its result has been consumed.
+                            break;
+                        }
+                    }
                     response = completeRejectedMatching(sequence);
                 } else {
                     CommandSlot context = owner.laneCommandContexts.required(sequence);
@@ -1247,7 +1320,14 @@ final class OrderedCommitCoordinator {
                         dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
                 continue;
             }
+            // A normal PLACE without a preconstructed direct settlement is completed strictly at
+            // the ordered head. Its Matcher result may already be ready, but applying it from
+            // this partition predispatch pass would advance exchange-core past earlier Core
+            // sequences whose Lane admission has not yet been collected.
+            if (pending.settlementEvent() == null || !pending.settlementEvent().direct()) return;
             CommandSlot laneContext = pending;
+            if (pending.placeAdmission() != null && !collectPlaceAdmissionIfReady(pending)) return;
+            if (owner.hasPendingMatchingRejection(pending.sequence())) return;
             com.surprising.aeron.service.matching.CoreMatchingResult matching = laneContext.matchingCompletion();
             if (matching == null || !matching.accepted()) return;
             matching = laneContext.takeMatchingCompletion();

@@ -23,7 +23,7 @@ final class CoreTestCompletion {
                 long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
                         ? requestedSequence : owner.firstPendingMatchingSequence();
                 if (sequence == 0) break;
-                owner.progressPlaceAdmissions();
+                owner.progressPlaceBatchAdmissions();
                 CoreResponse response;
                 if (owner.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
@@ -67,7 +67,7 @@ final class CoreTestCompletion {
         PendingMatching pending = owner.pendingMatching.get(sequence);
         while (pending != null && owner.placeAdmissionOutstanding(pending)
                 && !owner.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            owner.progressPlaceAdmissions();
+            owner.progressPlaceBatchAdmissions();
             if (owner.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
         if (owner.hasPendingMatchingRejection(sequence)) return null;

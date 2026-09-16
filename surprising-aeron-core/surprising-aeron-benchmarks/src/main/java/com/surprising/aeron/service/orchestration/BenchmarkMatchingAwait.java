@@ -15,7 +15,7 @@ final class BenchmarkMatchingAwait {
         CommandSlot pending = state.pendingMatching.get(sequence);
         while (pending != null && state.placeAdmissionOutstanding(pending)
                 && !state.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            state.progressPlaceAdmissions();
+            state.progressPlaceBatchAdmissions();
             if (state.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.hasPendingMatchingRejection(sequence)) return null;

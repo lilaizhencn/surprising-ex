@@ -329,6 +329,24 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
+    /**
+     * Advances the Matcher evidence stream for a Lane-rejected PLACE without touching the order
+     * book.  The Owner still owns the business rejection; this keeps the optimistic direct
+     * submission transactionally harmless when the Account Lane rejects the reservation.
+     */
+    public CoreMatchingResult rejectedPlaceWithEvidence(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long instrumentChangeId, long aeronTimestamp, String resultCode) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || resultCode == null || resultCode.isBlank())
+            throw new IllegalArgumentException("invalid rejected matcher command");
+        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        CoreMatchingResult result = new CoreMatchingResult(false, resultCode);
+        long sequence = matcherEvidence.nextSequence(shardId);
+        return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+                aeronTimestamp, sequence, shardId, result);
+    }
+
     public CoreMatchingResult cancelWithEvidence(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long instrumentChangeId, long aeronTimestamp, long userId, String symbol) {

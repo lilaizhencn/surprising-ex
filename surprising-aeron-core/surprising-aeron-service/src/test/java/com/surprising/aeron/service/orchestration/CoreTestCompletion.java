@@ -65,7 +65,7 @@ final class CoreTestCompletion {
                 long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
                         ? requestedSequence : owner.firstPendingMatchingSequence();
                 if (sequence == 0) break;
-                owner.progressPlaceAdmissions();
+                owner.progressPlaceBatchAdmissions();
                 CoreResponse response;
                 if (owner.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
@@ -118,7 +118,7 @@ final class CoreTestCompletion {
         CommandSlot pending = state.pendingMatching.get(sequence);
         while (pending != null && state.placeAdmissionOutstanding(pending)
                 && !state.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            state.progressPlaceAdmissions();
+            state.progressPlaceBatchAdmissions();
             if (state.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.hasPendingMatchingRejection(sequence)) return null;

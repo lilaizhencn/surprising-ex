@@ -243,7 +243,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private static boolean ready(Object command) {
-        return !(command instanceof MatcherSettlementEvent event) || event.ready();
+        return !(command instanceof MatcherSettlementEvent event) || event.readyForLane();
     }
 
     @Override

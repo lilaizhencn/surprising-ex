@@ -38,13 +38,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private long commitFenceTimestamp;
     private long commitFenceClusterPosition;
     private boolean commitFenceEstablished;
-    /**
-     * Exactly one asynchronous continuation can own a command at a time.  Keep one tagged
-     * reference instead of four mostly-null object fields; the continuation payload itself still
-     * remains pooled by its owning dispatcher.
-     */
+    /** Exactly one settlement/cancel continuation can own a command at a time. */
     private ContinuationKind continuationKind;
     private Object continuation;
+    /** Normal PLACE admission runs alongside the settlement continuation. */
+    private PlaceAdmissionEvent placeAdmission;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
@@ -216,6 +214,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitFenceEstablished = false;
         continuationKind = null;
         continuation = null;
+        placeAdmission = null;
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
@@ -300,8 +299,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
     long settlementApplyStartNanos() { return settlementApplyStartNanos; }
     PlaceAdmissionEvent placeAdmission() {
-        return continuationKind == ContinuationKind.PLACE_ADMISSION
-                ? (PlaceAdmissionEvent) continuation : null;
+        return placeAdmission;
     }
     boolean hasLaneContinuation() {
         return continuationKind == ContinuationKind.SETTLEMENT
@@ -316,17 +314,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         };
     }
     PlaceAdmissionEvent takePlaceAdmission() {
-        PlaceAdmissionEvent value = continuationKind == ContinuationKind.PLACE_ADMISSION
-                ? (PlaceAdmissionEvent) continuation : null;
-        clearContinuation(ContinuationKind.PLACE_ADMISSION);
+        PlaceAdmissionEvent value = placeAdmission;
+        placeAdmission = null;
         return value;
     }
     void placeAdmission(PlaceAdmissionEvent event) {
-        if (event == null || continuation != null || operation != Operation.PLACE) {
+        if (event == null || placeAdmission != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admission continuation");
         }
-        continuationKind = ContinuationKind.PLACE_ADMISSION;
-        continuation = event;
+        placeAdmission = event;
     }
     void admissionCompleted(ResolvedPlaceOrder resolvedOrder) {
         if (resolvedOrder == null || placeAdmission() == null || admittedPlaceOrder != null
@@ -370,6 +366,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     private void clearContinuation(ContinuationKind expected) {
+        if (expected == ContinuationKind.PLACE_ADMISSION) {
+            placeAdmission = null;
+            return;
+        }
         if (continuationKind != expected) return;
         continuationKind = null;
         continuation = null;
@@ -389,6 +389,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         admission = null;
         continuationKind = null;
         continuation = null;
+        placeAdmission = null;
         settlementPlan = null;
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
@@ -468,8 +469,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     @Override
     public void releaseMatcherSubmission(int shardId) {
-        if (submittedMatcherShard != shardId)
+        if (submittedMatcherShard != shardId) {
             throw new IllegalStateException("matcher completion belongs to another shard");
+        }
         submittedMatcherShard = -1;
     }
 
@@ -663,6 +665,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
         matchingRejection = null;
+        placeAdmission = null;
         cachedMatcherShard = -1;
     }
 }

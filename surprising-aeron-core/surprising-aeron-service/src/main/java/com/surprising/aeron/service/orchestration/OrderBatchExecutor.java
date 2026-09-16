@@ -368,14 +368,21 @@ final class OrderBatchExecutor {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             } catch (CoreStateRejectedException exception) {
+                // A reservation failure is reported by the owning Lane after it has validated
+                // and rolled back the item.  Other Lanes may have committed meanwhile, so the
+                // global runtime revision is not a valid unchanged-state check here.
+                boolean laneAdmissionFailure = batch.itemAdmission != null;
                 batch.itemAdmission = null;
-                requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
+                if (!laneAdmissionFailure)
+                    requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
                 appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
                         CoreResultCode.fromRejectionCode(exception.code()));
                 batch.nextIndex++;
             } catch (ArithmeticException | IllegalArgumentException exception) {
+                boolean laneAdmissionFailure = batch.itemAdmission != null;
                 batch.itemAdmission = null;
-                requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
+                if (!laneAdmissionFailure)
+                    requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
                 appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
                         exception instanceof ArithmeticException
                                 ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);

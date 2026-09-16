@@ -80,6 +80,11 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     /** 已有序号上下文的路由；直达结果先释放路由，再通知 Lane。 */
     private MatcherCompletionRoute matcherCompletionRoute;
     private int matcherCompletionShard;
+    /** Optional normal-PLACE admission that is queued ahead of this direct settlement. */
+    private PlaceAdmissionEvent admissionDependency;
+    /** Admission outcome copied before the pooled admission event is recycled by the Owner. */
+    private volatile boolean admissionResolved;
+    private RuntimeException admissionRejection;
     /** 完成前由命令持有，不归还结果容器；事件回收时释放引用。 */
     LaneOrderResultTarget resultTarget;
     static final class BatchStorage {
@@ -152,6 +157,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalArgumentException("invalid direct settlement reservation");
         direct = true; cancellation = false; directPublished = false; matcherPublicationDeferred = false;
         dispatched = false; directFailure = null;
+        admissionDependency = null;
+        admissionResolved = false;
+        admissionRejection = null;
         directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
@@ -221,6 +229,68 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
     long routedLaneMask() { return direct ? routedLaneMask : requiredLaneMask; }
     public boolean ready() { return !direct || directPublished; }
+
+    /** Lane readiness includes a normal PLACE admission queued ahead of this direct event. */
+    public boolean readyForLane() {
+        if (!ready()) return false;
+        if (admissionResolved || admissionDependency == null) return true;
+        return admissionDependency.complete();
+    }
+
+    /**
+     * Matcher-side admission fence.  The Matcher may own the command token immediately, but it
+     * must not mutate its order book until the Account Lane has decided whether the reservation
+     * is valid.  This wait stays off the Owner thread and preserves the direct result handoff.
+     */
+    public void awaitAdmission() {
+        while (!admissionResolved) {
+            PlaceAdmissionEvent dependency = admissionDependency;
+            if (dependency == null || dependency.complete()) {
+                resolveAdmissionDependency();
+                return;
+            }
+            Thread.onSpinWait();
+        }
+    }
+
+    public RuntimeException admissionRejection() {
+        return admissionRejection;
+    }
+
+    public String admissionResultCode() {
+        RuntimeException rejection = admissionRejection;
+        if (rejection instanceof CoreStateRejectedException stateRejected)
+            return stateRejected.code();
+        if (rejection instanceof ArithmeticException) return "ARITHMETIC_OVERFLOW";
+        return rejection == null ? "SUCCESS" : "INVALID_COMMAND";
+    }
+
+    /** Owner or the target Lane copies the completed admission result before the event is cleared. */
+    public void admissionResult(RuntimeException rejection) {
+        if (!direct || admissionDependency == null)
+            throw new IllegalStateException("direct settlement has no place admission dependency");
+        if (admissionResolved) {
+            if (admissionRejection != rejection)
+                throw new IllegalStateException("place admission result changed");
+            return;
+        }
+        admissionRejection = rejection;
+        admissionResolved = true;
+        signalAdmissionReady();
+    }
+
+    /** Wakes every Lane parked behind the direct event's admission or Matcher publication. */
+    void signalAdmissionReady() {
+        if (direct && runtime != null) runtime.signalDirectSettlement(routedLaneMask);
+    }
+
+    private void resolveAdmissionDependency() {
+        if (admissionResolved || admissionDependency == null) return;
+        PlaceAdmissionEvent dependency = admissionDependency;
+        if (!dependency.complete())
+            throw new IllegalStateException("place admission is not complete");
+        admissionResult(dependency.rejection());
+    }
 
     /** Matcher 自身用于区分结果已构建和已经允许 Lane 消费，不新增就绪状态。 */
     public boolean resultPrepared() { return !direct || firstDirectResult != null || directFailure != null; }
@@ -358,6 +428,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult() {
         requireDirectResult(); return firstDirectResult;
     }
+    /** A direct Matcher failure is prepared too, but has no result that can advance evidence. */
+    public boolean directResultAvailable() {
+        return direct && directPublished && directFailure == null && firstDirectResult != null;
+    }
     public com.surprising.aeron.service.matching.CoreMatchingResult lastDirectResult() {
         requireDirectResult(); return lastDirectResult;
     }
@@ -404,6 +478,12 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         resetCompletions(laneCount);
         runtime.expectMatcherSettlement(requiredLaneMask);
         return this;
+    }
+
+    void admissionDependency(PlaceAdmissionEvent admission) {
+        if (!direct || admission == null || admissionDependency != null)
+            throw new IllegalStateException("invalid place admission dependency");
+        admissionDependency = admission;
     }
 
     MatcherSettlementEvent prepareBatch(
@@ -474,6 +554,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         triggeredAt = 0;
         matcherCompletionRoute = null;
         matcherCompletionShard = -1;
+        admissionDependency = null;
+        admissionResolved = false;
+        admissionRejection = null;
         directCoreSequence = 0;
         directCommandId = null; authorizedCancellations = java.util.List.of();
         firstDirectResult = lastDirectResult = null; routedLaneMask = 0;
@@ -507,6 +590,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 return;
             }
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
+        }
+        // A direct normal PLACE is queued behind its admission on the same Lane.  If admission
+        // rejected, consume this already-submitted matcher fact as a no-op so the Owner can
+        // retire both pooled events without touching account state.
+        resolveAdmissionDependency();
+        if (admissionRejection != null) {
+            if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            publishCompletion(lane, startedNanos);
+            return;
+        }
+        if (admissionDependency != null
+                && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
+            OrderRuntime admitted = lane.orders.get(plan.takerOrderId());
+            if (admitted == null) throw new IllegalStateException("place admission order is missing from Lane");
+            batchStorage.admittedOrders[0] = admitted;
         }
         if (changes == null) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);
@@ -691,6 +789,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
         return changes;
     }
+    boolean hasChanges() { return changes != null; }
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         TradingRuntimeState.MatcherSettlementChanges value = changes();
         changes = null;

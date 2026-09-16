@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
+import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.UUID;
@@ -37,6 +38,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private OrderRuntime admittedOrder;
     private ReservationRuntime admittedReservation;
     private RuntimeException rejection;
+    /** Direct Matcher settlement queued behind this admission; only one normal PLACE uses it. */
+    private MatcherSettlementEvent dependentSettlement;
     @SuppressWarnings("FieldMayBeFinal")
     private boolean completed;
 
@@ -74,6 +77,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
+        dependentSettlement = null;
         COMPLETED.set(this, false);
         runtime.expectPlaceAdmission(laneId);
         return this;
@@ -94,6 +98,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
+        dependentSettlement = null;
     }
 
     @Override
@@ -138,9 +143,11 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;
+        MatcherSettlementEvent dependent = dependentSettlement;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         COMPLETED.setRelease(this, true);
         completionRuntime.publishPlaceAdmissionReady(completionLaneId, completionSequence);
+        if (dependent != null) dependent.signalAdmissionReady();
     }
 
     public boolean complete() {
@@ -164,6 +171,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
+        dependentSettlement = null;
         identityAllocations = 0;
         coreSequence = 0;
         userId = 0;
@@ -184,6 +192,32 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
             throw new IllegalStateException("place admission is not accepted");
         }
         return order;
+    }
+
+    /**
+     * Immutable matcher input is available as soon as the owner prepares the admission.  The
+     * matcher can therefore run in parallel with the account Lane; it must not wait for the Lane
+     * to publish the mutable runtime order just to reconstruct these command fields.
+     */
+    public CoreMatchingOrder matchingOrder() {
+        ResolvedPlaceOrder resolved = order;
+        if (resolved == null) throw new IllegalStateException("place admission is not prepared");
+        return new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
+                resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(),
+                resolved.quantitySteps());
+    }
+
+    /** Owner-only immutable input used to preconstruct a direct settlement before Lane admission. */
+    ResolvedPlaceOrder preparedOrder() {
+        if (order == null) throw new IllegalStateException("place admission is not prepared");
+        return order;
+    }
+
+    /** Binds the preconstructed Matcher result to this admission without another callback object. */
+    void dependentSettlement(MatcherSettlementEvent event) {
+        if (event == null || dependentSettlement != null)
+            throw new IllegalStateException("invalid place admission dependency");
+        dependentSettlement = event;
     }
     UserRuntime admittedUser() {
         if (!complete() || admittedUser == null) throw new IllegalStateException("place admission is incomplete");

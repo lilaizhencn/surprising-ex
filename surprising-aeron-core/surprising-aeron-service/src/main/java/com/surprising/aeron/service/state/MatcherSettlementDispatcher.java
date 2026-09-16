@@ -57,6 +57,22 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
+    MatcherSettlementEvent prepareDirectAdmission(long sequence, long laneMask,
+            PlaceAdmissionEvent admission, java.util.UUID commandId, int shard,
+            RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target) {
+        owner.assertOwner();
+        if (admission == null) throw new IllegalArgumentException("place admission is missing");
+        ResolvedPlaceOrder resolved = admission.preparedOrder();
+        OrderRuntime prepared = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
+                resolved, commandId, resolved.symbolId(), timestamp, position);
+        MatcherSettlementEvent event = prepareDirect(sequence, laneMask, prepared, null, 1,
+                commandId, shard, identities, timestamp, position, cancellations, target);
+        event.admissionDependency(admission);
+        admission.dependentSettlement(event);
+        return event;
+    }
+
     MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
             com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
@@ -195,6 +211,18 @@ final class MatcherSettlementDispatcher {
     public void releaseMatcherSettlement(MatcherSettlementEvent event) {
         owner.assertOwner();
         if (event == null) return;
+        event.clear();
+        matcherSettlementEventPool.addFirst(event);
+    }
+
+    /** Retire a direct event whose preceding Lane admission rejected the order. */
+    void discardMatcherSettlement(MatcherSettlementEvent event) {
+        owner.assertOwner();
+        if (event == null) return;
+        if (!event.complete()) throw new IllegalStateException("rejected direct settlement is incomplete");
+        if (event.hasChanges()) {
+            owner.releaseMatcherSettlementChanges(event.takeChanges());
+        }
         event.clear();
         matcherSettlementEventPool.addFirst(event);
     }
