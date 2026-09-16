@@ -2,21 +2,8 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
-
 /** Sequence-local cancellation applied entirely by the order owner's Account Lane. */
 public final class LaneCancelEvent implements SettlementLaneWorker.Command {
-    private static final VarHandle COMPLETED;
-
-    static {
-        try {
-            COMPLETED = MethodHandles.lookup().findVarHandle(LaneCancelEvent.class, "completed", boolean.class);
-        } catch (ReflectiveOperationException exception) {
-            throw new ExceptionInInitializerError(exception);
-        }
-    }
-
     private TradingRuntimeState runtime;
     private TradingRuntimeState.MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
@@ -117,7 +104,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;
-        COMPLETED.setRelease(this, true);
+        completed = true;
         completionRuntime.publishMatcherSettlementReady(completionLaneId, completionSequence);
     }
 
@@ -128,7 +115,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public long orderId() { return orderIds[0]; }
     public int laneId() { return laneId; }
     public long requiredLaneMask() { return 1L << laneId; }
-    public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
+    public boolean complete() { return completed; }
     RuntimeIdentityRegistry identities() { return identities; }
 
     /** Copy the Lane's primitive change keys before the Owner consumes and recycles this event. */
@@ -157,7 +144,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         commitClusterPosition = 0;
         laneId = 0;
         commitLane = false;
-        COMPLETED.setRelease(this, false);
+        completed = false;
     }
 
     void discard() {

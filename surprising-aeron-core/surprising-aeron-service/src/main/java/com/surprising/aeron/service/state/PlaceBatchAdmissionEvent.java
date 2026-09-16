@@ -1,23 +1,10 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
 import java.util.UUID;
 
 /** One-way admission for one user's PLACE batch, owned by exactly one Account Lane. */
 public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Command {
-    private static final VarHandle COMPLETED;
-
-    static {
-        try {
-            COMPLETED = MethodHandles.lookup().findVarHandle(
-                    PlaceBatchAdmissionEvent.class, "completed", boolean.class);
-        } catch (ReflectiveOperationException exception) {
-            throw new ExceptionInInitializerError(exception);
-        }
-    }
-
     private long coreSequence;
     private long timestamp, position;
     private long userId;
@@ -45,8 +32,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     /** Retained with this pooled event; cleared by Owner before reuse by the Lane. */
     private LanePublication publication;
     private RuntimeException rejection;
-    @SuppressWarnings("FieldMayBeFinal")
-    private boolean completed;
+    /** Volatile publication is sufficient: all payload fields are written before completion. */
+    private volatile boolean completed;
 
     PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, ResolvedPlaceOrder[] orders,
@@ -94,7 +81,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         admittedUser = null;
         if (publication != null) publication.clear();
         rejection = null;
-        COMPLETED.set(this, false);
+        completed = false;
         runtime.expectPlaceAdmission(laneId);
         return this;
     }
@@ -181,7 +168,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         int completionLaneId = laneId;
         long completionSequence = coreSequence;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
-        COMPLETED.setRelease(this, true);
+        completed = true;
         completionRuntime.publishPlaceAdmissionReady(completionLaneId, completionSequence);
     }
 
@@ -210,7 +197,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     }
 
     public long takeIdentityAllocations() { long count = identityAllocations; identityAllocations = 0; return count; }
-    public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
+    public boolean complete() { return completed; }
     public RuntimeException rejection() {
         if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
         return rejection;
@@ -243,7 +230,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (!complete()) runtime.releaseAdmissionExpectation(laneId);
         TradingRuntimeState.MatcherSettlementChanges value = changes;
         changes = null;
-        COMPLETED.setRelease(this, true);
+        completed = true;
         return value;
     }
 }

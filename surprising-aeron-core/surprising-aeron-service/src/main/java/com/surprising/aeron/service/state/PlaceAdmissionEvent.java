@@ -2,22 +2,10 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.protocol.CoreResultCode;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
 import java.util.UUID;
 
 /** One-way place admission owned and completed by exactly one Account Lane. */
 public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
-    private static final VarHandle COMPLETED;
-
-    static {
-        try {
-            COMPLETED = MethodHandles.lookup().findVarHandle(PlaceAdmissionEvent.class, "completed", boolean.class);
-        } catch (ReflectiveOperationException exception) {
-            throw new ExceptionInInitializerError(exception);
-        }
-    }
-
     private long coreSequence;
     private long timestamp, position;
     private long userId;
@@ -41,8 +29,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private OrderRuntime admittedOrder;
     private ReservationRuntime admittedReservation;
     private RuntimeException rejection;
-    @SuppressWarnings("FieldMayBeFinal")
-    private boolean completed;
+    /** Volatile publication is sufficient: all payload fields are written before completion. */
+    private volatile boolean completed;
 
     PlaceAdmissionEvent() {
     }
@@ -80,7 +68,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedReservation = null;
         rejection = null;
         reservedAmount = 0;
-        COMPLETED.set(this, false);
+        completed = false;
         return this;
     }
 
@@ -156,12 +144,12 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 completionSequence, order.orderId(),
                 admittedUser == null ? 0 : admittedUser.revision(), reservedAmount,
                 rejection == null, resultCode.wireCode());
-        COMPLETED.setRelease(this, true);
+        completed = true;
         completionRuntime.signalOwnerCompletion();
     }
 
     public boolean complete() {
-        return (boolean) COMPLETED.getAcquire(this);
+        return completed;
     }
 
     /** Abort a prepared event that was never submitted to a Lane. */
@@ -186,7 +174,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         userId = 0;
         laneId = 0;
         matcherShard = 0;
-        COMPLETED.setRelease(this, false);
+        completed = false;
     }
 
 
