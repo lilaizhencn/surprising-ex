@@ -5531,7 +5531,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (!accountLanesStarted) return;
         while (laneMask != 0) {
             int lane = Long.numberOfTrailingZeros(laneMask); laneMask &= laneMask - 1;
-            laneWorkers[lane].signalWork();
+            laneWorkers[lane].signalDirectReady();
         }
     }
 

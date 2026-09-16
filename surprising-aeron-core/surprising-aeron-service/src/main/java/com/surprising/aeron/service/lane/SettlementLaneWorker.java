@@ -14,6 +14,13 @@ import java.util.concurrent.locks.LockSupport;
 public final class SettlementLaneWorker implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
     private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
+    /**
+     * A direct matcher event may be queued before its payload is published.  Keep a short
+     * low-latency spin for that dependency, then park until the matcher signals publication.
+     * This is deliberately a fixed local policy: it adds no per-command state and does not
+     * change the configured strategy for executable Lane work.
+     */
+    private static final int DIRECT_READY_SPIN_LIMIT = 256;
 
     public interface Command {
         void execute(AccountLaneState lane);
@@ -112,6 +119,11 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
     }
 
+    /** Matcher publishes a direct payload; this is separate from the normal Owner submission path. */
+    public void signalDirectReady() {
+        if (parkRequested && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
+    }
+
     public int depth() {
         return Math.toIntExact(producerSequence.value - consumerSequence.value);
     }
@@ -135,6 +147,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
             lane.bindOwner();
             started = true;
             long reboundHandoff = 0;
+            int directReadySpins = 0;
             while (running || next < producerSequence.value) {
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
@@ -168,9 +181,30 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         consumerSequence.value = next;
                         command.execute(lane);
                         idleSpins = 0;
+                        directReadySpins = 0;
                         continue;
                     }
                     if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
+
+                    // The queue head is a valid command whose Matcher payload has not arrived.
+                    // Spinning forever here burns a whole core without doing settlement work and
+                    // can starve the Owner/Matcher that will make the event executable.  After a
+                    // short hand-tuned spin, use the existing publication signal/park handshake.
+                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                        if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
+                            parkRequested = true;
+                            try {
+                                if (running && next < producerSequence.value
+                                        && !ready(commands[(int) next & indexMask])) LockSupport.park(this);
+                            } finally {
+                                parkRequested = false;
+                                directReadySpins = 0;
+                            }
+                        } else {
+                            Thread.onSpinWait();
+                        }
+                        continue;
+                    }
                 }
                 switch (waitStrategy) {
                     case BUSY_SPIN -> Thread.onSpinWait();
