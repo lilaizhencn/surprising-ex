@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 6 已完成，阶段 7 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 6 已完成，阶段 7.1b 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -272,6 +272,12 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 状态：**已完成（100%）**。CANCEL batch 和流水 PLACE batch 已使用 `OrderBatchPending` 内预分配的
 `CoreMatchingResult[]` 及计数器；Matcher direct publish 不再把数组包装成 `List`，Owner 侧完成校验、遍历和回收也只访问固定槽位。批量 admission 的 Owner 等待和逐项迁移仍属于后续 7.1b，不在本子阶段虚报完成。
 
+#### 阶段 7.1b：完成标记和唤醒状态简化
+
+状态：**已完成（100%）**。准入、批量准入和 Lane 撤单事件的完成发布改为单个 `volatile` 标志，删除仅用于单布尔字段的反射式 VarHandle 初始化。Matcher SPSC 提交改为无条件 `unpark`，依靠 JVM 的粘性唤醒令牌关闭发布与休眠竞态，删除 `parkRequested` 状态机。该批次不改变队列顺序、完成栅栏、snapshot/replay 或业务结果。
+
+正确性验收：JDK 27 下服务模块全量回归 931 项，0 failures、0 errors、1 skipped；快照/重入测试单独重跑通过。批量准入的 Owner 等待和逐项业务迁移仍属于下一批，不能在此处虚报完成。
+
 ## 正确性门槛
 
 压测前必须全部通过：
@@ -335,4 +341,5 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 4～6 验收：JDK 27 编译及服务模块全量回归通过，`931 tests, 0 failures, 0 errors, 1 skipped`；普通撮合、跨 Lane 结算、批量原子性、恢复和 admission 目标测试通过。未执行吞吐压测。
 - 阶段 7.1a（批量结果固定槽位）：已完成。`OrderBatchPending` 的批量 Matcher 结果由复用 `CoreMatchingResult[]` 承载，CANCEL/流水 PLACE 的 Matcher direct publish 和 Owner 收集不再经过 `ArrayList`。
 - 阶段 7.1a 验收：JDK 27 下批量/恢复/直达结算目标测试通过；服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
-- 下一阶段为阶段 7：按同一模型迁移剩余 batch、风控/强平、资金费/结算、ADL、交割和期权等命令，完成后再统一压测。
+- 阶段 7.1b（完成标记和唤醒状态简化）：已完成。准入、批量准入和撤单事件移除仅为单布尔字段服务的反射式 VarHandle；Matcher 提交不再维护 `parkRequested` 状态机，改为无条件唤醒。完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
+- 下一阶段为阶段 7.2：先迁移批量准入的 Owner 协调，再按同一模型迁移风控/强平、资金费/结算、ADL、交割和期权等命令，完成后再统一压测。
