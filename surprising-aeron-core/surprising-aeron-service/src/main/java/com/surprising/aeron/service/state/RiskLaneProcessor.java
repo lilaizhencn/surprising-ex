@@ -67,6 +67,7 @@ final class RiskLaneProcessor {
         long maintenance = scan.riskMaintenanceMarginUnits();
         long isolatedMargin = scan.riskIsolatedMarginUnits();
         long isolatedReservation = scan.riskIsolatedReservationUnits();
+        long wallet = Long.MIN_VALUE;
         PositionRiskScratch positionRisk = POSITION_RISK.get();
         // A mark-price continuation may run on the same permanent Lane thread
         // after the previous scan was invalidated. Tie the small market cache to
@@ -134,10 +135,16 @@ final class RiskLaneProcessor {
             if (position.signedQuantitySteps() == 0 || position.marginMode() != CoreMarginMode.CROSS
                     || position.assetId() != settleAssetId) continue;
             if (!risk(runtime, position, identities, positionRisk)) continue;
-            BalanceRuntime balance = runtime.balance(user.userId(), settleAssetId);
-            long total = balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
-            long wallet = Math.subtractExact(Math.subtractExact(total, isolatedMargin), isolatedReservation);
-            if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
+            // The account balance and isolated offsets are stable while this
+            // Lane owns the scan. Calculate the cross wallet once per page,
+            // instead of repeating the same lookup and arithmetic for every
+            // cross position in the user.
+            if (wallet == Long.MIN_VALUE) {
+                BalanceRuntime balance = runtime.balance(user.userId(), settleAssetId);
+                long total = balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
+                wallet = Math.subtractExact(Math.subtractExact(total, isolatedMargin), isolatedReservation);
+                if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
+            }
             long equity = Math.addExact(wallet, unrealized);
             long ratio = riskRatio(maintenance, equity);
             putRiskAndLiquidation(runtime, user.userId(), positionCursor, position,
