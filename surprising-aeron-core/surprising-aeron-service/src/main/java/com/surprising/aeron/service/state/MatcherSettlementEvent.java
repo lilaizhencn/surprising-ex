@@ -168,7 +168,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         changes.directPositionIdentities = true;
         isolatedChanges = true; collected = false;
         collectedFundsDelta = RuntimeFundsDelta.empty();
-        prepareTreasuryDeltas(runtime.topology().accountLaneCount(), true);
+        prepareTreasuryDeltas(laneMask, true);
         resetCompletions(runtime.topology().accountLaneCount());
         // Direct events expose their completion through the event-owned padded bitset.  Do not
         // register per-Lane Owner notification expectations; that queue is only needed by the
@@ -398,20 +398,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             changes.ensureOrderCapacity(Math.addExact(plan.orderCount(), plan.preCancellationCount()),
                     requiredLaneMask);
         }
-        if (plan.tradeCount() == 0) {
-            if (touchedLaneTreasuryDeltas != null) {
-                for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
-            }
-        } else {
-            if (touchedLaneTreasuryDeltas == null || touchedLaneTreasuryDeltas.length != laneCount) {
-                touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
-                for (int index = 0; index < laneCount; index++) {
-                    touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
-                }
-            } else {
-                for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
-            }
-        }
+        prepareTreasuryDeltas(requiredLaneMask, plan.tradeCount() != 0);
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
@@ -465,7 +452,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.changes = runtime.acquireMatcherSettlementChanges(requiredLaneMask);
         changes.ensureOrderCapacity(expectedOrders, requiredLaneMask);
         treasuryTrades = hasTrade(plans, planCount);
-        prepareTreasuryDeltas(laneCount, treasuryTrades);
+        prepareTreasuryDeltas(requiredLaneMask, treasuryTrades);
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
@@ -648,16 +635,18 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         runtime.captureBalanceAfter(lane, userId, replacementAssetId);
     }
 
-    private void prepareTreasuryDeltas(int laneCount, boolean trades) {
+    /** Treasury slots follow the compact touched-Lane order used by laneSlot(). */
+    private void prepareTreasuryDeltas(long laneMask, boolean trades) {
         if (!trades) {
             if (touchedLaneTreasuryDeltas != null) {
                 for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
             }
             return;
         }
-        if (touchedLaneTreasuryDeltas == null || touchedLaneTreasuryDeltas.length != laneCount) {
-            touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
-            for (int index = 0; index < laneCount; index++) {
+        int touchedLaneCount = Long.bitCount(laneMask);
+        if (touchedLaneTreasuryDeltas == null || touchedLaneTreasuryDeltas.length != touchedLaneCount) {
+            touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[touchedLaneCount];
+            for (int index = 0; index < touchedLaneCount; index++) {
                 touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
             }
         } else {
