@@ -21,7 +21,7 @@ final class PendingMatchingRing {
     private final int[] previousSubmissionSlots;
     private final int[] submissionHeads;
     private final int[] submissionTails;
-    private final Map<UUID, CommandSlot> entriesByCommandId;
+    private final PendingCommandIdIndex entriesByCommandId;
     private final LongIntHashMap pendingByUser;
     private final CommandSlotRing contexts;
     private final int mask;
@@ -65,7 +65,7 @@ final class PendingMatchingRing {
         java.util.Arrays.fill(submissionTails, -1);
         mask = capacity - 1;
         contexts = new CommandSlotRing(capacity, laneCount);
-        entriesByCommandId = new java.util.HashMap<>(capacity);
+        entriesByCommandId = new PendingCommandIdIndex(capacity);
         pendingByUser = new LongIntHashMap(capacity);
     }
 
@@ -299,6 +299,31 @@ final class PendingMatchingRing {
     CommandSlot submissionHead(int matcherShard) {
         int index = submissionHeads[matcherShard];
         return index < 0 ? null : pendingAt(index);
+    }
+
+    /**
+     * Returns the oldest command held behind a batch boundary.  Deferred metadata lives in the
+     * reusable command slot, so this bounded ring walk replaces the old boxed LinkedHashMap.
+     */
+    CommandSlot firstDeferred() {
+        for (int index = head; index >= 0; index = nextSlots[index]) {
+            CommandSlot pending = pendingAt(index);
+            if (pending != null && pending.deferredMatching()) return pending;
+        }
+        return null;
+    }
+
+    boolean hasDeferred() {
+        return firstDeferred() != null;
+    }
+
+    int deferredCount() {
+        int count = 0;
+        for (int index = head; index >= 0; index = nextSlots[index]) {
+            CommandSlot pending = pendingAt(index);
+            if (pending != null && pending.deferredMatching()) count++;
+        }
+        return count;
     }
 
     void completeSubmission(long sequence) {

@@ -490,7 +490,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.resultLedger = new CommandResultLedger(commandResults);
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
         admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
-        admissions.deferredMatching = new LinkedHashMap<>();
         snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
         this.exportState = exportState;
         this.terminalRetention = terminalRetention;
@@ -785,6 +784,19 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 runtimeState.readFenceAll(committedCoreSequence);
             }
         }
+        CoreResponse queryResponse = applyQuery(message, clusterTimestamp);
+        if (queryResponse != null) return queryResponse;
+        if (message.header().kind() != WireMessageKind.COMMAND) {
+            return rejected(CoreResultCode.INVALID_MESSAGE);
+        }
+        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
+    }
+
+    /**
+     * Dispatch low-frequency read and audit queries away from the command admission hot path.
+     * Returning null means the message is a command and must continue to applyCommandIngress().
+     */
+    private CoreResponse applyQuery(CoreMessage message, long clusterTimestamp) {
         if (message.header().kind() == WireMessageKind.QUERY
                 && (message.header().messageType() == CoreMessageType.STATE_HASH_QUERY
                 || message.header().messageType() == CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
@@ -1113,10 +1125,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
-        if (message.header().kind() != WireMessageKind.COMMAND) {
-            return rejected(CoreResultCode.INVALID_MESSAGE);
-        }
-        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
+        return null;
     }
 
     /**
@@ -1479,6 +1488,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         admissions.pendingLifecycleScopes.remove(sequence);
         int shard = pendingMatching.submissionShard(sequence);
         boolean releasesSubmissionHead = shard >= 0 && pendingMatching.isSubmissionHead(sequence, shard);
+        CommandSlot current = pendingMatching.get(sequence);
+        if (current != null) current.committed();
         CommandSlot removed = pendingMatching.remove(sequence);
         // A wholly rejected batch can finish without submitting anything to the matcher.
         // Its successor's Lane notification may already have been consumed while blocked.
@@ -1916,7 +1927,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // deferred while the PLACE admission was in flight; without this bit the next command
         // would remain parked until another Lane notification arrived.
         if (pending.orderBatch != null || pendingMatching.submissionHead(shard) != null
-                || !admissions.deferredMatching.isEmpty()) {
+                || pendingMatching.hasDeferred()) {
             placeAdmissionReadyShardMask |= 1L << shard;
         }
     }
@@ -1930,8 +1941,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         while (!pendingMatching.isEmpty()) {
             // Both orderings append increasing Core sequences. Only their heads can advance.
             OrderBatchPending batch = batches.firstBatch();
-            Long deferredSequence = admissions.deferredMatching.isEmpty()
-                    ? null : admissions.deferredMatching.keySet().iterator().next();
+            CommandSlot deferredPending = pendingMatching.firstDeferred();
+            Long deferredSequence = deferredPending == null ? null : deferredPending.sequence();
             CommandSlot pending;
             if (deferredSequence != null && (batch == null || deferredSequence < batch.sequence)) {
                 pending = pendingMatching.get(deferredSequence);
@@ -1946,11 +1957,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 batches.activateOrderBatch(batch, pending, true);
                 return;
             }
-            MatchingCommandAdmission.DeferredMatching deferred = admissions.deferredMatching.get(pending.sequence());
-            if (deferred != null) {
-                CoreResponse response = admissions.prepareMatching(pending.command(), deferred.clusterTimestamp(),
-                        deferred.clusterPosition(), deferred.sourceKey(), pending.operation(), pending.fingerprint(),
-                        pending);
+            if (pending != null && pending.deferredMatching()) {
+                CoreResponse response = admissions.prepareMatching(pending.command(), pending.deferredClusterTimestamp(),
+                        pending.deferredClusterPosition(), pending.deferredSourceKey(), pending.operation(),
+                        pending.fingerprint(), pending);
                 if (response == null) return;
                 if (response.status() == ResponseStatus.REJECTED) continue;
                 continue;
@@ -3187,7 +3197,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         pendingMatching.clear();
         crossShardCancellations.clear();
         admissions.pendingLifecycleScopes.clear();
-        admissions.deferredMatching.clear();
         exportState.close();
         runtimeProjectionJournal.close();
         runtimeState.close();

@@ -31,7 +31,6 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
@@ -42,11 +41,16 @@ final class MatchingCommandAdmission {
 
     MatchingCommandAdmission(TradingCoreRuntime owner) { this.owner = owner; }
 
+    /** Compatibility view for diagnostics/tests; it is not a storage map. */
+    final DeferredMatchingView deferredMatching = new DeferredMatchingView();
+
+    final class DeferredMatchingView {
+        int size() { return owner.pendingMatching.deferredCount(); }
+        boolean isEmpty() { return size() == 0; }
+    }
+
     /** 在途清算或交割的资源范围，防止真实资金依赖交错。 */
     LongObjectHashMap<List<LifecycleScope>> pendingLifecycleScopes;
-
-    /** 尚不具备执行条件的匹配命令及其日志时间位置。 */
-    LinkedHashMap<Long, DeferredMatching> deferredMatching;
 
     /** 由触发等业务产生、等待正式登记的撮合命令。 */
     final List<QueuedTriggerMatching> queuedMatching = new ArrayList<>();
@@ -262,8 +266,7 @@ final class MatchingCommandAdmission {
             owner.putPendingMatching(pending);
         } else {
             owner.pendingMatching.put(pending);
-            deferredMatching.remove(sequence);
-            pending.deferredMatching(false);
+            pending.activateDeferredMatching();
         }
         if (placeAdmission != null) pending.placeAdmission(placeAdmission);
         registerPendingLifecycle(pending);
@@ -304,8 +307,7 @@ final class MatchingCommandAdmission {
         long sequence = Math.incrementExact(owner.appliedCommandCount);
         CommandSlot pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
         owner.putPendingMatching(pending);
-        pending.deferredMatching(true);
-        deferredMatching.put(sequence, new DeferredMatching(clusterTimestamp, clusterPosition, sourceKey));
+        pending.deferMatching(clusterTimestamp, clusterPosition, sourceKey);
         owner.appliedCommandCount = sequence;
         owner.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
@@ -324,8 +326,6 @@ final class MatchingCommandAdmission {
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, pending.sequence(), requiredExportSequence, stateHash,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-        deferredMatching.remove(pending.sequence());
-        pending.deferredMatching(false);
         owner.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 pending.sequence(), requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
@@ -783,6 +783,4 @@ final class MatchingCommandAdmission {
         return liquidation == null ? "" : owner.runtimeLiquidationSymbol(liquidation);
     }
 
-    record DeferredMatching(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
-    }
 }

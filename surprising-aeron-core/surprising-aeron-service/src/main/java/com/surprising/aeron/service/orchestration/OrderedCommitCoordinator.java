@@ -547,7 +547,7 @@ final class OrderedCommitCoordinator {
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.removePendingMatching(sequence);
-        if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) {
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
             owner.submitDeferredMatchingAfterBatch();
         }
         return owner.finishFactContext(response);
@@ -645,7 +645,7 @@ final class OrderedCommitCoordinator {
         }
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.removePendingMatching(pending.sequence());
-        if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
         return owner.finishFactContext(response);
     }
 
@@ -687,7 +687,7 @@ final class OrderedCommitCoordinator {
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseCancel(pending.takeCancelEvent());
         owner.removePendingMatching(pending.sequence());
-        if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
         return owner.finishFactContext(response);
     }
 

@@ -363,7 +363,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 expected.add(state.matchingSequence(message.header().commandId()));
             }
-            assertThat(state.admissions.deferredMatching).hasSize(2);
+            assertThat(state.pendingMatching.deferredCount()).isEqualTo(2);
             var completed = new ArrayList<Long>();
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
@@ -371,7 +371,7 @@ class CoreOrderedOrderBatchTest {
                         (sequence, response) -> completed.add(sequence));
             }
             assertThat(completed).containsExactlyElementsOf(expected);
-            assertThat(state.admissions.deferredMatching).isEmpty();
+            assertThat(state.pendingMatching.deferredCount()).isZero();
             assertThat(state.batches.hasPendingBatches()).isFalse();
             assertThat(state.pendingMatchingCount()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(

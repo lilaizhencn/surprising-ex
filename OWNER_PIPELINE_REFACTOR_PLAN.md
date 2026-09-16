@@ -1,8 +1,8 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 1 已完成，阶段 2 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 2 已完成，阶段 3 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
-本计划最初为待审核草案，现按审核意见执行。阶段 1 已完成并通过 JDK 27 正确性验收；没有启动吞吐压测。
+本计划最初为待审核草案，现按审核意见执行。阶段 2 已完成并通过 JDK 27 正确性验收；没有启动吞吐压测。
 
 ## 目标
 
@@ -302,4 +302,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 0（JDK 27 构建门槛）：已完成。父 POM、JFR 分析和资格脚本统一检查 JDK 27；Corretto 27 可直接运行。
 - 阶段 1（静态路由收敛）：已完成。删除当前 ingress 的候选订单 scratch 和相关调用；冲突校验、窗口登记直接读取已解码命令；仅保留已进入窗口命令的精确订单 ID，用于撤单/重试 fence；跨 shard batch 保持确定性的逐项固定提交语义。
 - 阶段 1 验收：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，JDK 27，910 项通过、1 项既有跳过、0 失败。
-- 尚未执行任何吞吐压测；下一阶段从 `TradingCoreRuntime.apply()` 的固定接纳 slot 和状态收敛开始。
+- 阶段 2（`apply()` 接纳收敛）：已完成。查询/低频分支移入 `applyQuery()`，命令入口单独进入 `applyCommandIngress()`；在途 command-id 索引改为固定开放寻址 primitive 表；延后匹配的时间、位置和 source key 放入复用 `CommandSlot`，删除 `LinkedHashMap<Long, DeferredMatching>` 和 `DeferredMatching` record；匹配生命周期用 slot byte 统一表达 admitted/deferred/submitted/matcher-done/lanes-done/committed，去掉重复 submitted/deferred boolean；continuation 改为明确的 settlement/cancel 类型字段，消除通用 `Object` 状态。
+- 阶段 2 验收：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，JDK 27，910 项通过、1 项既有跳过、0 失败。补正了一个原有测试等待条件，使其等待 Lane 已建立订单后再校验准入版本；未执行吞吐压测。
+- 下一阶段从 `PlaceAdmissionEvent` 的 Lane→Matcher receipt 路径开始；阶段 3 完成前不进行吞吐压测。

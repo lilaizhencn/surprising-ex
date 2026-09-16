@@ -831,7 +831,6 @@ final class OrderBatchExecutor {
         owner.matchingAdapter.poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
                 + " detail=" + detail);
         owner.admissions.queuedMatching.clear();
-        owner.admissions.deferredMatching.clear();
         owner.pendingMatching.forEach(value -> {
             if (owner.laneCommandContexts.claimed(value.sequence())) {
                 owner.laneCommandContexts.required(value.sequence()).resetMatchingContinuation();

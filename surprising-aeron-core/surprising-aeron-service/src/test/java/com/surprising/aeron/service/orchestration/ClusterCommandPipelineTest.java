@@ -82,7 +82,7 @@ class ClusterCommandPipelineTest {
                     live.progressUntil(() -> {
                         var pending = state.pendingMatching(sequence);
                         var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
-                        return event != null && event.dispatched();
+                        return event != null && event.dispatched() && state.runtimeState.order(1000) != null;
                     });
                     var admitted = state.runtimeState.order(1000);
                     assertThat(admitted.createdAtEpochMillis()).isEqualTo(command.header().submittedAtEpochMillis());

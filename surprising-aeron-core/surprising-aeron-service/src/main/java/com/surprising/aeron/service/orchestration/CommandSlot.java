@@ -40,7 +40,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private boolean commitFenceEstablished;
     /** Exactly one settlement/cancel continuation can own a command at a time. */
     private ContinuationKind continuationKind;
-    private Object continuation;
+    private com.surprising.aeron.service.state.MatcherSettlementEvent settlementContinuation;
+    private LaneCancelEvent cancelContinuation;
     /** Normal PLACE admission runs alongside the settlement continuation. */
     private PlaceAdmissionEvent placeAdmission;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
@@ -48,7 +49,21 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
     private ResolvedPlaceOrder admittedPlaceOrder;
     private CoreMatchingOrder admittedMatchingOrder;
-    private boolean matchingSubmitted;
+    /**
+     * Compact command lifecycle.  The slot is reused by the pending ring, so a byte is enough
+     * to describe the owner-side admission/submission boundary without a second continuation map.
+     */
+    private byte matchingLifecycle;
+    static final byte MATCHING_ADMITTED = 0;
+    static final byte MATCHING_DEFERRED = 1;
+    static final byte MATCHING_SUBMITTED = 2;
+    static final byte MATCHER_DONE = 3;
+    static final byte LANES_DONE = 4;
+    static final byte COMMITTED = 5;
+    /** Deferred commands keep their replay fence in the slot instead of a boxed map entry. */
+    private long deferredClusterTimestamp;
+    private long deferredClusterPosition;
+    private TradingCoreRuntime.SourceKey deferredSourceKey;
     /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
     boolean crossShardCancellationStarted;
     boolean clusterIndependent;
@@ -58,8 +73,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
-    /** Fast lifecycle bit for deferred commands; avoids a boxed LinkedHashMap probe in Owner polling. */
-    private boolean deferredMatching;
     /** Cached matcher shard for a non-batch command; stable until this slot is recycled. */
     private int cachedMatcherShard = -1;
 
@@ -213,20 +226,23 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitFenceClusterPosition = 0;
         commitFenceEstablished = false;
         continuationKind = null;
-        continuation = null;
+        settlementContinuation = null;
+        cancelContinuation = null;
         placeAdmission = null;
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
         admittedPlaceOrder = null;
-        matchingSubmitted = false;
+        matchingLifecycle = MATCHING_ADMITTED;
+        deferredClusterTimestamp = 0;
+        deferredClusterPosition = 0;
+        deferredSourceKey = null;
         crossShardCancellationStarted = false;
         clusterIndependent = false;
         partitionLaneMask = 0;
         realtimeTakerOrder = null;
         dispatchOnly = false;
         pipelinedSettlementCounted = false;
-        deferredMatching = false;
         cachedMatcherShard = -1;
         return this;
     }
@@ -280,8 +296,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     ResolvedMatchingAdmission matchingAdmission() { return admission; }
     long pendingStateHash() { return pendingStateHash; }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
-        return continuationKind == ContinuationKind.SETTLEMENT
-                ? (com.surprising.aeron.service.state.MatcherSettlementEvent) continuation : null;
+        return continuationKind == ContinuationKind.SETTLEMENT ? settlementContinuation : null;
     }
     com.surprising.aeron.service.state.MatcherSettlementEvent takeSettlementEvent() {
         var value = settlementEvent();
@@ -289,7 +304,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return value;
     }
     LaneCancelEvent cancelEvent() {
-        return continuationKind == ContinuationKind.CANCEL ? (LaneCancelEvent) continuation : null;
+        return continuationKind == ContinuationKind.CANCEL ? cancelContinuation : null;
     }
     LaneCancelEvent takeCancelEvent() {
         LaneCancelEvent value = cancelEvent();
@@ -302,8 +317,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return placeAdmission;
     }
     boolean hasLaneContinuation() {
-        return continuationKind == ContinuationKind.SETTLEMENT
-                || continuationKind == ContinuationKind.CANCEL;
+        return settlementContinuation != null || cancelContinuation != null;
     }
     boolean laneContinuationComplete() {
         if (!hasLaneContinuation()) return false;
@@ -339,40 +353,40 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             throw new IllegalStateException("invalid trigger admission");
         admittedMatchingOrder = order;
     }
-    boolean isMatchingSubmitted() { return matchingSubmitted; }
+    boolean isMatchingSubmitted() { return matchingLifecycle >= MATCHING_SUBMITTED; }
     void matchingSubmitted() {
-        if (matchingSubmitted) throw new IllegalStateException("matching command was submitted twice");
-        matchingSubmitted = true;
+        // A cross-shard control path may publish its evidenced result before it releases the
+        // submission cursor.  The result transition already proves submission in that case.
+        if (matchingLifecycle >= MATCHER_DONE) return;
+        if (isMatchingSubmitted()) throw new IllegalStateException("matching command was submitted twice");
+        matchingLifecycle = MATCHING_SUBMITTED;
     }
     void cancel(LaneCancelEvent event, long applyStartNanos) {
-        if (event == null || continuation != null
+        if (event == null || hasLaneContinuation()
                 || operation != Operation.CANCEL) {
             throw new IllegalStateException("invalid cancel continuation");
         }
         continuationKind = ContinuationKind.CANCEL;
-        continuation = event;
+        cancelContinuation = event;
         settlementApplyStartNanos = applyStartNanos;
     }
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
                     com.surprising.aeron.service.state.MatcherSettlementPlan plan,
                     long applyStartNanos) {
-        if (event == null || plan == null || continuation != null) {
+        if (event == null || plan == null || hasLaneContinuation()) {
             throw new IllegalStateException("invalid matcher settlement continuation");
         }
         continuationKind = ContinuationKind.SETTLEMENT;
-        continuation = event;
+        settlementContinuation = event;
         settlementPlan = plan;
         settlementApplyStartNanos = applyStartNanos;
     }
 
     private void clearContinuation(ContinuationKind expected) {
-        if (expected == ContinuationKind.PLACE_ADMISSION) {
-            placeAdmission = null;
-            return;
-        }
         if (continuationKind != expected) return;
         continuationKind = null;
-        continuation = null;
+        if (expected == ContinuationKind.SETTLEMENT) settlementContinuation = null;
+        else if (expected == ContinuationKind.CANCEL) cancelContinuation = null;
     }
 
     /** Clears the command-owned references when its fixed sequence slot is recycled. */
@@ -388,20 +402,56 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         decodedCommand = null;
         admission = null;
         continuationKind = null;
-        continuation = null;
+        settlementContinuation = null;
+        cancelContinuation = null;
         placeAdmission = null;
         settlementPlan = null;
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
         realtimeTakerOrder = null;
-        deferredMatching = false;
+        matchingLifecycle = MATCHING_ADMITTED;
+        deferredClusterTimestamp = 0;
+        deferredClusterPosition = 0;
+        deferredSourceKey = null;
         cachedMatcherShard = -1;
     }
     void dispatchOnly() { dispatchOnly = true; }
     boolean isDispatchOnly() { return dispatchOnly; }
 
-    void deferredMatching(boolean value) { deferredMatching = value; }
-    boolean deferredMatching() { return deferredMatching; }
+    void deferMatching(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
+        if (matchingLifecycle != MATCHING_ADMITTED || sourceKey == null) {
+            throw new IllegalStateException("invalid deferred matching transition");
+        }
+        deferredClusterTimestamp = clusterTimestamp;
+        deferredClusterPosition = clusterPosition;
+        deferredSourceKey = sourceKey;
+        matchingLifecycle = MATCHING_DEFERRED;
+    }
+    void activateDeferredMatching() {
+        if (matchingLifecycle != MATCHING_DEFERRED) {
+            throw new IllegalStateException("matching command is not deferred");
+        }
+        matchingLifecycle = MATCHING_ADMITTED;
+        deferredClusterTimestamp = 0;
+        deferredClusterPosition = 0;
+        deferredSourceKey = null;
+    }
+    boolean deferredMatching() { return matchingLifecycle == MATCHING_DEFERRED; }
+    void committed() {
+        matchingLifecycle = COMMITTED;
+    }
+    long deferredClusterTimestamp() {
+        if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
+        return deferredClusterTimestamp;
+    }
+    long deferredClusterPosition() {
+        if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
+        return deferredClusterPosition;
+    }
+    TradingCoreRuntime.SourceKey deferredSourceKey() {
+        if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
+        return deferredSourceKey;
+    }
 
     int cachedMatcherShard() { return cachedMatcherShard; }
 
@@ -445,8 +495,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     private enum ContinuationKind {
         SETTLEMENT,
-        CANCEL,
-        PLACE_ADMISSION
+        CANCEL
     }
 
 
@@ -612,6 +661,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
         matchingResult = result;
         expectedLaneMask = expectedMask;
+        matchingLifecycle = MATCHER_DONE;
     }
 
     void resetMatchingContinuation() { completedMatchingResult = null; }
@@ -632,6 +682,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                     + " completed=" + completedLaneMask);
         }
         completedLaneMask |= laneMask;
+        if (matchingResult != null && completedLaneMask == expectedLaneMask) {
+            matchingLifecycle = LANES_DONE;
+        }
     }
 
     boolean complete() {
@@ -666,6 +719,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitContextActive = false;
         matchingRejection = null;
         placeAdmission = null;
+        matchingLifecycle = MATCHING_ADMITTED;
+        deferredClusterTimestamp = 0;
+        deferredClusterPosition = 0;
+        deferredSourceKey = null;
         cachedMatcherShard = -1;
     }
 }
