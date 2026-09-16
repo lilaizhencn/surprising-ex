@@ -1637,6 +1637,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         pending.preMatchingCancellationOrderIds(), null);
             }
             pending.settlement(direct, direct.plan(), System.nanoTime());
+            direct.markMatcherOwnedPublication();
+            direct.reserveMatcherPublication();
             if (realtimeCapture != null)
                 pending.realtimeTakerOrder = directTaker;
         }
@@ -1649,6 +1651,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds());
             pending.settlement(direct, direct.plan(), System.nanoTime());
+            if (runtimeState.asynchronousCommands()) {
+                direct.markMatcherOwnedPublication();
+                direct.reserveMatcherPublication();
+            }
             if (realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
         }
         if (pending.operation() == CommandSlot.Operation.TRIGGER && runtimeState.asynchronousCommands()) {
@@ -1663,6 +1669,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     pending.preMatchingCancellationOrderIds(), null);
             direct.triggerCompletion(trigger, execute[3]);
             pending.settlement(direct, direct.plan(), System.nanoTime());
+            direct.markMatcherOwnedPublication();
+            direct.reserveMatcherPublication();
             if (realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
         }
         if (pending.operation() == CommandSlot.Operation.CANCEL && runtimeState.asynchronousCommands()) {
@@ -1671,6 +1679,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
             pending.settlement(direct, direct.plan(), System.nanoTime());
+            direct.markMatcherOwnedPublication();
+            direct.reserveMatcherPublication();
         }
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> matcherSubmission =
                 command;
@@ -1704,21 +1714,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // direct settlement behind the admission would make it wait for Matcher publication and
         // block later admissions on the same Lane. The completion pump queues it after Matcher
         // publication, together with any maker-Lane extensions.
-        if (direct != null) predispatchDirectSettlement(pending, direct);
+        if (direct != null && !direct.matcherOwnedPublication()) predispatchDirectSettlement(pending, direct);
     }
 
-    /**
-     * Before Matcher has inspected the book only the taker's Lane is known. Queueing a direct
-     * fact on every Lane here lets a slow fact block a later admission at an unrelated Lane;
-     * Matcher-discovered maker Lanes are appended after publication by the completion pump.
-     */
+    /** Before Matcher has inspected the book only the taker's Account Lane is known. */
     private long directInitialLaneMask(long userId) {
         if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
-        // Until the dedicated Matcher→Lane SPSC mailboxes are installed, the pooled direct
-        // event is published to the fixed lane fan-out. The admission mailbox is separate, so
-        // an unpublished event cannot block later Lane admissions. Stage 4 replaces this
-        // compatibility fan-out with Matcher-owned maker routing.
-        return commits.validAccountLaneMask();
+        return runtimeState.topology().accountLaneMask(userId);
     }
 
     /** Enqueue the initial taker-Lane route once its partition dependency allows it. */
@@ -2395,7 +2397,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             matcherPipeline.drainMatchingCompletions();
             pendingMatching.progressChanged();
         }
-        dispatchReadyDirectSettlementLanes();
         if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
     }
 
@@ -2421,22 +2422,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 }
             }
         }
-    }
-
-    /**
-     * Matcher publishes the immutable result and expands the event route with maker Lanes. The
-     * Owner only performs the queue handoff here; it never waits for or inspects Lane state.
-     */
-    private void dispatchReadyDirectSettlementLanes() {
-        pendingMatching.forEach(pending -> {
-            var event = pending.settlementEvent();
-            if (event == null || !event.direct() || !event.ready()) return;
-            if (!event.dispatched()) {
-                predispatchDirectSettlement(pending, event);
-            } else {
-                runtimeState.dispatchAdditionalDirectMatcherSettlement(event);
-            }
-        });
     }
 
     long matchingProgressSequence() {

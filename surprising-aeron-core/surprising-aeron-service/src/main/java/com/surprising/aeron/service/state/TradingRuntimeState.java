@@ -493,7 +493,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.releaseOwnerForHandoff();
             laneWorkers[laneId] = new SettlementLaneWorker(
                     "account", lane, topology.accountLaneQueueCapacity(),
-                    failure -> accountLaneFailure.compareAndSet(null, failure));
+                    failure -> accountLaneFailure.compareAndSet(null, failure),
+                    topology.matchingEngineCount());
         }
         accountLanesStarted = true;
     }
@@ -2477,6 +2478,15 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void requireSnapshotFenceReady() {
         assertOwner();
         if (controlLanes.pending()) throw new IllegalStateException("control Lane work is unfinished");
+        // Matcher→Lane mailboxes are transient transport, not business state.  A snapshot is
+        // valid only after every control and direct settlement cursor has drained; replay starts
+        // the rings at the empty cursor and reconstructs the same facts from the cluster log.
+        if (accountLanesStarted) {
+            for (SettlementLaneWorker worker : laneWorkers) {
+                if (worker != null && worker.depth() != 0)
+                    throw new IllegalStateException("Matcher settlement ring is unfinished");
+            }
+        }
         pendingReservations.assertPendingReservationCounts();
         if (pendingReservations.totalPendingReservations != 0 || !pendingReservations.pendingReservationsBySequence.isEmpty()
                 || !pendingReservations.pendingReservationUsers.isEmpty() || snapshotProjectionStateDirty()) {
@@ -5631,9 +5641,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }
 
-    /** Queue maker Lanes discovered by Matcher after the taker event was published. */
-    public void dispatchAdditionalDirectMatcherSettlement(MatcherSettlementEvent event) {
-        settlements.dispatchAdditional(event);
+    /** Matcher-owned direct publication; the Matcher thread is the sole producer for each shard ring. */
+    void publishMatcherSettlementDirect(MatcherSettlementEvent event) {
+        settlements.publishMatcherOwned(event);
     }
 
     void signalDirectSettlement(long laneMask) {

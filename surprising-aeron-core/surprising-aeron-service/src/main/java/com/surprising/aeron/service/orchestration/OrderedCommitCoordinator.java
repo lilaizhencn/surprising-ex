@@ -1251,7 +1251,8 @@ final class OrderedCommitCoordinator {
                     ? owner.pendingMatching.partitionDispatchHead(shard) : first;
             first = null;
             if (pending != null && pending.sequence() <= throughSequence && pending.settlementEvent() != null
-                    && pending.settlementEvent().direct() && pending.settlementEvent().ready()
+                    && pending.settlementEvent().direct() && !pending.settlementEvent().matcherOwnedPublication()
+                    && pending.settlementEvent().ready()
                     && !pending.settlementEvent().dispatched()) {
                 pending.establishCommitFence(clusterTimestamp, clusterPosition);
                 var event = pending.settlementEvent();

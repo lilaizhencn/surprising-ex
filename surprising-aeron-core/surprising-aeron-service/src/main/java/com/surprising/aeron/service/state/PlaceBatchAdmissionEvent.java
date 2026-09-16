@@ -216,7 +216,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         return rejection;
     }
     LanePublication publication() { return publication; }
-    long coreSequence() { return coreSequence; }
+    public long coreSequence() { return coreSequence; }
     long userId() { return userId; }
     OrderRuntime[] admittedOrders() { return admittedOrders; }
     int itemCount() { return itemCount; }

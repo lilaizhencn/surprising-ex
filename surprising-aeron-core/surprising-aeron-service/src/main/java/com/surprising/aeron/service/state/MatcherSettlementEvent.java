@@ -59,6 +59,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     /** 本代有效项数；缓冲容量不决定业务执行范围。 */
     private int batchPlanCount;
     private boolean direct;
+    /** True when the Matcher publishes this event into the Lane shard mailboxes. */
+    private boolean matcherOwnedPublication;
     private boolean cancellation;
     private long cancellationUserId;
     private com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacement;
@@ -68,8 +70,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private long triggeredAt;
     /** Matcher proof sequence for direct events; may differ from the final Lane commit sequence. */
     private long directCoreSequence;
-    private boolean dispatched; // Owner only.
-    /** Owner-only mask of Lane queues that already contain this event. */
+    /** Logical dispatch reservation; the Owner reserves it and the Matcher completes publication. */
+    private boolean dispatched;
+    /** Mask of Lane rings that already contain this event. Written by the single Matcher publisher. */
     private long queuedLaneMask;
     /** Async single-Lane routes may expand when Matcher discovers maker accounts. */
     private boolean expandLaneRoute;
@@ -166,6 +169,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
             throw new IllegalArgumentException("invalid direct settlement reservation");
         direct = true; cancellation = false; directPublished = false; matcherPublicationDeferred = false;
+        matcherOwnedPublication = false;
         dispatched = false; queuedLaneMask = 0;
         expandLaneRoute = runtime.asynchronousCommands() && Long.bitCount(laneMask) == 1;
         directFailure = null;
@@ -230,6 +234,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
     public boolean direct() { return direct; }
+    public boolean matcherOwnedPublication() { return matcherOwnedPublication; }
+    /** Core sequence used by the Lane merge gate. */
+    public long coreSequence() { return direct ? directCoreSequence : plan == null ? 0 : plan.coreSequence(); }
+    int directShard() { return directShard; }
     TradingRuntimeState runtime() { return runtime; }
     public boolean dispatched() { return dispatched; }
     public void commitFence(long timestamp, long position) {
@@ -374,10 +382,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             actualLanes |= batchPlans[index].requiredLaneMask();
             orders = Math.addExact(orders, batchPlans[index].orderCount());
         }
-        // The initial route contains only the taker's Lane. Matcher-discovered maker Lanes are
-        // added after the immutable result is built; the Owner dispatches those additional
-        // queues before ordered commit observes completion. A queued initial Lane may never be
-        // removed from the final route because it can already have consumed this event.
+        // The initial route contains only the taker's Lane. The Matcher discovers maker Lanes
+        // while building the immutable fact, then publishes the same event to every routed Lane
+        // ring before it signals the Owner. A queued initial Lane is never removed from the route.
         if (actualLanes == 0
                 || !expandLaneRoute && (actualLanes & ~routedLaneMask) != 0
                 || expandLaneRoute && (routedLaneMask & ~actualLanes) != 0)
@@ -403,9 +410,19 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         // Deterministic ~1/64 sampling; use existing per-Lane cache-line padding for times.
         if (LATENCY_DIAGNOSTICS && (Long.hashCode(directCoreSequence * 0x9e3779b97f4a7c15L) & 63) == 0)
             matcherPublishedNanos = System.nanoTime();
-        // 最后一次访问事件：Lane 观察到 ready 后可能立即完成，Owner 随即复用事件。
+        // Publish the readiness flag before handing the pooled event to its Matcher-owned ring;
+        // the ring publication itself is the release boundary for the Lane consumer.
         directPublished = true;
-        completionRuntime.signalDirectSettlement(completionLanes);
+        try {
+            if (matcherOwnedPublication) completionRuntime.publishMatcherSettlementDirect(this);
+            else completionRuntime.signalDirectSettlement(completionLanes);
+        } catch (Throwable failure) {
+            // Keep the failure on the pooled event.  The Matcher pipeline may observe the
+            // exception after directPublished became visible; without this assignment the
+            // Lane would wait forever on a partially published route.
+            directFailure = failure;
+            throw failure;
+        }
     }
 
     /** 由 Matcher pipeline 设置；复用已有 Context，不为每笔直达命令创建回调对象。 */
@@ -488,6 +505,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         admissionLaneId = laneId;
     }
 
+    public void markMatcherOwnedPublication() {
+        if (!direct || dispatched || directPublished) {
+            throw new IllegalStateException("invalid Matcher-owned settlement mode");
+        }
+        matcherOwnedPublication = true;
+    }
+
+    /** Reserve the logical dispatch state before Matcher publication; no Lane queue is touched. */
+    public void reserveMatcherPublication() {
+        if (!direct || !matcherOwnedPublication || dispatched || directPublished) {
+            throw new IllegalStateException("invalid Matcher publication reservation");
+        }
+        dispatched = true;
+    }
+
     MatcherSettlementEvent prepareBatch(
             long commitSequence, long requiredLaneMask,
             long commitTimestamp, long commitClusterPosition,
@@ -547,6 +579,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         direct = false; cancellation = false; directPublished = false; directFailure = null; dispatched = false;
+        matcherOwnedPublication = false;
         queuedLaneMask = 0;
         expandLaneRoute = false;
         matcherPublicationDeferred = false;

@@ -34,6 +34,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * Matcher, so it must never occupy the only queue head needed to publish a later admission.
      */
     private final Command[] admissionCommands;
+    /** One Matcher-owned SPSC mailbox per Matcher shard; the Lane merges these with control mail. */
+    private final MatcherSettlementRing[] matcherSettlementRings;
     private final int indexMask;
     private final int admissionIndexMask;
     private final WaitStrategy waitStrategy;
@@ -61,14 +63,24 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
                          java.util.function.Consumer<Throwable> failurePublisher) {
+        this(role, lane, requestedCapacity, failurePublisher, 1);
+    }
+
+    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+                         java.util.function.Consumer<Throwable> failurePublisher,
+                         int matcherShardCount) {
         this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
-        if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0) {
+        if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0
+                || matcherShardCount <= 0) {
             throw new IllegalArgumentException("invalid settlement lane worker");
         }
         int capacity = 1;
         while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
         commands = new Command[capacity];
         admissionCommands = new Command[capacity];
+        matcherSettlementRings = new MatcherSettlementRing[matcherShardCount];
+        for (int shard = 0; shard < matcherShardCount; shard++)
+            matcherSettlementRings[shard] = new MatcherSettlementRing(capacity);
         indexMask = capacity - 1;
         admissionIndexMask = capacity - 1;
         waitStrategy = configuredWaitStrategy();
@@ -128,6 +140,28 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return next + 1;
     }
 
+    /** Matcher-only producer path. The caller must be the sole producer for this shard ring. */
+    public long publishMatcherSettlement(int matcherShard, MatcherSettlementEvent event) {
+        if (event == null || matcherShard < 0 || matcherShard >= matcherSettlementRings.length)
+            throw new IllegalArgumentException("invalid Matcher settlement publication");
+        rethrowFailure();
+        if (!running) throw new RejectedExecutionException("settlement lane is closed");
+        MatcherSettlementRing ring = matcherSettlementRings[matcherShard];
+        int spins = 0;
+        while (ring.isFull()) {
+            rethrowFailure();
+            if (!running) throw new RejectedExecutionException("settlement lane is closed");
+            // The Matcher is the only producer.  A full ring means the Lane is catching up;
+            // apply the configured low-overhead spin policy rather than allocating or failing
+            // a valid settlement merely because a burst crossed the ring capacity.
+            if (spins++ < DIRECT_READY_SPIN_LIMIT) Thread.onSpinWait();
+            else LockSupport.parkNanos(1L);
+        }
+        long position = ring.publish(event);
+        signalWork();
+        return position + 1;
+    }
+
     /** 同一次休眠只唤醒一次；CAS失败说明已通知或Lane已恢复，不能省略消费者的重读。 */
     public void signalWork() {
         if (waitStrategy == WaitStrategy.BLOCKING && parkRequested
@@ -140,8 +174,10 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     public int depth() {
+        long direct = 0;
+        for (MatcherSettlementRing ring : matcherSettlementRings) direct += ring.depth();
         return Math.toIntExact((producerSequence.value - consumerSequence.value)
-                + (admissionProducerSequence.value - admissionConsumerSequence.value));
+                + (admissionProducerSequence.value - admissionConsumerSequence.value) + direct);
     }
 
     public boolean hasCapacity() {
@@ -173,7 +209,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
             long reboundHandoff = 0;
             int directReadySpins = 0;
             while (running || next < producerSequence.value
-                    || admissionNext < admissionProducerSequence.value) {
+                    || admissionNext < admissionProducerSequence.value
+                    || hasMatcherSettlementWork()) {
                 // Admissions are independent producer mail and must be drained even when the
                 // main queue head is a Matcher result that has not been published yet.
                 if (admissionNext < admissionProducerSequence.value) {
@@ -204,6 +241,17 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     }
                     lane.bindOwner();
                     reboundHandoff = completedHandoff;
+                }
+                // Handoff is an ownership barrier.  Do not consume a Matcher ring after the
+                // worker has released its Lane to the Owner and before the Owner resumes it.
+                MatcherSettlementEvent direct = peekMatcherSettlement();
+                Command main = next < producerSequence.value ? commands[(int) next & indexMask] : null;
+                if (direct != null && shouldRunMatcherSettlement(direct, main)) {
+                    pollMatcherSettlement(direct);
+                    direct.execute(lane);
+                    idleSpins = 0;
+                    directReadySpins = 0;
+                    continue;
                 }
                 if (next < producerSequence.value) {
                     int index = (int) next & indexMask;
@@ -284,6 +332,58 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return !(command instanceof MatcherSettlementEvent event) || event.readyForLane();
     }
 
+    private MatcherSettlementEvent peekMatcherSettlement() {
+        MatcherSettlementEvent selected = null;
+        long selectedSequence = Long.MAX_VALUE;
+        for (MatcherSettlementRing ring : matcherSettlementRings) {
+            MatcherSettlementEvent candidate = ring.peek();
+            if (candidate == null) continue;
+            long sequence = candidate.coreSequence();
+            if (selected == null || sequence < selectedSequence) {
+                selected = candidate;
+                selectedSequence = sequence;
+            }
+        }
+        return selected;
+    }
+
+    private boolean hasMatcherSettlementWork() {
+        for (MatcherSettlementRing ring : matcherSettlementRings) {
+            if (ring.depth() != 0) return true;
+        }
+        return false;
+    }
+
+    private void pollMatcherSettlement(MatcherSettlementEvent expected) {
+        for (MatcherSettlementRing ring : matcherSettlementRings) {
+            if (ring.peek() == expected) {
+                ring.poll();
+                return;
+            }
+        }
+        throw new IllegalStateException("Matcher settlement publication disappeared");
+    }
+
+    private static boolean shouldRunMatcherSettlement(MatcherSettlementEvent direct, Command main) {
+        if (main == null) return true;
+        long mainSequence = commandSequence(main);
+        // Unsequenced control work (handoff and metrics) stays ahead of business mail.
+        if (mainSequence == 0) return false;
+        if (!ready(main)) return false;
+        return direct.coreSequence() < mainSequence;
+    }
+
+    private static long commandSequence(Command command) {
+        if (command instanceof MatcherSettlementEvent event) return event.coreSequence();
+        if (command instanceof com.surprising.aeron.service.state.LaneCancelEvent event)
+            return event.coreSequence();
+        if (command instanceof com.surprising.aeron.service.state.LaneCommitEvent event)
+            return event.coreSequence();
+        if (command instanceof com.surprising.aeron.service.state.PlaceBatchAdmissionEvent event)
+            return event.coreSequence();
+        return 0;
+    }
+
     @Override
     public void close() {
         running = false;
@@ -325,5 +425,48 @@ public final class SettlementLaneWorker implements AutoCloseable {
         private volatile long value;
         @SuppressWarnings("unused")
         private long p11, p12, p13, p14, p15, p16, p17;
+    }
+
+    /** Fixed reference ring with one producer and one consumer; no CAS or node allocation. */
+    private static final class MatcherSettlementRing {
+        private final MatcherSettlementEvent[] events;
+        private final int mask;
+        private volatile long producerPosition;
+        private volatile long consumerPosition;
+
+        MatcherSettlementRing(int capacity) {
+            events = new MatcherSettlementEvent[capacity];
+            mask = capacity - 1;
+        }
+
+        boolean isFull() { return producerPosition - consumerPosition >= events.length; }
+
+        long publish(MatcherSettlementEvent event) {
+            long position = producerPosition;
+            if (position - consumerPosition >= events.length)
+                throw new RejectedExecutionException("Matcher settlement ring is full");
+            int index = (int) position & mask;
+            if (events[index] != null)
+                throw new IllegalStateException("Matcher settlement ring slot was not released");
+            events[index] = event;
+            producerPosition = position + 1;
+            return position;
+        }
+
+        MatcherSettlementEvent peek() {
+            long position = consumerPosition;
+            return position < producerPosition ? events[(int) position & mask] : null;
+        }
+
+        void poll() {
+            long position = consumerPosition;
+            int index = (int) position & mask;
+            if (position >= producerPosition || events[index] == null)
+                throw new IllegalStateException("Matcher settlement ring is empty");
+            events[index] = null;
+            consumerPosition = position + 1;
+        }
+
+        long depth() { return producerPosition - consumerPosition; }
     }
 }

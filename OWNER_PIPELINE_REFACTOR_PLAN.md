@@ -1,8 +1,8 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 3 已完成，阶段 4 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 4 已完成，阶段 5 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
-本计划最初为待审核草案，现按审核意见执行。阶段 3 已完成并通过 JDK 27 正确性验收；没有启动吞吐压测。
+本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
 ## 目标
 
@@ -88,15 +88,25 @@ Matcher 只负责订单簿和撮合事实。Lane 只修改自己拥有的账户�
 
 ### 4. `MatcherSettlementDispatcher.dispatchDirect`
 
-**未实现真正直达，阶段 4 待执行。**
+**阶段 4 已完成（100%，异步普通命令路径）。**
 
-当前事件内容可以提前准备，但实际路径仍是：
+阶段 4 之前的实际路径是：
 
 ```text
 Owner prepareDirect → Owner dispatchDirect → Owner submit Lane queue
 ```
 
-`MatcherSettlementDispatcher.dispatchDirect()` 仍要求 Owner 调用，Owner 仍然是 Lane SPSC 队列生产者。必须改成 Matcher 生产 settlement ring，Owner 只保留控制队列生产者，并在 Lane 内按 sequence 合并两条队列。
+现在异步普通 PLACE、CANCEL、REPLACE/AMEND、TRIGGER 的路径是：
+
+```text
+Owner reserve pooled event → Matcher builds fact → Matcher publishes per-shard SPSC rings → Lane merge gate
+```
+
+每个 Lane 为每个 Matcher shard 建立独立的固定引用 SPSC；Owner 仍只生产控制队列。Lane 先处理 admission，再在交接屏障之外按 `coreSequence` 合并控制队列和 Matcher rings。环满时 Matcher 采用健康检查忙等背压，Lane 故障或关闭会立即退出，不把有效命令误报成队列满。
+
+`dispatchDirect()` 只保留同步调用和阶段 7 尚未迁移的 batch 兼容路径，异步普通命令不再调用。阶段 5 才迁移事件内部的 `OrderRuntime`/`MatcherSettlementPlan` 引用为 Lane-owned primitive delta；这是状态就地修改和终态发布的一部分，不能与 transport 阶段混为一项。
+
+快照只在 Owner pending、Lane control 和 Matcher settlement rings 全部清空后建立；运行时会拒绝任何残留环游标，恢复从空 transport cursor 重放 cluster log，避免把线程间引用写入快照。
 
 ### 5. `completeDispatchedMatcherSettlement`
 
@@ -208,7 +218,7 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - settlement slot 只保留 primitive 事实增量，不携带 `OrderRuntime`、`ReservationRuntime`、List 或共享可变对象；
 - ring cursor、未消费 slot 和 gate 状态纳入 snapshot/replay。
 
-这一阶段完成后，Owner 不再是 Matcher→Lane 的数据生产者。
+**状态：已完成（100%，异步普通命令路径）。** Matcher 不再通过 Owner 向 Lane 提交异步普通结算；Owner 只保留控制 ring 生产者。batch 的旧 dispatch 归阶段 7，事件内部对象和响应内容的迁移归阶段 5/6。
 
 ### 阶段 5：Lane 内部就地修改，终态只发布一次
 

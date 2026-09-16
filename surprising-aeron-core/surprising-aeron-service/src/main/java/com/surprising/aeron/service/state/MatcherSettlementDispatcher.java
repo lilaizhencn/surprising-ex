@@ -143,31 +143,26 @@ final class MatcherSettlementDispatcher {
         }
     }
 
-    /**
-     * Queue matcher-discovered maker Lanes after publication.  The initial dispatch contains
-     * only the taker's Lane for asynchronous commands, so a slow matcher fact can never block a
-     * later admission on an unrelated Lane.  The event's owner-only queue mask makes this
-     * idempotent when the Owner observes the same publication notification more than once.
-     */
-    void dispatchAdditional(MatcherSettlementEvent event) {
-        owner.assertOwner();
-        if (event == null || event.runtime() != owner || !event.direct() || !event.dispatched()
-                || !event.ready()) return;
-        long lanes = event.routedLaneMask() & ~event.queuedLaneMask();
-        if (lanes == 0) return;
-        owner.ensureLaneWorkerCapacity(lanes);
-        owner.releaseOwnerLaneAccess();
-        if (!owner.accountLanesStarted)
-            throw new IllegalStateException("additional matcher settlement requires running account Lanes");
+    /** Publish a completed Matcher fact directly into each routed Lane's shard SPSC mailbox. */
+    void publishMatcherOwned(MatcherSettlementEvent event) {
+        if (event == null || event.runtime() != owner || !event.direct() || !event.ready())
+            throw new IllegalStateException("invalid Matcher-owned settlement publication");
+        if (event.dispatched() && event.queuedLaneMask() != 0)
+            throw new IllegalStateException("Matcher settlement was already dispatched");
+        long lanes = event.routedLaneMask();
+        if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
+        // A Matcher-owned slot is logically reserved before the Matcher starts work so
+        // admission/commit gates can observe it.  Publication only fills the rings; do not
+        // transition that reservation a second time.
+        if (!event.dispatched()) event.markDispatched();
+        int shard = event.directShard();
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
-            long bit = 1L << laneId;
-            lanes &= ~bit;
+            lanes &= lanes - 1;
             event.markLaneQueued(laneId);
-            owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                    owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-            owner.laneWorkers[laneId].submit(event);
+            owner.laneWorkers[laneId].publishMatcherSettlement(shard, event);
         }
+        owner.signalOwnerCompletion();
     }
 
     /** 可复用的 matcherSettlementEvent 对象池；仅在消费者完成后回收。 */
