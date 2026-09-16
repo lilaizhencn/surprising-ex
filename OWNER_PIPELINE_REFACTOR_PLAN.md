@@ -1,8 +1,8 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 2 已完成，阶段 3 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 3 已完成，阶段 4 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
-本计划最初为待审核草案，现按审核意见执行。阶段 2 已完成并通过 JDK 27 正确性验收；没有启动吞吐压测。
+本计划最初为待审核草案，现按审核意见执行。阶段 3 已完成并通过 JDK 27 正确性验收；没有启动吞吐压测。
 
 ## 目标
 
@@ -74,21 +74,21 @@ Matcher 只负责订单簿和撮合事实。Lane 只修改自己拥有的账户�
 
 ### 3. `progressPlaceAdmissions`
 
-**普通 PLACE 做过局部改造，约 35%，协议目标尚未实现。**
+**普通 PLACE 的 Lane→Matcher receipt 路径已完成（100%）。**
 
-普通 PLACE 已不再由 Owner 同步等待 admission 完成后才提交 Matcher，但当前仍保留：
+已经完成：
 
-- `PlaceAdmissionEvent`；
-- `placeAdmissionReadyShardMask`；
-- Owner 的 admission notification drain；
-- batch admission 的 Owner 收集和继续执行；
-- Matcher 对 admission event 的依赖等待。
+- 每个 `(account lane, matcher shard)` 使用固定容量的 SPSC `AdmissionReceiptRing`；
+- `PlaceAdmissionEvent` 只在用户 Lane 执行冻结、准入和本地订单写入，然后发布 primitive receipt；
+- Matcher 直接消费 receipt，拒绝也走同一 receipt，不再从 Owner 读取 `PlaceAdmissionEvent` 的业务结果；
+- Owner 不再等待 admission 才能提交 Matcher；Owner 侧通知只用于非阻塞地发布本地准入视图和唤醒被提交顺序挡住的后续命令；
+- Lane 使用独立 admission mailbox，即使主队列头是尚未发布的 Matcher 结算，也不会阻塞后续准入。
 
-因此还没有实现真正的 `Lane → Matcher AdmissionReceipt`。`progressPlaceBatchAdmissions()` 也不能直接删除，必须先把批量路径改成固定 batch slot。
+批量 PLACE admission 仍使用旧的批量协调器和通知游标，属于阶段 7 的批量迁移范围；本阶段没有把普通路径与批量路径混成两套新的中间状态。
 
 ### 4. `MatcherSettlementDispatcher.dispatchDirect`
 
-**未实现真正直达，约 10%。**
+**未实现真正直达，阶段 4 待执行。**
 
 当前事件内容可以提前准备，但实际路径仍是：
 
@@ -192,6 +192,8 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - batch 先使用固定 batch slot，不能继续沿用逐项 `Decision[]`、`ResolvedPlaceOrder[]` 和 `CoreMatchingOrder[]`。
 
 并发约束：每条 receipt ring 只有一个 Lane 生产者和一个 Matcher 消费者；不得使用 MPSC CAS 代替协议设计。
+
+**状态：已完成（100%）。** 普通 PLACE 已使用按 Lane×Matcher shard 的固定 SPSC receipt；全量服务测试通过后才允许进入阶段 4。批量 admission 按阶段 7 迁移，不作为本阶段的未完成项。
 
 ### 阶段 4：实现真正的 Matcher→Lane settlement 直达
 
@@ -304,4 +306,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 1 验收：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，JDK 27，910 项通过、1 项既有跳过、0 失败。
 - 阶段 2（`apply()` 接纳收敛）：已完成。查询/低频分支移入 `applyQuery()`，命令入口单独进入 `applyCommandIngress()`；在途 command-id 索引改为固定开放寻址 primitive 表；延后匹配的时间、位置和 source key 放入复用 `CommandSlot`，删除 `LinkedHashMap<Long, DeferredMatching>` 和 `DeferredMatching` record；匹配生命周期用 slot byte 统一表达 admitted/deferred/submitted/matcher-done/lanes-done/committed，去掉重复 submitted/deferred boolean；continuation 改为明确的 settlement/cancel 类型字段，消除通用 `Object` 状态。
 - 阶段 2 验收：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，JDK 27，910 项通过、1 项既有跳过、0 失败。补正了一个原有测试等待条件，使其等待 Lane 已建立订单后再校验准入版本；未执行吞吐压测。
-- 下一阶段从 `PlaceAdmissionEvent` 的 Lane→Matcher receipt 路径开始；阶段 3 完成前不进行吞吐压测。
+- 阶段 3（普通 PLACE 的 Lane→Matcher admission receipt）：已完成。新增按 Lane×Matcher shard 的固定 SPSC `AdmissionReceiptRing`；Lane 完成冻结后直接发布 primitive receipt，Matcher 在自己的线程消费并决定是否撮合；Owner 不再把 `PlaceAdmissionEvent` 结果转交给 Matcher。Lane 新增独立 admission mailbox，未发布的 Matcher 结算不会阻塞后续准入；批量 PLACE 旧协调路径保留到阶段 7。
+- 阶段 3 验收：JDK 27 下 `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，931 项通过、1 项既有跳过、0 失败、0 错误；其中 `ClusterCommandPipelineTest` 为 244 项通过、1 项既有跳过。未执行吞吐压测。
+- 下一阶段为阶段 4：建立 Matcher→Lane settlement 专用 SPSC，移除当前 Owner 作为结算队列生产者的兼容路径。

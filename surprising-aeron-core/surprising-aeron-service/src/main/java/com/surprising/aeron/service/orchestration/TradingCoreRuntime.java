@@ -1589,10 +1589,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     void submitMatching(CommandSlot pending) {
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
-        // Standalone callers execute the Account Lane admission inline.  Collect that result
-        // before routing to the synchronous Matcher so a rejected PLACE never mutates the
-        // order book after its Owner-side rejection has already been recorded.  Cluster ingress
-        // remains fully asynchronous and takes the Matcher admission fence below instead.
+        // Standalone mode executes the admission inline and retains its historical synchronous
+        // owner-visible publication contract. Cluster mode uses the Lane→Matcher receipt path
+        // below and never enters this branch.
         if (pending.placeAdmission() != null && !runtimeState.asynchronousCommands()) {
             if (!collectPlaceAdmissionIfReady(pending)
                     || hasPendingMatchingRejection(pending.sequence())) return;
@@ -1626,13 +1625,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     ? runtimeOrder(pending.decodedCommand().placeOrder().orderId()) : null;
             if (pending.placeAdmission() != null) {
                 direct = runtimeState.prepareDirectMatcherSettlement(
-                        pending.sequence(), directSettlementLaneMask(), pending.placeAdmission(),
+                        pending.sequence(), directInitialLaneMask(pending.placeAdmission().userId()), pending.placeAdmission(),
                         pending.command().header().commandId(), matcherShard(pending), identities,
                         pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                         pending.preMatchingCancellationOrderIds(), null);
             } else if (directTaker != null) {
                 direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                        directSettlementLaneMask(), directTaker, null, 1,
+                        directInitialLaneMask(directTaker.userId()), directTaker, null, 1,
                         pending.command().header().commandId(), matcherShard(pending), identities,
                         pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                         pending.preMatchingCancellationOrderIds(), null);
@@ -1645,7 +1644,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             var admission = requireMatchingAdmission(pending);
             requireUnchangedAdmissionState(admission);
             direct = runtimeState.prepareDirectReplacement(pending.sequence(), pending.sequence(),
-                    directSettlementLaneMask(),
+                    directInitialLaneMask(admission.userId()),
                     admission, pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds());
@@ -1658,7 +1657,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     "admitted trigger is missing");
             OrderRuntime triggerOrder = runtimeOrder(pending.admittedMatchingOrder().orderId());
             direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    directSettlementLaneMask(),
+                    directInitialLaneMask(triggerOrder.userId()),
                     triggerOrder, null, 1, pending.command().header().commandId(), matcherShard(pending),
                     identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), null);
@@ -1678,12 +1677,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (direct != null && pending.placeAdmission() != null) {
             var directSettlement = direct;
             var originalSubmission = matcherSubmission;
+            int admissionLaneId = pending.placeAdmission().laneId();
             matcherSubmission = () -> {
-                // Keep the optimistic command token on the Matcher, but fence the actual
-                // exchange-core mutation behind the Account Lane's reservation decision.
-                directSettlement.awaitAdmission();
-                RuntimeException rejection = directSettlement.admissionRejection();
-                if (rejection != null) {
+                // The Matcher consumes the fixed primitive receipt directly.  The Owner no
+                // longer polls a PlaceAdmissionEvent or transfers its result to this event.
+                runtimeState.awaitAdmissionReceipt(admissionLaneId, matcherShard(pending),
+                        pending.sequence(), directSettlement);
+                if (!directSettlement.admissionAccepted()) {
                     var place = pending.decodedCommand().placeOrder();
                     return matchingAdapter.rejectedPlaceWithEvidence(
                             matcherShard(pending), pending.sequence(),
@@ -1697,33 +1697,31 @@ public final class TradingCoreRuntime implements AutoCloseable,
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();
         // Keep the per-shard submission head occupied until the Account Lane admission is
-        // resolved.  This preserves command order for a following cancel/control command while
-        // allowing the Matcher itself to wait on the admission fence off the Owner thread.
+        // resolved. This preserves the existing command submission ordering while the Matcher
+        // itself waits on the primitive receipt off the Owner thread.
         if (pending.placeAdmission() == null) matchingSubmissionCompleted(pending);
-        // The event is already safe to queue: its commit fence is known and the Lane worker
-        // will hold it until the matcher publishes the immutable result.  This removes the
-        // owner completion drain from the matcher->Lane handoff; the owner still collects the
-        // completed event later for ordered funds/index/result commit.
+        // Do not queue an unpublished event. A Lane worker is strictly ordered; putting the
+        // direct settlement behind the admission would make it wait for Matcher publication and
+        // block later admissions on the same Lane. The completion pump queues it after Matcher
+        // publication, together with any maker-Lane extensions.
         if (direct != null) predispatchDirectSettlement(pending, direct);
     }
 
     /**
-     * Until the Matcher-owned Lane mailbox is installed, direct events are
-     * pre-enqueued to every Lane. The ingress dependency itself remains the
-     * user's single Lane; the broad event route prevents a fill discovered by
-     * Matcher from escaping the preallocated event. This compatibility bridge
-     * is removed together with the Owner dispatch call in the next phase.
+     * Before Matcher has inspected the book only the taker's Lane is known. Queueing a direct
+     * fact on every Lane here lets a slow fact block a later admission at an unrelated Lane;
+     * Matcher-discovered maker Lanes are appended after publication by the completion pump.
      */
-    private long directSettlementLaneMask() {
+    private long directInitialLaneMask(long userId) {
+        if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
+        // Until the dedicated Matcher→Lane SPSC mailboxes are installed, the pooled direct
+        // event is published to the fixed lane fan-out. The admission mailbox is separate, so
+        // an unpublished event cannot block later Lane admissions. Stage 4 replaces this
+        // compatibility fan-out with Matcher-owned maker routing.
         return commits.validAccountLaneMask();
     }
 
-    /**
-     * Enqueue a direct matcher settlement as soon as its partition dependency allows it.
-     * The SPSC producer remains the owner; the matcher only publishes the payload readiness
-     * bit.  If an earlier partition dependency is still outstanding, the ordered dispatcher
-     * retries the same event without requiring another matcher result copy.
-     */
+    /** Enqueue the initial taker-Lane route once its partition dependency allows it. */
     boolean predispatchDirectSettlement(CommandSlot pending,
                                      com.surprising.aeron.service.state.MatcherSettlementEvent event) {
         if (pending == null || event == null || !event.direct() || event.dispatched()) return false;
@@ -2274,12 +2272,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** Consume a completed ordinary admission notification without gating Matcher submission. */
     boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
         if (pending == null || pending.placeAdmission() == null) return true;
+        // In cluster mode the Matcher must consume the Lane receipt for this command. Keep the
+        // pooled admission event attached until its Matcher submission exists; otherwise a fast
+        // Owner notification can switch to the already-admitted path and leave an orphan receipt
+        // at the head of the Lane×Matcher SPSC ring.
         var admission = pending.placeAdmission();
         if (!admission.complete()) return false;
         identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
         RuntimeException rejection = admission.rejection();
         var direct = pending.settlementEvent();
-        if (direct != null && direct.direct()) direct.admissionResult(rejection);
         if (rejection != null) {
             CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
                     ? CoreResultCode.fromRejectionCode(rejected.code())
@@ -2386,6 +2387,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     void drainMatchingCompletions() {
         if (crossShardCancellations.hasPending()) crossShardCancellations.poll();
+        drainAdmissionReceiptCompletions();
         if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications()
                 || hasDeferredMatchingSubmission())
             progressPlaceBatchAdmissions();
@@ -2393,7 +2395,48 @@ public final class TradingCoreRuntime implements AutoCloseable,
             matcherPipeline.drainMatchingCompletions();
             pendingMatching.progressChanged();
         }
+        dispatchReadyDirectSettlementLanes();
         if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
+    }
+
+    /**
+     * Consume Lane admission completion notifications. Ordinary PLACE does not wait here before
+     * Matcher submission; the completed publication is made visible early for existing query and
+     * ordering contracts, while the Matcher consumes its primitive receipt independently.
+     */
+    private void drainAdmissionReceiptCompletions() {
+        long readyLanes = runtimeState.takeAdmissionReceiptReadyLaneMask();
+        while (readyLanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(readyLanes);
+            readyLanes &= readyLanes - 1;
+            long sequence;
+            while ((sequence = runtimeState.pollAdmissionReceiptReady(laneId)) != 0) {
+                CommandSlot pending = pendingMatching.get(sequence);
+                if (pending != null && pending.placeAdmission() != null) {
+                    if (!pending.isMatchingSubmitted()) {
+                        placeAdmissionReadyShardMask |= 1L << pendingSubmissionShard(pending);
+                    } else if (collectPlaceAdmissionIfReady(pending)) {
+                        pendingMatching.progressChanged();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Matcher publishes the immutable result and expands the event route with maker Lanes. The
+     * Owner only performs the queue handoff here; it never waits for or inspects Lane state.
+     */
+    private void dispatchReadyDirectSettlementLanes() {
+        pendingMatching.forEach(pending -> {
+            var event = pending.settlementEvent();
+            if (event == null || !event.direct() || !event.ready()) return;
+            if (!event.dispatched()) {
+                predispatchDirectSettlement(pending, event);
+            } else {
+                runtimeState.dispatchAdditionalDirectMatcherSettlement(event);
+            }
+        });
     }
 
     long matchingProgressSequence() {
@@ -2910,11 +2953,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState, identities, userId,
                 command, currentClusterTimestamp);
         int assetId = identities.assetId(resolved.reservationAsset());
+        int matcherShard = matchingAdapter.matcherShardId(resolved.symbol());
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
                 openInterestIndex.openInterestSteps(resolved.symbol()),
                 runtimeState.treasury().lifecycleSettlement(resolved.symbolId()) != 0,
                 runtimeState.treasury().fundingProgress(resolved.symbolId()) != null,
-                resolved.symbolId(), assetId, identities, timestamp, position);
+                resolved.symbolId(), assetId, matcherShard, identities, timestamp, position);
     }
 
     @Override public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,

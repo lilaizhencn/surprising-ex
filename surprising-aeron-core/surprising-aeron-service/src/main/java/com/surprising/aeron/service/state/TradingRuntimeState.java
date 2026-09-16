@@ -128,6 +128,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     final SettlementLaneWorker[] laneWorkers;
     /** 各 Lane 到 owner 的准入完成通知队列。 */
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
+    /** 各 Lane 到 Matcher 的准入回执；每条链路保持严格 SPSC。 */
+    final AdmissionReceiptRing[] admissionReceiptRings;
+    private final int admissionReceiptMatcherShardCount;
+    /** 准入回执的轻量 owner 唤醒游标；不承载业务结果，只提示延后提交可继续。 */
+    final LaneSequenceQueue[] admissionReceiptReadyQueues;
     /** 各 Lane 到 owner 的结算完成通知队列。 */
     final LaneSequenceQueue[] matcherSettlementReadyQueues;
     /** 按 Lane 固定复用的变更任务，完成收集后才能重新派发。 */
@@ -363,6 +368,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.laneUserScratch = routedUsers;
         this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
+        this.admissionReceiptMatcherShardCount = topology.matchingEngineCount();
+        this.admissionReceiptRings = new AdmissionReceiptRing[
+                Math.multiplyExact(topology.accountLaneCount(), admissionReceiptMatcherShardCount)];
+        this.admissionReceiptReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.laneMutationTasks = new LaneMutationTask[topology.accountLaneCount()];
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
@@ -379,6 +388,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
+            for (int matcherShard = 0; matcherShard < admissionReceiptMatcherShardCount; matcherShard++) {
+                admissionReceiptRings[admissionReceiptIndex(laneId, matcherShard)] =
+                        new AdmissionReceiptRing(topology.accountLaneQueueCapacity());
+            }
+            admissionReceiptReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneHashes(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
@@ -853,10 +867,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    void ensurePlaceAdmissionDispatchCapacity(int laneId) {
-        ensureLaneWorkerCapacity(1L << laneId);
-        if (expectedAdmissions[laneId] >= placeAdmissionReadyQueues[laneId].capacity()) {
-            throw new java.util.concurrent.RejectedExecutionException("place admission ready queue is full");
+    void ensurePlaceAdmissionDispatchCapacity(int laneId, int matcherShard) {
+        if (!accountLanesStarted || ownerLaneAccess) return;
+        assertAccountLanesHealthy();
+        if (!laneWorkers[laneId].hasAdmissionCapacity()) {
+            throw new java.util.concurrent.RejectedExecutionException("Account Lane admission queue is full");
+        }
+        if (!admissionReceiptRing(laneId, matcherShard).hasCapacity()) {
+            throw new java.util.concurrent.RejectedExecutionException("admission receipt ring is full");
         }
     }
 
@@ -1099,6 +1117,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void ensureOrderCapacity(int expectedOrders, long laneMask) {
             if (expectedOrders <= 0) return;
+            activeLaneMask |= laneMask;
             ensureActiveLanes(laneMask);
             while (laneMask != 0) {
                 int laneId = Long.numberOfTrailingZeros(laneMask);
@@ -1771,7 +1790,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, ResolvedPlaceOrder order, java.util.UUID commandId,
             long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
-            int symbolId, int assetId, RuntimeIdentityRegistry identities,
+            int symbolId, int assetId, int matcherShard, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
         if (!accountLanesStarted) {
@@ -1793,12 +1812,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (!inline) releaseOwnerLaneAccess();
         int laneId = topology.accountLaneId(userId);
-        ensurePlaceAdmissionDispatchCapacity(laneId);
+        ensurePlaceAdmissionDispatchCapacity(laneId, matcherShard);
         PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceAdmissionEvent();
         event.prepare(
                 coreSequence, userId, order, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
-                symbolId, assetId, laneId, this, identities, timestamp, position);
+                symbolId, assetId, laneId, matcherShard, this, identities, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -1836,7 +1855,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         releaseOwnerLaneAccess();
         int laneId = topology.accountLaneId(userId);
-        ensurePlaceAdmissionDispatchCapacity(laneId);
+        ensureLaneWorkerCapacity(1L << laneId);
         MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
         changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
@@ -1941,6 +1960,8 @@ public final class TradingRuntimeState implements AutoCloseable {
      */
     private final java.util.concurrent.atomic.AtomicLong directSettlementReadyLanes =
             new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong admissionReceiptReadyLanes =
+            new java.util.concurrent.atomic.AtomicLong();
     private final int[] expectedAdmissions = new int[64], expectedSettlements = new int[64];
 
     void expectPlaceAdmission(int laneId) {
@@ -1975,6 +1996,55 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    /**
+     * Publish a primitive admission result to the Matcher.  Ordinary PLACE
+     * commands no longer enter an Owner-consumed completion queue.
+     */
+    void publishAdmissionReceipt(int laneId, int matcherShard, long coreSequence, long reservationId,
+                                 long accountVersion, long reservedAmount,
+                                 boolean accepted, int resultCode) {
+        admissionReceiptRing(laneId, matcherShard).publish(coreSequence, reservationId, accountVersion,
+                reservedAmount, accepted, resultCode);
+        admissionReceiptReadyQueues[laneId].publish(coreSequence);
+        admissionReceiptReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        signalOwnerCompletion();
+    }
+
+    /** Owner consumes only a scheduling wake-up; the admission payload remains Matcher-owned. */
+    public long takeAdmissionReceiptReadyLaneMask() {
+        assertOwner();
+        return admissionReceiptReadyLanes.getAndSet(0L);
+    }
+
+    public long pollAdmissionReceiptReady(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= admissionReceiptReadyQueues.length) {
+            throw new IllegalArgumentException("invalid Account Lane id");
+        }
+        return admissionReceiptReadyQueues[laneId].poll();
+    }
+
+    /** Matcher consumes the receipt directly into its pooled settlement event. */
+    public void awaitAdmissionReceipt(int laneId, int matcherShard, long coreSequence, MatcherSettlementEvent target) {
+        if (laneId < 0 || laneId >= topology.accountLaneCount()) {
+            throw new IllegalArgumentException("invalid Account Lane id");
+        }
+        admissionReceiptRing(laneId, matcherShard).await(coreSequence, target);
+    }
+
+    private AdmissionReceiptRing admissionReceiptRing(int laneId, int matcherShard) {
+        if (laneId < 0 || laneId >= topology.accountLaneCount()
+                || matcherShard < 0 || matcherShard >= admissionReceiptMatcherShardCount) {
+            throw new IllegalArgumentException("invalid admission receipt route");
+        }
+        return admissionReceiptRings[admissionReceiptIndex(laneId, matcherShard)];
+    }
+
+    private int admissionReceiptIndex(int laneId, int matcherShard) {
+        return laneId * admissionReceiptMatcherShardCount + matcherShard;
+    }
+
+    /** Batch admission retains its legacy Owner notification cursor until batch routing is migrated. */
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
         admissionReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
@@ -1989,13 +2059,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
     public boolean hasMatchingNotifications() {
         assertOwner();
-        return hasPlaceAdmissionNotifications() || hasSettlementNotifications();
+        return (admissionReceiptReadyLanes.get() != 0)
+                || hasPlaceAdmissionNotifications() || hasSettlementNotifications();
     }
 
     /** 仅唤醒已经声明休眠的 Owner；在发布队列/就绪位后调用，不替代完成队列。 */
     private volatile Runnable ownerCompletionSignal;
     public void ownerCompletionSignal(Runnable signal) { assertOwner(); ownerCompletionSignal = signal; }
-    private void signalOwnerCompletion() {
+    void signalOwnerCompletion() {
         Runnable signal = ownerCompletionSignal;
         if (signal != null) signal.run();
     }
@@ -5559,6 +5630,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }
+
+    /** Queue maker Lanes discovered by Matcher after the taker event was published. */
+    public void dispatchAdditionalDirectMatcherSettlement(MatcherSettlementEvent event) {
+        settlements.dispatchAdditional(event);
+    }
 
     void signalDirectSettlement(long laneMask) {
         if (!accountLanesStarted) return;

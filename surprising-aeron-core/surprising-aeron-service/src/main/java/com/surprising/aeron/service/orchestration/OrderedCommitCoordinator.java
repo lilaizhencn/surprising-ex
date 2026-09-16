@@ -108,8 +108,15 @@ final class OrderedCommitCoordinator {
             // the same Matcher cursor as the live runtime.
             if (direct.directResultAvailable()) {
                 CoreMatchingResult matcherResult = direct.firstDirectResult();
-                validateMatchingEvidence(pending, matcherResult);
-                applyMatcherProgress(matcherResult);
+                // The normal direct completion path validates and applies the same result before
+                // it reaches this rejection helper. Avoid applying that evidence twice when the
+                // Lane rejection is observed after the Matcher event has completed.
+                int shard = matcherResult.nativeCommand().matcherShardId();
+                if (matcherSequence(shard) != matcherResult.nativeCommand().matcherSequence()
+                        || matcherPrefixDigest(shard) != matcherResult.matcherPrefix().after()) {
+                    validateMatchingEvidence(pending, matcherResult);
+                    applyMatcherProgress(matcherResult);
+                }
             }
             owner.runtimeState.discardMatcherSettlement(pending.takeSettlementEvent());
         } else if (pending.isMatchingSubmitted()) {
@@ -148,17 +155,6 @@ final class OrderedCommitCoordinator {
         clusterPosition = pending.commitFenceClusterPosition();
         owner.currentClusterPosition = clusterPosition;
         CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
-        // The standalone completion API may receive a Matcher result before the asynchronous
-        // admission notification.  Consume only a completed notification; never build a
-        // settlement plan from an order that the Account Lane has not published yet.
-        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null
-                && !owner.collectPlaceAdmissionIfReady(pending)) {
-            // The standalone completion API may have consumed the matcher mailbox token before
-            // the asynchronous admission notification arrived. Keep the same immutable result
-            // in the sequence context so a later ordered retry does not lose it.
-            laneContext.publishMatchingCompletion(matchingResult);
-            return null;
-        }
         // Matcher releases the route before publishing Lane readiness. A command slot cannot
         // be recycled while its producer still owns it; transport retirement is independent.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct()
@@ -559,6 +555,13 @@ final class OrderedCommitCoordinator {
             CommandSlot laneContext) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null || !event.complete()) return null;
+        // Admission is consumed once, at the ordered terminal boundary. The Matcher has
+        // already consumed the primitive Lane receipt; no Owner-side admission poll is needed.
+        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
+            if (!owner.collectPlaceAdmissionIfReady(pending)) return null;
+            if (owner.hasPendingMatchingRejection(pending.sequence()))
+                return completeRejectedMatching(pending.sequence());
+        }
         owner.captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
@@ -1034,12 +1037,6 @@ final class OrderedCommitCoordinator {
 
     boolean matchingCommitReady(CommandSlot pending) {
         if (pending == null) return false;
-        // Ordinary PLACE admissions and Matcher execution run concurrently.  Resolve the Lane
-        // publication only at the ordered head; no Owner-side admission pump may submit or wait
-        // for this command.  A rejection still waits for the already-submitted Matcher token to
-        // retire before the slot is recycled.
-        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null
-                && !collectPlaceAdmissionIfReady(pending)) return false;
         OrderBatchPending batch = pending.orderBatch;
         // A matcher result alone does not make a batch ready while its Lane work is outstanding.
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
@@ -1254,7 +1251,8 @@ final class OrderedCommitCoordinator {
                     ? owner.pendingMatching.partitionDispatchHead(shard) : first;
             first = null;
             if (pending != null && pending.sequence() <= throughSequence && pending.settlementEvent() != null
-                    && pending.settlementEvent().direct() && !pending.settlementEvent().dispatched()) {
+                    && pending.settlementEvent().direct() && pending.settlementEvent().ready()
+                    && !pending.settlementEvent().dispatched()) {
                 pending.establishCommitFence(clusterTimestamp, clusterPosition);
                 var event = pending.settlementEvent();
                 event.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
@@ -1273,7 +1271,7 @@ final class OrderedCommitCoordinator {
             OrderBatchPending batch = pending.orderBatch;
             if (batch != null) {
                 if (batch.settlementEvent != null && batch.settlementEvent.direct()
-                        && !batch.settlementEvent.dispatched()) {
+                        && batch.settlementEvent.ready() && !batch.settlementEvent.dispatched()) {
                     if (!batch.admissionCollected() || !batch.canPredispatch()) return;
                     pending.establishCommitFence(clusterTimestamp, clusterPosition);
                     batch.settlementEvent.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());

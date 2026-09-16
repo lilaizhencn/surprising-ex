@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
+import com.surprising.aeron.protocol.CoreResultCode;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.UUID;
@@ -27,6 +28,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private boolean fundingInProgress;
     private RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
     private int symbolId;
+    private int matcherShard;
     private int assetId;
     private int laneId;
     private TradingRuntimeState runtime;
@@ -34,12 +36,11 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private LanePublication publication;
     private LanePublication publicationBuffer;
     private long identityAllocations;
+    private long reservedAmount;
     private UserRuntime admittedUser;
     private OrderRuntime admittedOrder;
     private ReservationRuntime admittedReservation;
     private RuntimeException rejection;
-    /** Direct Matcher settlement queued behind this admission; only one normal PLACE uses it. */
-    private MatcherSettlementEvent dependentSettlement;
     @SuppressWarnings("FieldMayBeFinal")
     private boolean completed;
 
@@ -48,11 +49,11 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                                 long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
-                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                int symbolId, int assetId, int laneId, int matcherShard, TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
                 || symbolId < 0 || assetId < 0
-                || laneId < 0 || runtime == null) {
+                || laneId < 0 || matcherShard < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
         this.coreSequence = coreSequence;
@@ -72,14 +73,14 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.symbolId = symbolId;
         this.assetId = assetId;
         this.laneId = laneId;
+        this.matcherShard = matcherShard;
         this.runtime = runtime;
         admittedUser = null;
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
-        dependentSettlement = null;
+        reservedAmount = 0;
         COMPLETED.set(this, false);
-        runtime.expectPlaceAdmission(laneId);
         return this;
     }
 
@@ -98,7 +99,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
-        dependentSettlement = null;
+        reservedAmount = 0;
+        matcherShard = 0;
     }
 
     @Override
@@ -119,6 +121,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                         runtime, userId, order, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), preparedClientKey.key(), symbolId, positionKey,
                         lifecycleSettled, fundingInProgress);
+                reservedAmount = requiredReservation;
                 runtime.placeOrderInLane(lane, userId, order, commandId,
                         requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedUser = lane.users.get(userId);
@@ -143,11 +146,18 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;
-        MatcherSettlementEvent dependent = dependentSettlement;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
+        CoreResultCode resultCode = rejection == null ? CoreResultCode.NONE
+                : rejection instanceof CoreStateRejectedException stateRejected
+                ? CoreResultCode.fromRejectionCode(stateRejected.code())
+                : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
+                : CoreResultCode.INVALID_COMMAND;
+        completionRuntime.publishAdmissionReceipt(completionLaneId, matcherShard,
+                completionSequence, order.orderId(),
+                admittedUser == null ? 0 : admittedUser.revision(), reservedAmount,
+                rejection == null, resultCode.wireCode());
         COMPLETED.setRelease(this, true);
-        completionRuntime.publishPlaceAdmissionReady(completionLaneId, completionSequence);
-        if (dependent != null) dependent.signalAdmissionReady();
+        completionRuntime.signalOwnerCompletion();
     }
 
     public boolean complete() {
@@ -157,7 +167,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     /** Abort a prepared event that was never submitted to a Lane. */
     void discard() {
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
-        if (runtime != null) runtime.releaseAdmissionExpectation(laneId);
         order = null;
         commandId = null;
         lifecycleSettled = false;
@@ -171,11 +180,12 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedOrder = null;
         admittedReservation = null;
         rejection = null;
-        dependentSettlement = null;
+        reservedAmount = 0;
         identityAllocations = 0;
         coreSequence = 0;
         userId = 0;
         laneId = 0;
+        matcherShard = 0;
         COMPLETED.setRelease(this, false);
     }
 
@@ -184,6 +194,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public long takeIdentityAllocations() { long result = identityAllocations; identityAllocations = 0; return result; }
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }
+    public int laneId() { return laneId; }
     public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
     public long clientKey() { return preparedClientKey.key(); }
@@ -213,12 +224,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         return order;
     }
 
-    /** Binds the preconstructed Matcher result to this admission without another callback object. */
-    void dependentSettlement(MatcherSettlementEvent event) {
-        if (event == null || dependentSettlement != null)
-            throw new IllegalStateException("invalid place admission dependency");
-        dependentSettlement = event;
-    }
     UserRuntime admittedUser() {
         if (!complete() || admittedUser == null) throw new IllegalStateException("place admission is incomplete");
         return admittedUser;

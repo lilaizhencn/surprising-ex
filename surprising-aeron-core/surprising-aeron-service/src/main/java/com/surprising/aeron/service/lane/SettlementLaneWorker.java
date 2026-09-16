@@ -29,13 +29,21 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /** 首次失败发布到所属 runtime；正常任务不触碰共享故障状态。 */
     private final java.util.function.Consumer<Throwable> failurePublisher;
     private final Command[] commands;
+    /**
+     * Admission has a separate SPSC mailbox. A direct settlement may legitimately wait for the
+     * Matcher, so it must never occupy the only queue head needed to publish a later admission.
+     */
+    private final Command[] admissionCommands;
     private final int indexMask;
+    private final int admissionIndexMask;
     private final WaitStrategy waitStrategy;
     private final int spinLimit;
     private final AccountLaneState lane;
     private final Thread thread;
     private final PaddedSequence producerSequence = new PaddedSequence();
     private final PaddedSequence consumerSequence = new PaddedSequence();
+    private final PaddedSequence admissionProducerSequence = new PaddedSequence();
+    private final PaddedSequence admissionConsumerSequence = new PaddedSequence();
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
@@ -60,7 +68,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
         int capacity = 1;
         while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
         commands = new Command[capacity];
+        admissionCommands = new Command[capacity];
         indexMask = capacity - 1;
+        admissionIndexMask = capacity - 1;
         waitStrategy = configuredWaitStrategy();
         spinLimit = Integer.parseInt(System.getProperty(SPIN_LIMIT_PROPERTY, "0"));
         if (spinLimit < 0 || spinLimit > 4096)
@@ -99,13 +109,18 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
-        long next = producerSequence.value;
-        long consumed = consumerSequence.value;
-        if (next - consumed >= commands.length) {
+        boolean admission = command instanceof com.surprising.aeron.service.state.PlaceAdmissionEvent;
+        PaddedSequence producer = admission ? admissionProducerSequence : producerSequence;
+        PaddedSequence consumer = admission ? admissionConsumerSequence : consumerSequence;
+        Command[] queue = admission ? admissionCommands : commands;
+        int mask = admission ? admissionIndexMask : indexMask;
+        long next = producer.value;
+        long consumed = consumer.value;
+        if (next - consumed >= queue.length || depth() >= queue.length) {
             throw new RejectedExecutionException("settlement lane queue is full");
         }
-        commands[(int) next & indexMask] = command;
-        producerSequence.value = next + 1;
+        queue[(int) next & mask] = command;
+        producer.value = next + 1;
         // The consumer announces parking BEFORE rechecking producerSequence. These volatile
         // accesses ensure either it sees this publication or we observe its wake-up request.
         // Do not replace this handshake with an empty-queue check on consumerSequence.
@@ -125,11 +140,19 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     public int depth() {
-        return Math.toIntExact(producerSequence.value - consumerSequence.value);
+        return Math.toIntExact((producerSequence.value - consumerSequence.value)
+                + (admissionProducerSequence.value - admissionConsumerSequence.value));
     }
 
     public boolean hasCapacity() {
-        return running && failure == null && producerSequence.value - consumerSequence.value < commands.length;
+        return running && failure == null && depth() < commands.length;
+    }
+
+    /** Capacity probe for the dedicated Lane admission mailbox. */
+    public boolean hasAdmissionCapacity() {
+        return running && failure == null
+                && admissionProducerSequence.value - admissionConsumerSequence.value < admissionCommands.length
+                && depth() < admissionCommands.length;
     }
 
     public Throwable failure() {
@@ -142,13 +165,28 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
     private void run() {
         long next = consumerSequence.value;
+        long admissionNext = admissionConsumerSequence.value;
         int idleSpins = 0;
         try {
             lane.bindOwner();
             started = true;
             long reboundHandoff = 0;
             int directReadySpins = 0;
-            while (running || next < producerSequence.value) {
+            while (running || next < producerSequence.value
+                    || admissionNext < admissionProducerSequence.value) {
+                // Admissions are independent producer mail and must be drained even when the
+                // main queue head is a Matcher result that has not been published yet.
+                if (admissionNext < admissionProducerSequence.value) {
+                    int admissionIndex = (int) admissionNext & admissionIndexMask;
+                    Command admission = admissionCommands[admissionIndex];
+                    if (admission == null) throw new IllegalStateException("admission publication gap");
+                    admissionCommands[admissionIndex] = null;
+                    admissionNext++;
+                    admissionConsumerSequence.value = admissionNext;
+                    admission.execute(lane);
+                    idleSpins = 0;
+                    continue;
+                }
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;

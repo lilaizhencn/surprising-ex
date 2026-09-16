@@ -68,8 +68,7 @@ final class MatcherSettlementDispatcher {
                 resolved, commandId, resolved.symbolId(), timestamp, position);
         MatcherSettlementEvent event = prepareDirect(sequence, laneMask, prepared, null, 1,
                 commandId, shard, identities, timestamp, position, cancellations, target);
-        event.admissionDependency(admission);
-        admission.dependentSettlement(event);
+        event.admissionRoute(admission.laneId());
         return event;
     }
 
@@ -134,12 +133,40 @@ final class MatcherSettlementDispatcher {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
+            event.markLaneQueued(laneId);
             if (!owner.accountLanesStarted) event.execute(owner.accountLanes[laneId]);
             else {
                 owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
                         owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
                 owner.laneWorkers[laneId].submit(event);
             }
+        }
+    }
+
+    /**
+     * Queue matcher-discovered maker Lanes after publication.  The initial dispatch contains
+     * only the taker's Lane for asynchronous commands, so a slow matcher fact can never block a
+     * later admission on an unrelated Lane.  The event's owner-only queue mask makes this
+     * idempotent when the Owner observes the same publication notification more than once.
+     */
+    void dispatchAdditional(MatcherSettlementEvent event) {
+        owner.assertOwner();
+        if (event == null || event.runtime() != owner || !event.direct() || !event.dispatched()
+                || !event.ready()) return;
+        long lanes = event.routedLaneMask() & ~event.queuedLaneMask();
+        if (lanes == 0) return;
+        owner.ensureLaneWorkerCapacity(lanes);
+        owner.releaseOwnerLaneAccess();
+        if (!owner.accountLanesStarted)
+            throw new IllegalStateException("additional matcher settlement requires running account Lanes");
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            long bit = 1L << laneId;
+            lanes &= ~bit;
+            event.markLaneQueued(laneId);
+            owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                    owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
+            owner.laneWorkers[laneId].submit(event);
         }
     }
 
