@@ -29,6 +29,33 @@ public final class ImmutableLongArrayList extends AbstractList<Long>
 
     public static ImmutableLongArrayList empty() { return EMPTY; }
 
+    /** Append-only primitive builder for short-lived command pages and results. */
+    public static final class Builder {
+        private long[] values;
+        private int size;
+
+        public Builder(int initialCapacity) {
+            values = new long[Math.max(1, initialCapacity)];
+        }
+
+        public void add(long value) {
+            if (size == values.length) values = Arrays.copyOf(values, values.length << 1);
+            values[size++] = value;
+        }
+
+        public int size() { return size; }
+
+        public long last() {
+            if (size == 0) throw new IllegalStateException("empty primitive list");
+            return values[size - 1];
+        }
+
+        public ImmutableLongArrayList freeze() {
+            if (size == 0) return EMPTY;
+            return takeOwnership(size == values.length ? values : Arrays.copyOf(values, size));
+        }
+    }
+
     public static ImmutableLongArrayList sortedDistinct(long[] values, long additional) {
         long[] copy = Arrays.copyOf(values, values.length + 1);
         copy[values.length] = additional;

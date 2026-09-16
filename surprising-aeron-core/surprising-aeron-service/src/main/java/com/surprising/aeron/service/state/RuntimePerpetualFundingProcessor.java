@@ -10,7 +10,6 @@ import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.UUID;
@@ -213,7 +212,8 @@ public final class RuntimePerpetualFundingProcessor {
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-        LongArrayBuilder changedUserIds = new LongArrayBuilder(Math.min(16, selectedUserIds.size()));
+        ImmutableLongArrayList.Builder changedUserIds =
+                new ImmutableLongArrayList.Builder(Math.min(16, selectedUserIds.size()));
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (int userIndex = 0; userIndex < selectedUserIds.size(); userIndex++) {
             long userId = selectedUserIds.get(userIndex);
@@ -296,7 +296,7 @@ public final class RuntimePerpetualFundingProcessor {
 
     static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
         if (limit <= 0) return new UserPage(ImmutableLongArrayList.empty(), 0, 0, true);
-        LongArrayBuilder selected = new LongArrayBuilder(Math.min(limit, 64));
+        ImmutableLongArrayList.Builder selected = new ImmutableLongArrayList.Builder(Math.min(limit, 64));
         Iterable<Long> usersAfterCursor = indexedUserIds;
         if (indexedUserIds instanceof NavigableSet<?> indexedSet) {
             @SuppressWarnings("unchecked")
@@ -317,33 +317,4 @@ public final class RuntimePerpetualFundingProcessor {
                     long nextCursorUserId, boolean complete) {
     }
 
-    /** Small append-only primitive builder used for one funding page/result. */
-    private static final class LongArrayBuilder {
-        private long[] values;
-        private int size;
-
-        private LongArrayBuilder(int initialCapacity) {
-            values = new long[Math.max(1, initialCapacity)];
-        }
-
-        private void add(long value) {
-            if (size == values.length) values = Arrays.copyOf(values, values.length << 1);
-            values[size++] = value;
-        }
-
-        private int size() {
-            return size;
-        }
-
-        private long last() {
-            if (size == 0) throw new IllegalStateException("empty primitive page");
-            return values[size - 1];
-        }
-
-        private ImmutableLongArrayList freeze() {
-            if (size == 0) return ImmutableLongArrayList.empty();
-            return ImmutableLongArrayList.takeOwnership(
-                    size == values.length ? values : Arrays.copyOf(values, size));
-        }
-    }
 }

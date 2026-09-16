@@ -8,7 +8,6 @@ import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import java.util.Collections;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -90,7 +89,7 @@ public final class TriggerOrderIndex {
         // Candidate pages are on the mark-price hot path. Keep IDs primitive so
         // scanning a large trigger index does not build a boxed Long list and a
         // second defensive copy for every page.
-        CandidateBuffer result = new CandidateBuffer(limit);
+        ImmutableLongArrayList.Builder result = new ImmutableLongArrayList.Builder(limit);
         while (result.size() < limit && nextPhase < PHASE_COMPLETE) {
             if (nextPhase == PHASE_GREATER_OR_EQUAL) {
                 Map.Entry<Long, NavigableSet<Long>> bucket = nextGreaterOrEqualBucket(
@@ -220,7 +219,7 @@ public final class TriggerOrderIndex {
         return cursor == 0 ? eligible.lastEntry() : eligible.lowerEntry(cursor);
     }
 
-    private static long appendBucket(CandidateBuffer result, NavigableSet<Long> ids,
+    private static long appendBucket(ImmutableLongArrayList.Builder result, NavigableSet<Long> ids,
                                      long upperTriggerId, long orderCursor, int limit) {
         long last = 0;
         for (Long id : ids.descendingSet()) {
@@ -232,33 +231,10 @@ public final class TriggerOrderIndex {
         return last;
     }
 
-    private static TriggerCandidatePage page(CandidateBuffer result, int nextPhase,
+    private static TriggerCandidatePage page(ImmutableLongArrayList.Builder result, int nextPhase,
                                               long nextPriceCursor, long nextOrderCursor,
                                               boolean complete) {
         return new TriggerCandidatePage(result.freeze(), nextPhase, nextPriceCursor, nextOrderCursor, complete);
-    }
-
-    private static final class CandidateBuffer {
-        private long[] values;
-        private int size;
-
-        private CandidateBuffer(int capacity) {
-            values = new long[capacity];
-        }
-
-        private void add(long value) {
-            values[size++] = value;
-        }
-
-        private int size() {
-            return size;
-        }
-
-        private ImmutableLongArrayList freeze() {
-            if (size == 0) return ImmutableLongArrayList.empty();
-            return ImmutableLongArrayList.takeOwnership(
-                    size == values.length ? values : Arrays.copyOf(values, size));
-        }
     }
 
     public record TriggerCandidatePage(List<Long> ids, int nextPhase, long nextPriceCursor,
