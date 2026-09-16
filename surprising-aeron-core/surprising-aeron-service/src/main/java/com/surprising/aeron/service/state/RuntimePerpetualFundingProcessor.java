@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
@@ -9,6 +10,7 @@ import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.UUID;
@@ -90,8 +92,6 @@ public final class RuntimePerpetualFundingProcessor {
 
         UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(),
                 chunked ? command.maxUsers() : Integer.MAX_VALUE);
-        ArrayList<Long> selectedUserIds = userPage.userIds();
-
         return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
                 fundingMark, fundingPriceSequence, userPage);
     }
@@ -109,7 +109,7 @@ public final class RuntimePerpetualFundingProcessor {
         private final long fundingMark, fundingPriceSequence;
         /** 原有全局用户分页及其 Lane 参与范围。 */
         private final UserPage userPage;
-        private final ArrayList<Long> selectedUserIds;
+        private final ImmutableLongArrayList selectedUserIds;
         private final boolean chunked;
         private final long laneMask;
         private final LongArrayList[] usersByLane;
@@ -213,7 +213,7 @@ public final class RuntimePerpetualFundingProcessor {
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-        ArrayList<Long> changedUserIds = new ArrayList<>();
+        LongArrayBuilder changedUserIds = new LongArrayBuilder(Math.min(16, selectedUserIds.size()));
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (int userIndex = 0; userIndex < selectedUserIds.size(); userIndex++) {
             long userId = selectedUserIds.get(userIndex);
@@ -267,13 +267,16 @@ public final class RuntimePerpetualFundingProcessor {
                 throw new IllegalStateException("runtime funding debit relief was not fully allocated");
             }
         }
-        return new LaneFundingResult(payments, changedUserIds, treasuryDelta);
+        return new LaneFundingResult(payments, changedUserIds.freeze(), treasuryDelta);
     }
 
-    private static LongArrayList[] groupUsers(ArrayList<Long> userIds, TradingRuntimeState runtime) {
+    private static LongArrayList[] groupUsers(ImmutableLongArrayList userIds, TradingRuntimeState runtime) {
         LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
         for (int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
-        for (long userId : userIds) groups[runtime.topology().accountLaneId(userId)].add(userId);
+        for (int index = 0; index < userIds.size(); index++) {
+            long userId = userIds.valueAt(index);
+            groups[runtime.topology().accountLaneId(userId)].add(userId);
+        }
         return groups;
     }
 
@@ -287,12 +290,13 @@ public final class RuntimePerpetualFundingProcessor {
         }
     }
 
-    private record LaneFundingResult(List<CoreFundingPaymentView> payments, List<Long> changedUserIds,
+    private record LaneFundingResult(List<CoreFundingPaymentView> payments, ImmutableLongArrayList changedUserIds,
                                      RuntimeTreasuryDelta treasuryDelta) {
     }
 
     static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
-        ArrayList<Long> selected = new ArrayList<>();
+        if (limit <= 0) return new UserPage(ImmutableLongArrayList.empty(), 0, 0, true);
+        LongArrayBuilder selected = new LongArrayBuilder(Math.min(limit, 64));
         Iterable<Long> usersAfterCursor = indexedUserIds;
         if (indexedUserIds instanceof NavigableSet<?> indexedSet) {
             @SuppressWarnings("unchecked")
@@ -302,14 +306,44 @@ public final class RuntimePerpetualFundingProcessor {
         for (Long userId : usersAfterCursor) {
             if (userId == null || userId <= startCursorUserId) continue;
             if (selected.size() == limit) {
-                return new UserPage(selected, 0, selected.getLast(), false);
+                return new UserPage(selected.freeze(), 0, selected.last(), false);
             }
-            selected.add(userId);
+            selected.add(userId.longValue());
         }
-        return new UserPage(selected, 0, 0, true);
+        return new UserPage(selected.freeze(), 0, 0, true);
     }
 
-    record UserPage(ArrayList<Long> userIds, int accountLaneId,
+    record UserPage(ImmutableLongArrayList userIds, int accountLaneId,
                     long nextCursorUserId, boolean complete) {
+    }
+
+    /** Small append-only primitive builder used for one funding page/result. */
+    private static final class LongArrayBuilder {
+        private long[] values;
+        private int size;
+
+        private LongArrayBuilder(int initialCapacity) {
+            values = new long[Math.max(1, initialCapacity)];
+        }
+
+        private void add(long value) {
+            if (size == values.length) values = Arrays.copyOf(values, values.length << 1);
+            values[size++] = value;
+        }
+
+        private int size() {
+            return size;
+        }
+
+        private long last() {
+            if (size == 0) throw new IllegalStateException("empty primitive page");
+            return values[size - 1];
+        }
+
+        private ImmutableLongArrayList freeze() {
+            if (size == 0) return ImmutableLongArrayList.empty();
+            return ImmutableLongArrayList.takeOwnership(
+                    size == values.length ? values : Arrays.copyOf(values, size));
+        }
     }
 }

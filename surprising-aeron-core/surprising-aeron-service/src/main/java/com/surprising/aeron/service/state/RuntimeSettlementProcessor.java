@@ -89,7 +89,7 @@ public final class RuntimeSettlementProcessor {
                 ? 0 : previousProgress.accountLaneId();
         UserPage userPage = selectUsers(indexedUserIds, runtime, accountLaneId,
                 command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
-        ArrayList<Long> selectedUserIds = userPage.userIds();
+        List<Long> selectedUserIds = userPage.userIds();
         boolean moreUsers = chunked && !userPage.complete();
         int assetId = identities.assetId(instrument.settleAsset());
         LongArrayList[] usersByLane = groupUsers(selectedUserIds, runtime);
@@ -185,7 +185,7 @@ public final class RuntimeSettlementProcessor {
         int assetId = identities.assetId(instrument.settleAsset());
         UserPage userPage = ordersComplete || !moreOrders
                 ? selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
-                : new UserPage(new ArrayList<>(), accountLaneId, 0, true);
+                : new UserPage(List.of(), accountLaneId, 0, true);
         return new SettlementWork(command, chunkCommandId, runtime,
                 instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
                 moreOrders, userPage);
@@ -204,7 +204,7 @@ public final class RuntimeSettlementProcessor {
         private final TreasuryRuntime.LifecycleProgressRuntime previousProgress;
         private final List<CoreOrderState> selectedOrders;
         private final boolean moreOrders;
-        private final ArrayList<Long> selectedUserIds;
+        private final List<Long> selectedUserIds;
         private final LongArrayList[] usersByLane;
         private final ArrayList<CoreOrderState>[] ordersByLane;
         private final boolean usersComplete;
@@ -238,7 +238,7 @@ public final class RuntimeSettlementProcessor {
             this.command = null; this.chunkCommandId = null;
             this.runtime = runtime; this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
-            this.moreOrders = false; this.selectedUserIds = new ArrayList<>();
+            this.moreOrders = false; this.selectedUserIds = List.of();
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
             this.ordersByLane = (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
             this.usersComplete = true;
@@ -529,7 +529,7 @@ public final class RuntimeSettlementProcessor {
         }
     }
 
-    private static LongArrayList[] groupUsers(ArrayList<Long> userIds, TradingRuntimeState runtime) {
+    private static LongArrayList[] groupUsers(List<Long> userIds, TradingRuntimeState runtime) {
         LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
         for (int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
         for (long userId : userIds) groups[runtime.topology().accountLaneId(userId)].add(userId);
@@ -612,7 +612,7 @@ public final class RuntimeSettlementProcessor {
         }
     }
 
-    private record UserPage(ArrayList<Long> userIds, int accountLaneId,
+    private record UserPage(List<Long> userIds, int accountLaneId,
                             long nextCursorUserId, boolean complete) {
     }
 

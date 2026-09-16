@@ -107,7 +107,7 @@ public final class TriggerOrderCommands {
                     finished = true;
                     return true;
                 }
-                long id = page.ids().get(candidate);
+                long id = page.idAt(candidate);
                 var trigger = owner.runtimeState().triggerOrder(id);
                 if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
                     candidate++;
