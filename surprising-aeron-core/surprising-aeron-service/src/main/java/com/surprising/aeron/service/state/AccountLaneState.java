@@ -2,6 +2,8 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
+import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -292,7 +294,7 @@ public final class AccountLaneState {
         return totalPendingReservations != 0;
     }
 
-    RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex(int symbolId) {
+    AdmissionOrderIndex admissionOrderIndex(int symbolId) {
         assertOwner();
         if (symbolId < 0) throw new IllegalArgumentException("invalid admission symbol");
         admissionOrderIndex.symbolId = symbolId;
@@ -395,15 +397,14 @@ public final class AccountLaneState {
         return order != null && !order.status().terminal();
     }
 
-    private final class LaneAdmissionOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
+    private final class LaneAdmissionOrderIndex implements AdmissionOrderIndex {
         private final Long2ObjectHashMap<IntObjectHashMap<AdmissionAggregate>> summariesByUser =
                 new Long2ObjectHashMap<>();
-        private final RuntimeOrderAdmission.AdmissionSummary summary =
-                new RuntimeOrderAdmission.AdmissionSummary();
+        private final AdmissionSummary summary = new AdmissionSummary();
         private int symbolId;
 
         @Override
-        public RuntimeOrderAdmission.AdmissionSummary inspect(
+        public AdmissionSummary inspect(
                 long userId, String symbol, CorePositionSide positionSide,
                 CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
             IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);

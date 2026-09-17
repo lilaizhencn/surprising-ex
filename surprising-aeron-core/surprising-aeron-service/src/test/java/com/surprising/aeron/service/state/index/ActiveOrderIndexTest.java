@@ -2,7 +2,7 @@ package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.CoreUserState;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission;
+import com.surprising.aeron.service.state.admission.AdmissionSummary;
 import com.surprising.aeron.service.state.StateMapSupport;
 import com.surprising.aeron.service.state.TradingCoreState;
 
@@ -190,7 +190,7 @@ class ActiveOrderIndexTest {
         assertThat(index.reduceOnlyQuantity(11, "BTC-USDT", CoreOrderSide.SELL)).isEqualTo(3);
         assertThat(index.hasDifferentMarginMode(11, "BTC-USDT", CorePositionSide.NET,
                 CoreMarginMode.CROSS)).isTrue();
-        RuntimeOrderAdmission.AdmissionSummary summary = index.inspect(
+        AdmissionSummary summary = index.inspect(
                 11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
         assertThat(summary.pendingQuantity()).isEqualTo(5);
         assertThat(summary.reduceOnlyQuantity()).isZero();

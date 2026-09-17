@@ -7,11 +7,13 @@ import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
+import com.surprising.aeron.service.state.admission.AdmissionSummary;
 import java.util.HashMap;
 
 /** Owner-confined batch execution state; reused only after terminal commit. */
 final class BatchAdmissionOrderIndex
-        implements com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex {
+        implements AdmissionOrderIndex {
     /** 已提交活跃订单索引，作为批内准入计算的基线。 */
     final ActiveOrderIndex baseline;
     /** 字符串与 primitive 标识的唯一字典；生命周期覆盖该运行时。 */
@@ -21,8 +23,7 @@ final class BatchAdmissionOrderIndex
     /** 仅本批产生的币对准入增量，退出批量范围即清空。 */
     final HashMap<String, SymbolAdmissionDelta> deltasBySymbol;
     /** 复用的准入检查结果，不在批量项之间分配临时结果对象。 */
-    final com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary summary =
-            new com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary();
+    final AdmissionSummary summary = new AdmissionSummary();
 
     BatchAdmissionOrderIndex(ActiveOrderIndex baseline, RuntimeIdentityRegistry identities, int expectedOrders) {
         this.identities = identities;
@@ -54,7 +55,7 @@ final class BatchAdmissionOrderIndex
     }
 
     @Override
-    public com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary inspect(
+    public AdmissionSummary inspect(
             long userId, String symbol,
             com.surprising.aeron.protocol.CorePositionSide positionSide,
             com.surprising.aeron.protocol.CoreOrderSide side,

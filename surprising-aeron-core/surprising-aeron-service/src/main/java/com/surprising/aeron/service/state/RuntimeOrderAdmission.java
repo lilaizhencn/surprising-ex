@@ -4,6 +4,9 @@ import com.surprising.aeron.service.state.math.*;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+import com.surprising.aeron.service.state.admission.AdmissionIdentity;
+import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
+import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
@@ -263,41 +266,4 @@ public final class RuntimeOrderAdmission {
         return new CoreStateRejectedException(code, message);
     }
 
-    public interface AdmissionOrderIndex {
-        AdmissionSummary inspect(long userId, String symbol, CorePositionSide positionSide,
-                                 CoreOrderSide side, CoreMarginMode conflictingMarginMode);
-
-        default void admitted(long userId, ResolvedPlaceOrder order) {
-        }
-    }
-
-    public static final class AdmissionSummary {
-        private long pendingQuantity;
-        private long reduceOnlyQuantity;
-        private int marginModeCount;
-
-        public long pendingQuantity() {
-            return pendingQuantity;
-        }
-
-        public long reduceOnlyQuantity() {
-            return reduceOnlyQuantity;
-        }
-
-        public int marginModeCount() {
-            return marginModeCount;
-        }
-
-        public AdmissionSummary set(long pendingQuantity, long reduceOnlyQuantity, int marginModeCount) {
-            this.pendingQuantity = pendingQuantity;
-            this.reduceOnlyQuantity = reduceOnlyQuantity;
-            this.marginModeCount = marginModeCount;
-            return this;
-        }
-    }
-
-    /** Primitive admission flags; zero means no client/position identity and -1 means no symbol. */
-    public record AdmissionIdentity(
-            long clientKey, int symbolId, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-    }
 }

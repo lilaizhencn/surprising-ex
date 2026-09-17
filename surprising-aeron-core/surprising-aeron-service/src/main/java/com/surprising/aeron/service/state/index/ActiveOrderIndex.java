@@ -4,10 +4,11 @@ import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
+import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
@@ -25,7 +26,7 @@ import org.eclipse.collections.api.iterator.LongIterator;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongHashSet;
 
-public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
+public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
     /**
@@ -82,8 +83,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
-    private final RuntimeOrderAdmission.AdmissionSummary admissionSummary =
-            new RuntimeOrderAdmission.AdmissionSummary();
+    private final AdmissionSummary admissionSummary = new AdmissionSummary();
 
     public ActiveOrderIndex(TradingCoreState state) {
         this(state, null);
@@ -250,7 +250,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     @Override
-    public RuntimeOrderAdmission.AdmissionSummary inspect(
+    public AdmissionSummary inspect(
             long userId, String symbol,
             com.surprising.aeron.protocol.CorePositionSide positionSide,
             com.surprising.aeron.protocol.CoreOrderSide side,

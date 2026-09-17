@@ -657,7 +657,7 @@ public final class TriggerOrderCommands {
         private boolean cancelOco;
         private com.surprising.aeron.service.state.ResolvedPlaceOrder order;
         private String failureReason;
-        private com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity identity;
+        private com.surprising.aeron.service.state.admission.AdmissionIdentity identity;
         private int assetId, laneId;
         private long openInterest;
         private java.util.NavigableSet<Long> siblings;

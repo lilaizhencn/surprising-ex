@@ -7,6 +7,7 @@ import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.admission.AdmissionIdentity;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -302,7 +303,7 @@ public final class RuntimeCommandProcessor {
     /** Trigger claim, OCO cancellations and this reservation share one control Lane task. */
     public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
-            RuntimeOrderAdmission.AdmissionIdentity identity, long clientKey, int assetId) {
+            AdmissionIdentity identity, long clientKey, int assetId) {
         AccountLaneState lane = runtime.laneCommandScope.get();
         if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
             throw new IllegalStateException("trigger child requires its Account Lane");
