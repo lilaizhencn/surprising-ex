@@ -33,5 +33,8 @@
  * <p>{@code RiskSnapshotQueries} 只从风险快照、用户、持仓和行情状态组装查询视图，不写入任何
  * 权威状态；{@code RiskScanControlStateTransitions} 只更新版本化扫描控制，不修改扫描进度、风险
  * 快照或强平状态。</p>
+ *
+ * <p>{@code InstrumentStateTransitions} 只拥有 {@code instruments} 的版本化配置写入；
+ * {@code MarkPriceStateTransitions} 只拥有标记价和风险扫描失效标记，扫描执行仍由风险扫描流程负责。</p>
  */
 package com.surprising.aeron.service.state;

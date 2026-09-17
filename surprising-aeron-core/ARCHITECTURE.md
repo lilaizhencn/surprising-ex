@@ -152,6 +152,8 @@ CoreMessage / PlaceOrderCommand
 流水仍由各自的业务状态转换负责。
 `RiskSnapshotQueries` 只组装风险查询视图，不写入权威状态；`RiskScanControlStateTransitions`
 只更新版本化扫描控制，不修改扫描进度、风险快照或强平状态。
+`InstrumentStateTransitions` 只拥有 `instruments` 的版本化配置写入；`MarkPriceStateTransitions`
+只拥有标记价和风险扫描失效标记，扫描执行仍由风险扫描流程负责。
 
 ## 4. 第一阶段不做的事情
 

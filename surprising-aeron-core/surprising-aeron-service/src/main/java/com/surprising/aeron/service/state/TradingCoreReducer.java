@@ -408,44 +408,7 @@ public final class TradingCoreReducer {
     }
 
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
-        CoreInstrumentState instrument = CoreInstrumentState.from(state.productLine(), command);
-        CoreInstrumentState current = state.instruments().get(instrument.symbol());
-        if (current != null && instrument.lastChangeId() <= current.lastChangeId()) {
-            if (instrument.withMaintenance(current.maintenance()).equals(current)) return state;
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "instrument audit id must increase");
-        }
-        if (current != null && instrument.changeId() == current.changeId()) {
-            var statusUpdate = current.withStatus(instrument.status(), instrument.lastChangeId());
-            if (!instrument.withMaintenance(current.maintenance()).equals(statusUpdate)) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "calculation changes require a new audit reference");
-            }
-            Map<String, CoreInstrumentState> updated = StateMapSupport.delta(state.instruments());
-            updated.put(instrument.symbol(), statusUpdate);
-            return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(), state.orders(),
-                    updated, state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                    state.clientOrderIndex(), state.triggerOrders());
-        }
-        if (current != null && instrument.changeId() < current.changeId()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "calculation audit id cannot decrease");
-        }
-        boolean openOrder = state.orders().values().stream()
-                .anyMatch(order -> order.status() == CoreOrderStatus.OPEN
-                        && order.symbol().equals(instrument.symbol()));
-        boolean openPosition = state.users().values().stream()
-                .flatMap(user -> user.positions().values().stream())
-                .anyMatch(position -> position.symbol().equals(instrument.symbol())
-                        && position.signedQuantitySteps() != 0);
-        if (current != null && (openOrder || openPosition)) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_IN_USE",
-                    "cannot replace instrument version with open state");
-        }
-        Map<String, CoreInstrumentState> instruments = StateMapSupport.delta(state.instruments());
-        instruments.put(instrument.symbol(), current == null ? instrument : instrument.withMaintenance(current.maintenance()));
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(),
-                instruments, state.riskState(),
-                state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                state.clientOrderIndex(), state.triggerOrders());
+        return InstrumentStateTransitions.upsert(state, command);
     }
 
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command) {
@@ -460,48 +423,8 @@ public final class TradingCoreReducer {
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command,
                                            PositionUserIndex positionUserIndex,
                                            LiquidationIndex liquidationIndex) {
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
-        CoreMarkPriceState current = state.riskState().markPrices().get(instrument.symbol());
-        if (current != null && command.priceSequence() <= current.priceSequence()) {
-            throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
-        }
-        Map<String, CoreMarkPriceState> marks = StateMapSupport.delta(state.riskState().markPrices());
-        if (instrument.contractType().isOption()
-                && (command.indexPriceTicks() <= 0 || command.forwardPriceTicks() <= 0)) {
-            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
-                    "option mark requires index and same-expiry forward prices");
-        }
-        marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.changeId(),
-                command.markPriceTicks(), command.indexPriceTicks(), command.forwardPriceTicks(),
-                command.priceSequence(), command.generatedAtEpochMillis()));
-        Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
-        CoreRiskState.RiskScan currentScan = scans.get(instrument.symbol());
-        long scanStart = currentScan != null && !currentScan.riskComplete()
-                ? currentScan.scanStartPriceSequence() : command.priceSequence();
-        long lastUserId = currentScan != null && !currentScan.riskComplete() ? currentScan.lastUserId() : 0;
-        int accountLaneId = currentScan != null && !currentScan.riskComplete()
-                ? currentScan.accountLaneId() : 0;
-        CoreRiskScanControlView scanControl = state.riskState().scanControl();
-        CoreRiskState.RiskScan markedScan = new CoreRiskState.RiskScan(instrument.symbol(), accountLaneId,
-                command.priceSequence(), scanStart, lastUserId, !scanControl.enabled(),
-                0, 0, "-", 0, 0, 0, 0, 0,
-                true, 0, 0, 0, 0, 0, 0, 0, 0,
-                currentScan == null ? 0 : currentScan.lastScheduledRevision());
-        if (scanControl.enabled() && currentScan != null && !currentScan.riskComplete()
-                && !currentScan.laneProgress().isEmpty()) {
-            var laneProgress = new java.util.ArrayList<RiskLaneProgress>(currentScan.laneProgress().size());
-            for (var lane : currentScan.laneProgress()) laneProgress.add(new RiskLaneProgress(lane.lastUserId(),
-                    lane.complete(), 0, 0, "-", 0, 0, 0, 0, 0));
-            markedScan = markedScan.withLaneProgress(laneProgress);
-        }
-        scans.put(instrument.symbol(), markedScan);
-        CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
-                state.riskState().liquidations(), scans, state.riskState().nextLiquidationId(), scanControl, Math.incrementExact(state.revision()));
-        TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(),
-                state.instruments(), risk, state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
-                state.triggerOrders());
+        TradingCoreState withMark = MarkPriceStateTransitions.apply(state, command);
+        CoreRiskScanControlView scanControl = withMark.riskState().scanControl();
         return scanControl.enabled()
                 ? continueRiskScan(withMark, scanControl.scanBatchSize(), positionUserIndex, liquidationIndex)
                 : withMark;
