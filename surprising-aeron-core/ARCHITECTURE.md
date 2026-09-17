@@ -140,7 +140,8 @@ CoreMessage / PlaceOrderCommand
 `ResolvedPlaceOrder`，`state.admission.RuntimeOrderAdmission` 负责运行时状态准入和冻结需求调用，
 `OrderStateTransitions` 负责持久化 `TradingCoreState` 中订单、余额和预留的原子变更，
 包括下单、撤单、拒单、成交后的预留释放和强平批量撤单。账户 Lane、活跃订单索引和批量编排
-只实现 `AdmissionOrderIndex` 协议，不直接拥有订单或余额状态。
+只实现 `AdmissionOrderIndex` 协议，不直接拥有订单或余额状态。`TriggerOrderStateTransitions`
+单独拥有 `triggerOrders` 集合的创建、撤销、触发、过期和重试状态推进，不修改余额、持仓或普通订单。
 
 ## 4. 第一阶段不做的事情
 

@@ -13,5 +13,8 @@
  *
  * <p>{@code OrderStateTransitions} 是持久化订单生命周期的状态所有者：它原子更新订单、余额、
  * 预留和客户端订单索引；{@code TradingCoreReducer} 只保留兼容入口及其他风险、成交、结算流程。</p>
+ *
+ * <p>{@code TriggerOrderStateTransitions} 只拥有 {@code triggerOrders} 集合及其状态推进，
+ * 不修改余额、普通订单、持仓或成交状态。</p>
  */
 package com.surprising.aeron.service.state;
