@@ -137,8 +137,6 @@ public final class TradingCoreReducer {
         return RiskSnapshotQueries.find(state, userId, snapshotKeys);
     }
 
-    private static final long PPM = 1_000_000L;
-
     public TradingCoreState updateLeverage(TradingCoreState state, long userId, UpdateLeverageCommand command) {
         return LeverageStateTransitions.update(state, userId, command);
     }
@@ -718,64 +716,7 @@ public final class TradingCoreReducer {
 
     public java.util.List<com.surprising.aeron.protocol.CoreAdlCandidateView> adlCandidates(
             TradingCoreState state, String asset, int limit, AdlPositionIndex index) {
-        String normalizedAsset = AssetBalance.normalizeAsset(asset);
-        java.util.ArrayList<com.surprising.aeron.protocol.CoreAdlCandidateView> result = new java.util.ArrayList<>();
-        Iterable<AdlPositionIndex.PositionKey> keys = index == null
-                ? state.users().values().stream().flatMap(user -> user.positions().values().stream()
-                        .filter(position -> position.signedQuantitySteps() != 0
-                                && position.marginAsset().equals(normalizedAsset))
-                        .map(position -> new AdlPositionIndex.PositionKey(user.userId(), position.symbol(),
-                                position.positionSide()))).toList()
-                : index.positions(normalizedAsset);
-        for (AdlPositionIndex.PositionKey key : keys) {
-            CoreUserState user = state.user(key.userId());
-            CorePositionState position = user == null ? null
-                    : user.positions().get(positionKey(key.symbol(), key.positionSide()));
-            if (user == null || position == null) continue;
-                if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(normalizedAsset)) continue;
-                CoreInstrumentState instrument = state.instruments().get(position.symbol());
-                CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
-                if (instrument == null || mark == null
-                    || !(instrument.contractType().isPerpetual() || instrument.contractType().isDelivery()
-                    || instrument.contractType().isOption())
-                        || !instrument.settleAsset().equals(normalizedAsset)) continue;
-                long profit = CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
-                        position.entryPriceTicks(), mark.markPriceTicks());
-                if (profit <= 0) continue;
-                long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
-                        instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
-                        instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
-                        instrument.settleScaleUnits());
-                long margin = position.marginMode() == com.surprising.aeron.protocol.CoreMarginMode.ISOLATED
-                        ? position.positionMarginUnits()
-                        : user.totalUnits(normalizedAsset);
-                long profitRate = ratio(profit, notional);
-                long leverage = margin <= 0 ? Long.MAX_VALUE : ratio(notional, margin);
-                long priority = multiplyDivideCapped(profitRate, leverage, PPM);
-                result.add(new com.surprising.aeron.protocol.CoreAdlCandidateView(user.userId(), position.symbol(),
-                        normalizedAsset, position.marginMode(), position.positionSide(),
-                        position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks(),
-                        mark.priceSequence(), notional, profit, margin, profitRate, leverage, priority));
-        }
-        return result.stream().sorted(java.util.Comparator
-                        .comparingLong(com.surprising.aeron.protocol.CoreAdlCandidateView::priorityScorePpm).reversed()
-                        .thenComparing(java.util.Comparator.comparingLong(
-                                com.surprising.aeron.protocol.CoreAdlCandidateView::unrealizedProfitUnits).reversed())
-                        .thenComparingLong(com.surprising.aeron.protocol.CoreAdlCandidateView::userId)
-                        .thenComparing(com.surprising.aeron.protocol.CoreAdlCandidateView::symbol))
-                .limit(limit).toList();
-    }
-
-    private static long ratio(long numerator, long denominator) {
-        return numerator <= 0 || denominator <= 0 ? 0 : multiplyDivideCapped(numerator, PPM, denominator);
-    }
-
-    private static long multiplyDivideCapped(long left, long right, long divisor) {
-        try {
-            return Math.multiplyExact(left, right) / divisor;
-        } catch (ArithmeticException exception) {
-            return Long.MAX_VALUE;
-        }
+        return AdlCandidateQueries.find(state, asset, limit, index);
     }
 
     private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {

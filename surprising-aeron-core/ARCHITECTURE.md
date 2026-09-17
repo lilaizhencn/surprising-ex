@@ -161,7 +161,7 @@ CoreMessage / PlaceOrderCommand
 `LiquidationResolution` 只负责保险覆盖的确定性校验、保险基金/亏空变更和强平状态推进；不参与
 ADL 对手方持仓变更。
 `AdlExecution` 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
-`adlCandidates` 仍是独立查询入口。
+`AdlCandidateQueries` 负责只读 ADL 候选视图和确定性排序，`adlCandidates` 仍是 Reducer 的兼容查询入口。
 `InsuranceFundStateTransitions` 只负责直接调整 treasury 保险基金余额；清算覆盖仍由
 `LiquidationResolution` 按清算状态和确定性分配规则推进。
 
