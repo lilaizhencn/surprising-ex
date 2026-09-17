@@ -50,6 +50,14 @@ public final class MatcherSettlementPlan {
     private long[] initialOrderScratch;
     private static final long[] NO_ORDERS = new long[0];
     private OrderRuntime directTaker;
+    /**
+     * Direct PLACE facts are built by the Matcher before the Account Lane has exposed its
+     * mutable OrderRuntime.  Keep the immutable order fields needed for proof and Lane-side
+     * validation instead of allocating a detached OrderRuntime on the Owner thread.
+     */
+    private com.surprising.aeron.protocol.CoreOrderSide directTakerSide;
+    private int directTakerSymbolId;
+    private long directTakerInstrumentChangeId;
     private static final ThreadLocal<LongHashSet> DIRECT_ORDER_KEYS = ThreadLocal.withInitial(LongHashSet::new);
     /** Read-only view owned by this plan; it remains valid until the enclosing context is recycled. */
     private final List<Long> orderIdView = new OrderIdView(this);
@@ -62,6 +70,9 @@ public final class MatcherSettlementPlan {
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
         directTaker = null; takerLaneId = -1;
+        directTakerSide = null;
+        directTakerSymbolId = 0;
+        directTakerInstrumentChangeId = 0;
     }
 
     /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
@@ -72,9 +83,33 @@ public final class MatcherSettlementPlan {
                 || result.nativeOrderId() != taker.orderId()
                 || instrument.changeId() != taker.instrumentChangeId())
             throw new IllegalArgumentException("invalid direct matcher fact");
+        buildDirect(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
+                taker.instrumentChangeId(), taker.remainingQuantitySteps(), taker, instrument, result, runtime);
+    }
+
+    /** Build an accepted PLACE fact from immutable admission data; no detached runtime order. */
+    void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrumentState instrument,
+                     CoreMatchingResult result, TradingRuntimeState runtime) {
+        if (userId <= 0 || taker == null || instrument == null || result == null
+                || result.nativeCoreSequence() != sequence
+                || result.nativeOrderId() != taker.orderId()
+                || instrument.changeId() != taker.instrumentChangeId())
+            throw new IllegalArgumentException("invalid direct matcher fact");
+        buildDirect(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
+                taker.instrumentChangeId(), taker.quantitySteps(), null, instrument, result, runtime);
+    }
+
+    private void buildDirect(long sequence, long orderId, long userId,
+                             com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
+                             long instrumentChangeId, long remainingQuantity, OrderRuntime taker,
+                             CoreInstrumentState instrument, CoreMatchingResult result,
+                             TradingRuntimeState runtime) {
         clearReferences();
         coreSequence = sequence; directTaker = taker;
-        takerOrderId = taker.orderId(); activeUserId = taker.userId();
+        directTakerSide = side;
+        directTakerSymbolId = symbolId;
+        directTakerInstrumentChangeId = instrumentChangeId;
+        takerOrderId = orderId; activeUserId = userId;
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         matcherEvents = result.matcherEvents();
@@ -84,7 +119,7 @@ public final class MatcherSettlementPlan {
         keys.clear();
         try {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);
-            long remaining = taker.remainingQuantitySteps();
+            long remaining = remainingQuantity;
             for (int index = 0; index < matcherEvents.size(); index++) {
                 MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
@@ -137,6 +172,27 @@ public final class MatcherSettlementPlan {
         if (orderCount != 0) orderIds[0] = order.orderId();
     }
 
+    /**
+     * Rejection after a Lane admission does not have an order after-image.  Keep only the
+     * routing facts needed to retire the direct event; constructing a synthetic OrderRuntime
+     * here would add an allocation for every rejected admission.
+     */
+    void prepareRejectedDirect(long sequence, long userId, long orderId, long laneMask,
+                               CoreMatchingResult result) {
+        if (sequence <= 0 || userId <= 0 || orderId <= 0 || laneMask == 0 || result == null) {
+            throw new IllegalArgumentException("invalid rejected direct matcher fact");
+        }
+        clearReferences();
+        coreSequence = sequence;
+        takerOrderId = orderId;
+        activeUserId = userId;
+        requiredLaneMask = laneMask;
+        rejectedTaker = true;
+        matcherEvents = result.matcherEvents();
+        orderCount = 0;
+        tradeCount = 0;
+    }
+
     void omitUnplacedOrder() {
         int count = 0;
         for (int index = 0; index < orderCount; index++)
@@ -147,10 +203,10 @@ public final class MatcherSettlementPlan {
     /** The single account writer checks the current order, including earlier fills in this batch. */
     void validateDirectLane(AccountLaneState lane, TradingRuntimeState runtime,
                             RuntimeIdentityRegistry identities, CoreInstrumentState instrument) {
-        if (directTaker == null) return;
+        if (directTakerSide == null) return;
         if (runtime.topology().accountLaneId(activeUserId) == lane.laneId()) {
             OrderRuntime taker = lane.orders.get(takerOrderId);
-            requireDirectOrder(taker, activeUserId, directTaker.side());
+            requireDirectOrder(taker, activeUserId, directTakerSide);
             if (tradeCount != 0) runtime.retainDirectPositionIdentity(lane, identities, instrument, taker);
         }
         // Deep-fill plans already carry a per-maker-Lane event chain.  Reuse it here so
@@ -164,7 +220,7 @@ public final class MatcherSettlementPlan {
                     || !matcherEventTouchesLane(index, lane.laneId(), runtime)
                     || runtime.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
             OrderRuntime maker = lane.orders.get(event.matchedOrderId());
-            requireDirectOrder(maker, event.matchedOrderUid(), directTaker.side()
+            requireDirectOrder(maker, event.matchedOrderUid(), directTakerSide
                     == com.surprising.aeron.protocol.CoreOrderSide.BUY
                     ? com.surprising.aeron.protocol.CoreOrderSide.SELL
                     : com.surprising.aeron.protocol.CoreOrderSide.BUY);
@@ -177,8 +233,8 @@ public final class MatcherSettlementPlan {
     private void requireDirectOrder(OrderRuntime order, long userId,
                                     com.surprising.aeron.protocol.CoreOrderSide side) {
         if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
-                || order.symbolId() != directTaker.symbolId() || order.side() != side
-                || order.instrumentChangeId() != directTaker.instrumentChangeId())
+                || order.symbolId() != directTakerSymbolId || order.side() != side
+                || order.instrumentChangeId() != directTakerInstrumentChangeId)
             throw new IllegalStateException("matcher fact does not match Lane-owned order");
     }
     /** 仅触发子订单携带；owner 派发前构造，taker Lane 在同一结算事件中写入。 */

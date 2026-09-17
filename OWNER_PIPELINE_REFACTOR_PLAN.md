@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.12 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.14 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -411,3 +411,7 @@ OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结
 - 阶段 8.12 验收：JDK 27 下服务模块全量回归 `912 tests, 0 failures, 0 errors, 1 skipped`；撮合证据、前缀恢复、批量、跨 Lane 结算、响应编码和资金守恒目标通过。统一 64/128 窗口吞吐复测已完成，详见下一条记录。
 - 阶段 8.12 性能复测：统一 async harness（JDK 27、G1、BUSY_SPIN、1 Matcher、4 Lane、128 symbols、MIXED batch20、JFR）64 窗口 `307,223 ops/s`、p99 `8.44 ms`、Owner `93.16%`；128 窗口 `321,334 ops/s`、p99 `16.04 ms`、Owner `97.22%`。客户端校验和 saturation gate 均通过；`MatcherPrefix` 已从 Core 分配热点中消失，但 Owner 饱和、p99 和总分配门槛仍未达标。
 - 最终正确性审计进行中：service 模块门槛保持绿色；全仓 benchmark 套件唯一失败为 `LinearPerpetualBenchmarkSupportTest.saturatedWorkloadMaintainsOneSharedCoreWindowAndPreservesFunds` 的既有口径问题。该测试通过同步 `state.apply()` 驱动，基线 `752ec39f` 与当前代码均报告 `settlementInFlightHighWaterMark=0`，但断言要求异步结算才会产生的值至少为 2；其业务计数、成交、资金守恒、订单和 client identity 均通过。该 benchmark 不作为本次代码回归失败依据，后续压测使用独立 async cluster harness；统一 64/128 窗口压测及 JFR 归因仍待审计记录收敛后执行。
+- 阶段 8.13（NativeCommand 结果身份原语化）：已完成。`CoreMatchingResult` 在 Matcher 热路径保存 core/order/shard/sequence 等原语，`nativeCommand()` 仅作为兼容 API 懒物化；证据绑定与前缀校验不再创建 `NativeCommand`。JDK 27 服务全量回归 `912 tests, 0 failures, 0 errors, 1 skipped`。
+- 阶段 8.14（普通 PLACE 去除 Owner detached OrderRuntime）：已完成。Matcher 直达结算保留已有不可变 `ResolvedPlaceOrder`，`MatcherSettlementPlan` 用原语校验字段构建事实，Lane 在执行时从自己的订单表取得真实 `OrderRuntime`；拒绝准入只保留路由原语，删除 Owner 侧额外 `OrderRuntime` 构造。旧 admission source 引用不再跨线程保留，事件回收时无悬挂引用。
+- 阶段 8.14 验收：JDK 27 下编译通过；服务模块全量 `912 tests, 0 failures, 0 errors, 1 skipped`，普通 PLACE admission、Matcher 拒绝、跨 Lane 结算、批量、snapshot/replay、幂等和资金守恒目标通过。
+- 阶段 8.14 性能复测：统一 async harness（JDK 27、G1、BUSY_SPIN、1 Matcher、4 Lane、128 symbols、MIXED batch20、JFR）64 窗口 `294,099 ops/s`、p99 `7.75 ms`、Owner `94.16%`；128 窗口 `317,241 ops/s`、p99 `15.52 ms`、Owner `97.53%`。相比阶段 8.13，`preparedOrder` 的 Owner detached 构造已从调用链移除，但 Lane 必须创建真实订单，稳态吞吐没有上升；Owner 仍是瓶颈，Matcher 约 58–60%，Lane 约 98%，下一阶段应直接处理 `OrderRuntime.snapshot()`、结果响应/投影和 Owner commit 热点，而不是继续增加 Matcher 并发。

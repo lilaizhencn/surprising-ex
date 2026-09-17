@@ -91,6 +91,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private int matcherCompletionShard;
     /** Optional normal-PLACE admission receipt consumed by the Matcher before matching. */
     private boolean admissionRequired;
+    /** Immutable admission input retained by the pooled settlement until the Matcher builds its fact. */
+    private ResolvedPlaceOrder admissionOrder;
+    private long admissionUserId;
+    private long admissionOrderId;
     private int admissionLaneId = -1;
     /** Admission outcome copied from the fixed Lane→Matcher receipt slot. */
     private volatile boolean admissionResolved;
@@ -175,6 +179,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         expandLaneRoute = runtime.asynchronousCommands() && Long.bitCount(laneMask) == 1;
         directFailure = null;
         admissionRequired = false;
+        admissionOrder = null;
+        admissionUserId = admissionOrderId = 0;
         admissionLaneId = -1;
         admissionResolved = false;
         admissionAccepted = false;
@@ -278,6 +284,15 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public boolean admissionAccepted() { return !admissionRequired || admissionAccepted; }
     int admissionLaneId() { return admissionLaneId; }
 
+    void admissionOrder(ResolvedPlaceOrder order, long userId) {
+        if (!direct || !admissionRequired || order == null || userId <= 0) {
+            throw new IllegalStateException("invalid place admission order");
+        }
+        admissionOrder = order;
+        admissionUserId = userId;
+        admissionOrderId = order.orderId();
+    }
+
     /** Matcher copies a receipt slot into this already pooled event. */
     void admissionReceipt(long reservationId, long accountVersion, long reservedAmount,
                           boolean accepted, int resultCode) {
@@ -368,8 +383,23 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     batchStorage.admittedOrders[index], result, runtime);
             return;
         }
-        batchPlans[index].buildDirect(directCoreSequence, batchStorage.admittedOrders[index],
-                batchInstruments[index], result, runtime);
+        if (admissionRequired && admissionAccepted) {
+            if (admissionOrder == null) throw new IllegalStateException("place admission order is missing");
+            batchPlans[index].buildDirect(directCoreSequence, admissionUserId, admissionOrder,
+                    batchInstruments[index], result, runtime);
+        } else {
+            OrderRuntime admitted = batchStorage.admittedOrders[index];
+            if (admitted == null) {
+                if (!admissionRequired || admissionAccepted) {
+                    throw new IllegalStateException("direct matcher order is missing");
+                }
+                batchPlans[index].prepareRejectedDirect(directCoreSequence, admissionUserId,
+                        admissionOrderId, routedLaneMask, result);
+                return;
+            }
+            batchPlans[index].buildDirect(directCoreSequence, admitted,
+                    batchInstruments[index], result, runtime);
+        }
         batchPlans[index].preCancellationsFromResult(result.cancellations(), authorizedCancellations,
                 replacement == null ? 0 : replacement.originalOrderId());
         if (replacement != null && !result.accepted()) batchPlans[index].omitUnplacedOrder();
@@ -598,6 +628,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         matcherCompletionRoute = null;
         matcherCompletionShard = -1;
         admissionRequired = false;
+        admissionOrder = null;
+        admissionUserId = admissionOrderId = 0;
         admissionLaneId = -1;
         admissionResolved = false;
         admissionAccepted = false;

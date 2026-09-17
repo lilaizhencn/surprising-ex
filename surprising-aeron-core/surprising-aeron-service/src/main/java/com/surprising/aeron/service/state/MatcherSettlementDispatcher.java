@@ -64,11 +64,24 @@ final class MatcherSettlementDispatcher {
         owner.assertOwner();
         if (admission == null) throw new IllegalArgumentException("place admission is missing");
         ResolvedPlaceOrder resolved = admission.preparedOrder();
-        OrderRuntime prepared = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
-                resolved, commandId, resolved.symbolId(), timestamp, position);
-        MatcherSettlementEvent event = prepareDirect(sequence, laneMask, prepared, null, 1,
-                commandId, shard, identities, timestamp, position, cancellations, target);
+        if (resolved == null) throw new IllegalArgumentException("place admission order is missing");
+        owner.ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(1);
+        CoreInstrumentState instrument = owner.instrument(identities.symbol(resolved.symbolId()));
+        if (instrument == null || instrument.changeId() != resolved.instrumentChangeId()) {
+            throw new IllegalStateException("direct settlement instrument changed");
+        }
+        storage.instruments[0] = instrument;
+        storage.baseAssetIds[0] = identities.assetId(instrument.baseAsset());
+        storage.quoteAssetIds[0] = identities.assetId(instrument.quoteAsset());
+        storage.settleAssetIds[0] = identities.assetId(instrument.settleAsset());
+        storage.metadataSlots.put(resolved.symbolId(), 0);
+        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+                owner, identities, 1, cancellations, target);
         event.admissionRoute(admission.laneId());
+        event.admissionOrder(resolved, admission.userId());
         return event;
     }
 
