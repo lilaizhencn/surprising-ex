@@ -150,6 +150,8 @@ CoreMessage / PlaceOrderCommand
 变更中同时更新可用/锁定余额与持仓保证金，保证资金转移和保证金变化不可分离。
 `BalanceStateTransitions` 只负责直接调整用户可用余额；订单冻结/解冻、持仓保证金和 treasury
 流水仍由各自的业务状态转换负责。
+`FundingStateTransitions` 只负责永续资金费的产品线校验、标记价冻结、分页游标、用户余额变更、
+资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。
 `RiskSnapshotQueries` 只组装风险查询视图，不写入权威状态；`RiskScanControlStateTransitions`
 只更新版本化扫描控制，不修改扫描进度、风险快照或强平状态。
 `InstrumentStateTransitions` 只拥有 `instruments` 的版本化配置写入；`MarkPriceStateTransitions`

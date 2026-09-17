@@ -30,6 +30,9 @@
  * <p>{@code BalanceStateTransitions} 只负责直接调整用户可用余额；订单冻结/解冻、持仓保证金和
  * treasury 流水仍由各自的业务状态转换负责。</p>
  *
+ * <p>{@code FundingStateTransitions} 只负责永续资金费的产品线校验、标记价冻结、分页游标、用户余额
+ * 变更、资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。</p>
+ *
  * <p>{@code RiskSnapshotQueries} 只从风险快照、用户、持仓和行情状态组装查询视图，不写入任何
  * 权威状态；{@code RiskScanControlStateTransitions} 只更新版本化扫描控制，不修改扫描进度、风险
  * 快照或强平状态。</p>
