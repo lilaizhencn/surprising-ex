@@ -37,6 +37,16 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         item.resultOrderSymbol = symbol;
         item.laneResultPrepared = true;
     }
+    @Override public boolean captureUnchangedResults() {
+        // Only pipelined PLACE batches keep every result item on one owning Account Lane.  A
+        // CANCEL/AMEND batch may retire or replace an order and must retain its existing response
+        // omission semantics, while sequential PLACE items are still completed by the legacy
+        // item continuation.
+        return pipelined && kind == OrderBatchKind.PLACE;
+    }
+    @Override public boolean resultPrepared(int index) {
+        return items.get(index).laneResultPrepared;
+    }
     /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
     byte[] preparedResponse;
     /** Owner-only ordering links; never read by Matcher/Lane and detached before pool reuse. */

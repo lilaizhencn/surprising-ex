@@ -7,6 +7,12 @@ public interface LaneOrderResultTarget {
     long resultOriginalOrderId(int index);
     void resultOrder(int index, OrderRuntime order, String symbol);
 
+    /** Batch PLACE targets may resolve unchanged orders directly from their owning Lane. */
+    default boolean captureUnchangedResults() { return false; }
+
+    /** Whether a result slot was already filled by a changed-order capture. */
+    default boolean resultPrepared(int index) { return false; }
+
     /** 最终账户 Lane 已捕获结果后准备响应；在完成回执发布之前调用。 */
     void prepareResponse();
 
@@ -39,6 +45,25 @@ public interface LaneOrderResultTarget {
             }
             target.resultOrder(i, order, order == null ? null : identities.symbol(order.symbolId()));
         }
+        if (target.captureUnchangedResults()) captureUnchanged(target, identities, lane);
         target.prepareResponse();
+    }
+
+    /**
+     * Batch PLACE result slots also contain accepted orders with no fill. Resolve those slots
+     * from the Lane-owned map after all settlement mutations, so the Owner does not perform a
+     * second global publication lookup while encoding the response.
+     */
+    static void captureUnchanged(LaneOrderResultTarget target,
+                                 RuntimeIdentityRegistry identities, AccountLaneState lane) {
+        for (int index = 0; index < target.resultCount(); index++) {
+            if (target.resultPrepared(index)) continue;
+            OrderRuntime order = lane.orders.get(target.resultOrderId(index));
+            if (order == null) {
+                long original = target.resultOriginalOrderId(index);
+                if (original > 0) order = lane.orders.get(original);
+            }
+            target.resultOrder(index, order, order == null ? null : identities.symbol(order.symbolId()));
+        }
     }
 }

@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 7.2c 已完成，阶段 7.3 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 7.3 已完成，阶段 7.4 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -358,4 +358,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 7.2b（批量准入完成通知收敛）：已完成。删除批量准入 Lane 序号通知队列、Owner 期望计数及逐条消费，改为 Matcher shard 唤醒位；完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
 - 阶段 7.2c（批量准入 Owner 交接去重）：已完成。批量准入的 Lane publication 在 Matcher 提交前已经由 Owner 应用；提交阶段改为只接管 primitive changed-key、余额和资金增量，删除重复的 `LaneDelta.commitTerminalToOwner` 全量用户/订单/预留遍历与再次写入。保留失败回滚、资金守恒、快照和有序提交边界。
 - 阶段 7.2c 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；批量 admission、并发通知、管线和恢复目标测试通过；未执行吞吐压测。
-- 下一阶段为阶段 7.3：迁移批量 PLACE/CANCEL/AMEND 的终态响应和结果视图交接，随后按同一模型迁移风控/强平、资金费/结算、ADL、交割和期权等命令，完成后再统一压测。
+- 阶段 7.3（批量 PLACE 终态响应交接）：已完成。流水 PLACE batch 的结果目标明确声明其所有项属于同一 Account Lane；Lane 在结算完成后从私有订单表补齐未发生变化的订单 after-image，并在完成回执前编码批量响应。Owner 不再为这类批量逐项查询 `runtimeOrder` 或承担响应编码；CANCEL/AMEND、顺序 PLACE 及终态撤单继续使用原有兼容语义。
+- 阶段 7.3 验收：JDK 27 下 `ClusterCommandPipelineTest`、`CoreOrderedOrderBatchTest`、`RuntimeCommitRecoveryTest` 定向回归通过，随后服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
+- 下一阶段为阶段 7.4：收敛风控扫描和强平的 Owner 扫描/分配边界，复用固定 scan continuation，再按同一模型迁移资金费/结算、ADL、交割和期权等命令，完成后再统一压测。
