@@ -1282,10 +1282,7 @@ class ClusterCommandPipelineTest {
             f.setup();
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
             CoreFaults.attachRealtime(f.service, outbox);
-            var field = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
-            field.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            var requests = (java.util.Queue<RealtimeFrame>) field.get(f.service);
+            var requests = f.service.snapshotRequests();
             f.send(f.placeBatch(11, "BTC-USDT", 1000));
             requests.add(new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
                     11, 0, 0, TIME, 900, "", "", new byte[0]));
@@ -1793,9 +1790,7 @@ class ClusterCommandPipelineTest {
             });
             var first = live.place(11, "BTC-USDT", 50000, 80, 1, CoreOrderSide.BUY);
             var second = live.placeBatch(11, "BTC-USDT", 51000);
-            var windowField = SurprisingClusteredService.class.getDeclaredField("commandWindow");
-            windowField.setAccessible(true);
-            var window = (ClusterCommandWindow) windowField.get(live.service);
+            var window = live.service.commandWindow();
             var decodedField = ClusterCommandWindow.class.getDeclaredField("decoded");
             decodedField.setAccessible(true);
             try {

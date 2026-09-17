@@ -44,9 +44,7 @@ public final class CoreFaults {
     }
 
     static void attachRealtime(SurprisingClusteredService service, RealtimeOutbox outbox) {
-        TradingCoreRuntime state = (TradingCoreRuntime) get(service, "state");
-        set(service, "realtimeOutbox", outbox);
-        set(service, "realtimeCapture", state.attachRealtime(outbox));
+        service.attachRealtime(outbox);
     }
 
     static ActivationState activationState(TradingCoreRuntime state) {

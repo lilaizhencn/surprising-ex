@@ -293,10 +293,7 @@ class SurprisingClusteredServiceTest {
                 return 1;
             });
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            var requestsField = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
-            requestsField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            var requests = (java.util.Queue<com.surprising.aeron.protocol.RealtimeFrame>) requestsField.get(service);
+            var requests = service.snapshotRequests();
             assertThat(requests.offer(new com.surprising.aeron.protocol.RealtimeFrame(ProductLine.SPOT,
                     com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST,
                     1001, 0, 0, 0, 91, "", "", new byte[0]))).isTrue();

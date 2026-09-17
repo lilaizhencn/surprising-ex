@@ -439,13 +439,7 @@ public class ClusteredBatchTradingBenchmark {
             batchTrades = 0;
             makerBaseBalance = 1L + 256L * batchSize;
             service = new SurprisingClusteredService(productLine);
-            try {
-                var requests = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
-                requests.setAccessible(true);
-                @SuppressWarnings("unchecked")
-                var queue = (java.util.Queue<RealtimeFrame>) requests.get(service);
-                snapshotRequests = queue;
-            } catch (ReflectiveOperationException failure) { throw new IllegalStateException(failure); }
+            snapshotRequests = service.snapshotRequests();
             // Aeron invokes background callbacks while its service idle strategy is running.
             // Define that path here too; performance execution remains on the real cluster.
             var serviceIdle = new org.agrona.concurrent.IdleStrategy() {

@@ -54,7 +54,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     private Thread ownerThread;
     private Cluster cluster;
     private OwnerLogContext logContext;
-    private final SurprisingClusteredService processor;
+    private final TradingCoreOwner processor;
     private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
     /** Optional owner-gate diagnostics; disabled by default so the normal hot path has no clock reads. */
     private final boolean ownerPollDiagnostics = Boolean.getBoolean("surprising.owner.poll-diagnostics");
@@ -81,7 +81,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
 
     ContinuousTradingClusterService(ProductLine productLine, EgressFactory egressFactory) {
         this.egressFactory = egressFactory;
-        processor = new SurprisingClusteredService(productLine, this::publishResponse);
+        processor = new TradingCoreOwner(productLine, this::publishResponse);
     }
 
     public void onStart(Cluster cluster, Image snapshot) {
@@ -93,7 +93,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         ownerThread = new Thread(this::runOwner, "trading-owner-" + cluster.memberId());
         ownerThread.start();
         boundary(() -> {
-            processor.onStart(logContext, null);
+            processor.start(logContext);
             if (restored != null) processor.restoreSnapshot(restored);
             processor.ownerCompletionSignal(ownerIdle::signal);
             return null;
@@ -143,7 +143,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         boundary(() -> {
             logContext.role = role;
             ownerEpoch = next;
-            processor.onRoleChange(role);
+            processor.roleChange(role);
             return null;
         }, true);
     }
@@ -247,7 +247,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
             }
         } catch (Throwable fatal) { failure = fatal; }
         finally {
-            try { processor.onTerminate(logContext); }
+            try { processor.terminate(); }
             catch (Throwable fatal) { if (failure == null) failure = fatal; }
         }
     }
@@ -384,7 +384,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         long deadline = System.nanoTime() + DEADLINE_NS;
         while (!snapshot.isEndOfStream()) {
             int work = snapshot.poll((buffer, offset, length, header) -> {
-                SurprisingClusteredService.ensureSnapshotCapacity(bytes.size(), length);
+                TradingCoreOwner.ensureSnapshotCapacity(bytes.size(), length);
                 byte[] chunk = new byte[length];
                 buffer.getBytes(offset, chunk);
                 bytes.writeBytes(chunk);

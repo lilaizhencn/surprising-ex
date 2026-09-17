@@ -12,7 +12,7 @@ SurprisingClusterNode.main
         -> Aeron Cluster service thread
         -> input queue
         -> trading owner thread
-            -> SurprisingClusteredService
+            -> TradingCoreOwner
                 -> TradingCoreRuntime
                     -> command / matching / account-lane / snapshot state
         -> output queue
@@ -23,7 +23,8 @@ SurprisingClusterNode.main
 
 - `SurprisingClusterNode` 只负责节点启动、Aeron/Archive/Consensus 配置和进程级错误处理。
 - `ContinuousTradingClusterService` 负责 Aeron 回调、输入输出队列、会话出口和 owner 线程生命周期。
-- `SurprisingClusteredService` 当前同时实现 `ClusteredService` 回调和 owner 侧命令推进，是当前最明显的职责重叠点。
+- `TradingCoreOwner` 负责已复制命令的准入、撮合推进、有序提交、实时读取和快照状态边界；不实现 `ClusteredService`，不访问真实 Aeron 会话。
+- `SurprisingClusteredService` 只保留旧的 `ClusteredService` 回调适配，供兼容测试和独立回放使用，生产入口不再依赖它。
 - `TradingCoreRuntime` 当前同时承载命令路由、撮合流程、提交推进、查询、快照和大量状态门面。
 
 ## 2. 现货下单链路
@@ -34,7 +35,7 @@ SurprisingClusterNode.main
 CoreMessage / PlaceOrderCommand
     -> ContinuousTradingClusterService.onSessionMessage
     -> owner queue
-    -> SurprisingClusteredService.enqueueCommittedCommand
+    -> TradingCoreOwner.enqueueCommittedCommand
     -> TradingCoreRuntime.apply / applyCommandIngress
     -> MatchingCommandAdmission
         - 解码和通用订单校验
@@ -78,6 +79,7 @@ CoreMessage / PlaceOrderCommand
 
 - `surprising-aeron-service/.../cluster`
 - `surprising-aeron-service/.../orchestration/ContinuousTradingClusterService.java`
+- `surprising-aeron-service/.../orchestration/TradingCoreOwner.java`
 - `surprising-aeron-protocol/.../protocol`
 - `surprising-aeron-service/.../orchestration/*Snapshot*`
 
@@ -191,13 +193,14 @@ ADL 对手方持仓变更。
 - 不改 Kafka/Aeron topic、线协议、快照格式和 matcher 并发模型。
 - 不把查询、哈希、快照物化放进 matcher 或账户 Lane 热路径。
 
-## 5. 第一处代码边界候选
+## 5. 已完成的第一处代码边界
 
-先处理 `ContinuousTradingClusterService` 与 `SurprisingClusteredService` 的职责重叠：
+`ContinuousTradingClusterService` 与交易 Owner 已按线程边界分开：
 
-1. `ContinuousTradingClusterService` 保留 Aeron `ClusteredService` 回调、会话和跨线程队列。
-2. owner 侧处理器只保留日志命令队列、owner 推进和响应终态交接。
-3. `TradingCoreRuntime` 继续作为交易 owner 的组合根，但不承担 Aeron 会话职责。
-4. 现货下单行为和状态写入先保持不变，用现有服务测试、现货成交测试、余额冻结核对和快照恢复测试验证。
+1. `ContinuousTradingClusterService` 保留 Aeron `ClusteredService` 回调、会话、输入输出队列、快照发布和 owner 线程生命周期。
+2. `TradingCoreOwner` 只接收已复制的不可变命令，负责日志顺序、准入、撮合完成、提交、实时读取和权威状态快照边界。
+3. `TradingCoreRuntime` 继续作为交易 Owner 的组合根，不承担 Aeron 会话职责。
+4. `SurprisingClusteredService` 仅作为兼容适配器保留；它不拥有业务状态，不复制命令窗口或实时队列。
+5. 现货下单、成交、余额冻结、提交恢复和快照恢复均沿用原有逻辑，并由服务模块定向/全量测试覆盖。
 
-这个边界有明确的线程和状态所有权，因此值得拆分；它不是为了缩短文件或增加抽象层。
+这次拆分的理由是存在真实的线程和协议边界，不是为了缩短文件或增加抽象层。下一处边界应在本轮测试和性能验证完成后再单独选择。
