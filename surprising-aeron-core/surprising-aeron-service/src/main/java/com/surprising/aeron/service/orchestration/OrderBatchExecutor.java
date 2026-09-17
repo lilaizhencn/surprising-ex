@@ -1023,6 +1023,8 @@ final class OrderBatchExecutor {
         }
         byte[] responseData = batch.preparedResponse != null
                 ? batch.preparedResponse : TradingOrderBatchCodec.encodeResultSource(batch);
+        int responseLength = batch.preparedResponse != null
+                ? batch.preparedResponseLength : responseData.length;
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
@@ -1034,7 +1036,8 @@ final class OrderBatchExecutor {
                 ResponseStatus.APPLIED, CoreResultCode.NONE, batch.sequence);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                batch.sequence, requiredExportSequence, stateHash, responseData);
+                batch.sequence, requiredExportSequence, stateHash, responseData, 0, responseLength);
+        if (batch.hasPreparedResponseSlot()) batch.transferPreparedResponseOwnership();
         owner.runtimeState.endOrderBatchMutationScope();
         if (pending.takePipelinedSettlementCounted()) {
             owner.commits.dispatchedSettlementInFlight--;
@@ -1047,7 +1050,8 @@ final class OrderBatchExecutor {
         unregisterPipelinedBatchSymbols(batch);
         owner.submitDeferredMatchingAfterBatch();
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, batch.sequence, requiredExportSequence, stateHash, responseData);
+                CoreResultCode.NONE, batch.sequence, requiredExportSequence, stateHash,
+                responseData, 0, responseLength);
         releaseOrderBatchPending(batch);
         return owner.finishFactContext(response);
     }
@@ -1209,7 +1213,7 @@ final class OrderBatchExecutor {
             selected = candidate;
             break;
         }
-        if (selected == null) selected = new OrderBatchPending(itemCount);
+        if (selected == null) selected = new OrderBatchPending(itemCount, owner.responseArena);
         return selected.initialize(kind, clusterTimestamp, clusterPosition, operation);
     }
 

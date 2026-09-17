@@ -23,6 +23,10 @@ final class CommandResultLedger {
     private final long[] commandIdMost = new long[TABLE_CAPACITY];
     private final long[] commandIdLeast = new long[TABLE_CAPACITY];
     private final StoredResult[] results = new StoredResult[TABLE_CAPACITY];
+    /** Preconstructed commit records; a terminal command reuses one ring record. */
+    private final StoredResult[] recordRing = new StoredResult[TABLE_CAPACITY];
+    private final int[] freeRecordSlots = new int[TABLE_CAPACITY];
+    private int freeRecordCount;
     /** Retention order; eviction advances this queue instead of scanning the hash table. */
     private final int[] retentionSlots = new int[RETENTION_CAPACITY];
     private final int[] retentionPositions = new int[TABLE_CAPACITY];
@@ -41,6 +45,11 @@ final class CommandResultLedger {
 
     CommandResultLedger(LinkedHashMap<UUID, StoredResult> results, ResponseArena responseArena) {
         this.responseArena = responseArena;
+        for (int index = 0; index < TABLE_CAPACITY; index++) {
+            recordRing[index] = new StoredResult(index);
+            freeRecordSlots[index] = index;
+        }
+        freeRecordCount = TABLE_CAPACITY;
         java.util.Arrays.fill(retentionPositions, -1);
         if (results == null || results.size() > MAX_IDEMPOTENCY_RESULTS) {
             throw new IllegalArgumentException("invalid result ledger");
@@ -178,24 +187,30 @@ final class CommandResultLedger {
         int slot = locate(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
         StoredResult previous = results[slot];
         long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
-        StoredResult retained = new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, responseData, responseOffset, responseLength,
-                retentionSequence, true);
+        byte[] previousResponse = previous == null ? null : previous.responseDataUnsafe();
+        long previousBytes = previous == null ? 0 : resultEntryBytes(previous);
+        if (freeRecordCount == 0) throw new IllegalStateException("result commit ring is full");
+        // A replacement gets a different preconstructed record.  Existing snapshots and
+        // duplicate readers may still hold the previous record object, so mutating it in place
+        // would break the ledger's historical identity contract even though the table slot is
+        // replaced atomically.
+        StoredResult retained = recordRing[freeRecordSlots[--freeRecordCount]];
+        retained.set(fingerprint, status, resultCode, appliedCommandCount, requiredExportSequence,
+                stateHash, responseData, responseOffset, responseLength, retentionSequence, true);
         long nextSequence = previous == null ? Math.incrementExact(nextResultRetentionSequence)
                 : nextResultRetentionSequence;
-        long nextBytes = Math.addExact(commandResultBytes - (previous == null ? 0 : resultEntryBytes(previous)),
-                resultBytes);
         if (previous == null) {
             commandIdMost[slot] = commandId.getMostSignificantBits();
             commandIdLeast[slot] = commandId.getLeastSignificantBits();
             enqueueRetentionSlot(slot);
             size++;
-        } else if (responseArena != null && previous.responseDataUnsafe() != responseData) {
-            responseArena.release(previous.responseDataUnsafe());
+        } else if (responseArena != null && previousResponse != responseData) {
+            responseArena.release(previousResponse);
         }
+        if (previous != null) freeRecordSlots[freeRecordCount++] = previous.ringSlot;
         results[slot] = retained;
         nextResultRetentionSequence = nextSequence;
-        commandResultBytes = nextBytes;
+        commandResultBytes = Math.addExact(commandResultBytes - previousBytes, resultBytes);
         while (size > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
             int oldest = oldestSlot(commandId);
@@ -207,9 +222,12 @@ final class CommandResultLedger {
 
     private void put(UUID id, StoredResult value) {
         int slot = locate(id.getMostSignificantBits(), id.getLeastSignificantBits());
+        if (freeRecordCount == 0) throw new IllegalStateException("result commit ring is full");
+        StoredResult retained = recordRing[freeRecordSlots[--freeRecordCount]];
+        retained.copyFrom(value);
         commandIdMost[slot] = id.getMostSignificantBits();
         commandIdLeast[slot] = id.getLeastSignificantBits();
-        results[slot] = value;
+        results[slot] = retained;
         enqueueRetentionSlot(slot);
         size++;
     }
@@ -237,8 +255,9 @@ final class CommandResultLedger {
     }
 
     private void remove(int slot) {
-        if (responseArena != null && results[slot] != null) {
-            responseArena.release(results[slot].responseDataUnsafe());
+        StoredResult removed = results[slot];
+        if (responseArena != null && removed != null) {
+            responseArena.release(removed.responseDataUnsafe());
         }
         int position = retentionPositions[slot];
         retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;
@@ -262,6 +281,7 @@ final class CommandResultLedger {
         }
         results[hole] = null;
         retentionPositions[hole] = -1;
+        freeRecordSlots[freeRecordCount++] = removed.ringSlot;
         advanceRetentionHead();
     }
 
@@ -302,29 +322,38 @@ final class CommandResultLedger {
     }
 
     static final class StoredResult {
+        private final int ringSlot;
         /** 不可变命令指纹，防止相同命令 ID 对应不同请求内容。 */
-        final CommandFingerprint fingerprint;
+        private CommandFingerprint fingerprint;
         /** 该命令或业务项的执行状态。 */
-        final ResponseStatus status;
+        private ResponseStatus status;
         /** 该命令或业务项的确定性结果码。 */
-        final CoreResultCode resultCode;
+        private CoreResultCode resultCode;
         /** 已接收并应用的命令序号上界；可能高于已完成结算水位。 */
-        final long appliedCommandCount;
+        private long appliedCommandCount;
         /** 读取本结果对应状态所需的最小导出水位。 */
-        final long requiredExportSequence;
+        private long requiredExportSequence;
         /** 结果对应的业务状态摘要，用于恢复核对。 */
-        final long stateHash;
+        private long stateHash;
         /** 已保留的协议响应字节；所有权转移或复制后保存。 */
-        final byte[] responseData;
+        private byte[] responseData;
         /** Offset and logical length for an arena-backed response slice. */
-        final int responseOffset;
-        final int responseLength;
+        private int responseOffset;
+        private int responseLength;
         /** 本结果的保留顺序，替换内容不会重新排到队尾。 */
-        final long retentionSequence;
+        private long retentionSequence;
         /** 缓存摘要所对应的命令 ID。 */
         UUID digestCommandId;
         /** 本条结果的摘要缓存，避免恢复遍历重复计算。 */
         long cachedEntryDigest;
+
+        private StoredResult(int ringSlot) {
+            this.ringSlot = ringSlot;
+            fingerprint = null;
+            status = null;
+            resultCode = null;
+            responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+        }
 
         StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
                      long appliedCommandCount, long requiredExportSequence, long stateHash,
@@ -345,6 +374,22 @@ final class CommandResultLedger {
                      long appliedCommandCount, long requiredExportSequence, long stateHash,
                      byte[] responseData, int responseOffset, int responseLength,
                      long retentionSequence, boolean ownedResponseData) {
+            this.ringSlot = -1;
+            if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
+                    || requiredExportSequence < 0 || retentionSequence < 0 || responseOffset < 0
+                    || responseLength < 0 || responseData == null
+                    && (responseOffset != 0 || responseLength != 0) || responseData != null
+                    && responseOffset > responseData.length - responseLength) {
+                throw new IllegalArgumentException("invalid stored result");
+            }
+            set(fingerprint, status, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
+                    responseData, responseOffset, responseLength, retentionSequence, ownedResponseData);
+        }
+
+        private void set(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
+                          long appliedCommandCount, long requiredExportSequence, long stateHash,
+                          byte[] responseData, int responseOffset, int responseLength,
+                          long retentionSequence, boolean ownedResponseData) {
             if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
                     || requiredExportSequence < 0 || retentionSequence < 0 || responseOffset < 0
                     || responseLength < 0 || responseData == null
@@ -359,7 +404,6 @@ final class CommandResultLedger {
             this.requiredExportSequence = requiredExportSequence;
             this.stateHash = stateHash;
             byte[] normalized = responseData == null ? TradingCoreRuntime.EMPTY_RESPONSE_DATA : responseData;
-            // The shared empty payload is immutable, so it does not need a defensive clone.
             if (normalized == TradingCoreRuntime.EMPTY_RESPONSE_DATA || responseLength == 0) {
                 this.responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
                 this.responseOffset = 0;
@@ -375,6 +419,14 @@ final class CommandResultLedger {
                 this.responseLength = responseLength;
             }
             this.retentionSequence = retentionSequence;
+            this.digestCommandId = null;
+            this.cachedEntryDigest = 0;
+        }
+
+        private void copyFrom(StoredResult other) {
+            set(other.fingerprint, other.status, other.resultCode, other.appliedCommandCount,
+                    other.requiredExportSequence, other.stateHash, other.responseData, other.responseOffset,
+                    other.responseLength, other.retentionSequence, true);
         }
 
         static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,

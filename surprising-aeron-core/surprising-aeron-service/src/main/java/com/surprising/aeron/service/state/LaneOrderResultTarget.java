@@ -22,6 +22,12 @@ public interface LaneOrderResultTarget {
     /** Optional response bytes prepared by the Lane; null means the Owner must use its fallback. */
     default byte[] preparedResponse() { return null; }
 
+    /** Logical length of the fixed response slot; the backing array may be larger than the payload. */
+    default int preparedResponseLength() {
+        byte[] response = preparedResponse();
+        return response == null ? 0 : response.length;
+    }
+
     /** Direct single-command responses retain terminal after-images; batch responses preserve
      * their historical omission of orders that were already retired from a Lane. */
     default boolean includeTerminalAfterImage() { return false; }

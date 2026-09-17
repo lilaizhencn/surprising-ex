@@ -390,7 +390,9 @@ final class CommandResultBuilder {
         }
         if (pending != null) {
             byte[] prepared = pending.lanePreparedResponse();
-            if (prepared != null) return setResponse(prepared);
+            if (prepared != null) {
+                return setResponse(prepared, 0, pending.lanePreparedResponseLength());
+            }
         }
         if (commandSingleOrder == null && commandOrderViews.isEmpty() && commandOrderSources.isEmpty()) {
             return setResponse(EMPTY_RESULT);
@@ -459,6 +461,18 @@ final class CommandResultBuilder {
         responseStorage = response == null ? EMPTY_RESULT : response;
         responseOffset = 0;
         responseLength = responseStorage.length;
+        return responseStorage;
+    }
+
+    private byte[] setResponse(byte[] response, int offset, int length) {
+        discardResponseStorage();
+        if (response == null || length == 0) return setResponse(EMPTY_RESULT);
+        if (offset < 0 || length < 0 || offset > response.length - length) {
+            throw new IllegalArgumentException("invalid prepared Lane response");
+        }
+        responseStorage = response;
+        responseOffset = offset;
+        responseLength = length;
         return responseStorage;
     }
 

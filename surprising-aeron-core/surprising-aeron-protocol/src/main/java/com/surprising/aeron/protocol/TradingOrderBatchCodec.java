@@ -118,6 +118,14 @@ public final class TradingOrderBatchCodec {
     }
 
     public static byte[] encodeResultSource(ResultSource source) {
+        int length = encodedResultSourceLength(source);
+        byte[] encoded = new byte[length];
+        encodeResultSourceInto(source, encoded, 0);
+        return encoded;
+    }
+
+    /** Returns the exact wire length without allocating an output buffer. */
+    public static int encodedResultSourceLength(ResultSource source) {
         if (source == null || source.size() <= 0 || source.size() > CoreOrderBatchResult.MAX_ITEMS) {
             throw new IllegalArgumentException("invalid order batch result");
         }
@@ -135,7 +143,16 @@ public final class TradingOrderBatchCodec {
             length = Math.addExact(length, Math.addExact(FRAME_LENGTH_BYTES, frameLength));
         }
         if (length > MAX_BATCH_RESPONSE_BYTES) throw new IllegalArgumentException("order batch result is too large");
-        ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        return length;
+    }
+
+    /** Encodes directly into caller-owned stable storage and returns the logical length. */
+    public static int encodeResultSourceInto(ResultSource source, byte[] destination, int offset) {
+        int length = encodedResultSourceLength(source);
+        if (destination == null || offset < 0 || offset > destination.length - length) {
+            throw new IllegalArgumentException("result destination is too small");
+        }
+        ByteBuffer output = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         output.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(source.size());
         for (int index = 0; index < source.size(); index++) {
             int frameOffset = output.position();
@@ -160,7 +177,7 @@ public final class TradingOrderBatchCodec {
             output.putInt(frameOffset, output.position() - frameOffset - FRAME_LENGTH_BYTES);
         }
         if (output.hasRemaining()) throw new IllegalArgumentException("batch result size changed during encoding");
-        return output.array();
+        return length;
     }
 
     public static byte[] encodeBatchResult(CoreOrderBatchResult result) {

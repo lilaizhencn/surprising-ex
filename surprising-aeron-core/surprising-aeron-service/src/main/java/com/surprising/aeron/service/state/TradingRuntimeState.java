@@ -222,7 +222,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** owner 可见的已发布可用余额；与提交/回滚边界同步维护。 */
     final LongObjectHashMap<IntLongHashMap> publishedAvailableBalances = new LongObjectHashMap<>(4_096);
     /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
-    final LaneDelta[] laneDeltas;
+    final LaneCommitDelta[] laneDeltas;
 
     /** 下一条清算状态的 ID，需随快照保存。 */
     long nextLiquidationId = 1;
@@ -333,9 +333,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
     /** 当前结算事件的线程局部变更收集器。 */
     final ThreadLocal<MatcherSettlementChanges> matcherSettlementChangesScope = new ThreadLocal<>();
-    /** 可复用的 matcherSettlementChanges 对象池；仅在消费者完成后回收。 */
-    final java.util.ArrayDeque<MatcherSettlementChanges> matcherSettlementChangesPool =
-            new java.util.ArrayDeque<>();
+    /**
+     * 固定 LaneCommitDelta ring。每个活跃撮合结算占用一个预建槽位，Owner 收集完成后归还；
+     * 不再在提交压力下创建 MatcherSettlementChanges/LaneDelta 对象。
+     */
+    final MatcherSettlementChanges[] matcherSettlementChangesRing;
+    private final int[] freeMatcherSettlementChangeSlots;
+    private int freeMatcherSettlementChangeCount;
     /** 可复用的 laneCancelEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
     /** 可复用的 laneReplaceEvent 对象池；仅在消费者完成后回收。 */
@@ -351,6 +355,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
+        int deltaRingCapacity = Math.max(64,
+                Integer.getInteger("surprising.aeron.max-pending-matching", 4_096));
+        this.matcherSettlementChangesRing = new MatcherSettlementChanges[deltaRingCapacity];
+        this.freeMatcherSettlementChangeSlots = new int[deltaRingCapacity];
+        this.freeMatcherSettlementChangeCount = deltaRingCapacity;
+        for (int index = 0; index < deltaRingCapacity; index++) {
+            matcherSettlementChangesRing[index] = new MatcherSettlementChanges(accountLanes.length, index);
+            freeMatcherSettlementChangeSlots[index] = index;
+        }
         @SuppressWarnings("unchecked")
         LaneLongCaptures<UserRuntime>[] userPatches =
                 (LaneLongCaptures<UserRuntime>[]) new LaneLongCaptures<?>[
@@ -370,7 +383,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 (LaneLongCaptures<PositionRuntime>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
         this.patchPositionsBeforeByLane = positionPatches;
         this.patchClientOrdersBeforeByLane = new LaneClientOrderCaptures[topology.accountLaneCount()];
-        this.laneDeltas = new LaneDelta[topology.accountLaneCount()];
+        this.laneDeltas = new LaneCommitDelta[topology.accountLaneCount()];
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
@@ -408,7 +421,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             patchOrdersBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchPositionsBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchClientOrdersBeforeByLane[laneId] = new LaneClientOrderCaptures();
-            laneDeltas[laneId] = new LaneDelta();
+            laneDeltas[laneId] = new LaneCommitDelta();
         }
     }
 
@@ -1064,28 +1077,37 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     MatcherSettlementChanges acquireMatcherSettlementChanges(long laneMask) {
         assertOwner();
-        MatcherSettlementChanges changes = matcherSettlementChangesPool.pollFirst();
-        if (changes == null) changes = new MatcherSettlementChanges(accountLanes.length);
+        if (freeMatcherSettlementChangeCount == 0) {
+            throw new IllegalStateException("LaneCommitDelta ring is full");
+        }
+        MatcherSettlementChanges changes = matcherSettlementChangesRing[
+                freeMatcherSettlementChangeSlots[--freeMatcherSettlementChangeCount]];
+        if (changes.inUse) throw new IllegalStateException("LaneCommitDelta ring slot is already active");
+        changes.inUse = true;
         changes.activeLaneMask = laneMask;
         changes.ensureActiveLanes(laneMask);
         return changes;
     }
 
     void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
+        if (changes == null || !changes.inUse) throw new IllegalStateException("LaneCommitDelta slot is not active");
         changes.clear();
-        matcherSettlementChangesPool.addFirst(changes);
+        changes.inUse = false;
+        freeMatcherSettlementChangeSlots[freeMatcherSettlementChangeCount++] = changes.ringIndex;
     }
 
     static final class MatcherSettlementChanges {
-        private static final LaneDelta EMPTY_LANE_DELTA = new LaneDelta();
+        private static final LaneCommitDelta EMPTY_LANE_DELTA = new LaneCommitDelta();
         private static final LaneBalancePatches EMPTY_BALANCE_PATCHES = new LaneBalancePatches();
         private static final RuntimeFundsAccumulator EMPTY_FUNDS_DELTA = new RuntimeFundsAccumulator();
         private static final LongLongHashMap EMPTY_USER_REVISIONS = new LongLongHashMap();
         boolean directPositionIdentities;
+        boolean inUse;
+        final int ringIndex;
         /** Owner派发前固定的参与Lane；事件完成后仅回收这些Lane的缓冲。 */
         private long activeLaneMask;
         /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
-        final LaneDelta[] laneDeltas;
+        final LaneCommitDelta[] laneDeltas;
         /** 按 Lane 保存的余额前后值，用于资金增量核对。 */
         final LaneBalancePatches[] balancePatches;
         /** 各 Lane 收集的资金增量，完成后由 owner 合并。 */
@@ -1096,7 +1118,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         final RuntimeFundsAccumulator aggregateFundsDelta = new RuntimeFundsAccumulator(32);
 
         MatcherSettlementChanges(int laneCount) {
-            laneDeltas = new LaneDelta[laneCount];
+            this(laneCount, -1);
+        }
+
+        MatcherSettlementChanges(int laneCount, int ringIndex) {
+            this.ringIndex = ringIndex;
+            laneDeltas = new LaneCommitDelta[laneCount];
             balancePatches = new LaneBalancePatches[laneCount];
             laneFundsDeltas = new RuntimeFundsAccumulator[laneCount];
             userRevisionDeltas = new LongLongHashMap[laneCount];
@@ -1110,7 +1137,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             while (laneMask != 0) {
                 int laneId = Long.numberOfTrailingZeros(laneMask);
                 laneMask &= laneMask - 1;
-                if (laneDeltas[laneId] == EMPTY_LANE_DELTA) laneDeltas[laneId] = new LaneDelta();
+                if (laneDeltas[laneId] == EMPTY_LANE_DELTA) laneDeltas[laneId] = new LaneCommitDelta();
                 if (balancePatches[laneId] == EMPTY_BALANCE_PATCHES) balancePatches[laneId] = new LaneBalancePatches();
                 if (laneFundsDeltas[laneId] == EMPTY_FUNDS_DELTA) laneFundsDeltas[laneId] = new RuntimeFundsAccumulator();
                 if (userRevisionDeltas[laneId] == EMPTY_USER_REVISIONS) userRevisionDeltas[laneId] = new LongLongHashMap();
@@ -1145,6 +1172,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (expectedOrders <= 0) return;
             ensureActiveLanes(1L << laneId);
             laneDeltas[laneId].ensureAdmissionCapacity(expectedOrders);
+            laneDeltas[laneId].ensureTerminalCapacity(expectedOrders);
         }
 
         void ensureOrderCapacity(int expectedOrders, long laneMask) {
@@ -1155,6 +1183,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 int laneId = Long.numberOfTrailingZeros(laneMask);
                 laneMask &= laneMask - 1;
                 laneDeltas[laneId].ensureOrderCapacity(expectedOrders);
+                laneDeltas[laneId].ensureTerminalCapacity(expectedOrders);
             }
         }
 
@@ -1166,6 +1195,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             changes.orders.freezeValues(OrderRuntime::publicationValue);
             changes.reservations.freezeValues(ReservationRuntime::publicationValue);
             changes.positions.freezeValues(PositionRuntime::publicationValue);
+            // Terminal identity is a Lane fact. Capture its primitive fields before the
+            // publication handoff so the Owner never has to walk changed orders again merely
+            // to update the bounded tombstone window.
+            changes.orders.forEach((orderId, order) -> {
+                if (order != null && order.status().terminal()) changes.recordTerminalOrder(order);
+            });
             changes.orders.forEach((orderId, order) -> {
                 if (order == null || !order.status().terminal()) return;
                 ReservationRuntime reservation = lane.reservations.get(orderId);
@@ -1290,28 +1325,56 @@ public final class TradingRuntimeState implements AutoCloseable {
         /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
         LanePublication publication;
         private LanePublication publicationBuffer;
-        /** Lane 准备的终态引用，Owner 只访问终态项；随结算缓冲复用，不复制订单。 */
-        private OrderRuntime[] terminalOrders = new OrderRuntime[4];
+        /** Lane 准备的终态原语收据；Owner 不再重新遍历订单或创建 OrderRuntime 快照。 */
+        private long[] terminalOrderIds = new long[4];
+        private long[] terminalOrderUsers = new long[4];
+        private String[] terminalOrderClients = new String[4];
+        /** Frozen Lane-side values retained only for legacy TerminalOrderSink adapters. */
+        private OrderRuntime[] terminalOrderValues = new OrderRuntime[4];
         private int terminalOrderCount;
 
+        void ensureTerminalCapacity(int expectedCount) {
+            if (expectedCount <= terminalOrderIds.length) return;
+            int capacity = terminalOrderIds.length;
+            while (capacity < expectedCount) capacity = Math.multiplyExact(capacity, 2);
+            terminalOrderIds = java.util.Arrays.copyOf(terminalOrderIds, capacity);
+            terminalOrderUsers = java.util.Arrays.copyOf(terminalOrderUsers, capacity);
+            terminalOrderClients = java.util.Arrays.copyOf(terminalOrderClients, capacity);
+            terminalOrderValues = java.util.Arrays.copyOf(terminalOrderValues, capacity);
+        }
+
         private void recordTerminalOrder(OrderRuntime value) {
-            if (terminalOrderCount == terminalOrders.length)
-                terminalOrders = java.util.Arrays.copyOf(terminalOrders, terminalOrderCount * 2);
-            terminalOrders[terminalOrderCount++] = value;
+            if (terminalOrderCount == terminalOrderIds.length) {
+                ensureTerminalCapacity(Math.addExact(terminalOrderCount, 1));
+            }
+            terminalOrderIds[terminalOrderCount] = value.orderId();
+            terminalOrderUsers[terminalOrderCount] = value.userId();
+            terminalOrderClients[terminalOrderCount] = value.clientOrderId();
+            terminalOrderValues[terminalOrderCount++] = value;
         }
 
         void preparePublication(TradingRuntimeState state) {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             if (publicationBuffer == null) publicationBuffer = new LanePublication();
             publication = publicationBuffer;
-            terminalOrderCount = 0;
-            orders.forEach((id, value) -> {
-                if (value != null && value.status().terminal()) recordTerminalOrder(value);
-            });
+            // Standalone/recovery LaneDelta callers do not pass through prepareLaneTerminal;
+            // preserve their terminal callback contract without making the Owner rescan orders.
+            if (terminalOrderCount == 0) {
+                orders.forEach((orderId, order) -> {
+                    if (order != null && order.status().terminal()) recordTerminalOrder(order);
+                });
+            }
             // The publication borrows these already populated change buffers instead of
             // copying every entity into a second maps/keys/values array.
             publication.bind(state, this);
         }
+
+        /** Returns terminal identity data already collected by the Lane. */
+        public int terminalOrderCount() { return terminalOrderCount; }
+        public long terminalOrderId(int index) { return terminalOrderIds[index]; }
+        public long terminalOrderUser(int index) { return terminalOrderUsers[index]; }
+        public String terminalOrderClient(int index) { return terminalOrderClients[index]; }
+        OrderRuntime terminalOrderValue(int index) { return terminalOrderValues[index]; }
 
         /** 本次需要发布的触发单变化。 */
         RuntimeChangeBuffer<CoreTriggerOrderState> triggers;
@@ -1460,17 +1523,14 @@ public final class TradingRuntimeState implements AutoCloseable {
                 });
             }
             if (publication == null) {
-                terminalOrderCount = 0;
                 orders.forEach((orderId, order) -> {
                     if (changedOrders != null) changedOrders.add(orderId);
                     if (order != null && order.status().terminal()) recordTerminalOrder(order);
                     putOrRemove(state.publishedOrders, orderId, order);
                 });
-                if (terminalOrderSink != null && terminalOrderCount != 0)
-                    terminalOrderSink.acceptBatch(terminalOrders, terminalOrderCount, coreSequence);
-            } else if (terminalOrderSink != null && terminalOrderCount != 0) {
-                terminalOrderSink.acceptBatch(terminalOrders, terminalOrderCount, coreSequence);
             }
+            if (terminalOrderSink != null && terminalOrderCount != 0)
+                terminalOrderSink.acceptBatch(this, coreSequence);
             if (publication == null) {
                 reservations.drainTo((orderId, reservation) -> {
                     if (changedOrders != null) changedOrders.add(orderId);
@@ -1561,7 +1621,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (triggers != null) triggers.clear();
             if (publication != null) publication.clear();
             publication = null;
-            java.util.Arrays.fill(terminalOrders, 0, terminalOrderCount, null);
+            java.util.Arrays.fill(terminalOrderClients, 0, terminalOrderCount, null);
+            java.util.Arrays.fill(terminalOrderValues, 0, terminalOrderCount, null);
+            java.util.Arrays.fill(terminalOrderIds, 0, terminalOrderCount, 0);
+            java.util.Arrays.fill(terminalOrderUsers, 0, terminalOrderCount, 0);
             terminalOrderCount = 0;
             users.clear();
             orders.clear();
@@ -1573,6 +1636,22 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
         }
 
+    }
+
+    /**
+     * Fixed Lane handoff slot consumed by the Owner.  The legacy LaneDelta name remains as a
+     * source-compatible base type for recovery/unit fixtures, while all live account lanes use
+     * this concrete compact commit slot.
+     */
+    public static final class LaneCommitDelta extends LaneDelta {
+        // Keep the legacy reflective surface visible on the concrete ring slot.  These aliases
+        // point at the base storage; no second change buffer is allocated.
+        final RuntimeChangeBuffer<UserRuntime> users = super.users;
+        final RuntimeIndexedChangeBuffer<OrderRuntime, Void> orders = super.orders;
+        final RuntimeChangeBuffer<ReservationRuntime> reservations = super.reservations;
+        final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = super.positions;
+
+        public LaneCommitDelta() { }
     }
 
     @Override
@@ -2470,6 +2549,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     @FunctionalInterface
     public interface TerminalOrderSink {
         void accept(OrderRuntime order, long coreSequence);
+
+        /** Compact Lane handoff; the Owner receives identity primitives, never a second order walk. */
+        default void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
+            // Compatibility sinks can continue to consume the historical OrderRuntime callback.
+            // The built-in retention sink overrides this method and stays allocation-free.
+        }
+
+        default void acceptBatch(LaneDelta delta, long coreSequence) {
+            for (int index = 0; index < delta.terminalOrderCount(); index++) {
+                accept(delta.terminalOrderValue(index), coreSequence);
+            }
+        }
 
         /** 批量终态交接；默认实现保留第三方 sink 的兼容性。 */
         default void acceptBatch(OrderRuntime[] orders, int count, long coreSequence) {

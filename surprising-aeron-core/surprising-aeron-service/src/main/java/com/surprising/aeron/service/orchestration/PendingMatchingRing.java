@@ -31,6 +31,11 @@ final class PendingMatchingRing {
     private int size;
     /** Owner 派发顺序的失效标记：队列、分区或已派发前缀改变后必须重新检查依赖。 */
     private long dispatchRevision;
+    /** Ready partition cursor: one primitive slot per matcher shard plus a ready bitmask. */
+    private final int[] readyDispatchSlots;
+    private long readyPartitionMask;
+    private long readyPartitionRevision = Long.MIN_VALUE;
+    private long readyPartitionThrough = Long.MIN_VALUE;
 
     long dispatchRevision() { return dispatchRevision; }
 
@@ -56,6 +61,7 @@ final class PendingMatchingRing {
         previousSubmissionSlots = new int[capacity];
         submissionHeads = new int[matcherShardCount];
         submissionTails = new int[matcherShardCount];
+        readyDispatchSlots = new int[matcherShardCount];
         java.util.Arrays.fill(nextSlots, -1);
         java.util.Arrays.fill(previousSlots, -1);
         java.util.Arrays.fill(submissionShards, -1);
@@ -63,6 +69,7 @@ final class PendingMatchingRing {
         java.util.Arrays.fill(previousSubmissionSlots, -1);
         java.util.Arrays.fill(submissionHeads, -1);
         java.util.Arrays.fill(submissionTails, -1);
+        java.util.Arrays.fill(readyDispatchSlots, -1);
         mask = capacity - 1;
         contexts = new CommandSlotRing(capacity, laneCount);
         entriesByCommandId = new PendingCommandIdIndex(capacity);
@@ -198,17 +205,61 @@ final class PendingMatchingRing {
      * 检查范围限于有界在途窗口，不访问或扫描账户/订单状态。
      */
     CommandSlot partitionDispatchHead(int shard) {
+        if (shard < 0 || shard >= readyDispatchSlots.length) return null;
+        // This compatibility accessor is also used by tests and recovery helpers that mutate
+        // the reusable CommandSlot metadata directly.  The Owner hot path calls readyPartitionMask
+        // after every lifecycle mutation and keeps the cached cursor.
+        readyPartitionRevision = Long.MIN_VALUE;
+        readyPartitionMask(Long.MAX_VALUE);
+        int index = readyDispatchSlots[shard];
+        return index < 0 ? null : pendingAt(index);
+    }
+
+    /**
+     * Computes dispatchable partitions once per queue revision.  The Owner consumes the
+     * resulting bitmask and primitive cursor slots; it no longer performs an all-partition scan
+     * or allocates a candidate array on every completion pump.
+     */
+    long readyPartitionMask(long throughSequence) {
+        if (readyPartitionRevision == dispatchRevision && readyPartitionThrough == throughSequence) {
+            return readyPartitionMask;
+        }
+        java.util.Arrays.fill(readyDispatchSlots, -1);
+        long candidates = 0;
         long earlierLanes = 0;
         for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
             if (settlementDispatched[index]) continue;
             CommandSlot pending = pendingAt(index);
-            if (index != dispatchHead && (!pending.clusterIndependent || pending.partitionLaneMask == 0)) return null;
-            if (settlementShards[index] == shard)
-                return (pending.partitionLaneMask & earlierLanes) == 0 ? pending : null;
-            if (!pending.clusterIndependent || settlementShards[index] < 0 || pending.partitionLaneMask == 0) return null;
-            earlierLanes |= pending.partitionLaneMask;
+            if (pending == null || pending.sequence() > throughSequence) break;
+            int shard = settlementShards[index];
+            long laneMask = pending.partitionLaneMask;
+            boolean first = index == dispatchHead;
+            if (first && shard >= 0) {
+                if (readyDispatchSlots[shard] < 0) {
+                    readyDispatchSlots[shard] = index;
+                    candidates |= 1L << shard;
+                }
+            } else if (pending.clusterIndependent && shard >= 0 && laneMask != 0) {
+                if (readyDispatchSlots[shard] < 0 && (laneMask & earlierLanes) == 0) {
+                    readyDispatchSlots[shard] = index;
+                    candidates |= 1L << shard;
+                }
+            } else {
+                break;
+            }
+            if (!pending.clusterIndependent || shard < 0 || laneMask == 0) break;
+            earlierLanes |= laneMask;
         }
-        return null;
+        readyPartitionMask = candidates;
+        readyPartitionRevision = dispatchRevision;
+        readyPartitionThrough = throughSequence;
+        return candidates;
+    }
+
+    CommandSlot readyPartitionHead(int shard) {
+        if (shard < 0 || shard >= readyDispatchSlots.length) return null;
+        int index = readyDispatchSlots[shard];
+        return index < 0 ? null : pendingAt(index);
     }
 
     /**
@@ -224,27 +275,8 @@ final class PendingMatchingRing {
         if (heads == null || heads.length != submissionHeads.length) {
             throw new IllegalArgumentException("partition dispatch head storage is invalid");
         }
-        java.util.Arrays.fill(heads, null);
-        long earlierLanes = 0;
-        for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
-            if (settlementDispatched[index]) continue;
-            CommandSlot pending = pendingAt(index);
-            if (pending == null || pending.sequence() > throughSequence) break;
-            int shard = settlementShards[index];
-            long laneMask = pending.partitionLaneMask;
-            boolean first = index == dispatchHead;
-            if (first && shard >= 0 && heads[shard] == null) {
-                heads[shard] = pending;
-            } else if (pending.clusterIndependent && shard >= 0 && laneMask != 0) {
-                if (heads[shard] == null && (laneMask & earlierLanes) == 0) {
-                    heads[shard] = pending;
-                }
-            } else {
-                break;
-            }
-            if (!pending.clusterIndependent || shard < 0 || laneMask == 0) break;
-            earlierLanes |= laneMask;
-        }
+        readyPartitionMask(throughSequence);
+        for (int shard = 0; shard < heads.length; shard++) heads[shard] = readyPartitionHead(shard);
     }
 
     void completePartitionDispatch(long sequence, int shard) {

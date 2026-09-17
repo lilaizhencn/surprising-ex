@@ -38,25 +38,49 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         item.laneResultPrepared = true;
     }
     @Override public boolean captureUnchangedResults() {
-        // Only pipelined PLACE batches keep every result item on one owning Account Lane.  A
-        // CANCEL/AMEND batch may retire or replace an order and must retain its existing response
-        // omission semantics, while sequential PLACE items are still completed by the legacy
-        // item continuation.
-        return pipelined && kind == OrderBatchKind.PLACE;
+        // Every batch result is resolved by its owning Lane.  Terminal CANCEL/AMEND items still
+        // omit the retired after-image because capture() only uses the live Lane map unless the
+        // target explicitly opts into terminal images; unchanged/rejected items are resolved from
+        // that same Lane instead of forcing the Owner to query its publication map.
+        return true;
     }
     @Override public boolean resultPrepared(int index) {
         return items.get(index).laneResultPrepared;
     }
     /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
     byte[] preparedResponse;
+    int preparedResponseLength;
+    private final ResponseArena responseArena;
+    private ResponseArena.Slot preparedResponseSlot;
     /** Owner-only ordering links; never read by Matcher/Lane and detached before pool reuse. */
     OrderBatchPending previousBatch, nextBatch;
 
     @Override public void prepareResponse() {
         // 部分拒单、顺序改单可能没有本次 Lane 结果，仍需提交点补齐其查询语义。
         for (OrderBatchItem item : items) if (!item.laneResultPrepared || item.status == null) return;
-        preparedResponse = TradingOrderBatchCodec.encodeResultSource(this);
+        if (preparedResponseSlot != null) {
+            responseArena.release(preparedResponseSlot);
+            preparedResponseSlot = null;
+        }
+        if (responseArena == null) {
+            preparedResponse = TradingOrderBatchCodec.encodeResultSource(this);
+            preparedResponseLength = preparedResponse.length;
+        } else {
+            int length = TradingOrderBatchCodec.encodedResultSourceLength(this);
+            preparedResponseSlot = responseArena.acquireExactSlot(length);
+            preparedResponse = preparedResponseSlot.storage;
+            preparedResponseLength = TradingOrderBatchCodec.encodeResultSourceInto(
+                    this, preparedResponse, 0);
+        }
         responseItem = null;
+    }
+
+    void transferPreparedResponseOwnership() {
+        preparedResponseSlot = null;
+    }
+
+    boolean hasPreparedResponseSlot() {
+        return preparedResponseSlot != null;
     }
 
     public int settlementCount() { return deferredSettlementCount; }
@@ -285,7 +309,12 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     void activated(boolean value) { set(ACTIVATED, value); }
 
     OrderBatchPending(int requestedCapacity) {
+        this(requestedCapacity, null);
+    }
+
+    OrderBatchPending(int requestedCapacity, ResponseArena responseArena) {
         int capacity = Math.max(1, requestedCapacity);
+        this.responseArena = responseArena;
         items = new ArrayList<>(capacity);
         itemSlots = new OrderBatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
@@ -360,7 +389,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         nextIndex = 0;
         tradeCount = 0;
         responseItem = null;
+        if (preparedResponseSlot != null) responseArena.release(preparedResponseSlot);
+        preparedResponseSlot = null;
         preparedResponse = null;
+        preparedResponseLength = 0;
         cancellationChunkEnd = 0;
         sequence = 0;
         currentPreMatchingCancellationOrderIds = List.of();

@@ -141,7 +141,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
      */
     private final LaneResultTarget laneResultTarget = new LaneResultTarget();
 
-    void prepareLaneResultTarget() {
+    void prepareLaneResultTarget(ResponseArena responseArena) {
         if (orderBatch != null) return;
         long first = 0, second = 0;
         switch (operation) {
@@ -159,7 +159,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             }
             default -> { }
         }
-        laneResultTarget.bind(first, second);
+        laneResultTarget.bind(first, second, responseArena);
     }
 
     com.surprising.aeron.service.state.LaneOrderResultTarget laneResultTarget() {
@@ -170,6 +170,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     String laneResultSymbol(long orderId) { return laneResultTarget.symbol(orderId); }
     boolean laneResultPrepared() { return laneResultTarget.prepared(); }
     byte[] lanePreparedResponse() { return laneResultTarget.preparedResponse(); }
+    int lanePreparedResponseLength() { return laneResultTarget.preparedResponseLength(); }
+    void transferLaneResponseOwnership() { laneResultTarget.transferResponseOwnership(); }
 
     /** Reuses one slot-owned gate instead of allocating a capturing lambda for each PLACE. */
     java.util.function.Supplier<CoreMatchingResult> gateAdmission(TradingCoreRuntime owner,
@@ -1520,9 +1522,13 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private boolean prepared;
         private com.surprising.aeron.service.matching.CoreMatchingResult matcherResult;
         private byte[] response;
+        private int responseLength;
+        private ResponseArena responseArena;
+        private ResponseArena.Slot responseSlot;
 
-        void bind(long first, long second) {
+        void bind(long first, long second, ResponseArena responseArena) {
             clear();
+            this.responseArena = responseArena;
             if (first <= 0) return;
             ids[0] = first;
             count = 1;
@@ -1563,15 +1569,22 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                     || matcherResult.nativeOrderId() <= 0 || matcherResult.nativeInstrumentChangeId() <= 0
                     || matcherResult.nativeMatcherSequence() <= 0) return;
             try {
-                response = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrder(
-                        matcherResult.nativeCoreSequence(),
-                        new java.util.UUID(matcherResult.nativeCommandIdMostSignificantBits(),
-                                matcherResult.nativeCommandIdLeastSignificantBits()),
+                int length = com.surprising.aeron.protocol.CoreCommandResultCodec
+                        .encodedSingleOrderLength(source);
+                responseSlot = responseArena.acquireSlot(length);
+                response = responseSlot.storage;
+                responseLength = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(
+                        matcherResult.nativeCoreSequence(), matcherResult.nativeCommandIdMostSignificantBits(),
+                        matcherResult.nativeCommandIdLeastSignificantBits(),
                         matcherResult.nativeOrderId(), matcherResult.nativeInstrumentChangeId(),
-                        matcherResult.nativeMatcherSequence(),
-                        prefixBefore, prefixAfter, source);
+                        matcherResult.nativeMatcherSequence(), prefixBefore, prefixAfter, source,
+                        response, 0);
+                responseSlot.length = responseLength;
             } catch (IllegalArgumentException ignored) {
+                if (responseSlot != null) responseArena.release(responseSlot);
+                responseSlot = null;
                 response = null;
+                responseLength = 0;
             }
         }
 
@@ -1607,8 +1620,16 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 };
 
         @Override public byte[] preparedResponse() { return response; }
+        @Override public int preparedResponseLength() { return responseLength; }
+
+        void transferResponseOwnership() {
+            responseSlot = null;
+            response = null;
+            responseLength = 0;
+        }
 
         void clear() {
+            if (responseSlot != null && responseArena != null) responseArena.release(responseSlot);
             java.util.Arrays.fill(orders, null);
             java.util.Arrays.fill(symbols, null);
             java.util.Arrays.fill(ids, 0);
@@ -1616,6 +1637,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             prepared = false;
             matcherResult = null;
             response = null;
+            responseLength = 0;
+            responseSlot = null;
         }
     }
 }

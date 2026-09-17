@@ -123,6 +123,20 @@ public final class CoreCommandResultCodec {
         if (commandId == null || order == null || destination == null || offset < 0) {
             throw new IllegalArgumentException("command result fields are required");
         }
+        return encodeSingleOrderInto(coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), orderId, instrumentChangeId, matcherSequence,
+                matcherPrefixBefore, matcherPrefixAfter, order, destination, offset);
+    }
+
+    /** Allocation-free identity overload for Lane-owned response encoders. */
+    public static int encodeSingleOrderInto(long coreSequence, long commandIdMostSignificantBits,
+                                            long commandIdLeastSignificantBits, long orderId,
+                                            long instrumentChangeId, long matcherSequence,
+                                            long matcherPrefixBefore, long matcherPrefixAfter,
+                                            CoreOrderStateSource order, byte[] destination, int offset) {
+        if (order == null || destination == null || offset < 0) {
+            throw new IllegalArgumentException("command result fields are required");
+        }
         int length = encodedSingleOrderLength(order);
         if (offset > destination.length - length) {
             throw new IllegalArgumentException("command result destination is too small");
@@ -132,8 +146,8 @@ public final class CoreCommandResultCodec {
         ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
         buffer.putLong(coreSequence);
-        buffer.putLong(commandId.getMostSignificantBits());
-        buffer.putLong(commandId.getLeastSignificantBits());
+        buffer.putLong(commandIdMostSignificantBits);
+        buffer.putLong(commandIdLeastSignificantBits);
         buffer.putLong(orderId);
         buffer.putLong(instrumentChangeId);
         buffer.putLong(matcherSequence);

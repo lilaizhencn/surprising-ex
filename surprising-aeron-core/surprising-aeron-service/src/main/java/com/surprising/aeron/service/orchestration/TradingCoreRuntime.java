@@ -1713,7 +1713,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
         // Bind the fixed response target before any Matcher/Lane handoff. The target is reused
         // by this CommandSlot and contains no per-command collection or map.
-        pending.prepareLaneResultTarget();
+        pending.prepareLaneResultTarget(responseArena);
         // Standalone mode executes the admission inline and retains its historical synchronous
         // owner-visible publication contract. Cluster mode uses the Lane→Matcher receipt path
         // below and never enters this branch.
@@ -1844,12 +1844,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // publication fence; never freeze a placeholder fence into the Lane command.
         if (!pending.commitFenceEstablished()) return false;
         int shard = pendingSubmissionShard(pending);
-        if (pendingMatching.partitionDispatchHead(shard) != pending) {
+        pendingMatching.readyPartitionMask(pending.sequence());
+        if (pendingMatching.readyPartitionHead(shard) != pending) {
             return false;
         }
         pending.establishCommitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
         runtimeState.dispatchOwnerControlledSettlement(event);
-        pendingMatching.completePartitionDispatch(pending.sequence(), shard);
+        pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
         pendingMatching.progressChanged();
         pending.countPipelinedSettlement();
         commits.dispatchedSettlementInFlight++;

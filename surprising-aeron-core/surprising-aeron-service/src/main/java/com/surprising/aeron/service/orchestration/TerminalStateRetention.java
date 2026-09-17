@@ -120,6 +120,20 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     @Override
+    public void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
+        tombstones.putIfAbsent(EntityType.ORDER.ordinal(), orderId, userId,
+                normalizeClientId(clientOrderId), coreSequence);
+    }
+
+    @Override
+    public void acceptBatch(TradingRuntimeState.LaneDelta delta, long coreSequence) {
+        for (int index = 0; index < delta.terminalOrderCount(); index++) {
+            accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
+                    delta.terminalOrderClient(index), coreSequence);
+        }
+    }
+
+    @Override
     public void acceptBatch(OrderRuntime[] orders, int count, long coreSequence) {
         if (orders == null || count < 0 || count > orders.length) {
             throw new IllegalArgumentException("invalid terminal order batch");

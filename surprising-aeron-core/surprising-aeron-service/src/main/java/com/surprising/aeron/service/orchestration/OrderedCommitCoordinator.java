@@ -59,9 +59,6 @@ final class OrderedCommitCoordinator {
     /** 结算在途数量峰值，仅用于运行观测。 */
     int dispatchedSettlementHighWaterMark;
 
-    /** Reusable partition candidate storage; discovery must not allocate per Owner poll. */
-    private CommandSlot[] partitionDispatchHeads;
-
     /** 已发布变更的运行时 revision，禁止发布倒退。 */
     long runtimePatchRevision;
 
@@ -471,6 +468,7 @@ final class OrderedCommitCoordinator {
                 ? owner.resultBuilder.commandResultData(pending, matchingResult) : pending.resultData;
         int responseOffset = builderEncoded ? owner.resultBuilder.responseDataOffset() : 0;
         int responseLength = builderEncoded ? owner.resultBuilder.responseDataLength() : responseData.length;
+        boolean laneResponse = responseData != null && responseData == pending.lanePreparedResponse();
         pending.resultData = null;
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, owner.resultBuilder.commandTradeCount);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
@@ -479,6 +477,7 @@ final class OrderedCommitCoordinator {
         CoreResponse response = CoreResponse.owned(status, status, resultCode, applied, requiredExportSequence,
                 stateHash, responseData, responseOffset, responseLength);
         if (builderEncoded) owner.resultBuilder.transferResponseOwnership();
+        if (laneResponse) pending.transferLaneResponseOwnership();
         return response;
     }
 
@@ -1238,16 +1237,19 @@ final class OrderedCommitCoordinator {
         // 保存检查前的输入；本次派发若释放了跨分区依赖，下次仍会继续推进。
         checkedDispatchRevision = revision;
         checkedDispatchThrough = throughSequence;
-        // 每个订单簿分区独立推进；先用一次全局前缀扫描得到所有候选，避免按分区重复
-        // 扫描同一段 64/128 窗口。候选数组在 Owner 内复用，不进入分配热路径。
-        int shardCount = owner.matchingAdapter.topology().matchingEngineCount();
-        if (partitionDispatchHeads == null || partitionDispatchHeads.length != shardCount)
-            partitionDispatchHeads = new CommandSlot[shardCount];
-        owner.pendingMatching.collectPartitionDispatchHeads(throughSequence, partitionDispatchHeads);
-        for (int shard = 0; shard < shardCount; shard++) {
-            CommandSlot candidate = partitionDispatchHeads[shard];
+        // The ring maintains one ready cursor per matcher shard and a primitive bitmask.  Owner
+        // only visits ready partitions; it does not scan the global dispatch prefix once per
+        // shard or build a candidate array.
+        long readyShards = owner.pendingMatching.readyPartitionMask(throughSequence);
+        while (readyShards != 0) {
+            int shard = Long.numberOfTrailingZeros(readyShards);
+            readyShards &= readyShards - 1;
+            CommandSlot candidate = owner.pendingMatching.readyPartitionHead(shard);
+            long beforeRevision = owner.pendingMatching.dispatchRevision();
             if (candidate != null)
                 dispatchPartitionSettlements(shard, clusterTimestamp, clusterPosition, throughSequence, candidate);
+            if (owner.pendingMatching.dispatchRevision() == beforeRevision) break;
+            readyShards = owner.pendingMatching.readyPartitionMask(throughSequence);
         }
     }
 
@@ -1255,8 +1257,9 @@ final class OrderedCommitCoordinator {
                                              long throughSequence, CommandSlot firstCandidate) {
         CommandSlot first = firstCandidate;
         while (true) {
+            if (first == null) owner.pendingMatching.readyPartitionMask(throughSequence);
             CommandSlot pending = first == null
-                    ? owner.pendingMatching.partitionDispatchHead(shard) : first;
+                    ? owner.pendingMatching.readyPartitionHead(shard) : first;
             first = null;
             if (pending != null && pending.sequence() <= throughSequence && pending.settlementEvent() != null
                     && pending.settlementEvent().direct() && !pending.settlementEvent().matcherOwnedPublication()
