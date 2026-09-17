@@ -12,7 +12,7 @@ public final class RiskScanCoordinator {
     private final PositionUserIndex positionUsers;
     private final Iterable<Long> indexedUserIds;
     /** 全局预算，各轮扣除实际工作（空 Lane 访问也计一个工作单元）。 */
-    private final int budget;
+    private int budget;
     private int remaining;
     /** 每条 Lane 唯一的有界任务槽，仅本控制命令使用。 */
     private final RiskScanRuntime[] inputs;
@@ -43,13 +43,35 @@ public final class RiskScanCoordinator {
         this.identities = identities;
         this.positionUsers = positionUsers;
         this.indexedUserIds = indexedUserIds;
-        budget = runtime.riskScanControl().enabled()
-                ? Math.min(maxWork, runtime.riskScanControl().scanBatchSize()) : 0;
-        remaining = budget;
         int lanes = runtime.topology().accountLaneCount();
         inputs = new RiskScanRuntime[lanes];
         results = new RiskLaneProcessor.Page[lanes];
         allocations = new int[lanes];
+        resetForCommand(maxWork);
+    }
+
+    /**
+     * Re-arm this coordinator for another continuation without allocating its per-Lane arrays.
+     * Only the Owner thread calls this after the previous command has reached phase 3.
+     */
+    public void resetForCommand(int maxWork) {
+        runtime.assertOwner();
+        if (maxWork <= 0 || maxWork > 4096) {
+            throw new IllegalArgumentException("invalid risk scan budget");
+        }
+        // The direct command slot is serialized by the Owner.  A failed continuation may leave
+        // the coordinator in phase 1/2 after its Lane work has been rolled back; re-arming here
+        // is the recovery boundary for the next command and must not retain the abandoned page.
+        budget = runtime.riskScanControl().enabled()
+                ? Math.min(maxWork, runtime.riskScanControl().scanBatchSize()) : 0;
+        remaining = budget;
+        initial = null;
+        instrument = null;
+        mark = null;
+        settleAssetId = 0;
+        laneMask = creationMask = nextLiquidationId = 0;
+        nextLane = work = 0;
+        phase = 0;
     }
 
     /** 一次轮询只推进已就绪阶段；队列未完成立即返回，不等待其他线程。 */
