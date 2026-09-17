@@ -1806,24 +1806,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> matcherSubmission =
                 command;
         if (direct != null && pending.placeAdmission() != null) {
-            var directSettlement = direct;
-            var originalSubmission = matcherSubmission;
             int admissionLaneId = pending.placeAdmission().laneId();
-            matcherSubmission = () -> {
-                // The Matcher consumes the fixed primitive receipt directly.  The Owner no
-                // longer polls a PlaceAdmissionEvent or transfers its result to this event.
-                runtimeState.awaitAdmissionReceipt(admissionLaneId, matcherShard(pending),
-                        pending.sequence(), directSettlement);
-                if (!directSettlement.admissionAccepted()) {
-                    var place = pending.decodedCommand().placeOrder();
-                    return matchingAdapter.rejectedPlaceWithEvidence(
-                            matcherShard(pending), pending.sequence(),
-                            pending.command().header().commandId(), place.orderId(),
-                            place.instrumentChangeId(), pending.command().header().submittedAtEpochMillis(),
-                            directSettlement.admissionResultCode());
-                }
-                return originalSubmission.get();
-            };
+            // The Matcher consumes the fixed primitive receipt directly. The reusable slot gate
+            // avoids an Owner-side capturing lambda and retains the original submission only
+            // until this Matcher invocation completes.
+            matcherSubmission = pending.gateAdmission(this, admissionLaneId, matcherShard(pending),
+                    direct, matcherSubmission);
         }
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();

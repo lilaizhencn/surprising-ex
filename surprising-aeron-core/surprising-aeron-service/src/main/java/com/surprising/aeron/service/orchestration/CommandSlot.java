@@ -14,6 +14,7 @@ import com.surprising.aeron.service.state.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.LaneCancelEvent;
 import com.surprising.aeron.service.state.OrderRuntime;
+import com.surprising.aeron.service.state.MatcherSettlementEvent;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.List;
 import java.util.Objects;
@@ -115,6 +116,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private com.surprising.aeron.service.state.AccountPositionMarginAdjustment reusablePositionMarginAdjustment;
     private final AccountControlContinuation accountControl = new AccountControlContinuation();
     private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
+    /** Fixed wrapper for the only admission-gated Matcher submission. */
+    private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -161,6 +164,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     String laneResultSymbol(long orderId) { return laneResultTarget.symbol(orderId); }
     boolean laneResultPrepared() { return laneResultTarget.prepared(); }
     byte[] lanePreparedResponse() { return laneResultTarget.preparedResponse(); }
+
+    /** Reuses one slot-owned gate instead of allocating a capturing lambda for each PLACE. */
+    java.util.function.Supplier<CoreMatchingResult> gateAdmission(TradingCoreRuntime owner,
+            int admissionLaneId, int matcherShard,
+            com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
+            java.util.function.Supplier<CoreMatchingResult> original) {
+        admissionMatching.prepare(owner, admissionLaneId, matcherShard, settlement, original);
+        return admissionMatching;
+    }
 
     void deferControl(java.util.function.BooleanSupplier work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -982,6 +994,44 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         liquidationResolutionControl.clear();
         accountControl.clear();
         triggerControl.clear();
+        admissionMatching.clear();
+    }
+
+    private final class AdmissionMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+        private TradingCoreRuntime owner;
+        private int admissionLaneId;
+        private int matcherShard;
+        private MatcherSettlementEvent settlement;
+        private java.util.function.Supplier<CoreMatchingResult> original;
+
+        void prepare(TradingCoreRuntime owner, int admissionLaneId, int matcherShard,
+                     MatcherSettlementEvent settlement, java.util.function.Supplier<CoreMatchingResult> original) {
+            this.owner = Objects.requireNonNull(owner);
+            this.admissionLaneId = admissionLaneId;
+            this.matcherShard = matcherShard;
+            this.settlement = Objects.requireNonNull(settlement);
+            this.original = Objects.requireNonNull(original);
+        }
+
+        void clear() {
+            owner = null;
+            admissionLaneId = matcherShard = 0;
+            settlement = null;
+            original = null;
+        }
+
+        @Override
+        public CoreMatchingResult get() {
+            owner.runtimeState.awaitAdmissionReceipt(admissionLaneId, matcherShard, coreSequence, settlement);
+            if (!settlement.admissionAccepted()) {
+                var place = decodedCommand.placeOrder();
+                return owner.matchingAdapter.rejectedPlaceWithEvidence(
+                        matcherShard, coreSequence, command.header().commandId(), place.orderId(),
+                        place.instrumentChangeId(), command.header().submittedAtEpochMillis(),
+                        settlement.admissionResultCode());
+            }
+            return original.get();
+        }
     }
 
     /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
