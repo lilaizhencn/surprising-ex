@@ -1,19 +1,22 @@
-package com.surprising.aeron.service.state;
-
-import com.surprising.aeron.service.state.math.*;
+package com.surprising.aeron.service.business.derivative;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.math.CoreContractMath;
 
-final class FuturesFillCalculator {
-    private FuturesFillCalculator() {}
+/** Calculates opening margin for perpetual and delivery fills. */
+public final class FuturesFillCalculator {
+    private FuturesFillCalculator() {
+    }
 
-    static long openingMarginForFill(CoreInstrumentState instrument,
-                                             long projectedQuantitySteps,
-                                             long signedFillSteps,
-                                             long openSteps,
-                                             long priceTicks,
-                                             long leveragePpm,
-                                             MarkPriceRuntime riskMark) {
+    public static long openingMarginForFill(CoreInstrumentState instrument,
+                                            long projectedQuantitySteps,
+                                            long signedFillSteps,
+                                            long openSteps,
+                                            long priceTicks,
+                                            long leveragePpm,
+                                            MarkPriceRuntime riskMark) {
         if (openSteps == 0) return 0;
         long indexPriceTicks = riskMark == null ? 0 : riskMark.indexPriceTicks();
         long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,

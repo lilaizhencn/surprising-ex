@@ -1,19 +1,24 @@
-package com.surprising.aeron.service.state;
-
-import com.surprising.aeron.service.state.math.*;
+package com.surprising.aeron.service.business.option;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.math.OptionContractMath;
 
-final class OptionFillCalculator {
-    private OptionFillCalculator() {}
+/** Calculates option risk-mark validation and seller margin for fills. */
+public final class OptionFillCalculator {
+    private OptionFillCalculator() {
+    }
 
-    static long openingMarginForFill(CoreInstrumentState instrument,
-                                             long projectedQuantitySteps,
-                                             long signedFillSteps,
-                                             long openSteps,
-                                             long priceTicks,
-                                             long leveragePpm,
-                                             MarkPriceRuntime riskMark) {
+    public static long openingMarginForFill(CoreInstrumentState instrument,
+                                            long projectedQuantitySteps,
+                                            long signedFillSteps,
+                                            long openSteps,
+                                            long priceTicks,
+                                            long leveragePpm,
+                                            MarkPriceRuntime riskMark) {
         if (openSteps == 0 || signedFillSteps > 0) return 0;
         long indexPriceTicks = riskMark == null ? 0 : riskMark.indexPriceTicks();
         long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,
@@ -30,15 +35,15 @@ final class OptionFillCalculator {
                 bracket.optionMarginFactorPpm());
     }
 
-    static void requireRiskMark(MarkPriceRuntime riskMark) {
+    public static void requireRiskMark(MarkPriceRuntime riskMark) {
         if (riskMark == null || riskMark.indexPriceTicks() <= 0 || riskMark.forwardPriceTicks() <= 0) {
             throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
                     "option fill requires index and same-expiry forward prices");
         }
     }
 
-    static long premiumMarginFunding(CoreInstrumentState instrument, long premiumDelta,
-                                     long openSteps, long marginIncrease, long fillPriceTicks) {
+    public static long premiumMarginFunding(CoreInstrumentState instrument, long premiumDelta,
+                                            long openSteps, long marginIncrease, long fillPriceTicks) {
         return premiumDelta > 0 && openSteps > 0
                 ? Math.min(marginIncrease,
                         OptionContractMath.optionPremiumUnits(instrument, fillPriceTicks, openSteps)) : 0;
