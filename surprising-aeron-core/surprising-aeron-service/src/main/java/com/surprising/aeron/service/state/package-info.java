@@ -23,5 +23,8 @@
  *
  * <p>{@code LeverageStateTransitions} 只拥有衍生品 {@code leverages} 集合的校验和写入；它
  * 读取订单与持仓来阻止有敞口时修改杠杆，但不修改这些状态。</p>
+ *
+ * <p>{@code PositionStateTransitions} 负责衍生品位置模式切换和逐仓保证金调整；它在一次用户
+ * 状态变更中同时更新余额与持仓，保证资金转移和保证金变化不可分离。</p>
  */
 package com.surprising.aeron.service.state;

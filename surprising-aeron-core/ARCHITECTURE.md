@@ -146,6 +146,8 @@ CoreMessage / PlaceOrderCommand
 `AlgoOrderStateTransitions` 只拥有 `algoOrders` 的创建与修订；两者都不修改普通订单、余额或持仓。
 `LeverageStateTransitions` 只拥有衍生品 `leverages` 的校验和写入，读取订单与持仓执行敞口检查，
 但不修改订单、余额或持仓。
+`PositionStateTransitions` 负责衍生品位置模式切换和逐仓保证金调整；逐仓调保证金在一次用户状态
+变更中同时更新可用/锁定余额与持仓保证金，保证资金转移和保证金变化不可分离。
 
 ## 4. 第一阶段不做的事情
 
