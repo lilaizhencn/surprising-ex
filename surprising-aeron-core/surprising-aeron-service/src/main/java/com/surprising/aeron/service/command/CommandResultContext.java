@@ -9,6 +9,11 @@ import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
+import com.surprising.aeron.service.state.AccountBalanceAdjustment;
+import com.surprising.aeron.service.state.AccountTransferOut;
+import com.surprising.aeron.service.state.AccountLeverageChange;
+import com.surprising.aeron.service.state.AccountPositionModeChange;
+import com.surprising.aeron.service.state.AccountPositionMarginAdjustment;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 
@@ -38,6 +43,26 @@ public interface CommandResultContext extends CommandOwnerContext {
     void deferLiquidationResolutionControl(RuntimeDerivativeLiquidationProcessor.ResolutionWork work);
 
     RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableLiquidationResolutionWork();
+
+    AccountBalanceAdjustment reusableBalanceAdjustment();
+
+    AccountTransferOut reusableTransferOut();
+
+    AccountLeverageChange reusableLeverageChange();
+
+    AccountPositionModeChange reusablePositionModeChange();
+
+    AccountPositionMarginAdjustment reusablePositionMarginAdjustment();
+
+    void deferBalanceAdjustmentControl(AccountBalanceAdjustment work);
+
+    void deferTransferOutControl(AccountTransferOut work);
+
+    void deferLeverageChangeControl(AccountLeverageChange work, long beforeRevision);
+
+    void deferPositionModeChangeControl(AccountPositionModeChange work, long beforeRevision);
+
+    void deferPositionMarginAdjustmentControl(AccountPositionMarginAdjustment work);
 
     void setSingleChangedUser(long userId);
 

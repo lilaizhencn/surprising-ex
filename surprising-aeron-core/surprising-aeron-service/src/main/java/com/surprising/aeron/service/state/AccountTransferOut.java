@@ -3,23 +3,37 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 
 /** 异步转出：所属账户 Lane 扣款，Owner 收集完成后登记跨产品划转记录。 */
-public final class AccountTransferOut {
+public final class AccountTransferOut implements java.util.function.IntFunction<Object> {
     /** 唯一产品控制上下文。 */
-    private final TradingRuntimeState runtime;
+    private TradingRuntimeState runtime;
     /** 已验证的划转身份；null 表示已存在同一笔划转，不重复扣款。 */
-    private final TransferRuntime transfer;
+    private TransferRuntime transfer;
     /** 预解析资产，账户线程不修改身份注册表。 */
-    private final int assetId;
+    private int assetId;
     /** 扣款完成后提交的产品修订号。 */
-    private final long nextRevision;
+    private long nextRevision;
+    private long amountUnits;
     /** 完成收集后防止重复登记或修改修订号。 */
     private boolean completed;
 
     public AccountTransferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                               long userId, TransferFundsCommand command) {
+        reset(runtime, identities, userId, command);
+    }
+
+    public static AccountTransferOut prepare(AccountTransferOut reuse, TradingRuntimeState runtime,
+            RuntimeIdentityRegistry identities, long userId, TransferFundsCommand command) {
+        if (reuse == null) return new AccountTransferOut(runtime, identities, userId, command);
+        reuse.reset(runtime, identities, userId, command);
+        return reuse;
+    }
+
+    private void reset(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
+                       TransferFundsCommand command) {
         if (identities == null) throw new IllegalArgumentException("transfer identities are required");
         this.runtime = runtime;
-        transfer = RuntimeCommandProcessor.prepareTransferOut(runtime, userId, command);
+        this.transfer = RuntimeCommandProcessor.prepareTransferOut(runtime, userId, command);
+        this.amountUnits = command.amountUnits();
         if (transfer == null) {
             assetId = 0;
             nextRevision = runtime.revision();
@@ -28,10 +42,13 @@ public final class AccountTransferOut {
         }
         assetId = identities.assetId(command.asset());
         nextRevision = Math.incrementExact(runtime.revision());
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), lane -> {
-            RuntimeCommandProcessor.debitTransferAccount(runtime, userId, assetId, command.amountUnits());
-            return null;
-        });
+        completed = false;
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+    }
+
+    @Override public Object apply(int ignoredLaneId) {
+        RuntimeCommandProcessor.debitTransferAccount(runtime, transfer.userId(), assetId, amountUnits);
+        return null;
     }
 
     public boolean poll() {

@@ -1390,6 +1390,53 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 identities);
     }
 
+    @Override public com.surprising.aeron.service.state.AccountBalanceAdjustment
+            reusableBalanceAdjustment() {
+        return directCommand.reusableBalanceAdjustment();
+    }
+
+    @Override public com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut() {
+        return directCommand.reusableTransferOut();
+    }
+
+    @Override public com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange() {
+        return directCommand.reusableLeverageChange();
+    }
+
+    @Override public com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange() {
+        return directCommand.reusablePositionModeChange();
+    }
+
+    @Override public com.surprising.aeron.service.state.AccountPositionMarginAdjustment
+            reusablePositionMarginAdjustment() {
+        return directCommand.reusablePositionMarginAdjustment();
+    }
+
+    @Override public void deferBalanceAdjustmentControl(
+            com.surprising.aeron.service.state.AccountBalanceAdjustment work) {
+        directCommand.deferBalanceAdjustmentControl(this, work);
+    }
+
+    @Override public void deferTransferOutControl(
+            com.surprising.aeron.service.state.AccountTransferOut work) {
+        directCommand.deferTransferOutControl(this, work);
+    }
+
+    @Override public void deferLeverageChangeControl(
+            com.surprising.aeron.service.state.AccountLeverageChange work, long beforeRevision) {
+        directCommand.deferLeverageChangeControl(this, work, beforeRevision);
+    }
+
+    @Override public void deferPositionModeChangeControl(
+            com.surprising.aeron.service.state.AccountPositionModeChange work, long beforeRevision) {
+        directCommand.deferPositionModeChangeControl(this, work, beforeRevision);
+    }
+
+    @Override public void deferPositionMarginAdjustmentControl(
+            com.surprising.aeron.service.state.AccountPositionMarginAdjustment work) {
+        directCommand.deferPositionMarginAdjustmentControl(this, work);
+    }
+
     boolean hasPendingDirectCommand() { return directCommand.directActive; }
 
     CoreResponse pollDirectCommand() {

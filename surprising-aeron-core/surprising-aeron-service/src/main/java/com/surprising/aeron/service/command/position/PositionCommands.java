@@ -21,12 +21,9 @@ public final class PositionCommands {
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();
-            var work = new AccountPositionModeChange(owner.runtimeState(), userId, command);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
-                return true;
-            });
+            var work = AccountPositionModeChange.prepare(owner.reusablePositionModeChange(),
+                    owner.runtimeState(), userId, command);
+            owner.deferPositionModeChangeControl(work, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
             owner.requestCommitPublication();
         }
@@ -37,13 +34,9 @@ public final class PositionCommands {
         owner.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            var work = new AccountPositionMarginAdjustment(
+            var work = AccountPositionMarginAdjustment.prepare(owner.reusablePositionMarginAdjustment(),
                     owner.runtimeState(), owner.identities(), userId, command);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                owner.requestCommitPublication();
-                return true;
-            });
+            owner.deferPositionMarginAdjustmentControl(work);
         } else {
             DerivativeAccountCommandProcessor.adjustPositionMargin(
                     owner.runtimeState(), owner.identities(), userId, command);

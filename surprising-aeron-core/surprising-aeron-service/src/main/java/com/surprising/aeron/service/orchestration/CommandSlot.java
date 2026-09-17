@@ -3,6 +3,7 @@ import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
+import com.surprising.aeron.service.command.balance.BalanceCommandContext;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -105,6 +106,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork;
     private RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableResolutionWork;
     private RiskScanCoordinator reusableRiskCoordinator;
+    private com.surprising.aeron.service.state.AccountBalanceAdjustment reusableBalanceAdjustment;
+    private com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut;
+    private com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange;
+    private com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange;
+    private com.surprising.aeron.service.state.AccountPositionMarginAdjustment reusablePositionMarginAdjustment;
+    private final AccountControlContinuation accountControl = new AccountControlContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -206,6 +213,65 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             reusableRiskCoordinator.resetForCommand(maxUsers);
         }
         return reusableRiskCoordinator;
+    }
+
+    com.surprising.aeron.service.state.AccountBalanceAdjustment reusableBalanceAdjustment() {
+        return reusableBalanceAdjustment;
+    }
+
+    com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut() { return reusableTransferOut; }
+
+    com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange() {
+        return reusableLeverageChange;
+    }
+
+    com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange() {
+        return reusablePositionModeChange;
+    }
+
+    com.surprising.aeron.service.state.AccountPositionMarginAdjustment reusablePositionMarginAdjustment() {
+        return reusablePositionMarginAdjustment;
+    }
+
+    void deferBalanceAdjustmentControl(CommandResultContext owner,
+            com.surprising.aeron.service.state.AccountBalanceAdjustment work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        reusableBalanceAdjustment = Objects.requireNonNull(work);
+        accountControl.prepareBalance(owner, work);
+        controlWork = accountControl;
+    }
+
+    void deferTransferOutControl(CommandResultContext owner,
+            com.surprising.aeron.service.state.AccountTransferOut work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        reusableTransferOut = Objects.requireNonNull(work);
+        accountControl.prepareTransfer(owner, work);
+        controlWork = accountControl;
+    }
+
+    void deferLeverageChangeControl(CommandResultContext owner,
+                                    com.surprising.aeron.service.state.AccountLeverageChange work,
+                                    long beforeRevision) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        reusableLeverageChange = Objects.requireNonNull(work);
+        accountControl.prepareLeverage(owner, work, beforeRevision);
+        controlWork = accountControl;
+    }
+
+    void deferPositionModeChangeControl(CommandResultContext owner,
+            com.surprising.aeron.service.state.AccountPositionModeChange work, long beforeRevision) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        reusablePositionModeChange = Objects.requireNonNull(work);
+        accountControl.preparePositionMode(owner, work, beforeRevision);
+        controlWork = accountControl;
+    }
+
+    void deferPositionMarginAdjustmentControl(CommandResultContext owner,
+            com.surprising.aeron.service.state.AccountPositionMarginAdjustment work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        reusablePositionMarginAdjustment = Objects.requireNonNull(work);
+        accountControl.preparePositionMargin(owner, work);
+        controlWork = accountControl;
     }
 
     com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork settlementWork() {
@@ -882,6 +948,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         riskScanControl.clear();
         adlControl.clear();
         liquidationResolutionControl.clear();
+        accountControl.clear();
     }
 
     /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
@@ -1032,6 +1099,85 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             if (!work.getAsBoolean()) return false;
             owner.requestCommitPublication();
             return true;
+        }
+    }
+
+    /** Single fixed-slot continuation for the ordinary account control commands. */
+    private final class AccountControlContinuation implements java.util.function.BooleanSupplier {
+        private static final byte BALANCE = 1;
+        private static final byte TRANSFER = 2;
+        private static final byte LEVERAGE = 3;
+        private static final byte POSITION_MODE = 4;
+        private static final byte POSITION_MARGIN = 5;
+        private byte kind;
+        private CommandResultContext owner;
+        private com.surprising.aeron.service.state.AccountBalanceAdjustment balance;
+        private com.surprising.aeron.service.state.AccountTransferOut transfer;
+        private com.surprising.aeron.service.state.AccountLeverageChange leverage;
+        private com.surprising.aeron.service.state.AccountPositionModeChange positionMode;
+        private com.surprising.aeron.service.state.AccountPositionMarginAdjustment positionMargin;
+        private long beforeRevision;
+
+        void prepareBalance(CommandResultContext owner,
+                com.surprising.aeron.service.state.AccountBalanceAdjustment work) {
+            clear(); kind = BALANCE; balance = work; this.owner = Objects.requireNonNull(owner);
+        }
+        void prepareTransfer(CommandResultContext owner,
+                com.surprising.aeron.service.state.AccountTransferOut work) {
+            clear(); kind = TRANSFER; transfer = work; this.owner = Objects.requireNonNull(owner);
+        }
+        void prepareLeverage(CommandResultContext owner,
+                com.surprising.aeron.service.state.AccountLeverageChange work, long beforeRevision) {
+            clear(); kind = LEVERAGE; leverage = work; this.owner = Objects.requireNonNull(owner);
+            this.beforeRevision = beforeRevision;
+        }
+        void preparePositionMode(CommandResultContext owner,
+                com.surprising.aeron.service.state.AccountPositionModeChange work, long beforeRevision) {
+            clear(); kind = POSITION_MODE; positionMode = work; this.owner = Objects.requireNonNull(owner);
+            this.beforeRevision = beforeRevision;
+        }
+        void preparePositionMargin(CommandResultContext owner,
+                com.surprising.aeron.service.state.AccountPositionMarginAdjustment work) {
+            clear(); kind = POSITION_MARGIN; positionMargin = work; this.owner = Objects.requireNonNull(owner);
+        }
+
+        void clear() {
+            kind = 0; owner = null; balance = null; transfer = null; leverage = null;
+            positionMode = null; positionMargin = null; beforeRevision = 0;
+        }
+
+        @Override public boolean getAsBoolean() {
+            if (owner == null) throw new IllegalStateException("account continuation owner is missing");
+            boolean complete;
+            switch (kind) {
+                case BALANCE -> {
+                    complete = balance.poll();
+                    if (complete) owner.requestCommitPublication();
+                }
+                case TRANSFER -> {
+                    complete = transfer.poll();
+                    if (complete) {
+                        ((BalanceCommandContext) owner).refreshTransferHash();
+                        owner.requestCommitPublication();
+                    }
+                }
+                case LEVERAGE -> {
+                    complete = leverage.poll();
+                    if (complete && owner.runtimeState().revision() != beforeRevision)
+                        owner.requestCommitPublication();
+                }
+                case POSITION_MODE -> {
+                    complete = positionMode.poll();
+                    if (complete && owner.runtimeState().revision() != beforeRevision)
+                        owner.requestCommitPublication();
+                }
+                case POSITION_MARGIN -> {
+                    complete = positionMargin.poll();
+                    if (complete) owner.requestCommitPublication();
+                }
+                default -> throw new IllegalStateException("unknown account continuation");
+            }
+            return complete;
         }
     }
 

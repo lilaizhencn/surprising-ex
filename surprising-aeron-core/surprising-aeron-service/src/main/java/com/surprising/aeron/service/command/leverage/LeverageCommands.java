@@ -20,13 +20,9 @@ public final class LeverageCommands {
         var command = TradingCommandCodec.decodeUpdateLeverage(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();
-            var work = new AccountLeverageChange(
+            var work = AccountLeverageChange.prepare(owner.reusableLeverageChange(),
                     owner.runtimeState(), owner.identities(), userId, command);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
-                return true;
-            });
+            owner.deferLeverageChangeControl(work, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updateLeverage(
                 owner.runtimeState(), owner.identities(), userId, command)) {
             owner.requestCommitPublication();

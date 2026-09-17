@@ -26,13 +26,9 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
 
     private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
         if (owner.asynchronousCommands()) {
-            var work = new AccountBalanceAdjustment(
+            var work = AccountBalanceAdjustment.prepare(owner.reusableBalanceAdjustment(),
                     owner.runtimeState(), owner.identities(), userId, command);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                owner.requestCommitPublication();
-                return true;
-            });
+            owner.deferBalanceAdjustmentControl(work);
         } else {
             RuntimeCommandProcessor.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
             owner.requestCommitPublication();
@@ -43,13 +39,9 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
         owner.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            var work = new AccountTransferOut(
-                    owner.runtimeState(), owner.identities(), message.header().userId(), command);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                completeTransferPublication();
-                return true;
-            });
+            var work = AccountTransferOut.prepare(owner.reusableTransferOut(), owner.runtimeState(),
+                    owner.identities(), message.header().userId(), command);
+            owner.deferTransferOutControl(work);
         } else {
             RuntimeCommandProcessor.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
             completeTransferPublication();
