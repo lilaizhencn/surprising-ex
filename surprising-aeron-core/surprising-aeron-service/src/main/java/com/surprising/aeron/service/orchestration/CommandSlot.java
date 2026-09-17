@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.CommandResultContext;
+import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -16,6 +18,9 @@ import java.util.Objects;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.state.RiskScanCoordinator;
+import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 
 /**
  * Reusable command lifetime: input, business progress, Lane completion and final result.
@@ -88,6 +93,18 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
     private final LiquidationExecutionContinuation liquidationExecutionControl =
             new LiquidationExecutionContinuation();
+    /** Fixed-slot continuations for low-frequency command families. */
+    private final FundingControlContinuation fundingControl = new FundingControlContinuation();
+    private final RiskScanControlContinuation riskScanControl = new RiskScanControlContinuation();
+    private final AdlControlContinuation adlControl = new AdlControlContinuation();
+    private final LiquidationResolutionControlContinuation liquidationResolutionControl =
+            new LiquidationResolutionControlContinuation();
+    private static final java.util.function.BooleanSupplier COMPLETE_CONTROL = () -> true;
+    /** Reusable low-frequency work objects owned by the fixed direct command slot. */
+    private RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork;
+    private RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork;
+    private RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableResolutionWork;
+    private RiskScanCoordinator reusableRiskCoordinator;
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -140,6 +157,57 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         controlWork = Objects.requireNonNull(work);
     }
 
+    void deferFundingControl(CommandResultContext owner, RuntimePerpetualFundingProcessor.FundingWork work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        fundingControl.prepare(owner, work);
+        reusableFundingWork = work;
+        controlWork = fundingControl;
+    }
+
+    RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
+
+    void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId,
+                              String symbol, int maxUsers, int pendingBefore, long startedAt,
+                              long beforeRevision) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        riskScanControl.prepare(owner, risk, symbolId, symbol, maxUsers, pendingBefore, startedAt,
+                beforeRevision);
+        controlWork = riskScanControl;
+    }
+
+    void deferAdlControl(CommandResultContext owner, RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        adlControl.prepare(owner, work);
+        reusableAdlWork = work;
+        controlWork = adlControl;
+    }
+
+    RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork() { return reusableAdlWork; }
+
+    void deferLiquidationResolutionControl(CommandResultContext owner,
+            RuntimeDerivativeLiquidationProcessor.ResolutionWork work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        liquidationResolutionControl.prepare(owner, work);
+        reusableResolutionWork = work;
+        controlWork = liquidationResolutionControl;
+    }
+
+    RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableLiquidationResolutionWork() {
+        return reusableResolutionWork;
+    }
+
+    RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers,
+            com.surprising.aeron.service.state.PositionUserIndex positionUserIndex,
+            com.surprising.aeron.service.state.TradingRuntimeState runtime,
+            com.surprising.aeron.service.state.RuntimeIdentityRegistry identities) {
+        if (reusableRiskCoordinator == null) {
+            reusableRiskCoordinator = new RiskScanCoordinator(maxUsers, positionUserIndex, runtime, identities);
+        } else {
+            reusableRiskCoordinator.resetForCommand(maxUsers);
+        }
+        return reusableRiskCoordinator;
+    }
+
     com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork settlementWork() {
         return reusableSettlementWork;
     }
@@ -190,6 +258,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     void clearDirect() {
+        clearControlContinuations();
         directActive = false;
         command = null;
         fingerprint = null;
@@ -776,6 +845,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     private void clearLifecycleState() {
+        clearControlContinuations();
         settlementControl.clear();
         if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
         liquidationExecutionControl.clear();
@@ -805,6 +875,13 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         deferredSourceKey = null;
         cachedMatcherShard = -1;
         laneResultTarget.clear();
+    }
+
+    private void clearControlContinuations() {
+        fundingControl.clear();
+        riskScanControl.clear();
+        adlControl.clear();
+        liquidationResolutionControl.clear();
     }
 
     /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
@@ -857,6 +934,103 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             if (!work.getAsBoolean()) return false;
             coordinator.owner.resultBuilder.commandLiquidationProgress = progress;
             coordinator.requestCommitPublication();
+            return true;
+        }
+    }
+
+    private final class FundingControlContinuation implements java.util.function.BooleanSupplier {
+        private CommandResultContext owner;
+        private RuntimePerpetualFundingProcessor.FundingWork work;
+
+        void prepare(CommandResultContext owner, RuntimePerpetualFundingProcessor.FundingWork work) {
+            this.owner = Objects.requireNonNull(owner);
+            this.work = Objects.requireNonNull(work);
+        }
+
+        void clear() { owner = null; work = null; }
+
+        @Override public boolean getAsBoolean() {
+            if (!work.poll()) return false;
+            var result = work.result();
+            if (result.state() != owner.runtimeState()) {
+                throw new IllegalStateException("funding processor replaced authoritative runtime state");
+            }
+            owner.requestCommitPublication();
+            owner.setCommandFundingProgress(result.progress());
+            owner.addChangedUsersFromFundingPayments(result.payments());
+            return true;
+        }
+    }
+
+    private final class RiskScanControlContinuation implements java.util.function.BooleanSupplier {
+        private RiskCommandContext owner;
+        private RiskScanCoordinator risk;
+        private int symbolId;
+        private String symbol;
+        private int maxUsers;
+        private int pendingBefore;
+        private long startedAt;
+        private long beforeRevision;
+        private java.util.function.BooleanSupplier triggers;
+
+        void prepare(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String symbol,
+                     int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
+            this.owner = Objects.requireNonNull(owner);
+            this.risk = risk;
+            this.symbolId = symbolId;
+            this.symbol = Objects.requireNonNull(symbol);
+            this.maxUsers = maxUsers;
+            this.pendingBefore = pendingBefore;
+            this.startedAt = startedAt;
+            this.beforeRevision = beforeRevision;
+            this.triggers = null;
+        }
+
+        void clear() {
+            owner = null; risk = null; symbol = null; triggers = null;
+            symbolId = maxUsers = pendingBefore = 0; startedAt = beforeRevision = 0;
+        }
+
+        @Override public boolean getAsBoolean() {
+            if (triggers == null) {
+                if (risk != null && !risk.poll()) return false;
+                if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
+                int remaining = maxUsers - (risk == null ? 0 : risk.completedWork());
+                var completedScan = owner.runtimeState().riskScan(symbolId);
+                triggers = remaining > 0 && completedScan != null && completedScan.riskComplete()
+                        && !completedScan.triggerComplete()
+                        ? owner.pendingTriggerScan(symbol, remaining) : COMPLETE_CONTROL;
+            }
+            if (!triggers.getAsBoolean()) return false;
+            owner.logRiskScan("continuation", symbol, maxUsers, pendingBefore, startedAt);
+            return true;
+        }
+    }
+
+    private final class AdlControlContinuation implements java.util.function.BooleanSupplier {
+        private CommandResultContext owner;
+        private RuntimeDerivativeLiquidationProcessor.AdlWork work;
+        void prepare(CommandResultContext owner, RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+            this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
+        }
+        void clear() { owner = null; work = null; }
+        @Override public boolean getAsBoolean() {
+            if (!work.getAsBoolean()) return false;
+            owner.requestCommitPublication();
+            return true;
+        }
+    }
+
+    private final class LiquidationResolutionControlContinuation implements java.util.function.BooleanSupplier {
+        private CommandResultContext owner;
+        private RuntimeDerivativeLiquidationProcessor.ResolutionWork work;
+        void prepare(CommandResultContext owner, RuntimeDerivativeLiquidationProcessor.ResolutionWork work) {
+            this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
+        }
+        void clear() { owner = null; work = null; }
+        @Override public boolean getAsBoolean() {
+            if (!work.getAsBoolean()) return false;
+            owner.requestCommitPublication();
             return true;
         }
     }

@@ -11,8 +11,6 @@ import java.util.Collection;
 /** 衍生品强平执行、撤单推进和结果确认命令。 */
 public final class LiquidationCommands {
     private final LiquidationCommandContext owner;
-    private RuntimeDerivativeLiquidationProcessor.ResolutionWork asyncWork;
-    private final ResolutionContinuation continuation = new ResolutionContinuation();
 
     public LiquidationCommands(LiquidationCommandContext owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
@@ -21,10 +19,9 @@ public final class LiquidationCommands {
     public void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            asyncWork = RuntimeDerivativeLiquidationProcessor.beginResolution(asyncWork, command,
+            var work = RuntimeDerivativeLiquidationProcessor.beginResolution(owner.reusableLiquidationResolutionWork(), command,
                     owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
-            continuation.prepare(asyncWork);
-            owner.deferControl(continuation);
+            owner.deferLiquidationResolutionControl(work);
         } else {
             RuntimeDerivativeLiquidationProcessor.applyResolutionRuntime(command, owner.runtimeState(),
                     owner.identities(), owner.activeLiquidationIds());
@@ -47,17 +44,4 @@ public final class LiquidationCommands {
         owner.requestCommitPublication();
     }
 
-    /** Reusable owner callback for the slot-scoped liquidation resolution work. */
-    private final class ResolutionContinuation implements java.util.function.BooleanSupplier {
-        private RuntimeDerivativeLiquidationProcessor.ResolutionWork work;
-
-        void prepare(RuntimeDerivativeLiquidationProcessor.ResolutionWork work) { this.work = work; }
-
-        @Override
-        public boolean getAsBoolean() {
-            if (!work.getAsBoolean()) return false;
-            owner.requestCommitPublication();
-            return true;
-        }
-    }
 }

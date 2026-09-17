@@ -1346,6 +1346,50 @@ public final class TradingCoreRuntime implements AutoCloseable,
         directCommand.deferControl(continuation);
     }
 
+    @Override public void deferFundingControl(
+            com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork work) {
+        directCommand.deferFundingControl(this, work);
+    }
+
+    @Override public com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork
+            reusableFundingWork() {
+        return directCommand.reusableFundingWork();
+    }
+
+    @Override public void deferRiskScanControl(
+            com.surprising.aeron.service.command.risk.RiskCommandContext owner,
+            com.surprising.aeron.service.state.RiskScanCoordinator risk, int symbolId, String symbol,
+            int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
+        directCommand.deferRiskScanControl(owner, risk, symbolId, symbol, maxUsers, pendingBefore,
+                startedAt, beforeRevision);
+    }
+
+    @Override public void deferAdlControl(
+            com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+        directCommand.deferAdlControl(this, work);
+    }
+
+    @Override public com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.AdlWork
+            reusableAdlWork() {
+        return directCommand.reusableAdlWork();
+    }
+
+    @Override public void deferLiquidationResolutionControl(
+            com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ResolutionWork work) {
+        directCommand.deferLiquidationResolutionControl(this, work);
+    }
+
+    @Override public com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ResolutionWork
+            reusableLiquidationResolutionWork() {
+        return directCommand.reusableLiquidationResolutionWork();
+    }
+
+    @Override public com.surprising.aeron.service.state.RiskScanCoordinator
+            reusableRiskScanCoordinator(int maxUsers) {
+        return directCommand.reusableRiskScanCoordinator(maxUsers, positionUserIndex, runtimeState,
+                identities);
+    }
+
     boolean hasPendingDirectCommand() { return directCommand.directActive; }
 
     CoreResponse pollDirectCommand() {
