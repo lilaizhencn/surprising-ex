@@ -289,6 +289,12 @@ OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结
 
 正确性验收：JDK 27 下服务模块全量回归 931 项，0 failures、0 errors、1 skipped；批量 admission、并发通知、管线和恢复目标测试通过。未执行吞吐压测。
 
+#### 阶段 7.2d：批量准入变更前镜像批量化
+
+状态：**已完成（100%）**。流水 PLACE batch 的 Owner 变更前镜像现在按目标 Lane 一次捕获用户状态，并在同一 Lane 的固定捕获表中写入每个新订单/预留的共享缺失标记；不再为每个批项执行一次全局 `order()`/`reservation()` 查询、pending 查询和跨 Lane 扫描。单项路径仍保留真实 before-image，回滚、失败准入、快照和恢复语义不变。
+
+正确性验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；批量 admission、通知、管线、回滚、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
+
 ## 正确性门槛
 
 压测前必须全部通过：
@@ -357,6 +363,7 @@ OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结
 - 阶段 7.2b（批量准入完成通知收敛）：已完成。删除批量准入 Lane 序号通知队列、Owner 期望计数及逐条消费，改为 Matcher shard 唤醒位；完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
 - 阶段 7.2c（批量准入 Owner 交接去重）：已完成。批量准入的 Lane publication 在 Matcher 提交前已经由 Owner 应用；提交阶段改为只接管 primitive changed-key、余额和资金增量，删除重复的 `LaneDelta.commitTerminalToOwner` 全量用户/订单/预留遍历与再次写入。保留失败回滚、资金守恒、快照和有序提交边界。
 - 阶段 7.2c 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；批量 admission、并发通知、管线和恢复目标测试通过；未执行吞吐压测。
+- 阶段 7.2d（批量准入变更前镜像批量化）：已完成。流水 PLACE batch 按 Lane 单次捕获用户 before-image；新订单和 reservation 使用共享缺失标记，消除每个批项的全局实体/pending 查询和跨 Lane 捕获扫描。JDK 27 服务全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；批量 admission、回滚、snapshot/replay 和资金守恒目标通过；未执行吞吐压测。
 - 阶段 7.3（批量 PLACE 终态响应交接）：已完成。流水 PLACE batch 的结果目标明确声明其所有项属于同一 Account Lane；Lane 在结算完成后从私有订单表补齐未发生变化的订单 after-image，并在完成回执前编码批量响应。Owner 不再为这类批量逐项查询 `runtimeOrder` 或承担响应编码；CANCEL/AMEND、顺序 PLACE 及终态撤单继续使用原有兼容语义。
 - 阶段 7.3 验收：JDK 27 下 `ClusterCommandPipelineTest`、`CoreOrderedOrderBatchTest`、`RuntimeCommitRecoveryTest` 定向回归通过，随后服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
 - 阶段 7.4（风控扫描/强平续扫分配收敛）：已完成。`RiskScanCoordinator` 的每 Lane 输入、结果和预算数组跨 CONTINUE_RISK_SCAN 复用；RiskCommands 使用单一 Owner continuation，删除每次异步续扫的匿名 `BooleanSupplier` 和协调器对象。异常退出会在下一个串行 direct 命令重新清空协调器，保持清算编号溢出回滚后的可恢复性。

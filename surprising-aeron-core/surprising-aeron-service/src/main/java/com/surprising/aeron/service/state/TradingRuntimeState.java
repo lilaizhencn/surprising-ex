@@ -1964,13 +1964,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         // Capture the owner-visible state before publishing the newly admitted batch.  A fatal
         // pipelined batch must roll back to the pre-admission null order/reservation, rather than
         // accidentally treating the provisional admission as its own before-image.
-        captureUserBefore(userId);
-        for (int index = 0; index < event.itemCount(); index++) {
-            OrderRuntime admitted = event.admittedOrders()[index];
-            if (admitted == null) continue;
-            captureOrderBefore(admitted.orderId());
-            captureReservationBefore(admitted.orderId());
-        }
+        captureBatchAdmissionBefore(userId, event.admittedOrders(), event.itemCount(), laneId);
         event.copyBalanceBeforeTo(patchBalancesBeforeByLane[laneId]);
         admissionCapturePrelude = true;
         applyLanePublication(event.publication());
@@ -5178,6 +5172,35 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (!captured.containsKey(userId)) captured.put(userId, user(userId));
     }
 
+    /**
+     * Capture a pipelined batch's before-image in one owner-side pass.  Admission has already
+     * created the new order and reservation on the Lane, so every order/reservation identity is
+     * known to be absent from the owner view.  Avoiding one global lookup plus a cross-Lane capture
+     * scan per item removes a quadratic hot path for batch20 while preserving the same contains-key
+     * markers used by rollback.
+     */
+    private void captureBatchAdmissionBefore(long userId, OrderRuntime[] admittedOrders,
+                                             int itemCount, int laneId) {
+        if (userId <= 0 || admittedOrders == null || itemCount <= 0 || itemCount > admittedOrders.length
+                || laneId < 0 || laneId >= patchOrdersBeforeByLane.length) {
+            throw new IllegalArgumentException("invalid batch admission before-image");
+        }
+        captureUserBefore(userId);
+        LaneLongCaptures<PatchOrderBefore> orderCaptures = patchOrdersBeforeByLane[laneId];
+        LaneLongCaptures<PatchReservationBefore> reservationCaptures = patchReservationsBeforeByLane[laneId];
+        for (int index = 0; index < itemCount; index++) {
+            OrderRuntime admitted = admittedOrders[index];
+            if (admitted == null || admitted.userId() != userId) {
+                throw new IllegalStateException("batch admission order owner mismatch");
+            }
+            long orderId = admitted.orderId();
+            if (!orderCaptures.containsKey(orderId)) orderCaptures.put(orderId, ABSENT_ORDER_BEFORE);
+            if (!reservationCaptures.containsKey(orderId)) {
+                reservationCaptures.put(orderId, ABSENT_RESERVATION_BEFORE);
+            }
+        }
+    }
+
     /** Restore only this Lane's account data; no Owner index or revision is changed here. */
     void rollbackLaneAccountState(AccountLaneState lane) {
         lane.assertOwner();
@@ -5313,8 +5336,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = captureLane(orderId, value == null ? 0 : value.userId());
         LaneLongCaptures<PatchOrderBefore> captured = patchOrdersBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
-            captured.put(orderId, new PatchOrderBefore(value,
-                    value != null && pendingReservations.pendingReservation(orderId, value.userId())));
+            captured.put(orderId, value == null ? ABSENT_ORDER_BEFORE
+                    : new PatchOrderBefore(value, pendingReservations.pendingReservation(orderId, value.userId())));
         }
     }
 
@@ -5325,8 +5348,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = captureLane(orderId, value == null ? 0 : value.userId());
         LaneLongCaptures<PatchReservationBefore> captured = patchReservationsBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
-            captured.put(orderId, new PatchReservationBefore(value,
-                    value != null && pendingReservations.pendingReservation(orderId, value.userId())));
+            captured.put(orderId, value == null ? ABSENT_RESERVATION_BEFORE
+                    : new PatchReservationBefore(value, pendingReservations.pendingReservation(orderId, value.userId())));
         }
     }
 
@@ -5783,6 +5806,9 @@ public final class TradingRuntimeState implements AutoCloseable {
      */
 
     record PatchBefore<T>(T value) {}
+    private static final PatchOrderBefore ABSENT_ORDER_BEFORE = new PatchOrderBefore(null, false);
+    private static final PatchReservationBefore ABSENT_RESERVATION_BEFORE = new PatchReservationBefore(null, false);
+
     record PatchOrderBefore(OrderRuntime value, boolean pending) {}
     record PatchReservationBefore(ReservationRuntime value, boolean pending) {}
 
