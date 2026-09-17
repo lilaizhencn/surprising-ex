@@ -2006,3 +2006,20 @@ JFR 继续显示 `SettlementLaneWorker.run` 占 Lane 样本约 `78%`，而 Lane 
 计划：`TerminalStateRetention.normalizeClientId` 对不超过 64 个 UTF-16 单元的标识直接通过；该长度在最坏 UTF-8 编码下仍不超过 256 字节，较长内部/恢复值继续执行原 UTF-8 字节上限校验。只减少 Owner 终态 tombstone 的重复字符扫描，不改变空值、超长拒绝、快照或去重语义。
 
 验证：`TerminalStateRetentionTest` 通过；服务模块此前完整回归 `980` 项通过（失败/错误 `0`，既有跳过 `1`）。重新打包后的固定端到端无 JFR 轮为 `291,180.185 business/s`，JFR 轮为 `254,624.565 business/s`；两轮 `clientPass=true`、`peakInFlight=256`、`unfinished=0`、`fundsDiff=0`。JFR 中 Owner `95.58%`、Matcher `50.03%`、四 Lane 约 `97.4%`，Lane 有效执行比 `38.35%`；`utf8Length` 不再出现在 Owner 热点，`TerminalTombstoneStore.bucket` 仍约 `15` 个 Owner 样本。分配主项仍为 `OrderRuntime`、`byte[]`、`ReservationRuntime`、`long[]`、`MatcherResult` 和 `NativeCommand`，没有可归因的端到端吞吐提升；短测低于上一组结果属于调度/JFR 方差，不能归因于该改动。原始目录 `/tmp/core-terminal-id-fast-20260916`、`/tmp/core-terminal-id-profile-20260916` 保留审计，节点与客户端均已退出。
+
+### 2026-09-17：Stage 8.15 后复现 41.5 万配置并采集状态
+
+按历史高吞吐口径运行本机单节点 Aeron Cluster：JDK 27、G1、`BUSY_SPIN` Matcher/Settlement、1 Matcher、4 Account Lane、128 symbols、MIXED batch20、window/in-flight `256`、预热 `30s`、测量 `60s`。无 JFR 轮用于吞吐，独立 JFR 轮用于 CPU、热点、分配和 GC；两轮均为真实端到端链路，`clientPass=true`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。
+
+| 轮次 | business ops/s | core msg/s | fills/s | 最差业务 p99 | Owner CPU | Matcher CPU | Lane CPU / 有效执行 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 无 JFR | 333,607.511 | 31,887.948 | 79,410.547 | 24.494 ms | 未采集 | 未采集 | 未采集 |
+| JFR | 301,114.163 | 28,793.369 | 71,674.032 | 26.722 ms | 98.07% | 57.26% | 98.44% / 34.63% |
+
+普通 `PLACE_ORDER` p99 为无 JFR `15.269 ms`、JFR `16.375 ms`；最差为 `CANCEL_ORDER_BATCH`。JFR 会带来约 9.8% 观测开销，因此两轮只分别作为吞吐和状态证据，不能互相作为回退对比。与历史约 41.5 万的短测记录相比，本轮严格使用 60 秒标准测量，未复现该绝对值；配置一致不代表单轮结果确定，当前结果也没有证据表明 Stage 8.15 本身造成回退。
+
+状态观察：Owner 上下文高水位 `255/256`，客户端窗口阻塞 `50.67s/60.03s`（约 `84.4%`），说明 Owner/FIFO 提交链路是端到端上限。Matcher 队列高水位约 `221/256`，但 CPU 仅 `57.26%`，不是持续饱和。四个 Lane 的线程 CPU 约 `98.45%`，其中忙等/轮询占比很高，测量窗口内有效业务执行仅约 `34.63%`，因此不能把线程 CPU 高当作 Lane 业务饱和。采样中没有 Owner/Matcher 的显著 monitor contention，Lane 仅有少量亚毫秒级等待，锁竞争不是主因。
+
+JFR 热点仍以 `SettlementLaneWorker.run` 忙等循环为首（约 `65.29%` 样本）；Owner 热点分散在命令解码、路由/幂等、提交编排和索引维护，`OwnerCommitPublisher` 不在主要分配站点。分配约 `526.3 MB/s`，折算约 `1,748 B/business op`（按核心线程 ThreadAllocationStatistics 估算）：主要类型为 `OrderRuntime`、`byte[]`、`CoreMatchingResult`、`long[]`、`MatcherResult`、`ReservationRuntime`；主要站点为 `OrderRuntime.snapshot`、`CoreMatchingResult.fromNativeWithEvidence`、`TradingRuntimeState.preparedOrder`、`HeapByteBuffer`、Matcher 结果构造和协议解码。快照分配热点已转移到 Lane 的终态事实发布边界，仍是一笔变更一份 after-image，并非 Owner 重新遍历造成。
+
+本轮 GC 记录约 `162` 次暂停、合计约 `926 ms`、最大约 `16.9 ms`；`AllocationRequiringGC=0`。因此当前首要问题是 Owner 串行提交/FIFO 背压和 Lane 忙等造成的有效利用率低，随后才是终态 after-image、匹配结果和解码缓冲的分配；继续删除快照或结果对象前必须保持重放、快照和资金守恒语义。原始证据：`/tmp/aeron-stage815-plain`、`/tmp/aeron-stage815-profile`。
