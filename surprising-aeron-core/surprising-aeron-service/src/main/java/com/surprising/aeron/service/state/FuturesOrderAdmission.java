@@ -10,7 +10,7 @@ import com.surprising.aeron.service.state.model.CorePositionState;
 import static com.surprising.aeron.service.state.ReducerSettlementSupport.*;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
-import static com.surprising.aeron.service.state.OrderAdmissionMath.fragmentationSafeFeeDebit;
+import static com.surprising.aeron.service.business.OrderAdmissionMath.fragmentationSafeFeeDebit;
 
 public final class FuturesOrderAdmission {
     private FuturesOrderAdmission() {}
