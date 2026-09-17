@@ -2169,3 +2169,21 @@ JFR 状态：Owner CPU `92.71%`、Matcher `51.18%`、四个 Lane 约 `98.51%`，
 - 相关正确性证据：本轮端到端通过 mixed capacity 与资金差值校验；查询专项由服务模块全量回归覆盖；benchmark 模块依赖编译打包成功。性能脚本未单独执行查询压测和长稳增长斜率，因此这些项不从短测结果推断通过。
 
 结论：**部分验证**。交易端到端业务完整性、资金差值、窗口排空和 JFR DataLoss 均通过；查询路由专项回归通过，但本轮负载没有查询请求，不能给出查询吞吐结论。没有预锁数值性能门槛，且未覆盖长稳增长斜率，不能把本轮记为绝对吞吐验收通过。已清理本轮确认生成的 `/tmp/trading-query-router-plain-20260918`、`/tmp/trading-query-router-plain-20260918.build.log`、`/tmp/trading-query-router-jfr-20260918`，使用系统 Trash，可恢复；其他历史压测产物未触碰。
+
+### 2026-09-18：直接控制命令槽与撮合命令槽分离验证计划（采集前锁定）
+
+- 被测 commit：`ee505a8a8a985b0ec3149fe59d0903dd024e5954`，仅验证当前 `master`；不检出或比较旧版本
+- 工作区：代码改动已提交；仅存在既存用户未跟踪项 `openai`，本轮不触碰；本轮不以旧结果作为性能对照
+- 改动范围：新增 `DirectCommandSlot`，承接单个直接控制命令的 Lane 续步、失败回滚、终态提交准备及低频控制工作对象；`CommandSlot` 仅保留多个在途撮合命令的序号、Matcher 结果、Lane 结算、批量和提交暂存状态；`TradingCoreRuntime` 仍是业务状态、资金守恒、提交发布和 Owner 线程的权威所有者
+- 正确性假设：直接控制命令与普通撮合命令生命周期分离后，正常撮合、撤单、批量、资金/风险/触发控制、Lane 回滚、幂等、快照 pending 判定和关闭清理语义不变；不改变产品线、账户、topic、instrument、匹配顺序或快照格式
+- 场景：本机单个真实 Aeron Cluster member、`LINEAR_PERPETUAL`、1 matcher、4 Account Lane、128 symbols、MIXED、batch20、`SHARED_NETWORK`、`YIELDING`
+- 负载：异步 open-loop；全局/session/Owner window 与 in-flight 固定 `256`，不得降窗；Matcher/Settlement `BUSY_SPIN`，spin limit `0`；预热 `30s`、稳定测量 `60s`、测量后排空
+- JVM：HotSpot JDK 27、G1；Core `512m/1536m`、client `128m/512m`；plain 轮给吞吐，独立 JFR 轮给 CPU、热点、分配、GC、safepoint、native 和 I/O 状态，不横向比较两轮绝对吞吐
+- 预检查：已确认 `java -version` 为 Corretto HotSpot 27、`mvn -version` 使用 Java 27、磁盘可用约 `368GiB`；采集前确认本轮 artifact 目录不存在
+- 执行命令：
+  - `ASYNC_SKIP_BUILD=false ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=false ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/direct-command-slot-plain-20260918 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+  - `ASYNC_SKIP_BUILD=true ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=true ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/direct-command-slot-jfr-20260918 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+- 通过条件：`clientPass=true`；accepted/terminal business operations 与 Core messages 相等；`unfinished=0`；排空后 backlog/pending 为零；`peakInFlight=256`；`fundsDiff=0`，冻结/余额、持仓、订单终态、订单簿和快照恢复正确；Core 无 fatal/error；JFR `DataLoss=0`，如工具未提供该事件则记录缺口
+- 必采指标：terminal business/core ops/s、fills/s、分业务 p50/p90/p95/p99/p99.9/max、accepted/terminal/backlog、Owner/Matcher/Lane CPU 与有效执行比、队列/背压、分配 bytes/s 与 bytes/op、GC/safepoint/compilation、heap/native/NMT、I/O/异常及 direct/matching slot 相关热点；plain 与 JFR 分别报告，不以 profiler 轮替代吞吐轮
+- 预期与证伪：结构拆分主要改善代码职责和清理可读性，不预设吞吐收益；若 plain 正确性不满足则性能结论为失败，若吞吐波动但完整性通过则不归因于本次拆分；若出现 slot 状态残留、回滚不完整或 snapshot pending 误判，立即停止性能解释并保留正确性证据
+- 采集后：先核对资金/持仓/冻结/订单终态和快照恢复，追加实际参数、偏差、结果、JFR summary/view、原始文件大小和 SHA-256；仅清理确认属于本轮的 `/tmp/direct-command-slot-plain-20260918`、`/tmp/direct-command-slot-jfr-20260918` 及对应 build log，并记录清理状态

@@ -665,14 +665,14 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
                     throw new IllegalStateException("fault command did not enter continuation");
-                var business = owner.directCommand.controlWork;
-                owner.directCommand.controlWork = () -> {
+                var business = owner.directCommand.controlWork();
+                owner.directCommand.replaceControlWork(() -> {
                     if (!business.getAsBoolean()) return false;
                     // Deliberate capacity fault: this sentinel must be cleared before dispatch.
                     owner.admissions.queuedMatching.addAll(java.util.Collections.nCopies(
                                 owner.pendingMatching.capacity() + 1, null));
                     return true;
-                };
+                });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
                     result = owner.pollDirectCommand();
