@@ -2023,3 +2023,16 @@ JFR 继续显示 `SettlementLaneWorker.run` 占 Lane 样本约 `78%`，而 Lane 
 JFR 热点仍以 `SettlementLaneWorker.run` 忙等循环为首（约 `65.29%` 样本）；Owner 热点分散在命令解码、路由/幂等、提交编排和索引维护，`OwnerCommitPublisher` 不在主要分配站点。分配约 `526.3 MB/s`，折算约 `1,748 B/business op`（按核心线程 ThreadAllocationStatistics 估算）：主要类型为 `OrderRuntime`、`byte[]`、`CoreMatchingResult`、`long[]`、`MatcherResult`、`ReservationRuntime`；主要站点为 `OrderRuntime.snapshot`、`CoreMatchingResult.fromNativeWithEvidence`、`TradingRuntimeState.preparedOrder`、`HeapByteBuffer`、Matcher 结果构造和协议解码。快照分配热点已转移到 Lane 的终态事实发布边界，仍是一笔变更一份 after-image，并非 Owner 重新遍历造成。
 
 本轮 GC 记录约 `162` 次暂停、合计约 `926 ms`、最大约 `16.9 ms`；`AllocationRequiringGC=0`。因此当前首要问题是 Owner 串行提交/FIFO 背压和 Lane 忙等造成的有效利用率低，随后才是终态 after-image、匹配结果和解码缓冲的分配；继续删除快照或结果对象前必须保持重放、快照和资金守恒语义。原始证据：`/tmp/aeron-stage815-plain`、`/tmp/aeron-stage815-profile`。
+
+### 2026-09-17：41.5 万历史提交 worktree 复测
+
+从该记录反查出的历史提交为 `917092cfd9eb478b7e0caccf8d329234aae46d16`，临时 worktree `/tmp/surprising-415-20260917`。按历史的 `window=256`、1 Matcher、4 Lane、128 symbols、MIXED batch20、G1、BUSY_SPIN、30s 预热/60s 测量运行两轮；为遵守当前本地统一 JDK27 约定，仅在临时 worktree 放宽了旧脚本和 Maven 的 JDK25 版本门禁，没有修改业务代码或主分支。
+
+| 轮次 | business ops/s | core msg/s | fills/s | 最差业务 p99 | 完整性 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| JDK27 worktree 1 | 302,839.225 | 28,956.972 | 72,084.940 | 45.973 ms | PASS |
+| JDK27 worktree 2 | 321,722.291 | 30,756.215 | 76,572.545 | 31.178 ms | PASS |
+
+两轮均 `mixedVerify=PASS`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。均值为 `312,280.758 ops/s`，低于历史该提交 JDK25 短测第二轮 `418,283.703 ops/s`；本次 JDK27 两轮也低于当前 Stage 8.15 JDK27 无 JFR 轮 `333,607.511 ops/s`，但当前轮与旧版轮次不是同一 JVM/运行时，不能据此归因代码回退。两轮窗口都达到 256，但 Matcher 高水位仅 `128/122`，Owner/Matcher/Lane CPU 未采集，不能称为全阶段饱和吞吐；这是旧版 worktree 的吞吐复现，不是饱和归因轮。
+
+原始证据：`/tmp/surprising-415-20260917-r1`、`/tmp/surprising-415-20260917-r2`。临时 worktree 的 JDK27 适配改动未提交。
