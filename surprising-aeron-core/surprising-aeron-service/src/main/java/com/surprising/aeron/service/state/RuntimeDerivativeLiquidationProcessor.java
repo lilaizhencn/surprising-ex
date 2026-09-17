@@ -39,7 +39,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                             Collection<CoreOrderState> canceledOrders,
                                                             TradingRuntimeState runtime,
                                                             RuntimeIdentityRegistry identities) {
-        execute(command, canceledOrders, 0, runtime, identities, false);
+        execute(null, command, canceledOrders, 0, runtime, identities, false);
         return runtime;
     }
 
@@ -47,7 +47,14 @@ public final class RuntimeDerivativeLiquidationProcessor {
     public static java.util.function.BooleanSupplier beginExecution(ExecuteLiquidationCommand command,
             Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        return execute(command, canceledOrders, nextCursorOrderId, runtime, identities, true);
+        return beginExecution(null, command, canceledOrders, nextCursorOrderId, runtime, identities);
+    }
+
+    /** Re-arm a command-slot execution continuation while retaining its validation buffers. */
+    public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
+            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return execute(reuse, command, canceledOrders, nextCursorOrderId, runtime, identities, true);
     }
 
     /** A validated account stage that can be coalesced with other liquidation stages. */
@@ -97,24 +104,32 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     private static final class BatchExecutionStage {
-        private final ExecuteLiquidationCommand command;
-        private final long[] orderIds;
-        private final long nextCursorOrderId;
-        private final int canceledCount;
-        private final boolean advance;
-        private final boolean obsolete;
-        private final TradingRuntimeState runtime;
-        private final LiquidationRuntime liquidation;
-        private final CoreInstrumentState instrument;
-        private final int assetId;
-        private final long positionKey;
-        private final int laneId;
-        private final long userId;
+        private ExecuteLiquidationCommand command;
+        private long[] orderIds;
+        private long nextCursorOrderId;
+        private int canceledCount;
+        private boolean advance;
+        private boolean obsolete;
+        private TradingRuntimeState runtime;
+        private LiquidationRuntime liquidation;
+        private CoreInstrumentState instrument;
+        private int assetId;
+        private long positionKey;
+        private int laneId;
+        private long userId;
 
         private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
                                     long nextCursorOrderId, boolean advance, boolean obsolete,
                                     TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                     CoreInstrumentState instrument, int assetId, long positionKey) {
+            reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
+                    instrument, assetId, positionKey);
+        }
+
+        private void reset(ExecuteLiquidationCommand command, long[] orderIds,
+                           long nextCursorOrderId, boolean advance, boolean obsolete,
+                           TradingRuntimeState runtime, LiquidationRuntime liquidation,
+                           CoreInstrumentState instrument, int assetId, long positionKey) {
             this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
             this.canceledCount = orderIds == null ? 0 : orderIds.length;
             this.advance = advance; this.obsolete = obsolete; this.runtime = runtime;
@@ -126,12 +141,19 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private static BatchExecutionStage prepare(ExecutionRequest request,
                                                     TradingRuntimeState runtime,
                                                     RuntimeIdentityRegistry identities) {
+            return prepare(null, request.command(), request.canceledOrders(), request.nextCursorOrderId(),
+                    runtime, identities);
+        }
+
+        private static BatchExecutionStage prepare(BatchExecutionStage reuse,
+                                                    ExecuteLiquidationCommand command,
+                                                    Collection<CoreOrderState> canceledOrders,
+                                                    long nextCursorOrderId,
+                                                    TradingRuntimeState runtime,
+                                                    RuntimeIdentityRegistry identities) {
             if (!runtime.productLine().isDerivative()) {
                 throw new IllegalArgumentException("liquidation requires derivative product");
             }
-            ExecuteLiquidationCommand command = request.command();
-            Collection<CoreOrderState> canceledOrders = request.canceledOrders();
-            long nextCursorOrderId = request.nextCursorOrderId();
             LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
             if (liquidation == null) {
                 throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -167,8 +189,11 @@ public final class RuntimeDerivativeLiquidationProcessor {
             int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
             long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
                     positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
-            return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance, obsolete,
-                    runtime, liquidation, instrument, assetId, positionKey);
+            if (reuse == null) return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance,
+                    obsolete, runtime, liquidation, instrument, assetId, positionKey);
+            reuse.reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
+                    instrument, assetId, positionKey);
+            return reuse;
         }
 
         private RuntimeTreasuryDelta apply() {
@@ -201,9 +226,17 @@ public final class RuntimeDerivativeLiquidationProcessor {
             }
             return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
         }
+
+        private void clearReferences() {
+            command = null;
+            orderIds = null;
+            runtime = null;
+            liquidation = null;
+            instrument = null;
+        }
     }
 
-    private static java.util.function.BooleanSupplier execute(ExecuteLiquidationCommand command,
+    private static ExecutionWork execute(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
@@ -211,23 +244,57 @@ public final class RuntimeDerivativeLiquidationProcessor {
             throw new IllegalArgumentException("invalid liquidation account stage");
         }
         runtime.assertOwner();
-        BatchExecutionStage stage = BatchExecutionStage.prepare(
-                new ExecutionRequest(command, canceledOrders, nextCursorOrderId), runtime, identities);
-        java.util.function.IntFunction<Object> accountWork = ignored -> stage.apply();
+        ExecutionWork work = reuse == null ? new ExecutionWork() : reuse;
+        work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
         if (asynchronous) {
-            runtime.dispatchControlLanes(1L << stage.laneId, accountWork);
-            return () -> {
-                if (!runtime.pollControlLanes()) return false;
-                finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
-                        (RuntimeTreasuryDelta) runtime.controlLaneResult(stage.laneId), stage.canceledCount);
-                return true;
-            };
+            runtime.dispatchControlLanes(1L << work.stage.laneId, work);
+            return work;
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(1L << stage.laneId, 1, false, accountWork);
-        finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
-                (RuntimeTreasuryDelta) results[stage.laneId], stage.canceledCount);
+        Object[] results = runtime.executeLaneMutations(1L << work.stage.laneId, 1, false, work);
+        work.finish(results[work.stage.laneId]);
         return null;
+    }
+
+    /** One liquidation account stage with a reusable owner polling continuation. */
+    public static final class ExecutionWork
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+        private BatchExecutionStage stage;
+        private TradingRuntimeState runtime;
+        private boolean done;
+
+        private void prepare(ExecuteLiquidationCommand command, Collection<CoreOrderState> canceledOrders,
+                long nextCursorOrderId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            this.stage = BatchExecutionStage.prepare(stage, command, canceledOrders, nextCursorOrderId,
+                    runtime, identities);
+            this.runtime = runtime;
+            this.done = false;
+        }
+
+        @Override
+        public Object apply(int ignored) { return stage.apply(); }
+
+        @Override
+        public boolean getAsBoolean() {
+            if (done) return true;
+            if (!runtime.pollControlLanes()) return false;
+            finish(runtime.controlLaneResult(stage.laneId));
+            return true;
+        }
+
+        private void finish(Object result) {
+            if (done) return;
+            finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
+                    (RuntimeTreasuryDelta) result, stage.canceledCount);
+            done = true;
+        }
+
+        /** Drop command references while retaining the continuation object for the next slot use. */
+        public void clearReferences() {
+            if (stage != null) stage.clearReferences();
+            runtime = null;
+            done = false;
+        }
     }
 
     private static void finishExecution(TradingRuntimeState runtime, long userId, int assetId,
@@ -310,7 +377,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                                       TradingRuntimeState runtime,
                                                                       RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
-        execute(command, canceledOrders, nextCursorOrderId, runtime, identities, false);
+        execute(null, command, canceledOrders, nextCursorOrderId, runtime, identities, false);
         return runtime;
     }
 
@@ -329,16 +396,24 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                              TradingRuntimeState runtime,
                                                              RuntimeIdentityRegistry identities,
                                                              Iterable<Long> candidateIds) {
-        resolve(command, runtime, identities, candidateIds, false);
+        resolve(null, command, runtime, identities, candidateIds, false);
         return runtime;
     }
 
     public static java.util.function.BooleanSupplier beginResolution(ResolveLiquidationCommand command,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        return resolve(command, runtime, identities, candidateIds, true);
+        return beginResolution(null, command, runtime, identities, candidateIds);
     }
 
-    private static java.util.function.BooleanSupplier resolve(ResolveLiquidationCommand command,
+    /** Re-arm a slot-owned resolution continuation while retaining its treasury delta storage. */
+    public static ResolutionWork beginResolution(ResolutionWork reuse,
+            ResolveLiquidationCommand command, TradingRuntimeState runtime,
+            RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+        return resolve(reuse, command, runtime, identities, candidateIds, true);
+    }
+
+    private static ResolutionWork resolve(ResolutionWork reuse,
+            ResolveLiquidationCommand command,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds,
             boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
@@ -352,9 +427,11 @@ public final class RuntimeDerivativeLiquidationProcessor {
         CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
                 liquidation.instrumentChangeId());
         LiquidationRuntime current = liquidation;
+        ResolutionWork work = reuse == null ? new ResolutionWork() : reuse;
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        RuntimeTreasuryDelta treasuryDelta = work.delta();
+        treasuryDelta.clear();
         switch (command.resolution()) {
             case INSURANCE -> {
                 if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
@@ -408,25 +485,54 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
-        java.util.function.IntFunction<Object> accountWork = ignored -> {
-            runtime.replaceLiquidation(nextLiquidation);
-            return null;
-        };
         long laneMask = runtime.topology().accountLaneMask(current.userId());
+        work.prepare(runtime, nextLiquidation, laneMask);
         if (asynchronous) {
-            runtime.dispatchControlLanes(laneMask, accountWork);
-            return () -> {
-                if (!runtime.pollControlLanes()) return false;
-                treasuryDelta.apply(runtime.treasury());
-                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-                return true;
-            };
+            runtime.dispatchControlLanes(laneMask, work);
+            return work;
         }
         runtime.releaseOwnerLaneAccess();
-        runtime.executeLaneMutations(laneMask, 1, false, accountWork);
-        treasuryDelta.apply(runtime.treasury());
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.executeLaneMutations(laneMask, 1, false, work);
+        work.finish();
         return null;
+    }
+
+    /** One account-lane mutation plus the owner-side insurance delta for a resolution. */
+    public static final class ResolutionWork
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        private TradingRuntimeState runtime;
+        private LiquidationRuntime nextLiquidation;
+        private boolean done;
+
+        private RuntimeTreasuryDelta delta() { return treasuryDelta; }
+
+        private void prepare(TradingRuntimeState runtime, LiquidationRuntime nextLiquidation, long laneMask) {
+            this.runtime = runtime;
+            this.nextLiquidation = nextLiquidation;
+            this.done = false;
+        }
+
+        @Override
+        public Object apply(int ignored) {
+            runtime.replaceLiquidation(nextLiquidation);
+            return null;
+        }
+
+        @Override
+        public boolean getAsBoolean() {
+            if (done) return true;
+            if (!runtime.pollControlLanes()) return false;
+            finish();
+            return true;
+        }
+
+        private void finish() {
+            if (done) return;
+            treasuryDelta.apply(runtime.treasury());
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            done = true;
+        }
     }
 
 
@@ -443,16 +549,22 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     public static TradingRuntimeState applyAdlRuntime(ExecuteAdlCommand command, TradingRuntimeState runtime,
                                                       RuntimeIdentityRegistry identities) {
-        adl(command, runtime, identities, false);
+        adl(null, command, runtime, identities, false);
         return runtime;
     }
 
     public static java.util.function.BooleanSupplier beginAdl(ExecuteAdlCommand command,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        return adl(command, runtime, identities, true);
+        return beginAdl(null, command, runtime, identities);
     }
 
-    private static java.util.function.BooleanSupplier adl(ExecuteAdlCommand command,
+    /** Re-arm a slot-owned ADL continuation while retaining its primitive delta buffer. */
+    public static AdlWork beginAdl(AdlWork reuse, ExecuteAdlCommand command,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return adl(reuse, command, runtime, identities, true);
+    }
+
+    private static AdlWork adl(AdlWork reuse, ExecuteAdlCommand command,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
@@ -485,34 +597,72 @@ public final class RuntimeDerivativeLiquidationProcessor {
         int settleAssetId = identities.assetId(instrument.settleAsset());
         int targetLane = runtime.topology().accountLaneId(command.targetUserId());
         long mask = (1L << targetLane) | runtime.topology().accountLaneMask(liquidation.userId());
-        java.util.function.IntFunction<Object> accountWork = lane -> {
-            RuntimeTreasuryDelta delta = null;
-            if (runtime.currentLaneOwns(command.targetUserId()))
-                delta = applyAdlTarget(command, runtime, liquidation, instrument, mark, positionKey, settleAssetId);
-            if (runtime.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, runtime);
-            return delta;
-        };
+        AdlWork work = reuse == null ? new AdlWork() : reuse;
+        work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
+                settleAssetId, targetLane);
         if (asynchronous) {
-            runtime.dispatchControlLanes(mask, accountWork);
-            return () -> {
-                if (!runtime.pollControlLanes()) return false;
-                runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
-                ((RuntimeTreasuryDelta) runtime.controlLaneResult(targetLane)).apply(runtime.treasury());
-                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-                return true;
-            };
+            runtime.dispatchControlLanes(mask, work);
+            return work;
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), false, accountWork);
-        runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
-        ((RuntimeTreasuryDelta) results[targetLane]).apply(runtime.treasury());
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), false, work);
+        work.finish(results[targetLane]);
         return null;
+    }
+
+    /** Two-account-lane ADL mutation plus its single owner-side treasury delta. */
+    public static final class AdlWork
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+        private ExecuteAdlCommand command;
+        private TradingRuntimeState runtime;
+        private LiquidationRuntime liquidation;
+        private CoreInstrumentState instrument;
+        private MarkPriceRuntime mark;
+        private long positionKey;
+        private int settleAssetId, targetLane;
+        private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
+        private boolean done;
+
+        private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
+                LiquidationRuntime liquidation, CoreInstrumentState instrument, MarkPriceRuntime mark,
+                long positionKey, int settleAssetId, int targetLane) {
+            this.command = command; this.runtime = runtime; this.liquidation = liquidation;
+            this.instrument = instrument; this.mark = mark; this.positionKey = positionKey;
+            this.settleAssetId = settleAssetId; this.targetLane = targetLane;
+            this.targetDelta.clear(); this.done = false;
+        }
+
+        @Override
+        public Object apply(int ignored) {
+            RuntimeTreasuryDelta delta = null;
+            if (runtime.currentLaneOwns(command.targetUserId())) {
+                delta = applyAdlTarget(command, runtime, liquidation, instrument, mark,
+                        positionKey, settleAssetId, targetDelta);
+            }
+            if (runtime.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, runtime);
+            return delta;
+        }
+
+        @Override
+        public boolean getAsBoolean() {
+            if (done) return true;
+            if (!runtime.pollControlLanes()) return false;
+            finish(runtime.controlLaneResult(targetLane));
+            return true;
+        }
+
+        private void finish(Object result) {
+            if (done) return;
+            runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+            if (result instanceof RuntimeTreasuryDelta delta) delta.apply(runtime.treasury());
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            done = true;
+        }
     }
 
     private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingRuntimeState runtime,
             LiquidationRuntime liquidation, CoreInstrumentState instrument, MarkPriceRuntime mark,
-            long positionKey, int settleAssetId) {
+            long positionKey, int settleAssetId, RuntimeTreasuryDelta reuse) {
         PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.marginMode() != command.marginMode()
                 || position.signedQuantitySteps() != command.expectedSignedQuantitySteps()
@@ -542,7 +692,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
                         : Math.negateExact(command.closeQuantitySteps()), mark.markPriceTicks())
                 : coverCapacity;
         long targetCashDelta = Math.subtractExact(closeCashDelta, command.coveredUnits());
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        RuntimeTreasuryDelta treasuryDelta = reuse == null ? new RuntimeTreasuryDelta() : reuse;
+        treasuryDelta.clear();
         treasuryDelta.addClearing(settleAssetId, Math.negateExact(targetCashDelta));
         treasuryDelta.addDeficit(settleAssetId, Math.negateExact(command.coveredUnits()));
         treasuryDelta.addClearing(settleAssetId, Math.negateExact(command.coveredUnits()));

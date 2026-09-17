@@ -82,6 +82,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     TradingCoreRuntime.SourceKey sourceKey;
     long beforeRevision, checkpoint, identityCheckpoint;
     java.util.function.BooleanSupplier controlWork;
+    /** Slot-owned settlement continuation; retained across reuse to avoid per-command lambdas. */
+    private com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork reusableSettlementWork;
+    private final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
+    private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
+    private final LiquidationExecutionContinuation liquidationExecutionControl =
+            new LiquidationExecutionContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -132,6 +138,37 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     void deferControl(java.util.function.BooleanSupplier work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         controlWork = Objects.requireNonNull(work);
+    }
+
+    com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork settlementWork() {
+        return reusableSettlementWork;
+    }
+
+    void settlementWork(com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+        reusableSettlementWork = Objects.requireNonNull(work);
+    }
+
+    void deferSettlementControl(OrderedCommitCoordinator coordinator,
+            com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        settlementControl.prepare(coordinator, work);
+        controlWork = settlementControl;
+    }
+
+    com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
+        return reusableLiquidationWork;
+    }
+
+    void liquidationWork(com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
+        reusableLiquidationWork = Objects.requireNonNull(work);
+    }
+
+    void deferLiquidationExecutionControl(OrderedCommitCoordinator coordinator,
+            com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
+            com.surprising.aeron.protocol.CoreLiquidationProgressView progress) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        liquidationExecutionControl.prepare(coordinator, work, progress);
+        controlWork = liquidationExecutionControl;
     }
 
     void initializeDirect(CoreMessage command, CommandFingerprint fingerprint,
@@ -739,6 +776,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     private void clearLifecycleState() {
+        settlementControl.clear();
+        if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
+        liquidationExecutionControl.clear();
+        if (reusableLiquidationWork != null) reusableLiquidationWork.clearReferences();
         controlWork = null;
         controlPending = false;
         controlStartedNanos = 0;
@@ -764,6 +805,60 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         deferredSourceKey = null;
         cachedMatcherShard = -1;
         laneResultTarget.clear();
+    }
+
+    /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
+    private final class SettlementControlContinuation implements java.util.function.BooleanSupplier {
+        private OrderedCommitCoordinator coordinator;
+        private com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work;
+
+        void prepare(OrderedCommitCoordinator coordinator,
+                com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+            this.coordinator = Objects.requireNonNull(coordinator);
+            this.work = Objects.requireNonNull(work);
+        }
+
+        void clear() {
+            coordinator = null;
+            work = null;
+        }
+
+        @Override
+        public boolean getAsBoolean() {
+            if (!work.poll()) return false;
+            coordinator.owner.resultBuilder.commandSettlementProgress = work.result();
+            coordinator.requestCommitPublication();
+            return true;
+        }
+    }
+
+    /** Owner-confined callback shared by all asynchronous liquidation execution polls. */
+    private final class LiquidationExecutionContinuation implements java.util.function.BooleanSupplier {
+        private OrderedCommitCoordinator coordinator;
+        private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work;
+        private com.surprising.aeron.protocol.CoreLiquidationProgressView progress;
+
+        void prepare(OrderedCommitCoordinator coordinator,
+                com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
+                com.surprising.aeron.protocol.CoreLiquidationProgressView progress) {
+            this.coordinator = Objects.requireNonNull(coordinator);
+            this.work = Objects.requireNonNull(work);
+            this.progress = Objects.requireNonNull(progress);
+        }
+
+        void clear() {
+            coordinator = null;
+            work = null;
+            progress = null;
+        }
+
+        @Override
+        public boolean getAsBoolean() {
+            if (!work.getAsBoolean()) return false;
+            coordinator.owner.resultBuilder.commandLiquidationProgress = progress;
+            coordinator.requestCommitPublication();
+            return true;
+        }
     }
 
     private static final class LaneResultTarget

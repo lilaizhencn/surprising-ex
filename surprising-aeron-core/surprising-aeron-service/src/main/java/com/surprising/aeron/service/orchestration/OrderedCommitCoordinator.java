@@ -393,13 +393,10 @@ final class OrderedCommitCoordinator {
                                 chunk.orders().size());
                         if (owner.runtimeState.asynchronousCommands()) {
                             var work = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
-                                    .beginExecution(command, orders, nextCursor, owner.runtimeState, owner.identities);
-                            pending.deferControl(() -> {
-                                if (!work.getAsBoolean()) return false;
-                                requestCommitPublication();
-                                owner.resultBuilder.commandLiquidationProgress = progress;
-                                return true;
-                            });
+                                    .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
+                                            owner.runtimeState, owner.identities);
+                            pending.liquidationWork(work);
+                            pending.deferLiquidationExecutionControl(this, work, progress);
                         } else {
                             if (nextCursor != 0) owner.liquidations.advanceLiquidationCancellationRuntime(
                                     command, orders, nextCursor);
@@ -418,13 +415,9 @@ final class OrderedCommitCoordinator {
                         owner.instrumentSettlement.applySettlementChangedIds(command);
                         if (owner.runtimeState.asynchronousCommands()) {
                             var work = owner.instrumentSettlement.beginAsyncSettlement(
-                                    command, pending.command().header().commandId());
-                            pending.deferControl(() -> {
-                                if (!work.poll()) return false;
-                                owner.resultBuilder.commandSettlementProgress = work.result();
-                                requestCommitPublication();
-                                return true;
-                            });
+                                    pending.settlementWork(), command, pending.command().header().commandId());
+                            pending.settlementWork(work);
+                            pending.deferSettlementControl(this, work);
                         } else {
                             owner.instrumentSettlement.settleInstrumentRuntime(command,
                                     pending.command().header().commandId());

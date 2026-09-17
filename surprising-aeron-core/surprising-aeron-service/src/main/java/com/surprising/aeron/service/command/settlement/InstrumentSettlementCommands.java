@@ -65,7 +65,13 @@ public final class InstrumentSettlementCommands {
 
     public RuntimeSettlementProcessor.SettlementWork beginAsyncSettlement(
             com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
-        return RuntimeSettlementProcessor.prepareAsync(command,
+        return beginAsyncSettlement(null, command, commandId);
+    }
+
+    public RuntimeSettlementProcessor.SettlementWork beginAsyncSettlement(
+            RuntimeSettlementProcessor.SettlementWork reuse,
+            com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
+        return RuntimeSettlementProcessor.prepareAsync(reuse, command,
                 owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId()), commandId,
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
     }

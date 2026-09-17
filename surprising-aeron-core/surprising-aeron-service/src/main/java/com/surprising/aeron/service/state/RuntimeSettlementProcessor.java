@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
@@ -154,6 +155,15 @@ public final class RuntimeSettlementProcessor {
                                               ActiveOrderIndex activeOrderIndex,
                                               TradingRuntimeState runtime,
                                               RuntimeIdentityRegistry identities) {
+        return prepareAsync(null, command, indexedUserIds, chunkCommandId, activeOrderIndex, runtime, identities);
+    }
+
+    /** Re-arm a slot-owned continuation while retaining its Lane grouping buffers. */
+    public static SettlementWork prepareAsync(SettlementWork reuse, SettleInstrumentCommand command,
+                                              Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                              ActiveOrderIndex activeOrderIndex,
+                                              TradingRuntimeState runtime,
+                                              RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || chunkCommandId == null
                 || activeOrderIndex == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
@@ -165,8 +175,10 @@ public final class RuntimeSettlementProcessor {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
         }
         if (command.settlementId() == previousSettlement) {
-            return SettlementWork.completed(runtime,
-                    new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0));
+            CoreSettlementProgressView completed = new CoreSettlementProgressView(
+                    command.settlementId(), true, true, 0, 0, 0, 0);
+            return reuse == null ? SettlementWork.completed(runtime, completed)
+                    : reuse.resetCompleted(runtime, completed);
         }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         validateSettlement(instrument, kernel, command);
@@ -186,31 +198,36 @@ public final class RuntimeSettlementProcessor {
         UserPage userPage = ordersComplete || !moreOrders
                 ? selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
                 : new UserPage(List.of(), accountLaneId, 0, true);
-        return new SettlementWork(command, chunkCommandId, runtime,
-                instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
-                moreOrders, userPage);
+        if (reuse == null) {
+            return new SettlementWork(command, chunkCommandId, runtime,
+                    instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
+                    moreOrders, userPage);
+        }
+        return reuse.reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
+                previousProgress, selectedOrders, moreOrders, userPage);
     }
 
     /** Bounded asynchronous settlement continuation. Instances are owner-confined. */
-    public static final class SettlementWork {
+    public static final class SettlementWork implements java.util.function.IntFunction<Object> {
         private enum Phase { CANCEL, PREPARE, APPLY, APPLY_WAIT, DONE }
 
-        private final SettleInstrumentCommand command;
-        private final UUID chunkCommandId;
-        private final TradingRuntimeState runtime;
-        private final CoreInstrumentState instrument;
-        private final ProductTradingRules kernel;
-        private final int symbolId, assetId;
-        private final TreasuryRuntime.LifecycleProgressRuntime previousProgress;
-        private final List<CoreOrderState> selectedOrders;
-        private final boolean moreOrders;
-        private final List<Long> selectedUserIds;
+        private SettleInstrumentCommand command;
+        private UUID chunkCommandId;
+        private TradingRuntimeState runtime;
+        private CoreInstrumentState instrument;
+        private ProductTradingRules kernel;
+        private int symbolId, assetId;
+        private TreasuryRuntime.LifecycleProgressRuntime previousProgress;
+        private List<CoreOrderState> selectedOrders;
+        private boolean moreOrders;
+        private List<Long> selectedUserIds;
         private final LongArrayList[] usersByLane;
         private final ArrayList<CoreOrderState>[] ordersByLane;
-        private final boolean usersComplete;
-        private final long orderLaneMask;
-        private final long userLaneMask;
+        private boolean usersComplete;
+        private long orderLaneMask;
+        private long userLaneMask;
         private Phase phase;
+        private Phase dispatchedPhase;
         private Object[] prepared;
         private RuntimeTreasuryDelta treasuryDelta;
         private CoreSettlementProgressView result;
@@ -220,17 +237,12 @@ public final class RuntimeSettlementProcessor {
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CoreOrderState> selectedOrders, boolean moreOrders, UserPage userPage) {
-            this.command = command; this.chunkCommandId = chunkCommandId;
-            this.runtime = runtime;
-            this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
-            this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
-            this.moreOrders = moreOrders;
-            this.selectedUserIds = userPage.userIds(); this.usersComplete = userPage.complete();
-            this.ordersByLane = groupOrders(selectedOrders, runtime);
-            this.orderLaneMask = laneMask(ordersByLane);
-            this.usersByLane = groupUsers(selectedUserIds, runtime);
-            this.userLaneMask = laneMask(usersByLane);
-            this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
+            int laneCount = runtime.topology().accountLaneCount();
+            this.usersByLane = new LongArrayList[laneCount];
+            for (int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
+            this.ordersByLane = newLaneOrderGroups(laneCount);
+            reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
+                    previousProgress, selectedOrders, moreOrders, userPage);
         }
 
         @SuppressWarnings("unchecked")
@@ -240,9 +252,80 @@ public final class RuntimeSettlementProcessor {
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
             this.moreOrders = false; this.selectedUserIds = List.of();
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
+            for (int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
             this.usersComplete = true;
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
+            this.dispatchedPhase = null;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static ArrayList<CoreOrderState>[] newLaneOrderGroups(int laneCount) {
+            return (ArrayList<CoreOrderState>[]) new ArrayList<?>[laneCount];
+        }
+
+        private SettlementWork reset(SettleInstrumentCommand command, UUID chunkCommandId,
+                TradingRuntimeState runtime, CoreInstrumentState instrument,
+                ProductTradingRules kernel, int symbolId, int assetId,
+                TreasuryRuntime.LifecycleProgressRuntime previousProgress,
+                List<CoreOrderState> selectedOrders, boolean moreOrders, UserPage userPage) {
+            if (usersByLane.length != runtime.topology().accountLaneCount()) {
+                throw new IllegalStateException("settlement continuation lane topology changed");
+            }
+            this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
+            this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
+            this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
+            this.moreOrders = moreOrders; this.selectedUserIds = userPage.userIds();
+            this.usersComplete = userPage.complete();
+            for (LongArrayList users : usersByLane) users.clear();
+            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            for (int index = 0; index < selectedUserIds.size(); index++) {
+                long userId = selectedUserIds.get(index);
+                usersByLane[runtime.topology().accountLaneId(userId)].add(userId);
+            }
+            for (CoreOrderState order : selectedOrders) {
+                if (order == null) continue;
+                int lane = runtime.topology().accountLaneId(order.userId());
+                ArrayList<CoreOrderState> group = ordersByLane[lane];
+                if (group == null) ordersByLane[lane] = group = new ArrayList<>();
+                group.add(order);
+            }
+            this.orderLaneMask = laneMask(ordersByLane);
+            this.userLaneMask = laneMask(usersByLane);
+            if (prepared == null || prepared.length != usersByLane.length) prepared = new Object[usersByLane.length];
+            else Arrays.fill(prepared, null);
+            if (treasuryDelta == null) treasuryDelta = new RuntimeTreasuryDelta();
+            else treasuryDelta.clear();
+            this.result = null;
+            this.dispatchedPhase = null;
+            this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
+            return this;
+        }
+
+        private SettlementWork resetCompleted(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            this.command = null; this.chunkCommandId = null; this.runtime = runtime;
+            this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
+            this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
+            this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
+            for (LongArrayList users : usersByLane) users.clear();
+            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            if (prepared != null) Arrays.fill(prepared, null);
+            if (treasuryDelta != null) treasuryDelta.clear();
+            this.result = result; this.phase = Phase.DONE;
+            this.dispatchedPhase = null;
+            return this;
+        }
+
+        /** Drop command/page references before the fixed command slot is recycled. */
+        public void clearReferences() {
+            command = null; chunkCommandId = null; instrument = null; kernel = null;
+            previousProgress = null; selectedOrders = List.of(); selectedUserIds = List.of();
+            result = null; phase = Phase.DONE;
+            dispatchedPhase = null;
+            for (LongArrayList users : usersByLane) users.clear();
+            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            if (prepared != null) Arrays.fill(prepared, null);
+            if (treasuryDelta != null) treasuryDelta.clear();
         }
 
         static SettlementWork completed(TradingRuntimeState runtime, CoreSettlementProgressView result) {
@@ -254,10 +337,8 @@ public final class RuntimeSettlementProcessor {
             if (phase == Phase.DONE) return true;
             switch (phase) {
                 case CANCEL -> {
-                    runtime.dispatchControlLanes(orderLaneMask, lane -> {
-                        cancelOrdersOnLane(runtime, ordersByLane[lane]);
-                        return null;
-                    });
+                    dispatchedPhase = Phase.CANCEL;
+                    runtime.dispatchControlLanes(orderLaneMask, this);
                     phase = Phase.PREPARE;
                     return false;
                 }
@@ -283,15 +364,15 @@ public final class RuntimeSettlementProcessor {
                         finishWithoutUsers();
                         return true;
                     }
-                    runtime.dispatchControlLanes(userLaneMask, lane ->
-                            prepareLane(runtime, instrument, kernel, command, usersByLane[lane], symbolId, assetId));
+                    dispatchedPhase = Phase.PREPARE;
+                    runtime.dispatchControlLanes(userLaneMask, this);
                     phase = Phase.APPLY;
                     return false;
                 }
                 case APPLY -> {
                     if (!runtime.pollControlLanes()) return false;
                     int laneCount = runtime.topology().accountLaneCount();
-                    prepared = new Object[laneCount];
+                    Arrays.fill(prepared, null);
                     long requiredInsurance = 0;
                     for (int lane = 0; lane < laneCount; lane++) {
                         if ((userLaneMask & (1L << lane)) == 0) continue;
@@ -316,16 +397,14 @@ public final class RuntimeSettlementProcessor {
                     if (requiredInsurance != 0) runtime.treasury().setInsurance(assetId,
                             Math.subtractExact(runtime.treasury().insurance(assetId), requiredInsurance),
                             runtime.treasury().insuranceDeficit(assetId));
-                    runtime.dispatchControlLanes(userLaneMask, lane -> {
-                        @SuppressWarnings("unchecked") List<UserSettlement> plans = (List<UserSettlement>) prepared[lane];
-                        return applyLane(runtime, assetId, plans);
-                    });
+                    dispatchedPhase = Phase.APPLY;
+                    runtime.dispatchControlLanes(userLaneMask, this);
                     phase = Phase.APPLY_WAIT;
                     return false;
                 }
                 case APPLY_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
-                    treasuryDelta = new RuntimeTreasuryDelta();
+                    treasuryDelta.clear();
                     int laneCount = runtime.topology().accountLaneCount();
                     for (int lane = 0; lane < laneCount; lane++) {
                         if ((userLaneMask & (1L << lane)) == 0) continue;
@@ -350,6 +429,25 @@ public final class RuntimeSettlementProcessor {
                 }
                 default -> throw new IllegalStateException("invalid settlement continuation phase");
             }
+        }
+
+        /** Reused Lane operation for all three asynchronous settlement phases. */
+        @Override
+        public Object apply(int lane) {
+            return switch (dispatchedPhase) {
+                case CANCEL -> {
+                    cancelOrdersOnLane(runtime, ordersByLane[lane]);
+                    yield null;
+                }
+                case PREPARE -> prepareLane(runtime, instrument, kernel, command,
+                        usersByLane[lane], symbolId, assetId);
+                case APPLY -> {
+                    @SuppressWarnings("unchecked") List<UserSettlement> plans =
+                            (List<UserSettlement>) prepared[lane];
+                    yield applyLane(runtime, assetId, plans);
+                }
+                default -> throw new IllegalStateException("settlement lane operation outside dispatch phase");
+            };
         }
 
         private void finishWithoutUsers() {
