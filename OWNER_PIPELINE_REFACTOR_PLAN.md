@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.8 已完成，进入阶段 8.9**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.10 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -405,3 +405,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）：已完成。普通 CANCEL 在无前置撤单时复用固定 `CancelMatchingContinuation`；普通 REPLACE/AMEND 在无前置撤单时复用固定 `ReplaceMatchingContinuation`，并新增适配器内联的 `replaceWithEvidence`，删除该路径的 `MatchingSubmission`、证据包装和捕获式 lambda。带前置撤单的关闭容量/生命周期兼容路径仍保留原有组合语义，避免为冷路径引入新的状态机。
 - 阶段 8.9 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通撤单、替换/改单、Matcher 证据、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
 - 下一阶段：阶段 8.10（低频控制/查询路径最终审计）。只清理仍被生产调用的重复对象和无必要的 Owner continuation；不改变风险、资金费、强平、ADL、交割/期权的分页/恢复边界。完成后进行一次全局死代码与引用审计，再进入统一 64/128 窗口压测。
+- 阶段 8.10（低频控制/查询路径最终审计）：已完成。逐一核对风险扫描、资金费、强平、ADL、交割/期权、触发扫描、查询和 snapshot/replay 的生产调用；这些路径的 continuation、分页游标和 lane work 均有实际调用或恢复用途，不能删除。删除唯一无生产/测试调用的旧 `RuntimeDerivativeLiquidationProcessor.beginExecution(command, ...)` BooleanSupplier 兼容入口，保留复用 `ExecutionWork`、批量执行和同步恢复入口。没有为低频路径新增通用状态机或把业务 lambda 强行塞入普通热路径。
+- 阶段 8.10 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、风险/资金费/清算矩阵、触发扫描、批量、snapshot/replay 和幂等目标通过。未执行吞吐压测。
+- 最终正确性审计进行中：service 模块门槛保持绿色；全仓 benchmark 套件唯一失败为 `LinearPerpetualBenchmarkSupportTest.saturatedWorkloadMaintainsOneSharedCoreWindowAndPreservesFunds` 的既有口径问题。该测试通过同步 `state.apply()` 驱动，基线 `752ec39f` 与当前代码均报告 `settlementInFlightHighWaterMark=0`，但断言要求异步结算才会产生的值至少为 2；其业务计数、成交、资金守恒、订单和 client identity 均通过。该 benchmark 不作为本次代码回归失败依据，后续压测使用独立 async cluster harness；统一 64/128 窗口压测及 JFR 归因仍待审计记录收敛后执行。

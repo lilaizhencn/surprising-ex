@@ -43,13 +43,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         return runtime;
     }
 
-    /** One account stage owns cancellation and liquidation; only treasury changes return to Owner. */
-    public static java.util.function.BooleanSupplier beginExecution(ExecuteLiquidationCommand command,
-            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        return beginExecution(null, command, canceledOrders, nextCursorOrderId, runtime, identities);
-    }
-
     /** Re-arm a command-slot execution continuation while retaining its validation buffers. */
     public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
