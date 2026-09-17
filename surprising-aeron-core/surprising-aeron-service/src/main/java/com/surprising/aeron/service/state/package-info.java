@@ -20,5 +20,8 @@
  * <p>{@code CancelAllAfterStateTransitions} 只拥有 {@code cancelAllAfterTimers} 集合及其版本
  * 检查和生命周期推进；{@code AlgoOrderStateTransitions} 只拥有 {@code algoOrders} 集合的
  * 创建与修订。两者都不修改普通订单、余额或持仓。</p>
+ *
+ * <p>{@code LeverageStateTransitions} 只拥有衍生品 {@code leverages} 集合的校验和写入；它
+ * 读取订单与持仓来阻止有敞口时修改杠杆，但不修改这些状态。</p>
  */
 package com.surprising.aeron.service.state;
