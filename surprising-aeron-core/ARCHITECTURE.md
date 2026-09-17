@@ -154,6 +154,8 @@ CoreMessage / PlaceOrderCommand
 只更新版本化扫描控制，不修改扫描进度、风险快照或强平状态。
 `InstrumentStateTransitions` 只拥有 `instruments` 的版本化配置写入；`MarkPriceStateTransitions`
 只拥有标记价和风险扫描失效标记，扫描执行仍由风险扫描流程负责。
+`RiskScanExecution` 负责按 Account Lane 分批推进风险扫描，并物化风险快照和强平计划；Reducer
+只保留风险扫描公开入口及标记价变更后的调用顺序。
 
 ## 4. 第一阶段不做的事情
 
