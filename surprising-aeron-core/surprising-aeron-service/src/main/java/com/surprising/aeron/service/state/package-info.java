@@ -10,5 +10,8 @@
  *
  * <p>{@code state.admission} 是订单意图解析、准入校验以及活跃订单查询协议的边界；它可以
  * 读取状态并返回准入结果，但不拥有余额、冻结、订单或持仓。</p>
+ *
+ * <p>{@code OrderStateTransitions} 是持久化订单生命周期的状态所有者：它原子更新订单、余额、
+ * 预留和客户端订单索引；{@code TradingCoreReducer} 只保留兼容入口及其他风险、成交、结算流程。</p>
  */
 package com.surprising.aeron.service.state;

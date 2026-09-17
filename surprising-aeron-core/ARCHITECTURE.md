@@ -137,8 +137,10 @@ CoreMessage / PlaceOrderCommand
 `TradingCoreReducer` 和 `RuntimeDerivativeFillCalculator` 仍是状态侧入口。它们可以把确定性状态或成交事实交给对应产品规则，但不能通过共享父类、统一策略注册或复制快照来消除产品差异。
 
 订单入口的当前边界是：`state.admission.CoreOrderDecisionResolver` 负责把意图解析为
-`ResolvedPlaceOrder`，`state.admission.RuntimeOrderAdmission` 负责状态准入和冻结需求调用，
-账户 Lane、活跃订单索引和批量编排只实现 `AdmissionOrderIndex` 协议。
+`ResolvedPlaceOrder`，`state.admission.RuntimeOrderAdmission` 负责运行时状态准入和冻结需求调用，
+`OrderStateTransitions` 负责持久化 `TradingCoreState` 中订单、余额和预留的原子变更，
+包括下单、撤单、拒单、成交后的预留释放和强平批量撤单。账户 Lane、活跃订单索引和批量编排
+只实现 `AdmissionOrderIndex` 协议，不直接拥有订单或余额状态。
 
 ## 4. 第一阶段不做的事情
 
