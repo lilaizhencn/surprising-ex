@@ -152,6 +152,8 @@ CoreMessage / PlaceOrderCommand
 流水仍由各自的业务状态转换负责。
 `FundingStateTransitions` 只负责永续资金费的产品线校验、标记价冻结、分页游标、用户余额变更、
 资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。
+`SettlementStateTransitions` 负责交割/期权结算的 TradingCoreState 投影/物化桥接和订单取消后的
+lifecycle 游标推进；逐 Lane 的结算计算仍由 `RuntimeSettlementProcessor` 负责。
 `RiskSnapshotQueries` 只组装风险查询视图，不写入权威状态；`RiskScanControlStateTransitions`
 只更新版本化扫描控制，不修改扫描进度、风险快照或强平状态。
 `InstrumentStateTransitions` 只拥有 `instruments` 的版本化配置写入；`MarkPriceStateTransitions`

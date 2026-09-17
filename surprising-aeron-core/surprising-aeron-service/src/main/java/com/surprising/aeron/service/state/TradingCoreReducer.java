@@ -487,17 +487,7 @@ public final class TradingCoreReducer {
                                                               Iterable<Long> indexedUserIds,
                                                               UUID chunkCommandId,
                                                               ActiveOrderIndex activeOrderIndex) {
-        // Simulation uses the same financial kernel as authoritative settlement.
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
-        try {
-            var progress = RuntimeSettlementProcessor.apply(state, command, indexedUserIds, chunkCommandId,
-                    activeOrderIndex, runtime, identities);
-            if (runtime.revision() == state.revision()) return new SettlementApplication(state, progress);
-            return new SettlementApplication(RuntimeStateMaterializer.materialize(runtime, identities), progress);
-        } finally {
-            runtime.close();
-        }
+        return SettlementStateTransitions.apply(state, command, indexedUserIds, chunkCommandId, activeOrderIndex);
     }
 
     public TradingCoreState cancelLifecycleOrders(TradingCoreState state, Collection<CoreOrderState> orders) {
@@ -516,51 +506,8 @@ public final class TradingCoreReducer {
                                                                 Collection<CoreOrderState> orders,
                                                                 long nextCursorOrderId,
                                                                 UUID chunkCommandId) {
-        if (nextCursorOrderId <= 0 || chunkCommandId == null) {
-            throw new IllegalArgumentException("settlement cursor must advance");
-        }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
-        if (instrument.contractType().isOption()) {
-            OptionContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks());
-        }
-        CoreTreasuryState.LifecycleProgress progress = state.treasuryState().lifecycleProgress(command.symbol());
-        if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentChangeId() != command.instrumentChangeId()
-                || progress.settlementPriceTicks() != command.settlementPriceTicks()
-                || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
-                || progress.ordersComplete() || progress.nextCursorOrderId() != command.cursorOrderId()
-                || progress.nextCursorUserId() != command.cursorUserId())) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
-        }
-        if (progress == null && (command.cursorOrderId() != 0 || command.cursorUserId() != 0)) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
-        }
-        TradingCoreState canceled = cancelLifecycleOrders(state, orders);
-        CoreTreasuryState nextTreasury = canceled.treasuryState().withLifecycleProgress(command.symbol(),
-                new CoreTreasuryState.LifecycleProgress(command.settlementId(), command.instrumentChangeId(),
-                        command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
-                        nextCursorOrderId, 0, chunkCommandId));
-        return withTreasury(canceled, nextTreasury);
-    }
-
-    private static TradingCoreState withTreasury(TradingCoreState state, CoreTreasuryState treasury) {
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.instruments(), state.riskState(), treasury,
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
-                state.triggerOrders());
-    }
-
-    private static LifecycleOrderChunk selectLifecycleOrders(TradingCoreState state,
-                                                              ActiveOrderIndex activeOrderIndex,
-                                                              String symbol, long cursorOrderId, int maxOrders) {
-        if (activeOrderIndex == null) activeOrderIndex = new ActiveOrderIndex(state);
-        ActiveOrderIndex.Page page = activeOrderIndex.page(0, symbol, cursorOrderId, maxOrders);
-        List<CoreOrderState> selected = page.orderIds().stream().map(state::order)
-                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN).toList();
-        return new LifecycleOrderChunk(selected, page.nextCursorOrderId() != 0);
-    }
-
-    private record LifecycleOrderChunk(List<CoreOrderState> orders, boolean more) {
+        return SettlementStateTransitions.advanceOrderCancellation(state, command, orders,
+                nextCursorOrderId, chunkCommandId);
     }
 
     public record SettlementApplication(TradingCoreState state,
@@ -614,19 +561,6 @@ public final class TradingCoreReducer {
         }
         if (instrument.changeId() != version) {
             throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
-        }
-        return instrument;
-    }
-
-    private static CoreInstrumentState requireLifecycleInstrument(
-            TradingCoreState state, String symbol, long lifecycleVersion) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (lifecycleVersion < instrument.changeId()) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT",
-                    "instrument lifecycle version precedes execution version");
         }
         return instrument;
     }
