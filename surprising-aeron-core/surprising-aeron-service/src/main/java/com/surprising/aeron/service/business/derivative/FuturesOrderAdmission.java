@@ -1,22 +1,29 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.business.derivative;
 
-import com.surprising.aeron.service.state.math.*;
-
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.business.OrderAdmissionMath;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreUserState;
+import com.surprising.aeron.service.state.OrderReservation;
+import com.surprising.aeron.service.state.PositionRuntime;
+import com.surprising.aeron.service.state.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
+import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
-
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CorePositionState;
 
-import static com.surprising.aeron.service.state.ReducerSettlementSupport.*;
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
-import static com.surprising.aeron.service.business.OrderAdmissionMath.fragmentationSafeFeeDebit;
-
+/** Perpetual and delivery order reservation rules shared by all four futures product lines. */
 public final class FuturesOrderAdmission {
-    private FuturesOrderAdmission() {}
+    private FuturesOrderAdmission() {
+    }
 
     public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
-                                 ResolvedPlaceOrder order, long leverage, AdmissionSummary admissionSummary) {
+                                        ResolvedPlaceOrder order, long leverage,
+                                        AdmissionSummary admissionSummary) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());
@@ -26,10 +33,10 @@ public final class FuturesOrderAdmission {
         long projectedSigned = signedOrder > 0 ? projectedRisk : Math.negateExact(projectedRisk);
         long margin = openingMargin(instrument, projectedSigned, signedOrder, openSteps,
                 order.reservationPriceTicks(), leverage, order.indexPriceTicks(), order.forwardPriceTicks());
-        long feeDebit = fragmentationSafeFeeDebit(instrument, order);
+        long feeDebit = OrderAdmissionMath.fragmentationSafeFeeDebit(instrument, order);
         return Math.max(1, Math.addExact(margin, feeDebit));
-
     }
+
     private static long openingMargin(
             CoreInstrumentState instrument, long projectedQuantity, long signedFill, long openSteps,
             long priceTicks, long leveragePpm, long indexPriceTicks, long forwardPriceTicks) {
@@ -43,13 +50,16 @@ public final class FuturesOrderAdmission {
                 signedFill > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, priceTicks, openSteps, rate,
                 indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
     }
-    static long reservationUnitsForState(
+
+    /** Deterministic replay entry point for futures order reservation. */
+    public static long reservationUnitsForState(
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
             ResolvedPlaceOrder command,
-            ActiveOrderIndex activeOrderIndex) {
-        CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
+        ActiveOrderIndex activeOrderIndex) {
+        CorePositionState position = user.positions().get(
+                positionKey(instrument.symbol(), command.positionSide()));
         long currentQuantity = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = command.side() == CoreOrderSide.BUY
                 ? command.quantitySteps() : Math.negateExact(command.quantitySteps());
@@ -60,7 +70,7 @@ public final class FuturesOrderAdmission {
                 instrument.maxLeveragePpm());
         long projectedRiskQuantity = Math.addExact(Math.absExact(currentQuantity), command.quantitySteps());
         long projectedSteps = signedOrder > 0 ? projectedRiskQuantity : Math.negateExact(projectedRiskQuantity);
-        long margin = openingMarginForFill(instrument, projectedSteps, signedOrder, openSteps,
+        long margin = openingMargin(instrument, projectedSteps, signedOrder, openSteps,
                 command.reservationPriceTicks(), leverage, command.indexPriceTicks(),
                 command.forwardPriceTicks());
         long premium = instrument.contractType().isOption() && command.side() == CoreOrderSide.BUY
@@ -69,5 +79,10 @@ public final class FuturesOrderAdmission {
         long fee = CoreContractMath.feeDeltaUnits(instrument, command.reservationPriceTicks(),
                 command.quantitySteps(), command.takerFeeRatePpm());
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), Math.max(0, Math.negateExact(fee))));
+    }
+
+    private static String positionKey(String symbol, CorePositionSide side) {
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 }
