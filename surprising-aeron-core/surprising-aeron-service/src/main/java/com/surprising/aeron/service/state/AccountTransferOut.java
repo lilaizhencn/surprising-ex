@@ -32,7 +32,7 @@ public final class AccountTransferOut implements java.util.function.IntFunction<
                        TransferFundsCommand command) {
         if (identities == null) throw new IllegalArgumentException("transfer identities are required");
         this.runtime = runtime;
-        this.transfer = RuntimeCommandProcessor.prepareTransferOut(runtime, userId, command);
+        this.transfer = RuntimeAccountStateTransitions.prepareTransferOut(runtime, userId, command);
         this.amountUnits = command.amountUnits();
         if (transfer == null) {
             assetId = 0;
@@ -47,7 +47,7 @@ public final class AccountTransferOut implements java.util.function.IntFunction<
     }
 
     @Override public Object apply(int ignoredLaneId) {
-        RuntimeCommandProcessor.debitTransferAccount(runtime, transfer.userId(), assetId, amountUnits);
+        RuntimeAccountStateTransitions.debitTransferAccount(runtime, transfer.userId(), assetId, amountUnits);
         return null;
     }
 

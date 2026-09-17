@@ -47,7 +47,7 @@ public final class AccountBalanceAdjustment implements java.util.function.IntFun
     }
 
     @Override public Object apply(int ignoredLaneId) {
-        RuntimeCommandProcessor.adjustAccountBalance(runtime, userId, assetId, deltaUnits);
+        RuntimeAccountStateTransitions.adjustAccountBalance(runtime, userId, assetId, deltaUnits);
         return null;
     }
 

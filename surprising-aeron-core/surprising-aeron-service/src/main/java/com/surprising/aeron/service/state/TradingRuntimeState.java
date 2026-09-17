@@ -1231,7 +1231,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                     || trigger.positionSide() != position.positionSide()
                                     || trigger.marginMode() != position.marginMode()
                                     || !symbol.equals(trigger.symbol())) continue;
-                            CoreTriggerOrderState canceled = RuntimeCommandProcessor.preparePendingTriggerCancellation(trigger);
+                            CoreTriggerOrderState canceled = RuntimeTriggerOrderStateTransitions.preparePendingCancellation(trigger);
                             lane.putTrigger(canceled);
                             changes.putTrigger(id, canceled);
                             changes.closedTriggerCount = Math.incrementExact(changes.closedTriggerCount);

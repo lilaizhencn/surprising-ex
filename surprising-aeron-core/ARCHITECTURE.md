@@ -166,6 +166,11 @@ lifecycle 游标推进；逐 Lane 的结算计算仍由 `RuntimeSettlementProces
 生命周期互斥检查及写入；`RuntimeCommandProcessor` 仅保留兼容命令入口，不再混合承载合约配置业务。
 `RuntimeOrderStateTransitions` 负责运行时普通订单的创建、撤单、拒单和预留交接；触发子单、批量下单
 只复用这里的普通订单写入，不把触发状态或批量编排带入该状态所有者。
+`RuntimeAccountStateTransitions` 只拥有运行时可用余额和跨产品待处理划转；`RuntimeInsuranceFundStateTransitions`
+只拥有 treasury 保险基金直接调整。`RuntimeRiskStateTransitions` 只拥有风险扫描控制版本和运行时扫描游标投影。
+`RuntimeOrderCommitStateTransitions` 只负责订单提交元数据和终态清理，不改变订单成交、余额或持仓业务事实。
+`RuntimeCancelAllAfterStateTransitions`、`RuntimeAlgoOrderStateTransitions` 和 `RuntimeTriggerOrderStateTransitions`
+分别拥有撤单定时器、算法订单和触发订单的运行时生命周期；触发订单的持仓容量校验仍只读取持仓和普通订单索引。
 `RiskScanExecution` 负责按 Account Lane 分批推进风险扫描，并物化风险快照和强平计划；Reducer
 只保留风险扫描公开入口及标记价变更后的调用顺序。
 `LiquidationExecution` 只负责撤单游标、强平执行校验，以及强平执行时的余额、持仓、手续费和

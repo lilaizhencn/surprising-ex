@@ -53,7 +53,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         try {
             LongArrayList ids = triggerCancelIds[laneId];
             for (int index = 0; index < ids.size(); index++)
-                if (RuntimeCommandProcessor.cancelPendingTriggerForCommit(runtime, ids.get(index)))
+                if (RuntimeTriggerOrderStateTransitions.cancelPendingForCommit(runtime, ids.get(index)))
                     canceledTriggers[laneId]++;
         } finally { runtime.exitLaneCommandScope(lane); }
     }

@@ -1,0 +1,26 @@
+package com.surprising.aeron.service.state;
+
+import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
+
+/** Owns direct runtime treasury insurance-fund adjustments. */
+final class RuntimeInsuranceFundStateTransitions {
+
+    private RuntimeInsuranceFundStateTransitions() {
+    }
+
+    static void adjust(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                       AdjustInsuranceFundCommand command) {
+        if (runtime == null || identities == null || command == null) {
+            throw new IllegalArgumentException("invalid runtime insurance adjustment");
+        }
+        runtime.assertOwner();
+        int assetId = identities.assetId(command.asset());
+        long current = runtime.treasury().insurance(assetId);
+        if (command.deltaUnits() < 0 && Math.negateExact(command.deltaUnits()) > current) {
+            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                    "insurance fund balance is insufficient");
+        }
+        runtime.treasury().adjustInsurance(assetId, command.deltaUnits());
+        runtime.incrementCommandRevision();
+    }
+}

@@ -1,31 +1,26 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.model.AssetBalance;
-import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
-import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.admission.AdmissionIdentity;
-import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
-import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
-import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
-import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
-import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
-import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.state.admission.AdmissionIdentity;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.product.api.ProductLine;
+
 import java.util.UUID;
 
+/**
+ * Compatibility entry points for runtime commands.
+ *
+ * <p>Business state ownership lives in the specific runtime transition class for each state family. This class
+ * remains temporarily public because command handlers, commit events and recovery code still share these entry points.
+ */
 public final class RuntimeCommandProcessor {
 
     private RuntimeCommandProcessor() {
@@ -33,121 +28,26 @@ public final class RuntimeCommandProcessor {
 
     public static void adjustBalance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                      long userId, BalanceAdjustmentCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime balance adjustment");
-        }
-        runtime.assertOwner();
-        String asset = AssetBalance.normalizeAsset(command.asset());
-        int assetId = identities.assetId(asset);
-        long nextRevision = Math.incrementExact(runtime.revision());
-        adjustAccountBalance(runtime, userId, assetId, command.deltaUnits());
-        runtime.setMetadata(runtime.productLine(), nextRevision);
-    }
-
-    /** 只修改所属账户；产品 revision 和发布边界由调用方在任务完成后提交。 */
-    static void adjustAccountBalance(TradingRuntimeState runtime, long userId, int assetId, long deltaUnits) {
-        BalanceRuntime current = runtime.balance(userId, assetId);
-        long currentAvailable = current == null ? 0 : current.availableUnits();
-        long nextAvailable = Math.addExact(currentAvailable, deltaUnits);
-        if (nextAvailable < 0) throw new IllegalArgumentException("available balance cannot be negative");
-        UserRuntime user = runtime.user(userId);
-        // 所有可能的算术拒绝都在首个账户写入前完成，避免部分修改后才能发现溢出。
-        UserRuntime nextUser = new UserRuntime(runtime.productLine(), userId,
-                user == null ? 1 : Math.incrementExact(user.revision()),
-                user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode());
-        BalanceRuntime nextBalance = new BalanceRuntime(userId, assetId, nextAvailable,
-                current == null ? 0 : current.lockedUnits());
-        runtime.putUser(nextUser);
-        if (current == null) runtime.putBalance(nextBalance);
-        else runtime.replaceBalance(nextBalance);
+        RuntimeAccountStateTransitions.adjustBalance(runtime, identities, userId, command);
     }
 
     public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                      long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
-        if (identities == null) throw new IllegalArgumentException("transfer identities are required");
-        TransferRuntime transfer = prepareTransferOut(runtime, userId, command);
-        if (transfer == null) return false;
-        int assetId = identities.assetId(command.asset());
-        long nextRevision = Math.incrementExact(runtime.revision());
-        debitTransferAccount(runtime, userId, assetId, command.amountUnits());
-        runtime.putPendingTransfer(transfer);
-        runtime.setMetadata(runtime.productLine(), nextRevision);
-        return true;
-    }
-
-    /** Owner 校验跨产品划转身份与幂等记录；不访问可变账户余额。 */
-    static TransferRuntime prepareTransferOut(TradingRuntimeState runtime, long userId,
-                                               com.surprising.aeron.protocol.TransferFundsCommand command) {
-        if (runtime == null || command == null || userId <= 0)
-            throw new IllegalArgumentException("invalid runtime transfer out");
-        runtime.assertOwner();
-        if (runtime.productLine() != command.sourceProductLine())
-            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
-        TransferRuntime transfer = new TransferRuntime(userId, command);
-        TransferRuntime existing = runtime.pendingTransfer(command.transferId());
-        if (existing != null) {
-            if (!existing.equals(transfer))
-                throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
-            return null;
-        }
-        if (!runtime.hasPendingTransferCapacity())
-            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
-        return transfer;
-    }
-
-    /** 资金账户单写任务；冻结及其他产品余额不可用于本次转出。 */
-    static void debitTransferAccount(TradingRuntimeState runtime, long userId, int assetId, long amountUnits) {
-        BalanceRuntime balance = runtime.balance(userId, assetId);
-        if (balance == null || balance.availableUnits() < amountUnits)
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "transfer available balance is insufficient");
-        UserRuntime user = runtime.requireUser(userId);
-        UserRuntime advanced = new UserRuntime(runtime.productLine(), userId,
-                Math.incrementExact(user.revision()), user.positionMode());
-        BalanceRuntime debited = new BalanceRuntime(userId, assetId,
-                Math.subtractExact(balance.availableUnits(), amountUnits), balance.lockedUnits());
-        runtime.putUser(advanced);
-        runtime.replaceBalance(debited);
+                                      long userId, TransferFundsCommand command) {
+        return RuntimeAccountStateTransitions.transferOut(runtime, identities, userId, command);
     }
 
     public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                  long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime transfer in");
-        }
-        runtime.assertOwner();
-        if (runtime.productLine() != command.targetProductLine()) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
-        }
-        adjustBalance(runtime, identities, userId,
-                new com.surprising.aeron.protocol.BalanceAdjustmentCommand(command.asset(), command.amountUnits()));
+                                  long userId, TransferFundsCommand command) {
+        RuntimeAccountStateTransitions.transferIn(runtime, identities, userId, command);
     }
 
     public static boolean completeTransfer(TradingRuntimeState runtime, long userId, long transferId) {
-        if (runtime == null || userId <= 0 || transferId <= 0) {
-            throw new IllegalArgumentException("invalid runtime transfer completion");
-        }
-        runtime.assertOwner();
-        if (!runtime.removePendingTransfer(transferId, userId)) return false;
-        runtime.incrementCommandRevision();
-        return true;
+        return RuntimeAccountStateTransitions.completeTransfer(runtime, userId, transferId);
     }
 
     public static void updateRiskScanControl(TradingRuntimeState runtime, UpdateRiskScanControlCommand command,
                                              long updatedAtEpochMillis) {
-        if (runtime == null || command == null) {
-            throw new IllegalArgumentException("invalid runtime risk scan control update");
-        }
-        runtime.assertOwner();
-        CoreRiskScanControlView current = runtime.riskScanControl();
-        if (command.expectedVersion() != current.version()) {
-            throw new CoreStateRejectedException("STALE_RISK_SCAN_CONTROL_VERSION",
-                    "risk scan control version does not match");
-        }
-        runtime.setRiskScanControl(new CoreRiskScanControlView(
-                Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
-                command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),
-                Math.max(0, updatedAtEpochMillis)));
-        runtime.incrementCommandRevision();
+        RuntimeRiskStateTransitions.updateScanControl(runtime, command, updatedAtEpochMillis);
     }
 
     public static void upsertInstrument(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -156,24 +56,13 @@ public final class RuntimeCommandProcessor {
     }
 
     public static void updateInstrumentMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-            com.surprising.aeron.protocol.CoreMaintenanceCodec.Command command) {
+                                                   CoreMaintenanceCodec.Command command) {
         RuntimeInstrumentStateTransitions.updateMaintenance(runtime, identities, command);
     }
 
     public static void adjustInsuranceFund(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                            AdjustInsuranceFundCommand command) {
-        if (runtime == null || identities == null || command == null) {
-            throw new IllegalArgumentException("invalid runtime insurance adjustment");
-        }
-        runtime.assertOwner();
-        int assetId = identities.assetId(command.asset());
-        long current = runtime.treasury().insurance(assetId);
-        if (command.deltaUnits() < 0 && Math.negateExact(command.deltaUnits()) > current) {
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                    "insurance fund balance is insufficient");
-        }
-        runtime.treasury().adjustInsurance(assetId, command.deltaUnits());
-        runtime.incrementCommandRevision();
+        RuntimeInsuranceFundStateTransitions.adjust(runtime, identities, command);
     }
 
     public static void placeOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -191,16 +80,17 @@ public final class RuntimeCommandProcessor {
 
     /** Trigger claim, OCO cancellations and this reservation share one control Lane task. */
     public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
-            ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
-            AdmissionIdentity identity, long clientKey, int assetId) {
-        RuntimeOrderStateTransitions.placeTriggerChildInLane(runtime, userId, command, commandId,
-                coreSequence, openInterestSteps, identity, clientKey, assetId);
+                                               ResolvedPlaceOrder command, UUID commandId, long coreSequence,
+                                               long openInterestSteps, AdmissionIdentity identity, long clientKey,
+                                               int assetId) {
+        RuntimeOrderStateTransitions.placeTriggerChildInLane(runtime, userId, command, commandId, coreSequence,
+                openInterestSteps, identity, clientKey, assetId);
     }
 
     /** One account task writes the admitted order and its local pending marker. */
     public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
-            ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
-            long clientKey, int assetId, long coreSequence) {
+                                               ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
+                                               long clientKey, int assetId, long coreSequence) {
         RuntimeOrderStateTransitions.reserveBatchOrderInLane(runtime, userId, command, commandId,
                 requiredReservation, clientKey, assetId, coreSequence);
     }
@@ -215,485 +105,104 @@ public final class RuntimeCommandProcessor {
     }
 
     public static void validateOrderStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
-        if (timestamp < 0 || position < 0 || orderIds == null)
-            throw new IllegalArgumentException("invalid order commit metadata");
-        // Preserve the preparation boundary before any account task can start.
-        for (Long ignored : orderIds) { }
+        RuntimeOrderCommitStateTransitions.validateStampInputs(timestamp, position, orderIds);
     }
 
     public static boolean stampChangedOrdersByLane(
             TradingRuntimeState runtime, long timestamp, long clusterPosition,
             Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
-        if (runtime == null || changedOrderIds == null || changedUserIds == null
-                || timestamp < 0 || clusterPosition < 0) {
-            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
-        }
-        runtime.assertOwner();
-        if (changedOrderIds instanceof java.util.Collection<?> orders && orders.isEmpty()) return false;
-        // Callers retain this command-local collection until the synchronous Lane stage completes.
-        // Do not copy every order ID into a second boxed list just to iterate it again.
-        boolean hasCandidates = false;
-        for (Long orderId : changedOrderIds) hasCandidates |= orderId != null;
-        if (!hasCandidates) return false;
-        Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
-            boolean changed = false;
-            for (Long orderId : changedOrderIds) {
-                if (orderId == null) continue;
-                OrderRuntime order = runtime.order(orderId);
-                if (order == null || order.updatedAtEpochMillis() == timestamp
-                        && order.clusterPosition() == clusterPosition) continue;
-                runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
-                changed = true;
-            }
-            return changed;
-        });
-        for (Object result : results) {
-            if (Boolean.TRUE.equals(result)) return true;
-        }
-        return false;
+        return RuntimeOrderCommitStateTransitions.stampChangedOrdersByLane(
+                runtime, timestamp, clusterPosition, changedOrderIds, changedUserIds);
     }
 
     public static void pruneTerminalState(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                           TerminalPruneBatch batch) {
-        if (runtime == null || identities == null || batch == null || batch.isEmpty()) {
-            throw new IllegalArgumentException("invalid runtime terminal prune");
-        }
-        runtime.assertOwner();
-        runtime.pruneTerminalOrders(identities, batch.orderIds());
-        for (long algoOrderId : batch.algoOrderIds()) {
-            CoreAlgoOrderState algo = runtime.algoOrder(algoOrderId);
-            if (algo == null || !algo.terminal()) {
-                throw new IllegalStateException("algo order is not terminal: " + algoOrderId);
-            }
-            runtime.removeAlgoOrder(algoOrderId);
-        }
-        for (long triggerOrderId : batch.triggerOrderIds()) {
-            CoreTriggerOrderState trigger = runtime.triggerOrder(triggerOrderId);
-            if (trigger == null || trigger.status().open()) {
-                throw new IllegalStateException("trigger order is not terminal: " + triggerOrderId);
-            }
-            runtime.removeTriggerOrder(triggerOrderId);
-        }
-        for (long liquidationId : batch.liquidationIds()) {
-            LiquidationRuntime liquidation = runtime.liquidation(liquidationId);
-            if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.CANCELED
-                    && (liquidation.status() != CoreLiquidationState.Status.COMPLETED
-                    || liquidation.deficitUnits() != 0)) {
-                throw new IllegalStateException("liquidation is not terminal: " + liquidationId);
-            }
-            runtime.removeLiquidation(liquidationId);
-        }
+        RuntimeOrderCommitStateTransitions.pruneTerminalState(runtime, identities, batch);
     }
 
     public static void replaceRiskScan(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                        CoreRiskState.RiskScan scan) {
-        if (runtime == null || identities == null || scan == null) {
-            throw new IllegalArgumentException("invalid runtime risk scan");
-        }
-        runtime.putRiskScan(new RiskScanRuntime(identities.symbolId(scan.symbol()), scan.accountLaneId(),
-                scan.priceSequence(), scan.scanStartPriceSequence(), scan.lastUserId(),
-                scan.riskComplete(), scan.riskUserId(),
-                scan.riskPhase(), scan.riskPositionCursor(), scan.riskReservationCursor(),
-                scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(),
-                scan.riskIsolatedReservationUnits(), scan.triggerComplete(), scan.triggerPhase(),
-                scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
-                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress()));
-        incrementRevision(runtime);
+        RuntimeRiskStateTransitions.replaceScan(runtime, identities, scan);
     }
 
     public static void replaceRiskScan(TradingRuntimeState runtime, RiskScanRuntime scan) {
-        if (runtime == null || scan == null) {
-            throw new IllegalArgumentException("invalid runtime risk scan");
-        }
-        runtime.putRiskScan(scan);
-        incrementRevision(runtime);
+        RuntimeRiskStateTransitions.replaceScan(runtime, scan);
     }
 
     public static void updateCancelAllAfter(TradingRuntimeState runtime, long userId,
-                                            CoreCancelAllAfterCommand command) {
-        if (runtime == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime cancel-all-after update");
-        }
-        runtime.assertOwner();
-        if (command.userId() != userId) {
-            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_OWNER_MISMATCH",
-                    "cancel-all-after timer belongs to another user");
-        }
-        CoreCancelAllAfterKey key = new CoreCancelAllAfterKey(userId, command.symbolScope());
-        CoreCancelAllAfterState current = runtime.cancelAllAfterTimer(key);
-        CoreCancelAllAfterState next;
-        switch (command.action()) {
-            case SET -> {
-                CoreCancelAllAfterStatus status = command.countdownMillis() == 0
-                        ? CoreCancelAllAfterStatus.DISABLED : CoreCancelAllAfterStatus.ACTIVE;
-                if (status == CoreCancelAllAfterStatus.ACTIVE
-                        && command.triggerAtEpochMillis() <= command.updatedAtEpochMillis()) {
-                    throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER",
-                            "active cancel-all-after timer must trigger in the future");
-                }
-                next = new CoreCancelAllAfterState(userId, command.symbolScope(), command.countdownMillis(), status,
-                        status == CoreCancelAllAfterStatus.ACTIVE ? command.triggerAtEpochMillis() : 0,
-                        command.updatedAtEpochMillis(), 0, 0,
-                        current == null ? 1 : Math.incrementExact(current.revision()));
-            }
-            case CLAIM -> {
-                requireTimerRevision(current, command);
-                if (current.status() != CoreCancelAllAfterStatus.ACTIVE
-                        || current.triggerAtEpochMillis() > command.updatedAtEpochMillis()) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_DUE", "timer is not due");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        CoreCancelAllAfterStatus.TRIGGERING, current.triggerAtEpochMillis(),
-                        command.updatedAtEpochMillis(), current.canceledOrders(), current.canceledTriggerOrders(),
-                        Math.incrementExact(current.revision()));
-            }
-            case COMPLETE -> {
-                requireTimerRevision(current, command);
-                if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        CoreCancelAllAfterStatus.TRIGGERED, current.triggerAtEpochMillis(),
-                        command.updatedAtEpochMillis(), command.canceledOrders(), command.canceledTriggerOrders(),
-                        Math.incrementExact(current.revision()));
-            }
-            case RETRY -> {
-                requireTimerRevision(current, command);
-                if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        CoreCancelAllAfterStatus.ACTIVE, current.triggerAtEpochMillis(),
-                        command.updatedAtEpochMillis(), current.canceledOrders(), current.canceledTriggerOrders(),
-                        Math.incrementExact(current.revision()));
-            }
-            default -> throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_ACTION", "unsupported action");
-        }
-        runtime.putCancelAllAfterTimer(key, next);
-        incrementRevision(runtime);
+                                            com.surprising.aeron.protocol.CoreCancelAllAfterCommand command) {
+        RuntimeCancelAllAfterStateTransitions.update(runtime, userId, command);
     }
 
     public static void upsertAlgoOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                        long userId, CoreAlgoOrderView view) {
-        if (runtime == null || identities == null || view == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime algo order update");
-        }
-        upsertAlgoOrder(runtime, userId, view, identities.symbolId(view.symbol()));
+        RuntimeAlgoOrderStateTransitions.upsert(runtime, identities, userId, view);
     }
 
     public static void upsertAlgoOrder(TradingRuntimeState runtime, long userId,
                                        CoreAlgoOrderView view, int symbolId) {
-        if (runtime == null || view == null || userId <= 0 || symbolId < 0)
-            throw new IllegalArgumentException("invalid prepared algo update");
-        runtime.assertOwner();
-        if (view.userId() != userId) {
-            throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
-        }
-        if (view.clientAlgoOrderId().isBlank()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
-        }
-        CoreAlgoOrderState next = CoreAlgoOrderState.from(view);
-        CoreAlgoOrderState current = runtime.algoOrder(next.algoOrderId());
-        if (current == null) {
-            boolean duplicateClient = runtime.hasAlgoClient(userId, next.clientAlgoOrderId());
-            if (duplicateClient) {
-                throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
-                        "clientAlgoOrderId already exists");
-            }
-            if (!next.childOrderIds().isEmpty() || next.revision() != 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_CREATE", "new algo order must start empty");
-            }
-        } else {
-            requireSameAlgoIntent(current, next);
-            if (next.revision() <= current.revision()) {
-                throw new CoreStateRejectedException("STALE_ALGO_ORDER_REVISION", "algo order revision is stale");
-            }
-            if (next.revision() != Math.incrementExact(current.revision())
-                    || next.childOrderIds().size() < current.childOrderIds().size()
-                    || !next.childOrderIds().subList(0, current.childOrderIds().size()).equals(current.childOrderIds())
-                    || next.childOrderIds().size() > current.childOrderIds().size() + 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
-                        "algo order revision is not monotonic");
-            }
-            if (next.childOrderIds().size() > current.childOrderIds().size()) {
-                OrderRuntime child = runtime.order(next.childOrderIds().getLast());
-                if (child == null || child.userId() != userId
-                        || child.symbolId() != symbolId) {
-                    throw new CoreStateRejectedException("INVALID_ALGO_CHILD",
-                            "algo child order is not authoritative");
-                }
-            }
-        }
-        runtime.putAlgoOrder(next);
-        incrementRevision(runtime);
+        RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, view, symbolId);
     }
 
     public static void upsertTriggerOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                           long userId, CoreTriggerOrderStateView view) {
-        if (runtime == null || identities == null || view == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime trigger order update");
-        }
-        int symbolId = identities.symbolId(view.symbol());
-        long positionKey = triggerPositionKey(identities, runtime.productLine(), userId, view);
-        boolean instrumentSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
-        upsertTriggerOrder(runtime, userId, view, symbolId, positionKey, instrumentSettled);
+        RuntimeTriggerOrderStateTransitions.upsert(runtime, identities, userId, view);
     }
 
     public static void upsertTriggerOrder(TradingRuntimeState runtime, long userId,
                                           CoreTriggerOrderStateView view, int symbolId,
                                           long positionKey, boolean instrumentSettled) {
-        if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
-            throw new IllegalArgumentException("invalid prepared runtime trigger order update");
-        }
-        runtime.assertOwner();
-        if (view.userId() != userId || view.productLine() != runtime.productLine()) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
-        }
-        if (view.clientTriggerOrderId().isBlank()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
-        }
-        CoreInstrumentState instrument = runtime.instrument(view.symbol());
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
-        }
-        if (instrumentSettled) {
-            throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
-        }
-        if (runtime.triggerOrder(view.triggerOrderId()) != null) {
-            throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
-        }
-        boolean duplicateClient = runtime.hasTriggerClient(userId, view.clientTriggerOrderId());
-        if (duplicateClient) {
-            throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
-                    "client trigger order id already exists");
-        }
-        validateTriggerPlacement(runtime, userId, symbolId, positionKey, view);
-        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
-        if (trigger.instrumentChangeId() == 0) {
-            trigger = trigger.withExecutionSnapshot(instrument.changeId(), instrument.makerFeeRatePpm(),
-                    instrument.takerFeeRatePpm());
-        } else if (trigger.instrumentChangeId() != instrument.changeId()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
-                    "trigger order instrument version is stale");
-        }
-        runtime.putTriggerOrder(trigger);
-        incrementRevision(runtime);
+        RuntimeTriggerOrderStateTransitions.upsert(runtime, userId, view, symbolId, positionKey, instrumentSettled);
     }
 
     public static boolean cancelTriggerOrder(TradingRuntimeState runtime, long userId, long triggerOrderId) {
-        requireTriggerInput(runtime, userId, triggerOrderId);
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (current.userId() != userId) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
-        }
-        if (!current.status().open()) return false;
-        updateTrigger(runtime, current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
-                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
-        return true;
-    }
-
-    /** Commit event owns version publication; this helper mutates only its scoped account Lane. */
-    static boolean cancelPendingTriggerForCommit(TradingRuntimeState runtime, long triggerId) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
-        runtime.putTriggerOrder(preparePendingTriggerCancellation(current));
-        return true;
-    }
-
-    static CoreTriggerOrderState preparePendingTriggerCancellation(CoreTriggerOrderState current) {
-        if (current == null || current.status() != CoreTriggerOrderStatus.PENDING)
-            throw new IllegalStateException("closing trigger must be pending");
-        return triggerUpdate(current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
-                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
+        return RuntimeTriggerOrderStateTransitions.cancel(runtime, userId, triggerOrderId);
     }
 
     public static boolean claimTriggerOrder(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
                                             long triggeredPriceTicks, long triggeredAtEpochMillis) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
-        updateTrigger(runtime, current, CoreTriggerOrderStatus.TRIGGERING, 0, triggerSequence,
-                triggeredPriceTicks, current.rejectReason(), triggeredAtEpochMillis);
-        return true;
+        return RuntimeTriggerOrderStateTransitions.claim(runtime, triggerOrderId, triggerSequence,
+                triggeredPriceTicks, triggeredAtEpochMillis);
     }
 
     public static boolean completeTriggerOrder(TradingRuntimeState runtime, long triggerOrderId, boolean success,
                                                long placedOrderId, String rejectReason,
                                                long completedAtEpochMillis) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.TRIGGERING) return false;
-        updateTrigger(runtime, current, success ? CoreTriggerOrderStatus.TRIGGERED
-                        : CoreTriggerOrderStatus.TRIGGER_FAILED, placedOrderId, current.triggerSequence(),
-                current.triggeredPriceTicks(), rejectReason, completedAtEpochMillis);
-        return true;
+        return RuntimeTriggerOrderStateTransitions.complete(runtime, triggerOrderId, success, placedOrderId,
+                rejectReason, completedAtEpochMillis);
     }
 
     public static boolean updateTriggerTrailing(TradingRuntimeState runtime, long triggerOrderId,
                                                 long highestPriceTicks, long lowestPriceTicks,
                                                 long activatedAtEpochMillis) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
-        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
-                current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
-                current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
-                activatedAtEpochMillis, current.orderType(), current.timeInForce(), current.priceTicks(),
-                current.quantitySteps(), current.marginMode(), current.positionSide(), current.status(),
-                current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
-                current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
-                current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
-                Math.incrementExact(current.revision()), current.instrumentChangeId(), current.makerFeeRatePpm(),
-                current.takerFeeRatePpm()));
-        incrementRevision(runtime);
-        return true;
+        return RuntimeTriggerOrderStateTransitions.updateTrailing(runtime, triggerOrderId, highestPriceTicks,
+                lowestPriceTicks, activatedAtEpochMillis);
     }
 
     public static boolean expireTriggerOrder(TradingRuntimeState runtime, long triggerOrderId,
                                              long expiredAtEpochMillis) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
-                || current.expiresAtEpochMillis() > expiredAtEpochMillis) return false;
-        updateTrigger(runtime, current, CoreTriggerOrderStatus.EXPIRED, 0, current.triggerSequence(),
-                current.triggeredPriceTicks(), current.rejectReason(), expiredAtEpochMillis);
-        return true;
+        return RuntimeTriggerOrderStateTransitions.expire(runtime, triggerOrderId, expiredAtEpochMillis);
     }
 
     public static boolean retryTriggerOrder(TradingRuntimeState runtime, long triggerOrderId,
                                             long staleBeforeEpochMillis, long retryAtEpochMillis) {
-        CoreTriggerOrderState current = requireTrigger(runtime, triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.TRIGGERING
-                || current.updatedAtEpochMillis() > staleBeforeEpochMillis) return false;
-        updateTrigger(runtime, current, CoreTriggerOrderStatus.PENDING, 0, 0, 0,
-                current.rejectReason(), retryAtEpochMillis);
-        return true;
-    }
-
-    private static void validateTriggerPlacement(TradingRuntimeState runtime, long userId, int symbolId,
-                                                 long positionKey, CoreTriggerOrderStateView view) {
-        UserRuntime user = runtime.user(userId);
-        if (user == null) throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
-        if (!runtime.productLine().isDerivative()) return;
-        if (user.positionMode() == CorePositionMode.ONE_WAY && view.positionSide().hedgeSide()
-                || user.positionMode() == CorePositionMode.HEDGE && !view.positionSide().hedgeSide()) {
-            throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
-                    "trigger position side does not match user position mode");
-        }
-        PositionRuntime position = runtime.position(positionKey);
-        if (position == null || position.signedQuantitySteps() == 0) {
-            throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
-                    "trigger order requires an open position");
-        }
-        if (position.marginMode() != view.marginMode()) {
-            throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
-                    "trigger margin mode does not match position");
-        }
-        CoreOrderSide closeSide = position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
-        if (view.side() != closeSide) {
-            throw new CoreStateRejectedException("TRIGGER_SIDE_NOT_REDUCING",
-                    "trigger order side must reduce the current position");
-        }
-        long openReduceOnly = runtime.openReduceOnlyQuantity(
-                userId, symbolId, view.positionSide(), closeSide, view.marginMode());
-        long projectedTriggerCapacity = runtime.projectedTriggerCapacity(userId, view);
-        if (Math.addExact(openReduceOnly, projectedTriggerCapacity)
-                > Math.absExact(position.signedQuantitySteps())) {
-            throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
-                    "trigger order quantity exceeds available position");
-        }
+        return RuntimeTriggerOrderStateTransitions.retry(runtime, triggerOrderId, staleBeforeEpochMillis,
+                retryAtEpochMillis);
     }
 
     public static long triggerPositionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
                                           long userId, CoreTriggerOrderStateView view) {
-        if (!productLine.isDerivative()) return 0;
-        String positionIdentity = view.positionSide().hedgeSide()
-                ? OrderReservation.normalizeSymbol(view.symbol()) + ':' + view.positionSide().name()
-                : OrderReservation.normalizeSymbol(view.symbol());
-        return identities.positionKey(userId, positionIdentity);
+        return RuntimeTriggerOrderStateTransitions.positionKey(identities, productLine, userId, view);
     }
 
-    private static void updateTrigger(TradingRuntimeState runtime, CoreTriggerOrderState current,
-                                      CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
-                                      long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        runtime.putTriggerOrder(triggerUpdate(current, status, placedOrderId, triggerSequence,
-                triggeredPriceTicks, rejectReason, updatedAt));
-        incrementRevision(runtime);
-    }
-
-    /** owner 只构造终态，实际写入随成交结算交给该账户 Lane。 */
+    /** Owner builds the terminal state; settlement writes it on the account Lane. */
     public static CoreTriggerOrderState prepareMatchedTriggerCompletion(
             CoreTriggerOrderState current, long placedOrderId, long updatedAt) {
-        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING || placedOrderId <= 0)
-            throw new IllegalStateException("invalid matched trigger completion");
-        return triggerUpdate(current, CoreTriggerOrderStatus.TRIGGERED, placedOrderId,
-                current.triggerSequence(), current.triggeredPriceTicks(), "", updatedAt);
+        return RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(current, placedOrderId, updatedAt);
     }
 
     public static CoreTriggerOrderState prepareRejectedTriggerCompletion(
             CoreTriggerOrderState current, String reason, long updatedAt) {
-        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING)
-            throw new IllegalStateException("invalid rejected trigger completion");
-        return triggerUpdate(current, CoreTriggerOrderStatus.TRIGGER_FAILED, 0,
-                current.triggerSequence(), current.triggeredPriceTicks(), reason, updatedAt);
+        return RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(current, reason, updatedAt);
     }
-
-    private static CoreTriggerOrderState triggerUpdate(CoreTriggerOrderState current,
-                                      CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
-                                      long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
-                current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
-                current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
-                current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(), current.timeInForce(),
-                current.priceTicks(), current.quantitySteps(), current.marginMode(), current.positionSide(), status,
-                placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason, current.traceId(),
-                current.expiresAtEpochMillis(), status == CoreTriggerOrderStatus.TRIGGERED
-                        || status == CoreTriggerOrderStatus.TRIGGER_FAILED ? updatedAt : current.triggeredAtEpochMillis(),
-                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm());
-    }
-
-    private static CoreTriggerOrderState requireTrigger(TradingRuntimeState runtime, long triggerOrderId) {
-        if (runtime == null || triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
-        runtime.assertOwner();
-        CoreTriggerOrderState current = runtime.triggerOrder(triggerOrderId);
-        if (current == null) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
-        }
-        return current;
-    }
-
-    private static void requireTriggerInput(TradingRuntimeState runtime, long userId, long triggerOrderId) {
-        if (runtime == null || userId <= 0 || triggerOrderId <= 0) {
-            throw new IllegalArgumentException("invalid runtime trigger order");
-        }
-    }
-
-    private static void requireTimerRevision(CoreCancelAllAfterState current, CoreCancelAllAfterCommand command) {
-        if (current == null) {
-            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_FOUND", "timer not found");
-        }
-        if (command.expectedRevision() != current.revision()) {
-            throw new CoreStateRejectedException("STALE_CANCEL_ALL_AFTER_REVISION", "timer revision is stale");
-        }
-    }
-
-    private static void requireSameAlgoIntent(CoreAlgoOrderState left, CoreAlgoOrderState right) {
-        if (left.userId() != right.userId() || !left.clientAlgoOrderId().equals(right.clientAlgoOrderId())
-                || !left.symbol().equals(right.symbol()) || left.algoTypeCode() != right.algoTypeCode()
-                || left.side() != right.side() || left.priceTicks() != right.priceTicks()
-                || left.quantitySteps() != right.quantitySteps()
-                || left.childQuantitySteps() != right.childQuantitySteps()
-                || left.intervalSeconds() != right.intervalSeconds() || left.durationSeconds() != right.durationSeconds()
-                || left.marginMode() != right.marginMode() || left.positionSide() != right.positionSide()
-                || left.reduceOnly() != right.reduceOnly() || left.postOnly() != right.postOnly()
-                || left.timeInForce() != right.timeInForce() || left.startAtEpochMillis() != right.startAtEpochMillis()
-                || left.createdAtEpochMillis() != right.createdAtEpochMillis()) {
-            throw new CoreStateRejectedException("ALGO_ORDER_INTENT_MISMATCH", "algo order intent is immutable");
-        }
-    }
-
-    private static void incrementRevision(TradingRuntimeState runtime) {
-        runtime.incrementCommandRevision();
-    }
-
 }

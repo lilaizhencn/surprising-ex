@@ -404,9 +404,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (replacement != null && !result.accepted()) batchPlans[index].omitUnplacedOrder();
         if (sourceTrigger != null) {
             batchPlans[index].completeTrigger(result.accepted()
-                    ? RuntimeCommandProcessor.prepareMatchedTriggerCompletion(sourceTrigger,
+                    ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
                             batchStorage.admittedOrders[index].orderId(), triggeredAt)
-                    : RuntimeCommandProcessor.prepareRejectedTriggerCompletion(sourceTrigger,
+                    : RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(sourceTrigger,
                             result.resultCode(), triggeredAt));
         }
     }
