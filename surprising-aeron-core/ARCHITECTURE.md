@@ -160,6 +160,8 @@ CoreMessage / PlaceOrderCommand
 强平状态变更；保险基金决议和 ADL 仍由各自的生命周期入口负责。
 `LiquidationResolution` 只负责保险覆盖的确定性校验、保险基金/亏空变更和强平状态推进；不参与
 ADL 对手方持仓变更。
+`AdlExecution` 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
+`adlCandidates` 仍是独立查询入口。
 
 ## 4. 第一阶段不做的事情
 

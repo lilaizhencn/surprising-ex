@@ -45,5 +45,8 @@
  *
  * <p>{@code LiquidationResolution} 只负责保险覆盖的确定性校验、保险基金/亏空变更和强平状态推进；
  * 不参与 ADL 对手方持仓变更。</p>
+ *
+ * <p>{@code AdlExecution} 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
+ * {@code adlCandidates} 仍是独立查询入口。</p>
  */
 package com.surprising.aeron.service.state;
