@@ -35,7 +35,7 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 ## 测试要求
 
-- 所有 Java 构建、Maven 测试、集成测试及性能采样统一使用 HotSpot JDK 25；执行前检查 `java -version` 和 `mvn -version`。
+- 所有 Java 构建、Maven 测试、集成测试及性能采样统一使用 HotSpot JDK 27；执行前检查 `java -version` 和 `mvn -version`。
 - 根据 CodeGraph 调用方、Maven 依赖和数据/事件边界确定影响面，不按文件数量判断，也不默认跑全量：
   - 文档、注释、格式及不影响运行时的配置：`git diff --check` 和必要的静态检查。
   - 局部逻辑：受影响模块及对应测试类；跨模块边界：所有直接受影响模块测试及集成测试。
