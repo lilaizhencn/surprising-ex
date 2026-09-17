@@ -15,6 +15,20 @@ public final class CoreTriggerOrderCodec {
 
     public static byte[] encodeState(CoreTriggerOrderStateView state) {
         Writer writer = new Writer();
+        writeState(writer, state);
+        return writer.bytes();
+    }
+
+    /** Encode a one-element response without allocating the temporary singleton List. */
+    public static byte[] encodeSingle(CoreTriggerOrderStateView state) {
+        Writer writer = new Writer();
+        writer.intValue(VERSION);
+        writer.intValue(1);
+        writer.state(state);
+        return writer.bytes();
+    }
+
+    private static void writeState(Writer writer, CoreTriggerOrderStateView state) {
         writer.intValue(STATE_VERSION);
         writer.longValue(state.triggerOrderId());
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
@@ -35,7 +49,6 @@ public final class CoreTriggerOrderCodec {
         writer.longValue(state.revision());
         writer.longValue(state.instrumentChangeId()); writer.longValue(state.makerFeeRatePpm());
         writer.longValue(state.takerFeeRatePpm());
-        return writer.bytes();
     }
 
     public static int encodedStateLength(CoreTriggerOrderStateView state) {
@@ -96,7 +109,7 @@ public final class CoreTriggerOrderCodec {
 
     public static byte[] encodeList(List<CoreTriggerOrderStateView> values) {
         Writer writer = new Writer(); writer.intValue(VERSION); writer.intValue(values.size());
-        values.forEach(value -> writer.bytes(encodeState(value))); return writer.bytes();
+        values.forEach(writer::state); return writer.bytes();
     }
 
     public static List<CoreTriggerOrderStateView> decodeList(byte[] encoded) {
@@ -193,6 +206,10 @@ public final class CoreTriggerOrderCodec {
         void longValue(long value) { for (int i = 0; i < 8; i++) out.write((int) (value >>> (i * 8))); }
         void text(String value) { byte[] bytes = value.getBytes(StandardCharsets.UTF_8); if (bytes.length > MAX_TEXT_BYTES) throw new IllegalArgumentException("trigger text too long"); intValue(bytes.length); out.writeBytes(bytes); }
         void bytes(byte[] value) { intValue(value.length); out.writeBytes(value); }
+        void state(CoreTriggerOrderStateView value) {
+            intValue(encodedStateLength(value));
+            writeState(this, value);
+        }
         byte[] bytes() { return out.toByteArray(); }
     }
     private static final class Reader {

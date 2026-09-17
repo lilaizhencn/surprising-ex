@@ -376,7 +376,7 @@ final class CommandResultBuilder {
             return CoreSettlementProgressCodec.encode(commandSettlementProgress);
         }
         if (commandTriggerOrderView != null) {
-            return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of(commandTriggerOrderView));
+            return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeSingle(commandTriggerOrderView);
         }
         if (pending != null) {
             byte[] prepared = pending.lanePreparedResponse();

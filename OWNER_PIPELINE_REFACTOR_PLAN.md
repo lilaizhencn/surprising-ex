@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.4b 已完成，进入阶段 8.5**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.5a 已完成，进入阶段 8.5b**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -388,3 +388,7 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.4b：已完成。扫描内部的过期、trailing、OCO sibling mutation 和完成处理改为复用的显式 `ScanMutation`，同步/异步共享同一 Lane 操作；删除候选项级 mutation/collect lambda 和已废弃的 `beginTriggerMutation` 兼容方法，保留 cursor、预算、OCO 分页和失败重放语义。
 - 阶段 8.4b 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；风险扫描、OCO 分页、触发执行和恢复目标通过。未执行吞吐压测。
 - 阶段 8.5（终态响应与结果账本分配边界）：待完成。审查 `CommandResultBuilder`、OwnerCommitPublisher、结果账本和 session response 的 byte[]/view/StoredResult 创建，固定响应 arena 只替换可复用的 Owner 热路径分配，不改变结果账本 retention、snapshot/replay 和客户端顺序。
+- 阶段 8.5 拆分为 8.5a/8.5b：协议编码先与结果所有权分离，避免为降低分配而改变账本语义。
+- 阶段 8.5a：已完成。触发订单单项响应新增直接单项编码，批量触发编码复用同一 writer，删除 singleton List、嵌套状态 byte[] 和重复 writer；结果账本仍接收独立响应字节，幂等、snapshot/replay 和客户端顺序不变。
+- 阶段 8.5a 验收：JDK 27 下协议模块和服务模块全量回归通过，服务 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
+- 阶段 8.5b：待完成。为普通 `CoreCommandResultCodec` 建立有界响应 slab/descriptor，并让结果账本和 session response 共享所有权；只有确认槽位生命周期、snapshot/replay 和超大响应回退后才替换当前 byte[]。
