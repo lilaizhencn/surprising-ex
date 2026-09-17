@@ -2036,3 +2036,40 @@ JFR 热点仍以 `SettlementLaneWorker.run` 忙等循环为首（约 `65.29%` �
 两轮均 `mixedVerify=PASS`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。均值为 `312,280.758 ops/s`，低于历史该提交 JDK25 短测第二轮 `418,283.703 ops/s`；本次 JDK27 两轮也低于当前 Stage 8.15 JDK27 无 JFR 轮 `333,607.511 ops/s`，但当前轮与旧版轮次不是同一 JVM/运行时，不能据此归因代码回退。两轮窗口都达到 256，但 Matcher 高水位仅 `128/122`，Owner/Matcher/Lane CPU 未采集，不能称为全阶段饱和吞吐；这是旧版 worktree 的吞吐复现，不是饱和归因轮。
 
 原始证据：`/tmp/surprising-415-20260917-r1`、`/tmp/surprising-415-20260917-r2`。临时 worktree 的 JDK27 适配改动未提交。
+
+### 2026-09-17：Owner/Lane 紧凑 Delta 优化验证计划（采集前锁定）
+
+- 被测 commit：`0d288ded`，仅验证当前 `master`，不检出或比较旧版本
+- 工作区：目标仓库仅有既存用户未跟踪项 `openai`，本轮不触碰
+- 目标：验证 Owner 只消费 LaneCommitDelta、ready cursor/bitmask、Lane 侧响应/索引/tombstone 处理及固定 ring slot 后，真实端到端链路的吞吐、尾延迟、分配/GC 与状态正确性
+- 模式：单个真实 Aeron Cluster member、1 matcher、4 Account Lane、`LINEAR_PERPETUAL`、128 symbols、MIXED、batch20、异步 open-loop
+- 并发：全局/session/Owner window 固定 `256`，不得降窗；`BUSY_SPIN` Matcher/Settlement，spin limit `0`，`SHARED_NETWORK` + `YIELDING`
+- JVM：HotSpot JDK 27、G1；plain Core `512m/1536m`、client `128m/512m`；独立 JFR 轮使用 `owner-commit-profile.jfc`，Core/client 原始录制分文件
+- 阶段：预热 `30s`，稳定测量 `60s`，测量前排空预热请求，测量后排空；先 plain 端到端吞吐轮，再独立 JFR 端到端归因轮
+- 执行命令：
+  - `ASYNC_SKIP_BUILD=false ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=false ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/owner-lane-delta-plain-20260917 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+  - `ASYNC_SKIP_BUILD=true ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=true ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/owner-lane-delta-jfr-20260917 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+- 通过条件：`clientPass=true`；accepted/terminal 相等；`unfinished=0`；测量后 backlog/pending=0；`peakInFlight=256`；`fundsDiff=0`、持仓/冻结/订单簿/快照恢复正确；Core 无 fatal；JFR `DataLoss=0`
+- 记录指标：terminal business/core ops/s、fills/s、各业务 p99/p99.9/max、Owner/Matcher/Lane CPU、Lane 有效执行比、分配与 GC；不把 JFR 轮吞吐与 plain 轮直接横比
+- 采集后：先追加结果和原始产物 SHA-256，再仅清理本轮确认生成的 `/tmp/owner-lane-delta-*` 目录
+
+执行结果：见下方最终修复结果。
+
+### 2026-09-17：Owner 响应 ring 生命周期与并发 claim 修复（最终结果）
+
+本轮在压测过程中定位并修复了两个问题：多个 Lane 线程对共享响应 ring slot 的非原子 claim 会导致不同命令得到同一响应数组；另外，Owner ledger 和异步 egress 对响应的生命周期不同，单一引用计数会造成过早释放或重复释放。最终实现为固定 slot 的 `AtomicIntegerArray.compareAndSet` 无锁 claim，ledger/transport 分离引用计数，固定 `64 KiB` backing 配合逻辑长度解码；没有使用 `synchronized` 或显式锁。超过固定 backing 的极端响应仍走精确容量 fallback，不影响本轮常规响应路径。
+
+修复前的失败轮是正确性诊断，不是吞吐结果：初始正式 plain 轮 `/tmp/owner-lane-delta-plain-20260917` 报响应 identity mismatch；随后 `/tmp/owner-lane-delta-fix-smoke-20260917`、`/tmp/owner-lane-delta-ringfix-smoke-20260917`、`/tmp/owner-lane-delta-ring512-smoke-20260917` 复现同类 alias；`/tmp/owner-lane-delta-refcount-smoke-20260917`、`/tmp/owner-lane-delta-refcount2-smoke-20260917`、`/tmp/owner-lane-delta-refsplit-smoke-20260917`、`/tmp/owner-lane-delta-refsplit2-smoke-20260917` 暴露 transport double release；`/tmp/owner-lane-delta-debug-20260917` 至 `/tmp/owner-lane-delta-debug7-20260917` 为同一问题的逐步诊断。上述轮次均未出现 OOM，根因是并发响应所有权/生命周期错误，不是 JVM 堆过小。
+
+最终被测提交为 `e920e84c`，plain/JFR 使用同一最终构建和同一配置：JDK 27、G1、1 Matcher、4 Lane、128 symbols、MIXED batch20、全局 in-flight/window `256`、BUSY_SPIN、预热 `30s`、测量 `60s`。
+
+| 轮次 | business ops/s | core msg/s | fills/s | 最差业务 p99 | 完整性 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| plain | 287,098.908 | 27,458.537 | 68,337.078 | 29.032 ms | PASS |
+| JFR | 285,802.817 | 27,334.902 | 68,028.535 | 26.836 ms | PASS |
+
+两轮均 `clientPass=true`、`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、`peakInFlight=256`，accepted/terminal 相等，Core 无 fatal。plain 原始证据为 `/tmp/owner-lane-delta-plain-final-20260917`，JFR 原始证据为 `/tmp/owner-lane-delta-jfr-final-20260917`；两轮仅用于分别给出吞吐和运行状态证据，不把 JFR 吞吐当作 plain 的直接对比。
+
+JFR 状态：Owner CPU `92.71%`、Matcher `51.18%`、四个 Lane 约 `98.51%`，但 Lane 有效业务执行比仅约 `28.88%`；Owner 上下文高水位 `256`，说明顺序提交/FIFO 背压仍是端到端上限。最终 allocation top 25 已不再出现 `ResponseArena.acquireExactSlot`，说明固定 backing 消除了该路径的变长 `byte[]` 分配；contention 记录中没有响应 arena 的 monitor contention。JFR 线程采样 `912`，未见 DataLoss。
+
+内存配置仍为 Core `-Xms512m -Xmx1536m`、client `-Xms128m -Xmx512m`、G1；最终 plain/JFR 均没有 OOM 或 GC 导致的失败。服务模块全量回归 `935` 项通过、失败/错误 `0`、既有跳过 `1`；协议模块 `111` 项通过、失败/错误 `0`。源码修复已提交并推送：`e920e84c fix: make owner response arena lock-free`。
