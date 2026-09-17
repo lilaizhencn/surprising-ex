@@ -162,6 +162,8 @@ CoreMessage / PlaceOrderCommand
 ADL 对手方持仓变更。
 `AdlExecution` 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
 `adlCandidates` 仍是独立查询入口。
+`InsuranceFundStateTransitions` 只负责直接调整 treasury 保险基金余额；清算覆盖仍由
+`LiquidationResolution` 按清算状态和确定性分配规则推进。
 
 ## 4. 第一阶段不做的事情
 

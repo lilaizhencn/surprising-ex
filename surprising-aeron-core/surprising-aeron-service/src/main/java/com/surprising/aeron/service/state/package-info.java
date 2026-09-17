@@ -48,5 +48,8 @@
  *
  * <p>{@code AdlExecution} 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
  * {@code adlCandidates} 仍是独立查询入口。</p>
+ *
+ * <p>{@code InsuranceFundStateTransitions} 只负责直接调整 treasury 保险基金余额；清算覆盖仍由
+ * {@code LiquidationResolution} 按清算状态和确定性分配规则推进。</p>
  */
 package com.surprising.aeron.service.state;
