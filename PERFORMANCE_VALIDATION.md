@@ -2135,3 +2135,37 @@ JFR 状态：Owner CPU `92.71%`、Matcher `51.18%`、四个 Lane 约 `98.51%`，
 - 相关正确性证据：本轮端到端通过 mixed capacity 与资金差值校验；JDK27 下服务模块全量回归 `914` 项通过、失败/错误 `0`、既有跳过 `1`，覆盖命令推进、成交、余额/持仓状态、快照/恢复测试；benchmark 模块依赖编译打包成功。性能脚本本身未单独执行快照恢复/长稳增长斜率，因此这些项不从短测结果推断通过。
 
 结论：**部分验证**。两轮端到端业务完整性、资金差值和窗口排空均通过，JFR DataLoss 为零；没有证据表明本次回调/Owner 边界拆分造成运行时正确性回归。没有预锁数值性能门槛，且未覆盖长稳增长斜率，不能把本轮记为绝对吞吐验收通过；Owner/context 高水位和 Lane 有效执行比约 `34.44%` 是后续性能定位重点。已清理本轮确认生成的 `/tmp/trading-owner-boundary-plain-20260918`、`/tmp/trading-owner-boundary-plain-20260918.build.log`、`/tmp/trading-owner-boundary-jfr-20260918`，使用系统 Trash，可恢复；其他历史压测产物未触碰。
+
+### 2026-09-18：查询协议路由边界拆分验证计划（采集前锁定）
+
+- 被测 commit：`139ceffd93ca43cf5ae1ce491031675af9259336`，仅验证当前 `master`；不检出或比较旧版本
+- 改动范围：将 `TradingCoreRuntime.applyQuery` 移至 `TradingCoreQueryRouter`；Runtime 继续拥有命令准入、撮合推进、提交顺序和全部权威状态，查询路由只读取 `TradingRuntimeState` 及提交维护的索引；不改线协议、响应错误码、快照格式、产品线和 matcher 并发模型
+- 业务目标：验证状态哈希、账户/订单、盘口、风险、资金费、清算和 Instrument 维护查询在新路由边界下保持一致；查询不绕过账户 Lane 读取屏障，异步盘口会话继续由 `OrderBookQueryService` 持有
+- 场景：本机单个真实 Aeron Cluster member、`LINEAR_PERPETUAL`、1 matcher、4 Account Lane、128 symbols、MIXED、batch20、`SHARED_NETWORK`、`YIELDING`
+- 负载：异步 open-loop；全局/session/Owner window 与 in-flight 固定 `256`，不得降窗；Matcher/Settlement `BUSY_SPIN`，spin limit `0`；预热 `30s`、稳定测量 `60s`、测量后排空
+- JVM：HotSpot JDK 27、G1；Core `512m/1536m`、client `128m/512m`；plain 轮给吞吐，独立 JFR 轮给 CPU、热点、分配、GC、safepoint 和 native 状态，不横向比较两轮绝对吞吐
+- 预检查：执行前确认 `java -version`、`mvn -version`、`df -h .`，确认 `/tmp/trading-query-router-plain-20260918` 和 `/tmp/trading-query-router-jfr-20260918` 不存在；构建使用 JDK 27
+- 执行命令：
+  - `ASYNC_SKIP_BUILD=false ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=false ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/trading-query-router-plain-20260918 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+  - `ASYNC_SKIP_BUILD=true ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=true ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/trading-query-router-jfr-20260918 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+- 通过条件：`clientPass=true`；accepted/terminal business operations 与 Core messages 相等；`unfinished=0`；排空后 backlog/pending 为零；`peakInFlight=256`；`fundsDiff=0`，订单终态、冻结/余额、持仓、订单簿和快照恢复正确；Core 无 fatal/error；JFR `DataLoss=0`，如工具未提供该事件则记录缺口
+- 必采指标：terminal business/core ops/s、fills/s、分业务 p50/p90/p95/p99/p99.9/max、accepted/terminal/backlog、Owner/Matcher/Lane CPU 与有效执行比、线程/队列/背压、分配 bytes/s 与 bytes/op、GC/safepoint/compilation、heap/native/NMT、I/O/异常及查询热点；plain 与 JFR 分别报告，不把 profiler 轮替代吞吐轮
+- 采集后：先核对资金/持仓/冻结/订单终态和快照恢复，追加实际参数、偏差、结果、JFR summary/view、原始文件大小和 SHA-256；仅清理确认属于本轮的 `/tmp/trading-query-router-plain-20260918`、`/tmp/trading-query-router-jfr-20260918` 及对应 build log，并记录清理状态
+
+执行结果：
+
+- 实际执行：两轮均按锁定命令运行，单节点/1 matcher/4 Lane/128 symbols/MIXED batch20、window/in-flight `256`、JDK27、G1、30s 预热/60s 稳定测量；plain 构建成功，JFR 使用同一最终构建，期间未改代码。
+- plain 稳定窗口 `60.015121s`：`businessOpsPerSec=334745.241`、`coreMessagesPerSec=31997.003`、`fillsPerSec=79674.008`；最终 `mixedCapacity=PASS` 为 `334759.471 business ops/s`、`31998.242 core messages/s`。该场景 `queries=0`，不作为查询吞吐数据。
+- plain 完整性：`clientPass=true`、`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、`offeredBusinessOperations=terminalBusinessOperations=20092457`、`offeredCoreMessages=terminalCoreMessages=1920553`、`peakInFlight=256`；排空 `5.457592ms`、`2681` business operations；Core 日志无 fatal/error。
+- plain 分业务尾延迟：PLACE `p99=14.270ms/p99.9=26.771ms/max=34.897ms`，CANCEL `13.639/23.183/28.131ms`，APPLY_MARK_PRICE `14.098/20.774/30.670ms`，PLACE_BATCH `17.596/30.081/46.268ms`，CANCEL_BATCH `25.362/36.732/45.973ms`；最大业务 p99 为 `25.362ms`。
+- JFR 稳定窗口 `60.024979s`：`businessOpsPerSec=289370.829`、`coreMessagesPerSec=27674.978`、`fillsPerSec=68871.455`；最终 `mixedCapacity=PASS` 为 `289388.147 business ops/s`、`27676.617 core messages/s`；JFR 轮仅作归因证据，不与 plain 吞吐直接比较，且同样 `queries=0`。
+- JFR 完整性：`clientPass=true`、`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、`offeredBusinessOperations=terminalBusinessOperations=17372166`、`offeredCoreMessages=terminalCoreMessages=1661446`、`peakInFlight=256`；排空 `5.696471ms`、`2688` business operations；Core 日志无 fatal/error。
+- JFR 分业务尾延迟：PLACE `p99=16.220ms/p99.9=29.540ms/max=44.367ms`，CANCEL `16.130/26.296/35.782ms`，APPLY_MARK_PRICE `16.031/24.723/26.361ms`，PLACE_BATCH `20.037/32.784/47.316ms`，CANCEL_BATCH `29.491/41.910/46.465ms`；最大业务 p99 为 `29.491ms`。
+- 阶段状态：plain pipeline high-water 为 matcher `225`、completion `187`、context `255`、Lane `[48,47,76,46]`；JFR 为 matcher `220`、completion `146`、context `256`、Lane `[49,57,58,52]`。JFR Owner `96.857%`、Matcher `54.824%`、四 Lane `98.676%`～`98.686%` 单核；Lane 有效执行比 `32.958%`～`33.518%`、平均 `33.114%`。Owner/context 达到高水位，说明交易端到端仍受 Owner 顺序提交/窗口背压影响；不能把 Lane 忙等 CPU 解释为有效业务饱和。
+- JFR 证据：node、主 client、辅助 client recording 的 `jdk.DataLoss=0`；`jdk.AllocationRequiringGC=0`；node GC view 列出 `144` 次 collection，最长暂停列最大 `19.2ms`；safepoint view `159` 条，最大停顿 `53.1ms`；NMT 总 committed 增量 `+33795KB`，其中 malloc `+10887KB`、mmap `+22908KB`。热点首项为 `SettlementLaneWorker.run()` `68.89%`；分配首项为 `OrderRuntime 18.88%`、`CoreMatchingResult 8.07%`、`MatcherResult 6.09%`；JFR 有 `1` 次 CompilationFailure，未观察到业务失败。
+- 查询边界证据：服务模块全量测试 `914` 项通过、失败/错误 `0`、既有跳过 `1`，覆盖状态哈希、账户/订单、盘口、风险、资金费、清算、Instrument 维护查询及快照/恢复；因此查询行为有回归覆盖，但本轮端到端吞吐不含查询请求。
+- JFR 视图与 recording：`jfr-summary.txt`、`thread-cpu-load.txt`、`hot-methods.txt`、`allocation-by-class.txt`、`allocation-by-site.txt`、`gc.txt`、`safepoints.txt`、`nmt-summary.diff.txt` 已生成。node `node.jfr` `164872996` bytes，SHA-256 `cc499141daec5ab0a0697f0b87cf8f78fb0a905bb8cf34e40d9b60b807a923e5`；client `client-21960.jfr` `126414660` bytes，SHA-256 `4e2cc62051ef92a5a20a0044e36c00a912b3d9a79911f0b4880f9477e2ecee7a`；辅助 `client-21957.jfr` `10384162` bytes，SHA-256 `c594798c974e3c1ace0727f49409271ed202b04703704fbbe6c0361cbf60a8cb`。
+- 关键结果校验：plain `metrics.pretty.json` SHA-256 `6ac1f2249dbb5967de2c3419957d088a868dc0b58df4baad7110235dcee00bdb`、`client.log` `5eda6670b3f9386ee6be5d9ce38c93b79e5a8838668685e717af254c2c095d78`；JFR `metrics.pretty.json` `e2cd0f46725e686b04f2c0fe1981ab2a44982dca8f008a7b8de40ec37f9f4510`、`client.log` `5a64c1e3bae3b9cfa64acf569010c0995842d203c9122887cf8710dca09d34b`、`jfr-summary.txt` `e8aa3825c5225eb481ec5e26d18479509eb04819bbcb16e5441ade750a6e10e5`。
+- 相关正确性证据：本轮端到端通过 mixed capacity 与资金差值校验；查询专项由服务模块全量回归覆盖；benchmark 模块依赖编译打包成功。性能脚本未单独执行查询压测和长稳增长斜率，因此这些项不从短测结果推断通过。
+
+结论：**部分验证**。交易端到端业务完整性、资金差值、窗口排空和 JFR DataLoss 均通过；查询路由专项回归通过，但本轮负载没有查询请求，不能给出查询吞吐结论。没有预锁数值性能门槛，且未覆盖长稳增长斜率，不能把本轮记为绝对吞吐验收通过。已清理本轮确认生成的 `/tmp/trading-query-router-plain-20260918`、`/tmp/trading-query-router-plain-20260918.build.log`、`/tmp/trading-query-router-jfr-20260918`，使用系统 Trash，可恢复；其他历史压测产物未触碰。
