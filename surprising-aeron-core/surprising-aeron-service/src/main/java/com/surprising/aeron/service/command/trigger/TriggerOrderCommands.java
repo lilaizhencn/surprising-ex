@@ -76,6 +76,7 @@ public final class TriggerOrderCommands {
         private int candidate;
         private boolean ocoComplete, finished;
         private java.util.function.BooleanSupplier pending;
+        private final ScanMutation reusableMutation = new ScanMutation();
 
         PendingTriggerScan() {
         }
@@ -131,7 +132,7 @@ public final class TriggerOrderCommands {
                 long price = scan.triggerMarkPriceTicks(), at = scan.triggerGeneratedAtEpochMillis();
                 if (trigger.expiresAtEpochMillis() > 0 && at > 0 && trigger.expiresAtEpochMillis() <= at) {
                     candidate++;
-                    mutate(trigger.userId(), () -> RuntimeCommandProcessor.expireTriggerOrder(owner.runtimeState(), id, at), null);
+                    mutateExpire(trigger.userId(), id, at);
                     continue;
                 }
                 if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
@@ -147,8 +148,7 @@ public final class TriggerOrderCommands {
                     long activated = trigger.activatedAtEpochMillis() == 0 ? at : trigger.activatedAtEpochMillis();
                     if (highest != trigger.highestPriceTicks() || lowest != trigger.lowestPriceTicks()
                             || activated != trigger.activatedAtEpochMillis()) {
-                        mutate(trigger.userId(), () -> RuntimeCommandProcessor.updateTriggerTrailing(
-                                owner.runtimeState(), id, highest, lowest, activated), null);
+                        mutateTrailing(trigger.userId(), id, highest, lowest, activated);
                         continue;
                     }
                 }
@@ -192,7 +192,95 @@ public final class TriggerOrderCommands {
             boolean complete = !more;
             int work = count;
             long next = last;
-            Runnable collect = () -> {
+            if (work == 0) {
+                reusableMutation.completeSiblings(trigger, next, work, complete, resumed);
+                return;
+            }
+            reusableMutation.prepareSiblings(trigger, cursor, next, work, complete, resumed, siblings);
+            submitMutation(trigger.userId());
+        }
+
+        private void mutateExpire(long userId, long triggerId, long at) {
+            reusableMutation.prepareExpire(triggerId, at);
+            submitMutation(userId);
+        }
+
+        private void mutateTrailing(long userId, long triggerId, long highest, long lowest, long activated) {
+            reusableMutation.prepareTrailing(triggerId, highest, lowest, activated);
+            submitMutation(userId);
+        }
+
+        private void submitMutation(long userId) {
+            reusableMutation.userId = userId;
+            if (owner.runtimeState().asynchronousCommands()) {
+                pending = reusableMutation;
+                owner.runtimeState().dispatchControlLanes(
+                        1L << owner.runtimeState().topology().accountLaneId(userId), reusableMutation);
+            } else {
+                Object result = owner.runtimeState().executeUserSettlement(userId, reusableMutation);
+                if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
+                reusableMutation.completeMutation();
+            }
+        }
+
+        private final class ScanMutation implements java.util.function.BooleanSupplier,
+                java.util.function.IntFunction<Object>, java.util.function.Supplier<Object> {
+            private static final byte EXPIRE = 1, TRAILING = 2, SIBLINGS = 3;
+            private byte kind;
+            private long userId, triggerId, arg1, arg2, arg3, cursor, next;
+            private int work;
+            private boolean complete, resumed;
+            private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
+            private java.util.NavigableSet<Long> siblings;
+
+            void prepareExpire(long triggerId, long at) {
+                clear(); kind = EXPIRE; this.triggerId = triggerId; arg1 = at;
+            }
+
+            void prepareTrailing(long triggerId, long highest, long lowest, long activated) {
+                clear(); kind = TRAILING; this.triggerId = triggerId;
+                arg1 = highest; arg2 = lowest; arg3 = activated;
+            }
+
+            void prepareSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+                                 long cursor, long next, int work, boolean complete, boolean resumed,
+                                 java.util.NavigableSet<Long> siblings) {
+                clear(); kind = SIBLINGS; this.trigger = trigger; this.cursor = cursor; this.next = next;
+                this.work = work; this.complete = complete; this.resumed = resumed; this.siblings = siblings;
+            }
+
+            void completeSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+                                  long next, int work, boolean complete, boolean resumed) {
+                this.trigger = trigger; this.next = next; this.work = work;
+                this.complete = complete; this.resumed = resumed; finishSiblings();
+            }
+
+            private Object applyMutation() {
+                return switch (kind) {
+                    case EXPIRE -> RuntimeCommandProcessor.expireTriggerOrder(owner.runtimeState(), triggerId, arg1);
+                    case TRAILING -> RuntimeCommandProcessor.updateTriggerTrailing(owner.runtimeState(), triggerId,
+                            arg1, arg2, arg3);
+                    case SIBLINGS -> {
+                        boolean changed = false;
+                        for (long id : siblings) {
+                            if (id == trigger.triggerOrderId() || id >= cursor) continue;
+                            if (id < next) break;
+                            var sibling = owner.runtimeState().triggerOrder(id);
+                            if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
+                                changed |= RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState(),
+                                        trigger.userId(), id);
+                        }
+                        yield changed;
+                    }
+                    default -> throw new IllegalStateException("unknown trigger scan mutation");
+                };
+            }
+
+            void completeMutation() {
+                if (kind == SIBLINGS) finishSiblings();
+            }
+
+            private void finishSiblings() {
                 remaining -= work;
                 if (!complete) {
                     scan = scan.withTriggerOcoProgress(trigger.triggerOrderId(), next);
@@ -202,27 +290,23 @@ public final class TriggerOrderCommands {
                     scan = scan.withTriggerOcoProgress(0, 0);
                     replaceRiskScan(scan);
                 } else ocoComplete = true;
-            };
-            if (work == 0) { collect.run(); return; }
-            mutate(trigger.userId(), () -> {
-                boolean changed = false;
-                for (long id : siblings) {
-                    if (id == trigger.triggerOrderId() || id >= cursor) continue;
-                    if (id < next) break;
-                    var sibling = owner.runtimeState().triggerOrder(id);
-                    if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                        changed |= RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState(), trigger.userId(), id);
-                }
-                return changed;
-            }, collect);
-        }
+            }
 
-        private void mutate(long userId, java.util.function.BooleanSupplier mutation, Runnable collect) {
-            if (owner.runtimeState().asynchronousCommands()) pending = beginTriggerMutation(userId, mutation, collect);
-            else {
-                if (owner.runtimeState().executeUserSettlement(userId, mutation::getAsBoolean))
-                    owner.requestCommitPublication();
-                if (collect != null) collect.run();
+            void clear() {
+                kind = 0; userId = triggerId = arg1 = arg2 = arg3 = cursor = next = 0;
+                work = 0; complete = resumed = false; trigger = null; siblings = null;
+            }
+
+            @Override public Object apply(int ignoredLaneId) { return applyMutation(); }
+            @Override public Object get() { return applyMutation(); }
+
+            @Override public boolean getAsBoolean() {
+                if (!owner.runtimeState().pollControlLanes()) return false;
+                Object result = owner.runtimeState().controlLaneResult(
+                        owner.runtimeState().topology().accountLaneId(userId));
+                if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
+                completeMutation();
+                return true;
             }
         }
     }
@@ -441,24 +525,6 @@ public final class TriggerOrderCommands {
         RuntimeCommandProcessor.updateCancelAllAfter(owner.runtimeState(), message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
-    }
-
-    private void deferTriggerMutation(long userId, java.util.function.BooleanSupplier mutation,
-                                      Runnable collect) {
-        owner.deferControl(beginTriggerMutation(userId, mutation, collect));
-    }
-
-    private java.util.function.BooleanSupplier beginTriggerMutation(long userId,
-            java.util.function.BooleanSupplier mutation, Runnable collect) {
-        int lane = owner.runtimeState().topology().accountLaneId(userId);
-        owner.runtimeState().dispatchControlLanes(1L << lane, ignored -> mutation.getAsBoolean());
-        return () -> {
-            if (!owner.runtimeState().pollControlLanes()) return false;
-            if (Boolean.TRUE.equals(owner.runtimeState().controlLaneResult(lane)))
-                owner.requestCommitPublication();
-            if (collect != null) collect.run();
-            return true;
-        };
     }
 
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {

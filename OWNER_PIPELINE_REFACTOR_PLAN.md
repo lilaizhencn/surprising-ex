@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.4a 已完成，进入阶段 8.4b**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.4b 已完成，进入阶段 8.5**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -385,3 +385,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.4a：已完成。标记价后的 `PendingTriggerScan` 和触发子单执行续步改为命令实例内的单实例可复用工作；消除每次分页扫描和每个触发子单的捕获对象图，保留 cursor、预算、OCO 顺序和子单提交顺序。
 - 阶段 8.4a 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；触发扫描、子单执行、恢复和幂等目标通过。未执行吞吐压测。
 - 阶段 8.4b：待完成。将扫描内部的过期、trailing、OCO sibling mutation 及 collect 回调改成同一工作对象的显式阶段字段，消除每个候选项的匿名 lambda；保持扫描分页和失败重放语义。
+- 阶段 8.4b：已完成。扫描内部的过期、trailing、OCO sibling mutation 和完成处理改为复用的显式 `ScanMutation`，同步/异步共享同一 Lane 操作；删除候选项级 mutation/collect lambda 和已废弃的 `beginTriggerMutation` 兼容方法，保留 cursor、预算、OCO 分页和失败重放语义。
+- 阶段 8.4b 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；风险扫描、OCO 分页、触发执行和恢复目标通过。未执行吞吐压测。
+- 阶段 8.5（终态响应与结果账本分配边界）：待完成。审查 `CommandResultBuilder`、OwnerCommitPublisher、结果账本和 session response 的 byte[]/view/StoredResult 创建，固定响应 arena 只替换可复用的 Owner 热路径分配，不改变结果账本 retention、snapshot/replay 和客户端顺序。
