@@ -640,7 +640,7 @@ public final class TriggerOrderCommands {
             var place = childOrder(trigger, price, instrument);
             owner.requireOrderIdentityAvailable(trigger.userId(), place);
             try {
-                resolved = com.surprising.aeron.service.state.CoreOrderDecisionResolver.resolve(
+                resolved = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(
                         owner.runtimeState(), owner.identities(), trigger.userId(), place, owner.currentClusterTimestamp());
             } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
         }

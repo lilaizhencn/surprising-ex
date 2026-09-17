@@ -1,5 +1,13 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.admission;
 
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.OrderReservation;
+import com.surprising.aeron.service.state.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.model.CoreFeeRate;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 
@@ -164,7 +172,7 @@ public final class CoreOrderDecisionResolver {
         return Math.max(1, scalePpm(markPriceTicks, factor, ceiling));
     }
 
-    static long scalePpm(long value, long factor, boolean ceiling) {
+    public static long scalePpm(long value, long factor, boolean ceiling) {
         long whole = Math.multiplyExact(value / PPM, factor);
         long remainderProduct = Math.multiplyExact(value % PPM, factor);
         long scaled = Math.addExact(whole, remainderProduct / PPM);

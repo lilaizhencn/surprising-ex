@@ -24,7 +24,7 @@ import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.PositionCloseCapacity;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.OrderRuntime;
-import com.surprising.aeron.service.state.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.RuntimeSettlementProcessor;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;

@@ -20,7 +20,7 @@ import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.OrderRuntime;
-import com.surprising.aeron.service.state.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
