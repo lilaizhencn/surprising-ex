@@ -39,8 +39,10 @@ public final class ClusterCommandWindow {
     private int lastMatchingPhysical = -1;
 
     private long candidateUser;
-    private IngressRoute candidateRoute;
-    /** Request whose decoded value produced candidateRoute; prevents stale scratch reuse. */
+    private long candidateUserLaneBit;
+    private int candidateMatcherShard = -1;
+    private boolean candidateRouted;
+    /** Request whose decoded value produced the candidate route; prevents stale scratch reuse. */
     private CoreMessage routedSource;
     private CoreMessage decodedSource;
     private DecodedMatchingCommand decoded;
@@ -64,21 +66,27 @@ public final class ClusterCommandWindow {
     /** Reset the reusable route scratch for the next ingress command. */
     public void resetCandidate(long userId) {
         candidateUser = userId;
-        candidateRoute = null;
+        candidateUserLaneBit = 0;
+        candidateMatcherShard = -1;
+        candidateRouted = false;
         routedSource = null;
         conflict = Conflict.NONE;
     }
 
     /** Capture the static route. Maker lanes are discovered by Matcher. */
-    public IngressRoute route(int matcherShard, long userLaneBit) {
+    public void route(int matcherShard, long userLaneBit) {
         if (candidateUser <= 0 || matcherShard < 0 || userLaneBit == 0)
             throw new IllegalArgumentException("invalid ingress route");
         routedSource = decodedSource;
-        candidateRoute = new IngressRoute(candidateUser, matcherShard, userLaneBit, 0);
-        return candidateRoute;
+        candidateMatcherShard = matcherShard;
+        candidateUserLaneBit = userLaneBit;
+        candidateRouted = true;
     }
 
-    public IngressRoute route() { return candidateRoute; }
+    public boolean hasRoute() { return candidateRouted; }
+    public long routeUserId() { return candidateRouted ? candidateUser : 0; }
+    public int routeMatcherShard() { return candidateRouted ? candidateMatcherShard : -1; }
+    public long routeUserLaneBit() { return candidateRouted ? candidateUserLaneBit : 0; }
 
     public boolean conflicts() { return conflictingPrefixSize() != 0; }
 
@@ -96,11 +104,11 @@ public final class ClusterCommandWindow {
         // roughly one in-flight command per lane.  Only the same user's Owner
         // preparation must wait for its prior terminal state; the Lane queue
         // already serializes different users on the same lane.
-        long candidateUserId = candidateRoute == null ? 0 : candidateRoute.userId();
+        long candidateUserId = candidateRouted ? candidateUser : 0;
         if (candidateUserId != 0) {
             for (int i = size - 1; i >= exactPrefix; i--) {
-                IngressRoute route = get(i).route;
-                if (route != null && route.userId() == candidateUserId) {
+                Entry route = get(i);
+                if (route.routePresent && route.routeUserId == candidateUserId) {
                     conflict = Conflict.ACCOUNT;
                     return i + 1;
                 }
@@ -165,13 +173,16 @@ public final class ClusterCommandWindow {
 
     public Entry add(ClientSession session, CoreMessage request, long timestamp, long position) {
         if (size == entries.length) throw new IllegalStateException("cluster command window is full");
-        if (candidateRoute == null) throw new IllegalStateException("ingress route is missing");
+        if (!candidateRouted) throw new IllegalStateException("ingress route is missing");
         Entry entry = get(size++);
         entry.session = session;
         entry.request = request;
         entry.timestamp = timestamp;
         entry.position = position;
-        entry.route = candidateRoute;
+        entry.routeUserId = candidateUser;
+        entry.routeMatcherShard = candidateMatcherShard;
+        entry.routeUserLaneBit = candidateUserLaneBit;
+        entry.routePresent = true;
         int physical = (head + size - 1) & indexMask;
         entry.orderCount = copyTrackedOrderIds(entry, physical);
         entry.physicalSlot = physical;
@@ -212,7 +223,6 @@ public final class ClusterCommandWindow {
             throw new IllegalArgumentException("invalid command window sequence binding");
         if (entry.sequence != 0) completionSlots.remove(entry.sequence);
         entry.sequence = sequence;
-        if (entry.route != null) entry.route = entry.route.withCommandSequence(sequence);
         if (sequence == 0) return;
         long slot = entry.physicalSlot + 1L;
         long existing = completionSlots.get(sequence);
@@ -277,7 +287,9 @@ public final class ClusterCommandWindow {
             entry.request = null;
             entry.response = null;
             entry.sequence = entry.timestamp = entry.position = 0;
-            entry.route = null;
+            entry.routeUserId = entry.routeUserLaneBit = 0;
+            entry.routeMatcherShard = -1;
+            entry.routePresent = false;
             entry.physicalSlot = -1;
         }
         head = (head + count) & indexMask;
@@ -301,7 +313,10 @@ public final class ClusterCommandWindow {
         /** Only exact identities needed for cancellation/retry fencing. */
         public final long[] orders = new long[MAX_TRACKED_ORDER_IDS];
         public int orderCount;
-        public IngressRoute route;
+        public long routeUserId;
+        public long routeUserLaneBit;
+        public int routeMatcherShard = -1;
+        public boolean routePresent;
         public ClientSession session;
         public CoreMessage request;
         public CoreResponse response;

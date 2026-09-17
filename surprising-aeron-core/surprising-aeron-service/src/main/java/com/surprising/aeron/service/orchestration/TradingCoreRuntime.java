@@ -642,7 +642,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 仅当前apply范围持有的预计算摘要，嵌套命令不能误用外层摘要。 */
     private CommandFingerprint preparedIngressFingerprint;
     /** Static ingress route captured before apply() creates the pending matcher. */
-    private IngressRoute preparedIngressRoute;
+    private long preparedRouteUserLaneBit;
+    private int preparedRouteMatcherShard = -1;
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
@@ -684,7 +685,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         assertOwner();
         long user = message.header().userId();
         if (message.header().productLine() != productLine || user <= 0) {
-            preparedIngressRoute = null;
+            preparedRouteUserLaneBit = 0;
+            preparedRouteMatcherShard = -1;
             return false;
         }
         window.resetCandidate(user);
@@ -748,7 +750,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     private boolean rememberPipelineRoute(ClusterCommandWindow window, boolean eligible) {
-        preparedIngressRoute = eligible ? window.route() : null;
+        preparedRouteUserLaneBit = eligible ? window.routeUserLaneBit() : 0;
+        preparedRouteMatcherShard = eligible ? window.routeMatcherShard() : -1;
         return eligible;
     }
 
@@ -1635,11 +1638,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         try {
-            if (clusterPipelineAdmission && preparedIngressRoute != null) {
-                pending.partitionLaneMask = preparedIngressRoute.userLaneBit();
+            if (clusterPipelineAdmission && preparedRouteUserLaneBit != 0
+                    && preparedRouteMatcherShard >= 0) {
+                pending.partitionLaneMask = preparedRouteUserLaneBit;
                 // The route was already resolved at ingress. Reuse its shard instead
                 // of probing the symbol registry again while registering the ring slot.
-                pending.cachedMatcherShard(preparedIngressRoute.matcherShard());
+                pending.cachedMatcherShard(preparedRouteMatcherShard);
             } else {
                 pending.partitionLaneMask = 0;
             }

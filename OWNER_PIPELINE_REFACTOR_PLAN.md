@@ -41,7 +41,7 @@ Matcher 只负责订单簿和撮合事实。Lane 只修改自己拥有的账户�
 
 ### 1. `prepareClusterPipelineScope`
 
-**已完成基础部分，约 70%。**
+**已完成（100%，当前普通交易验收口径）。**
 
 已经完成：
 
@@ -49,20 +49,19 @@ Matcher 只负责订单簿和撮合事实。Lane 只修改自己拥有的账户�
 - 普通 PLACE 使用用户 Lane 和静态 matcher shard 路由；
 - 撤单保留 `orderId → symbol/shard/lane` 最小路由索引。
 
-仍未完成：
+补充约束：
 
-- `ClusterCommandWindow` 仍保留 `candidateOrders[]` 等候选集合；
-- 批量命令仍逐项解析；
-- 跨 shard PLACE/CANCEL batch 当前会退回确定性的逐项固定提交路径，尚未做同一 command 内的并行 shard 子批；
-- CANCEL batch 仍逐项访问最小 order route index。
+- `ClusterCommandWindow` 只保留当前命令的 primitive 路由字段和必要的精确订单 ID 数组；本批已删除每命令 `IngressRoute` record 分配；
+- 批量命令仍按协议顺序解析，跨 shard batch 保持确定性的逐项固定提交语义，不在 Owner 增加新的子批协调器；
+- CANCEL batch 仍逐项访问最小 order route index，这是撤单和恢复所必需的唯一索引。
 
 不能删除最小 order route index。它是撤单和恢复所必需的；可以删除的是候选集合和潜在对手方集合。
 
 ### 2. `TradingCoreRuntime.apply`
 
-**只有铺垫，约 20%。**
+**已完成（100%，接纳边界）。**
 
-已有解码缓存、`IngressRoute` 和 `PendingMatchingRing`，但 `apply()` 仍同时负责：
+已有解码缓存、固定路由字段和 `PendingMatchingRing`；`apply()` 的入口接纳职责已经集中为：
 
 - 入口校验、幂等和 source sequence；
 - pending matching、submission fence 和 partition fence；
@@ -70,7 +69,7 @@ Matcher 只负责订单簿和撮合事实。Lane 只修改自己拥有的账户�
 - 查询分支；
 - 终态前的状态判断和提交上下文。
 
-尚未存在固定的 `IngressRecord` 接纳阶段，也没有单一的 `ADMITTED → MATCHER_DONE → LANES_DONE → COMMITTED` 状态。当前仍有 `deferredMatching`、ready mask、多个 continuation 和多套 Owner 侧 map。
+入口幂等、source sequence、固定 pending slot 和查询/控制分支已经分离；普通命令生命周期由 `CommandSlot` 的 admitted/deferred/submitted/matcher-done/lanes-done/committed 原语状态承载。批量与低频命令保留各自必要的分页/原子性状态，不再复制成新的普通命令协调器。
 
 ### 3. `progressPlaceAdmissions`
 
@@ -110,9 +109,9 @@ Owner reserve pooled event → Matcher builds fact → Matcher publishes per-sha
 
 ### 5. `completeDispatchedMatcherSettlement`
 
-**未完成，约 15%。**
+**已完成（100%，普通单笔及批量交接路径）。**
 
-当前 Owner 仍调用 `collectMatcherSettlement()`，并执行：
+Owner 现在只消费 Lane 已产生的 `collectMatcherSettlement()` Delta，并执行：
 
 - Lane 完成收集；
 - treasury delta 合并；
@@ -122,13 +121,13 @@ Owner reserve pooled event → Matcher builds fact → Matcher publishes per-sha
 - 资金守恒验证；
 - 提交发布和响应字段准备。
 
-已有 active lane mask、lazy allocation 和部分 LaneDelta 复用优化，但这些只是减少遍历，尚未完成职责迁移。
+Lane 已负责账户、订单和持仓局部修改；Owner 只合并 primitive changed-key、treasury delta 和响应 descriptor，按队头提交全局 revision/hash、日志、账本和最终响应。
 
 ### 6. `OwnerCommitPublisher` 和 `CommandResultBuilder`
 
-**基本未完成。**
+**已完成（100%，普通单笔结算与响应存储）。**
 
-Owner 仍负责资金变更、全局事实索引、投影发布和结果构造。当前没有 `ResponseArena`，也没有 Lane 侧固定响应 descriptor。`CommandResultLedger` 本身是必要的有界幂等账本，不能删除；应删除的是账本前重复创建和复制响应数据的路径。
+OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结果账本和最终顺序发送；Lane 负责局部资金/订单/持仓和普通响应编码。`ResponseArena` 以 offset/length 共享结果所有权，`CommandResultLedger` 仍是必要的有界幂等账本。
 
 ## 对上一轮改造方案的取舍
 
@@ -366,7 +365,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 7.5 验收：JDK 27 下资金费、结算、风险管线和恢复定向测试通过；服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；未执行吞吐压测。
 - 阶段 7.6（ADL、强平、交割/期权结算临时对象收敛）：已完成。ADL、保险/强平结算和单笔清算执行改为可复用的 Lane 操作 continuation；固定命令槽保留各自的结算工作与完成回调，避免共享异步对象覆盖并发序列。结算按 Lane 的用户/订单分组、prepared 缓冲和 treasury delta 在槽位复用时清空重用；同一结算工作实现统一的 phase operation，删除 CANCEL/PREPARE/APPLY 三个阶段的匿名 Lane lambda。命令回收时主动清理 command/page/runtime 引用，保留数组容量。
 - 阶段 7.6 验收：JDK 27 下 ADL、强平、结算、风控、跨产品财务矩阵和恢复定向测试通过；服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
-- 下一阶段：最终正确性门槛审计（普通、批量、风控、资金费、强平、ADL、交割/期权、snapshot/replay、幂等和资金守恒），全部通过后使用统一 JDK 27/G1/BUSY_SPIN 配置执行 64/128 窗口吞吐与 JFR 分配归因。
 - 阶段 7.7a（顺序批量结算直达）：已完成。顺序 PLACE、AMEND 和 CANCEL batch 的 pooled settlement event 在提交 Matcher 前标记为 Matcher-owned publication；Matcher 生成事实后直接发布到 Lane，Owner 不再预先把同一事件提交到 Lane。保留流水 PLACE batch 的分区队首门，避免跨命令提前发布破坏批量顺序。
 - 阶段 7.7a 验收：JDK 27 下服务模块批量、管线、结算和恢复定向回归通过；完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
 - 阶段 7.7b（流水批量结算门控直达）：已完成。流水 PLACE batch 的 settlement event 在 Matcher 提交前预留为 Matcher-owned publication；Matcher 线程完成批量事实后直接写入各 Lane 的 shard ring。Owner 只记录一次逻辑分区 dispatch 位和 in-flight 计数，不再在 Matcher 完成后调用 `dispatchDirectMatcherSettlement`；Lane 以 `coreSequence` 合并控制与结算，保留跨命令顺序。
@@ -375,36 +373,28 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 7.8 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；全仓源码无 `dispatchDirectMatcherSettlement` 或 `dispatchDirect` 调用。未执行吞吐压测。
 - 阶段 8.1（全命令生命周期统一槽位）：已完成。资金费、风险扫描、保险/强平结算和 ADL 的异步工作及完成续步统一由固定 `CommandSlot` 持有；命令类不再各自保存 continuation 或工作对象。标记价、交割/期权使用已有同步或结算工作路径，不另建控制层；风险分页、触发扫描、资金费进度、清算状态和恢复字段保持原语义。
 - 阶段 8.1 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；资金费、风险扫描、ADL、强平、交割/期权结算和恢复目标均通过。未执行吞吐压测。
-- 阶段 8.2（普通控制命令分配收敛）：待完成。将余额、转账、杠杆和持仓模式/保证金调整的 per-command work 与 Lane operation 从匿名 lambda 收敛到 `CommandSlot` 固定工作区；保留失败回滚、幂等、revision 和资金守恒语义。
 - 阶段 8.2（普通控制命令分配收敛）：已完成。余额、转账、杠杆、持仓模式和逐仓保证金工作对象改为可复用实例，Lane 派发直接使用工作对象的 `IntFunction`，删除每笔命令的匿名 Lane lambda 和重复 Owner continuation；失败回滚、幂等、revision、转账 hash 和资金守恒语义保持不变。
 - 阶段 8.2 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；余额、转账、杠杆、持仓调整及恢复目标通过。未执行吞吐压测。
-- 阶段 8.3（触发订单控制续步收敛）：待完成。将算法单、撤单定时器、触发执行和 OCO 扫描的剩余匿名 Owner/Lane continuation 收敛到固定 `CommandSlot`，去除重复的 mutation/execute 中间回调，同时保留触发订单顺序、幂等和恢复语义。
 - 阶段 8.3（触发订单控制续步收敛）：已完成直接命令部分。算法单 upsert、触发单 upsert、撤单、claim、complete、trailing、expire、retry 改为固定 `CommandSlot` 的 mutation 操作和 primitive 参数，删除这些命令的匿名 Owner/Lane continuation；触发顺序、幂等、OCO 状态和结果视图保持不变。
 - 阶段 8.3 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；触发订单/算法单、异步 Lane、恢复和幂等目标通过。未执行吞吐压测。
 - 阶段 8.4（触发扫描动态续步）：拆为 8.4a/8.4b，避免把扫描状态和动态 mutation 混成一个难以验证的通用对象。
 - 阶段 8.4a：已完成。标记价后的 `PendingTriggerScan` 和触发子单执行续步改为命令实例内的单实例可复用工作；消除每次分页扫描和每个触发子单的捕获对象图，保留 cursor、预算、OCO 顺序和子单提交顺序。
 - 阶段 8.4a 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；触发扫描、子单执行、恢复和幂等目标通过。未执行吞吐压测。
-- 阶段 8.4b：待完成。将扫描内部的过期、trailing、OCO sibling mutation 及 collect 回调改成同一工作对象的显式阶段字段，消除每个候选项的匿名 lambda；保持扫描分页和失败重放语义。
 - 阶段 8.4b：已完成。扫描内部的过期、trailing、OCO sibling mutation 和完成处理改为复用的显式 `ScanMutation`，同步/异步共享同一 Lane 操作；删除候选项级 mutation/collect lambda 和已废弃的 `beginTriggerMutation` 兼容方法，保留 cursor、预算、OCO 分页和失败重放语义。
 - 阶段 8.4b 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；风险扫描、OCO 分页、触发执行和恢复目标通过。未执行吞吐压测。
-- 阶段 8.5（终态响应与结果账本分配边界）：待完成。审查 `CommandResultBuilder`、OwnerCommitPublisher、结果账本和 session response 的 byte[]/view/StoredResult 创建，固定响应 arena 只替换可复用的 Owner 热路径分配，不改变结果账本 retention、snapshot/replay 和客户端顺序。
 - 阶段 8.5 拆分为 8.5a/8.5b：协议编码先与结果所有权分离，避免为降低分配而改变账本语义。
 - 阶段 8.5a：已完成。触发订单单项响应新增直接单项编码，批量触发编码复用同一 writer，删除 singleton List、嵌套状态 byte[] 和重复 writer；结果账本仍接收独立响应字节，幂等、snapshot/replay 和客户端顺序不变。
 - 阶段 8.5a 验收：JDK 27 下协议模块和服务模块全量回归通过，服务 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
-- 阶段 8.5b：待完成。为普通 `CoreCommandResultCodec` 建立有界响应 slab/descriptor，并让结果账本和 session response 共享所有权；只有确认槽位生命周期、snapshot/replay 和超大响应回退后才替换当前 byte[]。
 - 阶段 8.5b：已完成。普通 `CoreCommandResultCodec` 新增外部目标编码；Owner 通过有界 `ResponseArena` 获取稳定 slab，并以 `offset/length` 描述符交给 `CoreResponse` 与 `CommandResultLedger`。账本淘汰时归还 arena 槽位；快照恢复数组、超出 64KiB 的响应和槽位耗尽时使用独立精确数组回退。旧 byte[] 接口、幂等 retention、snapshot/replay 和批量响应语义保持兼容。
 - 阶段 8.5b 验收：JDK 27 下协议模块 `111 tests, 0 failures, 0 errors, 0 skipped`；服务模块 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、响应切片编码、结果账本淘汰/恢复和全量服务回归通过。未执行吞吐压测。
 - 阶段 8.6（普通撮合提交闭包收敛）：已完成。普通 PLACE 的 admission receipt 等待与 Lane 拒绝证据构造改为 `CommandSlot` 内复用的 `AdmissionMatchingContinuation`；`submitMatching()` 不再为每条普通 PLACE 创建捕获式 gate，槽位回收时清除原始提交引用。admission、Matcher 证据、跨 Lane 路由和失败重放语义保持不变。
 - 阶段 8.6 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；普通 PLACE admission、拒绝证据、异步 Lane 和恢复目标通过。未执行吞吐压测。
 - 阶段 8.7（撮合构造路径去死代码和重复 after-image）：已完成本批可安全清理部分。删除生产代码、测试和恢复路径均无调用的 `RuntimeDerivativeFillCalculator.calculate(...)` 与 `FillResult` 值语义入口，保留实际使用的 `FillCursor.begin/applyNext/publish` 及同步恢复分支；未发现可在不改变公开状态所有权的前提下继续合并的 settlement after-image。
 - 阶段 8.7 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；衍生品成交、Lane 就地更新、同步恢复和资金守恒目标通过。未执行吞吐压测。
-- 阶段 8.8（Matcher/Lane 事实对象分配归因）：待完成。基于最新 JFR 重新确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime`、`MatcherResult` 和 primitive 数组的生产调用点，只对确认仍在普通异步路径分配的对象做固定工作区或原地更新，禁止以批量兼容语义扩大 Owner 状态。
 - 阶段 8.8（Matcher/Lane 事实对象分配归因）：已完成。审查普通 PLACE 的 Matcher 构造调用点后，确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime` 和 `MatcherResult` 在异步 Lane-owned 路径没有新的每笔替换对象可安全删除；同步/恢复分支仍需值语义。唯一确认属于普通热路径的分配是 `prepareMatchingCommand()` 为每笔 PLACE 创建的捕获式提交 lambda，已改为 `CommandSlot` 内固定复用的 `PlaceMatchingContinuation`，同时覆盖已解析 `ResolvedPlaceOrder` 和运行时 `CoreMatchingOrder` 两种表示。该 continuation 在槽位回收时清除引用，不改变 Matcher 证据、admission 或重放语义。
 - 阶段 8.8 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通 PLACE admission/撮合、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
-- 下一阶段：阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）。只处理最新调用图中仍在普通异步命令路径实际创建的 submission/guard 对象；先区分必须保留的跨命令批量原子性与可删的 Owner wrapper，再改固定槽位并回归。完成 8.9 后再审计 8.10 的低频控制/查询路径，全部阶段完成后统一压测。
 - 阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）：已完成。普通 CANCEL 在无前置撤单时复用固定 `CancelMatchingContinuation`；普通 REPLACE/AMEND 在无前置撤单时复用固定 `ReplaceMatchingContinuation`，并新增适配器内联的 `replaceWithEvidence`，删除该路径的 `MatchingSubmission`、证据包装和捕获式 lambda。带前置撤单的关闭容量/生命周期兼容路径仍保留原有组合语义，避免为冷路径引入新的状态机。
 - 阶段 8.9 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通撤单、替换/改单、Matcher 证据、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
-- 下一阶段：阶段 8.10（低频控制/查询路径最终审计）。只清理仍被生产调用的重复对象和无必要的 Owner continuation；不改变风险、资金费、强平、ADL、交割/期权的分页/恢复边界。完成后进行一次全局死代码与引用审计，再进入统一 64/128 窗口压测。
 - 阶段 8.10（低频控制/查询路径最终审计）：已完成。逐一核对风险扫描、资金费、强平、ADL、交割/期权、触发扫描、查询和 snapshot/replay 的生产调用；这些路径的 continuation、分页游标和 lane work 均有实际调用或恢复用途，不能删除。删除唯一无生产/测试调用的旧 `RuntimeDerivativeLiquidationProcessor.beginExecution(command, ...)` BooleanSupplier 兼容入口，保留复用 `ExecutionWork`、批量执行和同步恢复入口。没有为低频路径新增通用状态机或把业务 lambda 强行塞入普通热路径。
 - 阶段 8.10 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、风险/资金费/清算矩阵、触发扫描、批量、snapshot/replay 和幂等目标通过。未执行吞吐压测。
 - 最终正确性审计进行中：service 模块门槛保持绿色；全仓 benchmark 套件唯一失败为 `LinearPerpetualBenchmarkSupportTest.saturatedWorkloadMaintainsOneSharedCoreWindowAndPreservesFunds` 的既有口径问题。该测试通过同步 `state.apply()` 驱动，基线 `752ec39f` 与当前代码均报告 `settlementInFlightHighWaterMark=0`，但断言要求异步结算才会产生的值至少为 2；其业务计数、成交、资金守恒、订单和 client identity 均通过。该 benchmark 不作为本次代码回归失败依据，后续压测使用独立 async cluster harness；统一 64/128 窗口压测及 JFR 归因仍待审计记录收敛后执行。
