@@ -10,7 +10,6 @@ import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -37,8 +36,8 @@ public final class OptionTradingRules implements ProductTradingRules {
     @Override
     public long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
-                                 RuntimeOrderAdmission.AdmissionSummary admissionSummary) {
+                                 long pendingQuantitySteps) {
         return OptionOrderAdmission.reservationUnits(
-                instrument, position, order, leverage, admissionSummary);
+                instrument, position, order, leverage, pendingQuantitySteps);
     }
 }

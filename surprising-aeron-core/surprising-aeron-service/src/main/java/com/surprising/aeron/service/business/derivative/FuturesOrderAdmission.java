@@ -8,7 +8,6 @@ import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.math.CoreContractMath;
@@ -23,7 +22,7 @@ public final class FuturesOrderAdmission {
 
     public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
-                                        AdmissionSummary admissionSummary) {
+                                        long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());

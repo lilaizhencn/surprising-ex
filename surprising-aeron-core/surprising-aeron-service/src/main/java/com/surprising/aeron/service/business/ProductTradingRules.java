@@ -3,7 +3,6 @@ package com.surprising.aeron.service.business;
 import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -14,7 +13,7 @@ public interface ProductTradingRules {
 
     long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                           ResolvedPlaceOrder order, long leverage,
-                          RuntimeOrderAdmission.AdmissionSummary admissionSummary);
+                          long pendingQuantitySteps);
 
     ProductLine productLine();
 

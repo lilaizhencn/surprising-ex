@@ -7,7 +7,6 @@ import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
@@ -26,7 +25,7 @@ public final class OptionOrderAdmission {
 
     public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
-                                        AdmissionSummary admissionSummary) {
+                                        long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());
@@ -45,7 +44,7 @@ public final class OptionOrderAdmission {
                     Math.subtractExact(Math.addExact(premium, feeDebit), releasedMargin)));
         }
         if (openSteps == 0) return Math.max(1, feeDebit);
-        long totalSellOrders = Math.addExact(admissionSummary.pendingQuantity(), order.quantitySteps());
+        long totalSellOrders = Math.addExact(pendingQuantitySteps, order.quantitySteps());
         long projectedSigned = Math.subtractExact(current, totalSellOrders);
         long projectedRisk = Math.max(0, Math.negateExact(projectedSigned));
         long projectedNotional = CoreContractMath.riskNotionalUnits(

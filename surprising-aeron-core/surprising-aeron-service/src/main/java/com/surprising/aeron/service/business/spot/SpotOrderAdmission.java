@@ -5,7 +5,6 @@ import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
@@ -19,7 +18,7 @@ public final class SpotOrderAdmission {
 
     public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
-                                        AdmissionSummary admissionSummary) {
+                                        long pendingQuantitySteps) {
         if (order.side() == CoreOrderSide.SELL) return order.quantitySteps();
         long notional = Math.multiplyExact(order.reservationPriceTicks(), order.quantitySteps());
         long feeDebit = fragmentationSafeFeeDebit(instrument, order);

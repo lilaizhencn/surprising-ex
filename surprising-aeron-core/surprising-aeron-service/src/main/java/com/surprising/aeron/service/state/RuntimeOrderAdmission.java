@@ -132,7 +132,7 @@ public final class RuntimeOrderAdmission {
         validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
                 openInterestSteps, excluded, leverage);
         return ProductTradingRulesRegistry.forProductLine(instrument.contractType().productLine())
-                .reservationUnits(instrument, position, order, leverage, admissionSummary);
+                .reservationUnits(instrument, position, order, leverage, admissionSummary.pendingQuantity());
     }
 
     private static void validateReservation(
