@@ -4,6 +4,7 @@ import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.command.balance.BalanceCommandContext;
+import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -22,6 +23,7 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 
 /**
  * Reusable command lifetime: input, business progress, Lane completion and final result.
@@ -112,6 +114,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange;
     private com.surprising.aeron.service.state.AccountPositionMarginAdjustment reusablePositionMarginAdjustment;
     private final AccountControlContinuation accountControl = new AccountControlContinuation();
+    private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -272,6 +275,35 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         reusablePositionMarginAdjustment = Objects.requireNonNull(work);
         accountControl.preparePositionMargin(owner, work);
         controlWork = accountControl;
+    }
+
+    void deferTriggerMutationControl(TriggerCommandContext owner, long userId,
+            TriggerCommandContext.Mutation mutation, long triggerOrderId,
+            long arg1, long arg2, long arg3, boolean flag, String text) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        triggerControl.prepareMutation(owner, userId, mutation, triggerOrderId, arg1, arg2, arg3, flag, text);
+        owner.runtimeState().dispatchControlLanes(1L << owner.runtimeState().topology().accountLaneId(userId),
+                triggerControl);
+        controlWork = triggerControl;
+    }
+
+    void deferTriggerUpsertControl(TriggerCommandContext owner, long userId,
+            com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger, int symbolId,
+            long positionKey, boolean instrumentSettled) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        triggerControl.prepareTriggerUpsert(owner, userId, trigger, symbolId, positionKey, instrumentSettled);
+        owner.runtimeState().dispatchControlLanes(1L << owner.runtimeState().topology().accountLaneId(userId),
+                triggerControl);
+        controlWork = triggerControl;
+    }
+
+    void deferAlgoUpsertControl(TriggerCommandContext owner, long userId,
+            com.surprising.aeron.protocol.CoreAlgoOrderView algo, int symbolId) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        triggerControl.prepareAlgoUpsert(owner, userId, algo, symbolId);
+        owner.runtimeState().dispatchControlLanes(1L << owner.runtimeState().topology().accountLaneId(userId),
+                triggerControl);
+        controlWork = triggerControl;
     }
 
     com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork settlementWork() {
@@ -949,6 +981,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         adlControl.clear();
         liquidationResolutionControl.clear();
         accountControl.clear();
+        triggerControl.clear();
     }
 
     /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
@@ -1178,6 +1211,96 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 default -> throw new IllegalStateException("unknown account continuation");
             }
             return complete;
+        }
+    }
+
+    /** Fixed-slot Lane operation and completion for direct trigger/algo commands. */
+    private final class TriggerControlContinuation
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+        private static final byte MUTATION = 1;
+        private static final byte TRIGGER_UPSERT = 2;
+        private static final byte ALGO_UPSERT = 3;
+        private byte kind;
+        private TriggerCommandContext owner;
+        private long userId, triggerOrderId, arg1, arg2, arg3;
+        private boolean flag;
+        private String text;
+        private TriggerCommandContext.Mutation mutation;
+        private com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger;
+        private com.surprising.aeron.protocol.CoreAlgoOrderView algo;
+        private int symbolId;
+        private long positionKey;
+        private boolean instrumentSettled;
+
+        void prepareMutation(TriggerCommandContext owner, long userId,
+                TriggerCommandContext.Mutation mutation, long triggerOrderId,
+                long arg1, long arg2, long arg3, boolean flag, String text) {
+            clear(); kind = MUTATION; this.owner = Objects.requireNonNull(owner); this.userId = userId;
+            this.mutation = Objects.requireNonNull(mutation); this.triggerOrderId = triggerOrderId;
+            this.arg1 = arg1; this.arg2 = arg2; this.arg3 = arg3; this.flag = flag; this.text = text;
+        }
+
+        void prepareTriggerUpsert(TriggerCommandContext owner, long userId,
+                com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger, int symbolId,
+                long positionKey, boolean instrumentSettled) {
+            clear(); kind = TRIGGER_UPSERT; this.owner = Objects.requireNonNull(owner);
+            this.userId = userId; this.trigger = Objects.requireNonNull(trigger); this.symbolId = symbolId;
+            this.positionKey = positionKey; this.instrumentSettled = instrumentSettled;
+        }
+
+        void prepareAlgoUpsert(TriggerCommandContext owner, long userId,
+                com.surprising.aeron.protocol.CoreAlgoOrderView algo, int symbolId) {
+            clear(); kind = ALGO_UPSERT; this.owner = Objects.requireNonNull(owner);
+            this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId;
+        }
+
+        void clear() {
+            kind = 0; owner = null; mutation = null; trigger = null; algo = null; text = null;
+            userId = triggerOrderId = arg1 = arg2 = arg3 = positionKey = 0; flag = instrumentSettled = false;
+            symbolId = 0;
+        }
+
+        @Override public Object apply(int ignoredLaneId) {
+            var runtime = owner.runtimeState();
+            return switch (kind) {
+                case MUTATION -> switch (mutation) {
+                    case CANCEL -> RuntimeCommandProcessor.cancelTriggerOrder(runtime, userId, triggerOrderId);
+                    case CLAIM -> RuntimeCommandProcessor.claimTriggerOrder(runtime, triggerOrderId, arg1, arg2, arg3);
+                    case COMPLETE -> RuntimeCommandProcessor.completeTriggerOrder(runtime, triggerOrderId,
+                            flag, arg1, text == null ? "" : text, arg2);
+                    case TRAILING -> RuntimeCommandProcessor.updateTriggerTrailing(runtime, triggerOrderId,
+                            arg1, arg2, arg3);
+                    case EXPIRE -> RuntimeCommandProcessor.expireTriggerOrder(runtime, triggerOrderId, arg1);
+                    case RETRY -> RuntimeCommandProcessor.retryTriggerOrder(runtime, triggerOrderId, arg1, arg2);
+                };
+                case TRIGGER_UPSERT -> {
+                    RuntimeCommandProcessor.upsertTriggerOrder(runtime, userId, trigger, symbolId,
+                            positionKey, instrumentSettled);
+                    yield null;
+                }
+                case ALGO_UPSERT -> {
+                    RuntimeCommandProcessor.upsertAlgoOrder(runtime, userId, algo, symbolId);
+                    yield runtime.algoOrder(algo.algoOrderId());
+                }
+                default -> throw new IllegalStateException("unknown trigger continuation");
+            };
+        }
+
+        @Override public boolean getAsBoolean() {
+            if (!owner.runtimeState().pollControlLanes()) return false;
+            Object result = owner.runtimeState().controlLaneResult(
+                    owner.runtimeState().topology().accountLaneId(userId));
+            if (kind == MUTATION) {
+                if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
+            } else if (kind == TRIGGER_UPSERT) {
+                owner.requestCommitPublication();
+                owner.setCommandTriggerOrderView(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
+            } else {
+                owner.runtimeState().publishAlgoOrder(
+                        (com.surprising.aeron.service.state.model.CoreAlgoOrderState) result);
+                owner.requestCommitPublication();
+            }
+            return true;
         }
     }
 

@@ -1437,6 +1437,25 @@ public final class TradingCoreRuntime implements AutoCloseable,
         directCommand.deferPositionMarginAdjustmentControl(this, work);
     }
 
+    @Override public void deferTriggerMutation(long userId,
+            com.surprising.aeron.service.command.trigger.TriggerCommandContext.Mutation mutation,
+            long triggerOrderId, long arg1, long arg2, long arg3, boolean flag, String text) {
+        directCommand.deferTriggerMutationControl(this, userId, mutation, triggerOrderId, arg1, arg2,
+                arg3, flag, text);
+    }
+
+    @Override public void deferTriggerUpsert(long userId,
+            com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger, int symbolId,
+            long positionKey, boolean instrumentSettled) {
+        directCommand.deferTriggerUpsertControl(this, userId, trigger, symbolId, positionKey,
+                instrumentSettled);
+    }
+
+    @Override public void deferAlgoUpsert(long userId,
+            com.surprising.aeron.protocol.CoreAlgoOrderView algo, int symbolId) {
+        directCommand.deferAlgoUpsertControl(this, userId, algo, symbolId);
+    }
+
     boolean hasPendingDirectCommand() { return directCommand.directActive; }
 
     CoreResponse pollDirectCommand() {

@@ -8,6 +8,7 @@ import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
@@ -16,6 +17,7 @@ import java.util.UUID;
  * the core runtime only supplies these state, result and matching boundaries.
  */
 public interface TriggerCommandContext extends CommandResultContext {
+    enum Mutation { CANCEL, CLAIM, COMPLETE, TRAILING, EXPIRE, RETRY }
     TradingRuntimeState runtimeState();
 
     RuntimeIdentityRegistry identities();
@@ -52,6 +54,14 @@ public interface TriggerCommandContext extends CommandResultContext {
     void seedChangeAccumulators();
 
     void setCommandTriggerOrderView(CoreTriggerOrderStateView trigger);
+
+    void deferTriggerMutation(long userId, Mutation mutation, long triggerOrderId,
+                              long arg1, long arg2, long arg3, boolean flag, String text);
+
+    void deferTriggerUpsert(long userId, CoreTriggerOrderStateView trigger, int symbolId,
+                            long positionKey, boolean instrumentSettled);
+
+    void deferAlgoUpsert(long userId, CoreAlgoOrderView algo, int symbolId);
 
     record OcoCancellationPage(boolean complete, long nextCursor, int workUnits) { }
 }

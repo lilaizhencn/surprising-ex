@@ -414,18 +414,7 @@ public final class TriggerOrderCommands {
             if (current != null && current.userId() != message.header().userId())
                 throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
             int symbolId = owner.identities().symbolId(algo.symbol());
-            int lane = owner.runtimeState().topology().accountLaneId(message.header().userId());
-            owner.runtimeState().dispatchControlLanes(1L << lane, ignored -> {
-                RuntimeCommandProcessor.upsertAlgoOrder(owner.runtimeState(), message.header().userId(), algo, symbolId);
-                return owner.runtimeState().algoOrder(algo.algoOrderId());
-            });
-            owner.deferControl(() -> {
-                if (!owner.runtimeState().pollControlLanes()) return false;
-                owner.runtimeState().publishAlgoOrder((com.surprising.aeron.service.state.model.CoreAlgoOrderState)
-                        owner.runtimeState().controlLaneResult(lane));
-                owner.requestCommitPublication();
-                return true;
-            });
+            owner.deferAlgoUpsert(message.header().userId(), algo, symbolId);
             return;
         }
         RuntimeCommandProcessor.upsertAlgoOrder(owner.runtimeState(), owner.identities(),
@@ -472,12 +461,8 @@ public final class TriggerOrderCommands {
         long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
         boolean instrumentSettled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(message.header().userId(), () -> {
-                RuntimeCommandProcessor.upsertTriggerOrder(owner.runtimeState(),
-                        message.header().userId(), trigger, symbolId, positionKey, instrumentSettled);
-                return true;
-            }, () -> owner.setCommandTriggerOrderView(
-                    owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view()));
+            owner.deferTriggerUpsert(message.header().userId(), trigger, symbolId, positionKey,
+                    instrumentSettled);
             return;
         }
         owner.runtimeState().executeUserSettlement(message.header().userId(), () -> {
@@ -492,8 +477,8 @@ public final class TriggerOrderCommands {
     public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(message.header().userId(), () ->
-                    RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState(), message.header().userId(), triggerOrderId), null);
+            owner.deferTriggerMutation(message.header().userId(), TriggerCommandContext.Mutation.CANCEL,
+                    triggerOrderId, 0, 0, 0, false, null);
             return;
         }
         cancelTriggerOrderRuntime(message.header().userId(), triggerOrderId);
@@ -502,8 +487,8 @@ public final class TriggerOrderCommands {
     public void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(requireTriggerOwner(claim[0]), () ->
-                    RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState(), claim[0], claim[1], claim[2], claim[3]), null);
+            owner.deferTriggerMutation(requireTriggerOwner(claim[0]), TriggerCommandContext.Mutation.CLAIM,
+                    claim[0], claim[1], claim[2], claim[3], false, null);
             return;
         }
         claimTriggerOrderRuntime(claim[0], claim[1], claim[2], claim[3]);
@@ -512,8 +497,8 @@ public final class TriggerOrderCommands {
     public void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(requireTriggerOwner(complete[0]), () ->
-                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState(), complete[0], complete[1] == 1, complete[2], "", complete[3]), null);
+            owner.deferTriggerMutation(requireTriggerOwner(complete[0]), TriggerCommandContext.Mutation.COMPLETE,
+                    complete[0], complete[2], complete[3], 0, complete[1] == 1, "");
             return;
         }
         completeTriggerOrderRuntime(complete[0], complete[1] == 1, complete[2], "", complete[3]);
@@ -522,8 +507,8 @@ public final class TriggerOrderCommands {
     public void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(requireTriggerOwner(trailing[0]), () ->
-                    RuntimeCommandProcessor.updateTriggerTrailing(owner.runtimeState(), trailing[0], trailing[1], trailing[2], trailing[3]), null);
+            owner.deferTriggerMutation(requireTriggerOwner(trailing[0]), TriggerCommandContext.Mutation.TRAILING,
+                    trailing[0], trailing[1], trailing[2], trailing[3], false, null);
             return;
         }
         updateTriggerTrailingRuntime(trailing[0], trailing[1], trailing[2], trailing[3]);
@@ -532,8 +517,8 @@ public final class TriggerOrderCommands {
     public void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(requireTriggerOwner(lifecycle[0]), () ->
-                    RuntimeCommandProcessor.expireTriggerOrder(owner.runtimeState(), lifecycle[0], lifecycle[1]), null);
+            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), TriggerCommandContext.Mutation.EXPIRE,
+                    lifecycle[0], lifecycle[1], 0, 0, false, null);
             return;
         }
         expireTriggerOrderRuntime(lifecycle[0], lifecycle[1]);
@@ -542,8 +527,8 @@ public final class TriggerOrderCommands {
     public void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            deferTriggerMutation(requireTriggerOwner(lifecycle[0]), () ->
-                    RuntimeCommandProcessor.retryTriggerOrder(owner.runtimeState(), lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis()), null);
+            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), TriggerCommandContext.Mutation.RETRY,
+                    lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis(), 0, false, null);
             return;
         }
         retryTriggerOrderRuntime(lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis());
