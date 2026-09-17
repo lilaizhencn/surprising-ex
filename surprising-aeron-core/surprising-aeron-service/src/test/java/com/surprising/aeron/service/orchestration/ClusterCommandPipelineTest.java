@@ -1663,7 +1663,8 @@ class ClusterCommandPipelineTest {
                 assertThat(pending.orderBatch.cancelEvent).isNull();
                 assertThat(pending.orderBatch.preparedResponse)
                         .as("Lane encodes the final batch result without an Owner turn").isNotNull();
-                assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse).items())
+                assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse,
+                        pending.orderBatch.preparedResponseLength).items())
                         .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
                 assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }

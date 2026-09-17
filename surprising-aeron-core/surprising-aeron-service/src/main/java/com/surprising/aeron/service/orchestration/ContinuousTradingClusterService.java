@@ -287,10 +287,12 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         int length = CoreMessageCodec.encodedResponseLength(response);
         if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
             outputOverflow = true;
+            processor.releaseResponse(response);
             return;
         }
         if (!output.offer(new Output(session, header, response, committedSequence, length, ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header)))) {
             outputOverflow = true;
+            processor.releaseResponse(response);
             return;
         }
         outputProduced += length;
@@ -308,14 +310,18 @@ public final class ContinuousTradingClusterService implements ClusteredService {
             Output next = output.poll();
             if (next == null) break;
             outputConsumed += next.length;
-            if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
-            if (sendScratch.length < next.length) {
-                sendScratch = new byte[next.length];
-                sendBuffer.wrap(sendScratch);
+            try {
+                if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
+                if (sendScratch.length < next.length) {
+                    sendScratch = new byte[next.length];
+                    sendBuffer.wrap(sendScratch);
+                }
+                CoreMatchingPhaseMetrics.recordBoundary("ownerToEgress", next.header, next.publishedNanos);
+                CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
+                deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
+            } finally {
+                processor.releaseResponse(next.response);
             }
-            CoreMatchingPhaseMetrics.recordBoundary("ownerToEgress", next.header, next.publishedNanos);
-            CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
-            deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
         }
         return work + deferred.poll(System.nanoTime(), 256);
     }

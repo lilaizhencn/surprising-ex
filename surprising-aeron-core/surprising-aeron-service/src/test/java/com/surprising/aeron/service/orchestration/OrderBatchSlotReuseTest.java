@@ -18,10 +18,12 @@ class OrderBatchSlotReuseTest {
         batch.resultOrder(1, null, null);
         batch.prepareResponse();
         byte[] encoded = batch.preparedResponse;
-        assertThat(encoded).isEqualTo(com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource(batch));
+        int encodedLength = batch.preparedResponseLength;
+        assertThat(com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeResult(encoded, encodedLength).items())
+                .hasSize(2);
         batch.clear();
         assertThat(batch.preparedResponse).isNull();
-        var decoded = com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeResult(encoded);
+        var decoded = com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeResult(encoded, encodedLength);
         assertThat(decoded.items()).hasSize(2);
         assertThat(decoded.items().getFirst().orderId()).isEqualTo(1);
     }

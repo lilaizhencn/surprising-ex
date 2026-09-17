@@ -638,6 +638,10 @@ public final class SurprisingClusteredService implements ClusteredService {
         return state;
     }
 
+    void releaseResponse(CoreResponse response) {
+        if (state != null) state.releaseResponse(response);
+    }
+
     private void loadSnapshot(Image snapshotImage) {
         loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);
     }
@@ -680,14 +684,21 @@ public final class SurprisingClusteredService implements ClusteredService {
             responseSink.offer(session, header, response, state.committedCoreSequence());
             return;
         }
-        if (responseSink == null && session.isClosing()) return;
+        if (session.isClosing()) {
+            state.releaseResponse(response);
+            return;
+        }
         int length = CoreMessageCodec.encodedResponseLength(response);
         if (responseScratch.length < length) {
             responseScratch = new byte[length];
             responseBuffer.wrap(responseScratch);
         }
-        CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), responseScratch);
-        pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
+        try {
+            CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), responseScratch);
+            pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
+        } finally {
+            state.releaseResponse(response);
+        }
     }
 
     private static boolean retryableOffer(long result) {

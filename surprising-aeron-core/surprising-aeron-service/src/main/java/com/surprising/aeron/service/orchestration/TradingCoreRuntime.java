@@ -854,6 +854,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, appliedCommandCount,
                             0, cachedBusinessStateHash, EMPTY_RESPONSE_DATA);
                 }
+                responseArena.retain(result.responseDataUnsafe());
                 return CoreResponse.owned(ResponseStatus.OK, result.status(), result.resultCode(),
                         result.appliedCommandCount(), result.requiredExportSequence(), result.stateHash(),
                         result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
@@ -1547,6 +1548,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     CoreResponse finishFactContext(CoreResponse response) {
         clearFactContext();
         return response;
+    }
+
+    /** Releases the transport-side reference after the response has been encoded or copied. */
+    void releaseResponse(CoreResponse response) {
+        if (response != null) responseArena.release(response.dataUnsafe());
     }
 
     void activateFactContext(CoreMessage command, CommandFingerprint fingerprint) {

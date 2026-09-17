@@ -38,7 +38,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         item.laneResultPrepared = true;
     }
     @Override public boolean captureUnchangedResults() {
-        // Every batch result is resolved by its owning Lane.  Terminal CANCEL/AMEND items still
+        // Every batch result is resolved by its owning Lane. Terminal CANCEL/AMEND items still
         // omit the retired after-image because capture() only uses the live Lane map unless the
         // target explicitly opts into terminal images; unchanged/rejected items are resolved from
         // that same Lane instead of forcing the Owner to query its publication map.

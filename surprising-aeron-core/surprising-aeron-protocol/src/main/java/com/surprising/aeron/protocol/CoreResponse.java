@@ -197,7 +197,8 @@ public final class CoreResponse {
         return dataLength;
     }
 
-    byte[] dataUnsafe() {
+    /** Internal no-copy access for the fixed response arena lifecycle. */
+    public byte[] dataUnsafe() {
         return data;
     }
 

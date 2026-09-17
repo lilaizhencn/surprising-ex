@@ -464,6 +464,10 @@ final class OrderedCommitCoordinator {
         long stateHash = owner.stateHash(businessStateHash, pending.command().header().commandId(),
                 status, resultCode, applied);
         boolean builderEncoded = pending.resultData == null;
+        // Control continuations may have prepared the response into resultData before the
+        // terminal commit.  That byte slice still belongs to the reusable result builder until
+        // this response is handed to the command window, even though it is not encoded here.
+        boolean builderResponseOwned = builderEncoded || pending.resultData != null;
         byte[] responseData = builderEncoded
                 ? owner.resultBuilder.commandResultData(pending, matchingResult) : pending.resultData;
         int responseOffset = builderEncoded ? owner.resultBuilder.responseDataOffset() : 0;
@@ -476,7 +480,7 @@ final class OrderedCommitCoordinator {
                 responseOffset, responseLength);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, applied, requiredExportSequence,
                 stateHash, responseData, responseOffset, responseLength);
-        if (builderEncoded) owner.resultBuilder.transferResponseOwnership();
+        if (builderResponseOwned) owner.resultBuilder.transferResponseOwnership();
         if (laneResponse) pending.transferLaneResponseOwnership();
         return response;
     }

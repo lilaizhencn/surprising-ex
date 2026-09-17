@@ -77,6 +77,7 @@ final class CommandResultLedger {
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash,
                     EMPTY_RESPONSE_DATA);
         }
+        if (responseArena != null) responseArena.retain(duplicate.responseDataUnsafe());
         return CoreResponse.owned(ResponseStatus.DUPLICATE,
                 duplicate.status(), duplicate.resultCode(), duplicate.appliedCommandCount(),
                 duplicate.requiredExportSequence(), duplicate.stateHash(), duplicate.responseDataUnsafe(),
@@ -190,6 +191,20 @@ final class CommandResultLedger {
         byte[] previousResponse = previous == null ? null : previous.responseDataUnsafe();
         long previousBytes = previous == null ? 0 : resultEntryBytes(previous);
         if (freeRecordCount == 0) throw new IllegalStateException("result commit ring is full");
+        // The terminal response is still owned by the Owner command/output FIFO after this
+        // method returns. Keep a separate arena reference for the idempotency ledger so eviction
+        // cannot recycle bytes that have not reached the transport yet.
+        if (responseArena != null) {
+            if (previous != null && previousResponse == responseData) {
+                // Replacing the same command result keeps its existing ledger reference, but the
+                // newly returned CoreResponse still needs its own transport reference. This is
+                // also the path used when a retained result is queried after its first response
+                // has already drained from the egress queue.
+                responseArena.retain(responseData);
+            } else {
+                responseArena.retainLedger(responseData);
+            }
+        }
         // A replacement gets a different preconstructed record.  Existing snapshots and
         // duplicate readers may still hold the previous record object, so mutating it in place
         // would break the ledger's historical identity contract even though the table slot is
@@ -205,7 +220,7 @@ final class CommandResultLedger {
             enqueueRetentionSlot(slot);
             size++;
         } else if (responseArena != null && previousResponse != responseData) {
-            responseArena.release(previousResponse);
+            responseArena.releaseLedger(previousResponse);
         }
         if (previous != null) freeRecordSlots[freeRecordCount++] = previous.ringSlot;
         results[slot] = retained;
@@ -257,7 +272,7 @@ final class CommandResultLedger {
     private void remove(int slot) {
         StoredResult removed = results[slot];
         if (responseArena != null && removed != null) {
-            responseArena.release(removed.responseDataUnsafe());
+            responseArena.releaseLedger(removed.responseDataUnsafe());
         }
         int position = retentionPositions[slot];
         retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;

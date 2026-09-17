@@ -185,11 +185,16 @@ public final class TradingOrderBatchCodec {
     }
 
     public static CoreOrderBatchResult decodeResult(byte[] encoded) {
-        if (encoded == null || encoded.length > MAX_BATCH_RESPONSE_BYTES
-                || encoded.length < Integer.BYTES * 2) {
+        return decodeResult(encoded, encoded == null ? 0 : encoded.length);
+    }
+
+    /** Decodes a logical result slice from a fixed-size response ring backing array. */
+    public static CoreOrderBatchResult decodeResult(byte[] encoded, int length) {
+        if (encoded == null || length > MAX_BATCH_RESPONSE_BYTES || length < Integer.BYTES * 2
+                || length > encoded.length) {
             throw new ProtocolException("invalid order batch result payload");
         }
-        ByteBuffer buffer = readable(encoded);
+        ByteBuffer buffer = readable(encoded, 0, length);
         int version = buffer.getInt();
         if (version != PlaceOrderBatchCommand.WIRE_VERSION) {
             throw new ProtocolException("unsupported order batch result version: " + version);
