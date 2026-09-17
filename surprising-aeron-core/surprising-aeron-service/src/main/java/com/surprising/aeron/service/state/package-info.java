@@ -42,5 +42,8 @@
  *
  * <p>{@code LiquidationExecution} 只负责撤单游标、强平执行校验，以及强平执行时的余额、持仓、
  * 手续费和强平状态变更；保险基金决议和 ADL 仍由各自的生命周期入口负责。</p>
+ *
+ * <p>{@code LiquidationResolution} 只负责保险覆盖的确定性校验、保险基金/亏空变更和强平状态推进；
+ * 不参与 ADL 对手方持仓变更。</p>
  */
 package com.surprising.aeron.service.state;
