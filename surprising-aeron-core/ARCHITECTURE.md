@@ -150,6 +150,10 @@ CoreMessage / PlaceOrderCommand
 变更中同时更新可用/锁定余额与持仓保证金，保证资金转移和保证金变化不可分离。
 `BalanceStateTransitions` 只负责直接调整用户可用余额；订单冻结/解冻、持仓保证金和 treasury
 流水仍由各自的业务状态转换负责。
+`MatchStateTransitions` 负责把 exchange-core 返回的一批成交事件按原顺序应用到权威订单、用户、
+持仓和 treasury 状态，并校验撮合事件与订单身份一致；现货和衍生品的单笔成交资金公式分别由
+`ReducerSpotSettlement`、`ReducerDerivativeSettlement` 承担。它不拥有撮合簿，也不改变 matcher
+的事件顺序；`TradingCoreReducer.applyMatches` 只保留兼容入口。
 `FundingStateTransitions` 只负责永续资金费的产品线校验、标记价冻结、分页游标、用户余额变更、
 资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。
 `SettlementStateTransitions` 负责交割/期权结算的 TradingCoreState 投影/物化桥接和订单取消后的
