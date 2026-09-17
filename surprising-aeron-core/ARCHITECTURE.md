@@ -125,6 +125,7 @@ CoreMessage / PlaceOrderCommand
 | `business.derivative` | 永续/交割共同的订单冻结和成交开仓保证金公式 | 仅四条衍生品线；不包含现货和期权 |
 | `business.option` | 期权冻结、成交保证金、风险价格校验和期权产品规则 | 仅期权 |
 | `business` | 与产品无关的订单费用扣减数学 | 只允许不含产品分支的通用数学 |
+| `state.admission` | 下单意图解析、准入校验和活跃订单查询协议 | 读取状态并返回结果，不拥有业务状态 |
 | `state` | `TradingCoreState`、运行时状态、Reducer、Lane 和确定性重放 | 负责调用产品规则并写入权威状态，不拥有产品公式 |
 
 当前已经归位的关键类：
@@ -134,6 +135,10 @@ CoreMessage / PlaceOrderCommand
 - 期权：`OptionOrderAdmission`、`OptionFillCalculator`、`OptionRiskRules`、`OptionTradingRules`。
 
 `TradingCoreReducer` 和 `RuntimeDerivativeFillCalculator` 仍是状态侧入口。它们可以把确定性状态或成交事实交给对应产品规则，但不能通过共享父类、统一策略注册或复制快照来消除产品差异。
+
+订单入口的当前边界是：`state.admission.CoreOrderDecisionResolver` 负责把意图解析为
+`ResolvedPlaceOrder`，`state.admission.RuntimeOrderAdmission` 负责状态准入和冻结需求调用，
+账户 Lane、活跃订单索引和批量编排只实现 `AdmissionOrderIndex` 协议。
 
 ## 4. 第一阶段不做的事情
 
