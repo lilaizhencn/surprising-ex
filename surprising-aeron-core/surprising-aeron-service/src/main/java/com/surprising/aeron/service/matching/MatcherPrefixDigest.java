@@ -32,13 +32,17 @@ final class MatcherPrefixDigest {
         hash = mix(hash, result.successfulPrefixCount());
         hash = mix(hash, result.matcherStateChanged());
         hash = mix(hash, result.cancellations().size());
-        for (CoreCancellationResult cancellation : result.cancellations()) {
+        var cancellations = result.cancellations();
+        for (int index = 0; index < cancellations.size(); index++) {
+            CoreCancellationResult cancellation = cancellations.get(index);
             hash = mix(hash, cancellation.orderId());
             hash = mix(hash, cancellation.accepted());
             hash = mix(hash, cancellation.resultCode());
         }
         hash = mix(hash, result.matcherEvents().size());
-        for (MatcherResult.MatcherEvent event : result.matcherEvents()) {
+        var matcherEvents = result.matcherEvents();
+        for (int index = 0; index < matcherEvents.size(); index++) {
+            MatcherResult.MatcherEvent event = matcherEvents.get(index);
             hash = mix(hash, event.eventType().name());
             hash = mix(hash, event.section());
             hash = mix(hash, event.activeOrderCompleted());

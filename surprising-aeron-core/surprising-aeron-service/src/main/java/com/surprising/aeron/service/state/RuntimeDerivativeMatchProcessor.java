@@ -46,7 +46,8 @@ public final class RuntimeDerivativeMatchProcessor {
         validateAndPrepare(takerOrderId, matches, runtime, identities);
         int settleAssetId = identities.assetId(instrument.settleAsset());
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        for (MatcherEvent match : matches) {
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
@@ -86,7 +87,8 @@ public final class RuntimeDerivativeMatchProcessor {
         validateMatches(runtime, taker, matches);
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
         identities.positionKey(taker.userId(), positionKey(instrument.symbol(), taker.positionSide()));
-        for (MatcherEvent match : matches) {
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
             identities.positionKey(maker.userId(), positionKey(instrument.symbol(), maker.positionSide()));
@@ -99,7 +101,8 @@ public final class RuntimeDerivativeMatchProcessor {
                           RuntimeTreasuryDelta treasuryDelta) {
         if (treasuryDelta == null) throw new IllegalArgumentException("treasury delta is required");
         OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (MatcherEvent match : matches) {
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             if (localTaker != null) {
                 localTaker = requireOpen(runtime, takerOrderId);
@@ -320,7 +323,8 @@ public final class RuntimeDerivativeMatchProcessor {
         LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
         makerRemaining.clear();
         try {
-            for (MatcherEvent match : matches) {
+            for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+                MatcherEvent match = matches.get(matchIndex);
                 if (match == null) {
                     throw new IllegalArgumentException("runtime match is required");
                 }

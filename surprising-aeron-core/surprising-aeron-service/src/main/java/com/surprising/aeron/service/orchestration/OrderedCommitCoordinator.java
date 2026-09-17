@@ -709,12 +709,16 @@ final class OrderedCommitCoordinator {
         // Instrument settlement changes the selected position/order owners, not its operator.
         if (activeUserId > 0 && pending.operation() != CommandSlot.Operation.SETTLEMENT)
             mask |= owner.matchingAdapter.topology().accountLaneMask(activeUserId);
-        for (MatcherEvent match : result.matcherEvents()) {
+        var matcherEvents = result.matcherEvents();
+        for (int index = 0; index < matcherEvents.size(); index++) {
+            MatcherEvent match = matcherEvents.get(index);
             if (match.eventType() == MatcherEventType.TRADE) {
                 mask |= owner.matchingAdapter.topology().accountLaneMask(match.matchedOrderUid());
             }
         }
-        for (CoreCancellationResult cancellation : result.cancellations()) {
+        var cancellations = result.cancellations();
+        for (int index = 0; index < cancellations.size(); index++) {
+            CoreCancellationResult cancellation = cancellations.get(index);
             OrderRuntime order = owner.runtimeOrder(cancellation.orderId());
             if (order != null) mask |= owner.matchingAdapter.topology().accountLaneMask(order.userId());
         }
@@ -941,14 +945,18 @@ final class OrderedCommitCoordinator {
                     || pending.operation() == CommandSlot.Operation.AMEND)
                     ? replacement.originalOrderId() : 0;
             boolean containsTrade = false;
-            for (MatcherEvent event : result.matcherEvents()) {
+            var matcherEvents = result.matcherEvents();
+            for (int index = 0; index < matcherEvents.size(); index++) {
+                MatcherEvent event = matcherEvents.get(index);
                 if (event.eventType() == MatcherEventType.TRADE) {
                     containsTrade = true;
                     break;
                 }
             }
             boolean cancellationsValid = true;
-            for (CoreCancellationResult cancellation : result.cancellations()) {
+            var cancellations = result.cancellations();
+            for (int index = 0; index < cancellations.size(); index++) {
+                CoreCancellationResult cancellation = cancellations.get(index);
                 long orderId = cancellation.orderId();
                 if (cancellation.accepted() && !expected.contains(orderId) && orderId != replacedOrderId) {
                     cancellationsValid = false;

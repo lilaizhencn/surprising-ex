@@ -1123,7 +1123,9 @@ final class OrderBatchExecutor {
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         List<Long> expected = pending.preMatchingCancellationOrderIds();
         if (expected.isEmpty()) return;
-        for (CoreCancellationResult cancellation : result.cancellations()) {
+        var cancellations = result.cancellations();
+        for (int index = 0; index < cancellations.size(); index++) {
+            CoreCancellationResult cancellation = cancellations.get(index);
             if (!cancellation.accepted() || !expected.contains(cancellation.orderId())) continue;
             OrderRuntime order = owner.runtimeOrder(cancellation.orderId());
             if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {

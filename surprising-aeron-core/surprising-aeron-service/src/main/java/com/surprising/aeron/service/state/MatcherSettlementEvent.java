@@ -351,7 +351,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("direct matcher result proof is inconsistent");
         if (result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.KNOWN_PREFIX_APPLIED) {
             boolean containsTrade = false;
-            for (var event : result.matcherEvents()) {
+            var matcherEvents = result.matcherEvents();
+            for (int eventIndex = 0; eventIndex < matcherEvents.size(); eventIndex++) {
+                var event = matcherEvents.get(eventIndex);
                 if (event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE) {
                     containsTrade = true;
                     break;

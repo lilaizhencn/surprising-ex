@@ -454,13 +454,17 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         itemChangedOrderIds.add(item.orderId());
         if (item.originalOrderId() > 0) itemChangedOrderIds.add(item.originalOrderId());
         if (item.replacementOrderId() > 0) itemChangedOrderIds.add(item.replacementOrderId());
-        for (MatcherEvent event : matchingResult.matcherEvents()) {
+        var matcherEvents = matchingResult.matcherEvents();
+        for (int index = 0; index < matcherEvents.size(); index++) {
+            MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() == MatcherEventType.TRADE) {
                 changedUserIds.add(event.matchedOrderUid());
                 itemChangedOrderIds.add(event.matchedOrderId());
             }
         }
-        for (CoreCancellationResult cancellation : matchingResult.cancellations()) {
+        var cancellations = matchingResult.cancellations();
+        for (int index = 0; index < cancellations.size(); index++) {
+            CoreCancellationResult cancellation = cancellations.get(index);
             if (cancellation.accepted()) {
                 itemChangedOrderIds.add(cancellation.orderId());
                 runtimeChangedOrderIds.add(cancellation.orderId());

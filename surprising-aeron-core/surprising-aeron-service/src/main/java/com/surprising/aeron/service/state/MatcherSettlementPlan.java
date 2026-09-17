@@ -85,7 +85,8 @@ public final class MatcherSettlementPlan {
         try {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);
             long remaining = taker.remainingQuantitySteps();
-            for (MatcherEvent event : matcherEvents) {
+            for (int index = 0; index < matcherEvents.size(); index++) {
+                MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
                 if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
@@ -98,8 +99,12 @@ public final class MatcherSettlementPlan {
                 tradeCount++;
             }
             // Pre-matching cancellations belong to the submitting account and were authorized at admission.
-            for (var cancellation : result.cancellations()) if (cancellation.accepted())
-                orderCount = addUnique(keys, orderIds, orderCount, cancellation.orderId());
+            var cancellations = result.cancellations();
+            for (int index = 0; index < cancellations.size(); index++) {
+                var cancellation = cancellations.get(index);
+                if (cancellation.accepted())
+                    orderCount = addUnique(keys, orderIds, orderCount, cancellation.orderId());
+            }
             rejectTaker(!result.accepted());
             indexLaneEvents(runtime);
         } finally { keys.clear(); }
@@ -111,9 +116,12 @@ public final class MatcherSettlementPlan {
         if (order == null || result == null || result.nativeCommand().coreSequence() != sequence
                 || result.nativeCommand().orderId() != order.orderId())
             throw new IllegalArgumentException("invalid direct cancellation fact");
-        for (MatcherEvent event : result.matcherEvents())
+        var matcherEvents = result.matcherEvents();
+        for (int index = 0; index < matcherEvents.size(); index++) {
+            MatcherEvent event = matcherEvents.get(index);
             if (event == null || event.eventType() == MatcherEventType.TRADE)
                 throw new IllegalStateException("cancel result contains a trade");
+        }
         if (!result.cancellations().isEmpty())
             throw new IllegalStateException("single cancel contains unrelated cancellations");
         clearReferences();
@@ -332,7 +340,9 @@ public final class MatcherSettlementPlan {
         }
         int tradeCount = 0;
         try {
-            for (MatcherEvent event : result.matcherEvents()) {
+            var matcherEvents = result.matcherEvents();
+            for (int index = 0; index < matcherEvents.size(); index++) {
+                MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("runtime match is required");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
                 if (tradeCount == 0) preparePositionIdentity(runtime, identities, instrument, taker);
@@ -372,7 +382,9 @@ public final class MatcherSettlementPlan {
         } finally {
             if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
         }
-        for (var cancellation : result.cancellations()) {
+        var cancellations = result.cancellations();
+        for (int index = 0; index < cancellations.size(); index++) {
+            var cancellation = cancellations.get(index);
             OrderRuntime order = runtime.order(cancellation.orderId());
             if (order != null) {
                 orderCount = addUnique(uniqueOrders, orders, orderCount, order.orderId());
@@ -500,7 +512,8 @@ public final class MatcherSettlementPlan {
         }
         int count = 0;
         boolean primitiveAuthorized = authorizedOrderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList;
-        for (CoreCancellationResult cancellation : cancellations) {
+        for (int index = 0; index < cancellations.size(); index++) {
+            CoreCancellationResult cancellation = cancellations.get(index);
             if (!cancellation.accepted()) continue;
             long orderId = cancellation.orderId();
             boolean authorized = primitiveAuthorized
@@ -537,7 +550,8 @@ public final class MatcherSettlementPlan {
         if (expectedOrderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive) {
             for (int expectedIndex = 0; expectedIndex < primitive.size(); expectedIndex++) {
                 long orderId = primitive.valueAt(expectedIndex);
-                for (CoreCancellationResult cancellation : cancellations) {
+                for (int cancellationIndex = 0; cancellationIndex < cancellations.size(); cancellationIndex++) {
+                    CoreCancellationResult cancellation = cancellations.get(cancellationIndex);
                     if (cancellation.accepted() && cancellation.orderId() == orderId) {
                         ensurePreCancellationCapacity(count + 1);
                         preCancellationStorage[count++] = orderId;
@@ -546,10 +560,12 @@ public final class MatcherSettlementPlan {
                 }
             }
         } else {
-            for (Long expectedOrderId : expectedOrderIds) {
+            for (int expectedIndex = 0; expectedIndex < expectedOrderIds.size(); expectedIndex++) {
+                Long expectedOrderId = expectedOrderIds.get(expectedIndex);
                 if (expectedOrderId == null) continue;
                 long orderId = expectedOrderId;
-                for (CoreCancellationResult cancellation : cancellations) {
+                for (int cancellationIndex = 0; cancellationIndex < cancellations.size(); cancellationIndex++) {
+                    CoreCancellationResult cancellation = cancellations.get(cancellationIndex);
                     if (cancellation.accepted() && cancellation.orderId() == orderId) {
                         ensurePreCancellationCapacity(count + 1);
                         preCancellationStorage[count++] = orderId;

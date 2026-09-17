@@ -56,7 +56,8 @@ public final class RuntimeSpotMatchProcessor {
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         validateMatches(runtime, taker, matches);
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        for (MatcherEvent match : matches) {
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
@@ -84,7 +85,8 @@ public final class RuntimeSpotMatchProcessor {
                                           int baseAssetId, int quoteAssetId) {
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (MatcherEvent match : matches) {
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             if (localTaker != null) {
                 localTaker = requireOpen(runtime, takerOrderId);
@@ -495,7 +497,8 @@ public final class RuntimeSpotMatchProcessor {
         LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
         makerRemaining.clear();
         try {
-            for (MatcherEvent match : matches) {
+            for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+                MatcherEvent match = matches.get(matchIndex);
                 if (match == null) {
                     throw new IllegalArgumentException("invalid runtime match");
                 }
