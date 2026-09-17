@@ -69,8 +69,8 @@ class SurprisingClusteredServiceTest {
             runtime.enterAsynchronousCommandScope();
             try {
                 assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
-                var business = owner.directCommand.controlWork;
-                owner.directCommand.controlWork = () -> {
+                var business = owner.directCommand.controlWork();
+                owner.directCommand.replaceControlWork(() -> {
                     if (!business.getAsBoolean()) return false;
                     if (capacityFailure) {
                         // Overflow only: entries must be rejected and cleared before they can be dispatched.
@@ -89,7 +89,7 @@ class SurprisingClusteredServiceTest {
                         };
                     }
                     return true;
-                };
+                });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
                     result = owner.pollDirectCommand();

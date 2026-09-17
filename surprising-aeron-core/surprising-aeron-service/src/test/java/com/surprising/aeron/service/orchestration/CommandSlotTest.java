@@ -27,26 +27,28 @@ class CommandSlotTest {
 
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
-        CommandSlot slot = new CommandSlot();
+        DirectCommandSlot slot = new DirectCommandSlot();
         CoreMessage first = command(1000);
         var point = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
-        slot.initializeDirect(first, CommandFingerprint.of(first), null, 10, 20, point, 1, 2, 3);
+        slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
+                CommandSource.OPERATIONS, 1), 10, 20, point, 1, 2, 3);
         slot.deferControl(() -> true);
-        slot.status = com.surprising.aeron.protocol.ResponseStatus.REJECTED;
-        slot.resultCode = com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND;
-        slot.finalizationPrepared = true;
-        slot.clearDirect();
+        slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND);
+        slot.markFinalizationPrepared();
+        slot.clear();
 
         CoreMessage second = command(1001);
-        slot.initializeDirect(second, CommandFingerprint.of(second), null, 30, 40, point, 4, 5, 6);
+        slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
+                CommandSource.OPERATIONS, 1), 30, 40, point, 4, 5, 6);
         assertThat(slot.command()).isSameAs(second);
-        assertThat(slot.controlWork).isNull();
-        assertThat(slot.status).isNull();
-        assertThat(slot.resultCode).isNull();
-        assertThat(slot.finalizationPrepared).isFalse();
+        assertThat(slot.controlWork()).isNull();
+        assertThat(slot.status()).isNull();
+        assertThat(slot.resultCode()).isNull();
+        assertThat(slot.finalizationPrepared()).isFalse();
         assertThat(slot.commitFenceTimestamp()).isEqualTo(30);
-        assertThat(slot.checkpoint).isEqualTo(5);
-        slot.clearDirect();
+        assertThat(slot.checkpoint()).isEqualTo(5);
+        slot.clear();
     }
 
     @Test

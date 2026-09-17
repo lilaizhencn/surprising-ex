@@ -760,7 +760,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (!activated) activate();
         assertOwner();
-        if (directCommand.directActive) throw new IllegalStateException("asynchronous control command is still active");
+        if (directCommand.active()) throw new IllegalStateException("asynchronous control command is still active");
         admissionPreviousClusterTimestamp = currentClusterTimestamp;
         admissionPreviousClusterPosition = currentClusterPosition;
         currentClusterTimestamp = clusterTimestamp;
@@ -864,7 +864,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         long beforeRuntimeRevision = runtimeState.revision();
         long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
         long positionIdentityCheckpoint = identities.positionCheckpoint();
-        directCommand.initializeDirect(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
+        directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
                 beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         resultBuilder.beginCommand();
         admissions.queuedMatching.clear();
@@ -881,25 +881,24 @@ public final class TradingCoreRuntime implements AutoCloseable,
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
-        if (directCommand.controlWork == null && runtimeState.asynchronousCommands()
+        if (!directCommand.hasControlWork() && runtimeState.asynchronousCommands()
                 && !clusterPipelineAdmission) {
             // 控制命令统一通过续步提交；失败时账户回滚也在所属 Lane 执行。
-            directCommand.status = status;
-            directCommand.resultCode = resultCode;
+            directCommand.result(status, resultCode);
         }
-        if (directCommand.controlWork != null || directCommand.status != null) {
+        if (directCommand.hasControlWork() || directCommand.status() != null) {
             return null;
         }
         return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
 
-    private CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+    CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
             SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
-        if (!directCommand.finalizationPrepared) {
+        if (!directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
                     && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
                         || runtimeState.hasUncommittedCommandChanges())) {
@@ -949,26 +948,25 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 // 业务任务已经结束。把发布序号交给实际参与 Lane，不接管全部账户。
                 if (runtimeState.asynchronousCommands()) {
                     runtimeState.releaseCompletedSequentialLaneStage();
-                    directCommand.commitEvent = runtimeState.dispatchLaneMutation(
+                    directCommand.commitEvent(runtimeState.dispatchLaneMutation(
                             nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
                             resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
-                            clusterTimestamp, clusterPosition);
+                            clusterTimestamp, clusterPosition));
                 } else {
                     runtimeState.stageLaneMutation(nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
                 }
             }
-            directCommand.finalizationPrepared = true;
+            directCommand.markFinalizationPrepared();
         }
-        if (directCommand.commitEvent != null) {
-            if (!runtimeState.laneCommitComplete(directCommand.commitEvent)) {
-                directCommand.status = status;
-                directCommand.resultCode = resultCode;
+        if (directCommand.commitEvent() != null) {
+            if (!runtimeState.laneCommitComplete(directCommand.commitEvent())) {
+                directCommand.result(status, resultCode);
                 return null;
             }
-            runtimeState.releaseLaneCommit(directCommand.commitEvent);
-            directCommand.commitEvent = null;
+            runtimeState.releaseLaneCommit(directCommand.commitEvent());
+            directCommand.clearCommitEvent();
         }
-        directCommand.finalizationPrepared = false;
+        directCommand.clearFinalizationPrepared();
         commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) {
             validateFundsConservation(message);
@@ -1002,22 +1000,21 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     private CoreResponse finishDirectContext(CoreResponse response) {
-        directCommand.clearDirect();
+        directCommand.clear();
         return finishFactContext(response);
     }
 
     /** Reuse the direct command continuation for failures discovered during terminal preparation. */
     private boolean deferFinalizationRejection(CoreResultCode code) {
         if (!runtimeState.asynchronousCommands()) return false;
-        if (!directCommand.directActive)
+        if (!directCommand.active())
             throw new IllegalStateException("asynchronous finalization has no command context");
-        directCommand.status = ResponseStatus.REJECTED;
-        directCommand.resultCode = code;
+        directCommand.result(ResponseStatus.REJECTED, code);
         return true;
     }
 
-    /** 控制命令复用同一种命令槽；跨回调的执行、结果、回滚和提交状态均归属该命令。 */
-    final CommandSlot directCommand = new CommandSlot();
+    /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
+    final DirectCommandSlot directCommand = new DirectCommandSlot();
 
     @Override public void deferControl(java.util.function.BooleanSupplier continuation) {
         directCommand.deferControl(continuation);
@@ -1133,47 +1130,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
         directCommand.deferAlgoUpsertControl(this, userId, algo, symbolId);
     }
 
-    boolean hasPendingDirectCommand() { return directCommand.directActive; }
+    boolean hasPendingDirectCommand() { return directCommand.active(); }
 
-    CoreResponse pollDirectCommand() {
-        assertOwner();
-        var pending = directCommand;
-        if (!pending.directActive) throw new IllegalStateException("no pending direct command");
-        if (directCommand.status == null) {
-            try {
-                if (!directCommand.controlWork.getAsBoolean()) return null;
-                directCommand.status = ResponseStatus.APPLIED;
-                directCommand.resultCode = CoreResultCode.NONE;
-            } catch (CoreStateRejectedException failure) {
-                directCommand.status = ResponseStatus.REJECTED;
-                directCommand.resultCode = CoreResultCode.fromRejectionCode(failure.code());
-            } catch (ArithmeticException failure) {
-                directCommand.status = ResponseStatus.REJECTED;
-                directCommand.resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-            } catch (IllegalArgumentException failure) {
-                directCommand.status = ResponseStatus.REJECTED;
-                directCommand.resultCode = CoreResultCode.INVALID_COMMAND;
-            }
-            directCommand.controlWork = null;
-        }
-        if (directCommand.status != ResponseStatus.APPLIED
-                && (commits.commitPublicationDirty || runtimeState.revision() != pending.beforeRevision
-                    || runtimeState.hasUncommittedCommandChanges())) {
-            if (directCommand.controlWork == null) {
-                commits.abortCommitPublicationBatch();
-                directCommand.controlWork = runtimeState.beginCommandRollback(pending.checkpoint,
-                        Math.incrementExact(appliedCommandCount));
-            }
-            if (!directCommand.controlWork.getAsBoolean()) return null;
-            identities.rollbackPositionKeys(pending.identityCheckpoint);
-            directCommand.controlWork = null;
-        }
-        CoreResponse result = finishDirectCommand(pending.command(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.sourceKey,
-                pending.fingerprint(), pending.beforeProjection(),
-                pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint,
-                directCommand.status, directCommand.resultCode);
-        return result;
-    }
+    CoreResponse pollDirectCommand() { return directCommand.poll(this); }
 
     long runtimePositionQuantity(long userId, String symbol) {
         long quantity = 0;
@@ -2445,7 +2404,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (!activated) activate();
         assertOwner();
         assertHealthy();
-        if (directCommand.directActive || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
+        if (directCommand.active() || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
             throw new IllegalStateException("unfinished business work outside cluster log callback");
         }
     }
@@ -2600,7 +2559,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     boolean snapshotHasPendingCommands() {
-        return factContextActive || directCommand.directActive || laneCommandContexts.inFlight() != 0;
+        return factContextActive || directCommand.active() || laneCommandContexts.inFlight() != 0;
     }
 
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
@@ -2981,7 +2940,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         bookQueries.queryIds.clear();
         runtimeState.endOrderBatchMutationScope();
         clearFactContext();
-        directCommand.clearDirect();
+        directCommand.clear();
         batches.clearPendingBatches();
         pendingMatching.clear();
         crossShardCancellations.clear();
