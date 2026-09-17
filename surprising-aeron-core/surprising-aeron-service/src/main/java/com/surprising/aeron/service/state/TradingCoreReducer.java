@@ -193,18 +193,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             long userId,
             BalanceAdjustmentCommand command) {
-        requireUserId(userId);
-        CoreUserState currentUser = state.users().getOrDefault(userId,
-                CoreUserState.empty(state.productLine(), userId));
-        String asset = AssetBalance.normalizeAsset(command.asset());
-        AssetBalance currentBalance = currentUser.balances().getOrDefault(asset, new AssetBalance(asset, 0, 0));
-        AssetBalance nextBalance = currentBalance.adjustAvailable(command.deltaUnits());
-
-        Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
-        balances.put(asset, nextBalance);
-        CoreUserState nextUser = currentUser.transition(Math.incrementExact(currentUser.revision()), balances,
-                currentUser.reservations(), currentUser.positions(), currentUser.positionMode());
-        return replaceUser(state, nextUser, state.orders());
+        return BalanceStateTransitions.adjust(state, userId, command);
     }
 
     public TradingCoreState placeOrder(TradingCoreState state, long userId, PlaceOrderCommand command) {

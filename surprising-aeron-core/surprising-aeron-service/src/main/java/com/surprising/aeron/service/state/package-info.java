@@ -26,5 +26,8 @@
  *
  * <p>{@code PositionStateTransitions} 负责衍生品位置模式切换和逐仓保证金调整；它在一次用户
  * 状态变更中同时更新余额与持仓，保证资金转移和保证金变化不可分离。</p>
+ *
+ * <p>{@code BalanceStateTransitions} 只负责直接调整用户可用余额；订单冻结/解冻、持仓保证金和
+ * treasury 流水仍由各自的业务状态转换负责。</p>
  */
 package com.surprising.aeron.service.state;

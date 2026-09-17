@@ -148,6 +148,8 @@ CoreMessage / PlaceOrderCommand
 但不修改订单、余额或持仓。
 `PositionStateTransitions` 负责衍生品位置模式切换和逐仓保证金调整；逐仓调保证金在一次用户状态
 变更中同时更新可用/锁定余额与持仓保证金，保证资金转移和保证金变化不可分离。
+`BalanceStateTransitions` 只负责直接调整用户可用余额；订单冻结/解冻、持仓保证金和 treasury
+流水仍由各自的业务状态转换负责。
 
 ## 4. 第一阶段不做的事情
 
