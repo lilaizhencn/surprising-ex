@@ -120,6 +120,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation();
     /** Fixed wrapper for the ordinary PLACE Matcher submission. */
     private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation();
+    /** Fixed wrapper for the ordinary CANCEL Matcher submission. */
+    private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation();
+    /** Fixed wrapper for a resolved ordinary REPLACE/AMEND Matcher submission. */
+    private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -186,6 +190,22 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder) {
         placeMatching.prepare(owner, matcherShard, instrumentChangeId, userId, resolvedOrder, matchingOrder);
         return placeMatching;
+    }
+
+    /** Reuses the command slot for the common cancellation path instead of allocating a lambda. */
+    java.util.function.Supplier<CoreMatchingResult> prepareCancelMatching(TradingCoreRuntime owner,
+            int matcherShard, long orderId, long instrumentChangeId, long userId, String symbol) {
+        cancelMatching.prepare(owner, matcherShard, orderId, instrumentChangeId, userId, symbol);
+        return cancelMatching;
+    }
+
+    /** Reuses the command slot for a resolved replacement without intermediate submission objects. */
+    java.util.function.Supplier<CoreMatchingResult> prepareReplaceMatching(TradingCoreRuntime owner,
+            int matcherShard, long orderId, long instrumentChangeId, long userId,
+            long originalOrderId, String symbol, CoreMatchingOrder replacement) {
+        replaceMatching.prepare(owner, matcherShard, orderId, instrumentChangeId, userId,
+                originalOrderId, symbol, replacement);
+        return replaceMatching;
     }
 
     void deferControl(java.util.function.BooleanSupplier work) {
@@ -1010,6 +1030,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         triggerControl.clear();
         admissionMatching.clear();
         placeMatching.clear();
+        cancelMatching.clear();
+        replaceMatching.clear();
     }
 
     private final class AdmissionMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
@@ -1089,6 +1111,83 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             return owner.matchingAdapter.placeWithEvidence(
                     matcherShard, coreSequence, command.header().commandId(), instrumentChangeId,
                     command.header().submittedAtEpochMillis(), userId, matchingOrder);
+        }
+    }
+
+    private final class CancelMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+        private TradingCoreRuntime owner;
+        private int matcherShard;
+        private long orderId;
+        private long instrumentChangeId;
+        private long userId;
+        private String symbol;
+
+        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId, long instrumentChangeId,
+                     long userId, String symbol) {
+            this.owner = Objects.requireNonNull(owner);
+            this.matcherShard = matcherShard;
+            this.orderId = orderId;
+            this.instrumentChangeId = instrumentChangeId;
+            this.userId = userId;
+            this.symbol = Objects.requireNonNull(symbol);
+        }
+
+        void clear() {
+            owner = null;
+            matcherShard = 0;
+            orderId = 0;
+            instrumentChangeId = 0;
+            userId = 0;
+            symbol = null;
+        }
+
+        @Override
+        public CoreMatchingResult get() {
+            return owner.matchingAdapter.cancelWithEvidence(
+                    matcherShard, coreSequence, command.header().commandId(), orderId,
+                    instrumentChangeId, command.header().submittedAtEpochMillis(), userId, symbol);
+        }
+    }
+
+    private final class ReplaceMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+        private TradingCoreRuntime owner;
+        private int matcherShard;
+        private long orderId;
+        private long instrumentChangeId;
+        private long userId;
+        private long originalOrderId;
+        private String symbol;
+        private CoreMatchingOrder replacement;
+
+        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId, long instrumentChangeId,
+                     long userId, long originalOrderId, String symbol, CoreMatchingOrder replacement) {
+            this.owner = Objects.requireNonNull(owner);
+            this.matcherShard = matcherShard;
+            this.orderId = orderId;
+            this.instrumentChangeId = instrumentChangeId;
+            this.userId = userId;
+            this.originalOrderId = originalOrderId;
+            this.symbol = Objects.requireNonNull(symbol);
+            this.replacement = Objects.requireNonNull(replacement);
+        }
+
+        void clear() {
+            owner = null;
+            matcherShard = 0;
+            orderId = 0;
+            instrumentChangeId = 0;
+            userId = 0;
+            originalOrderId = 0;
+            symbol = null;
+            replacement = null;
+        }
+
+        @Override
+        public CoreMatchingResult get() {
+            return owner.matchingAdapter.replaceWithEvidence(
+                    matcherShard, coreSequence, command.header().commandId(), orderId,
+                    instrumentChangeId, command.header().submittedAtEpochMillis(), userId,
+                    originalOrderId, symbol, replacement);
         }
     }
 

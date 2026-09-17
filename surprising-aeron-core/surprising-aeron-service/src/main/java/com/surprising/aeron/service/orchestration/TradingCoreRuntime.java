@@ -2095,10 +2095,20 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     String symbol = identities.symbol(order.symbolId());
                     long instrumentChangeId = order.instrumentChangeId();
                     int shard = matcherShard(pending);
-                    return () -> matchingAdapter.cancelWithEvidence(shard, pending.sequence(),
-                            pending.command().header().commandId(), command.orderId(), instrumentChangeId,
-                            pending.command().header().submittedAtEpochMillis(), userId, symbol);
+                    return pending.prepareCancelMatching(this, shard, command.orderId(), instrumentChangeId,
+                            userId, symbol);
                 }
+            }
+            if ((pending.operation() == CommandSlot.Operation.REPLACE
+                    || pending.operation() == CommandSlot.Operation.AMEND)
+                    && preMatchingCancellations.isEmpty()) {
+                ResolvedMatchingAdmission admission = requireMatchingAdmission(pending);
+                requireUnchangedAdmissionState(admission);
+                var order = runtimeOrder(admission.originalOrderId());
+                String symbol = runtimeOrderSymbol(order);
+                return pending.prepareReplaceMatching(this, matcherShard(pending), admission.resolved().orderId(),
+                        admission.resolved().instrumentChangeId(), userId, admission.originalOrderId(), symbol,
+                        admission.matchingOrder());
             }
             MatchingSubmission matching = switch (pending.operation()) {
                 case PLACE -> {

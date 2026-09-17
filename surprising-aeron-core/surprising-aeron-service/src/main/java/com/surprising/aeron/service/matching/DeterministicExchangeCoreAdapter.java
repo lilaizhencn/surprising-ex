@@ -366,6 +366,36 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
+    /**
+     * Executes a resolved replacement and binds its result to the ordinary matcher evidence
+     * stream without creating an intermediate Supplier wrapper.  The replacement operation is
+     * already serialized on this matcher worker, so the existing cancel-then-place semantics are
+     * preserved while the caller can use a fixed command-slot continuation.
+     */
+    public CoreMatchingResult replaceWithEvidence(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long instrumentChangeId, long aeronTimestamp, long userId, long originalOrderId,
+            String symbol, CoreMatchingOrder replacement) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || symbol == null || symbol.isBlank() || replacement == null) {
+            throw new IllegalArgumentException("invalid native matcher replacement");
+        }
+        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            CoreMatchingResult result = replaceOrder(userId, originalOrderId, symbol, replacement);
+            long sequence = matcherEvidence.nextSequence(shardId);
+            return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+                    aeronTimestamp, sequence, shardId, result);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
     private CoreMatchingResult bindNativeMatcherEvidence(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long instrumentChangeId, long aeronTimestamp, exchange.core2.core.common.MatcherResult result) {

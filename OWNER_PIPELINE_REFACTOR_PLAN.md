@@ -402,3 +402,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.8（Matcher/Lane 事实对象分配归因）：已完成。审查普通 PLACE 的 Matcher 构造调用点后，确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime` 和 `MatcherResult` 在异步 Lane-owned 路径没有新的每笔替换对象可安全删除；同步/恢复分支仍需值语义。唯一确认属于普通热路径的分配是 `prepareMatchingCommand()` 为每笔 PLACE 创建的捕获式提交 lambda，已改为 `CommandSlot` 内固定复用的 `PlaceMatchingContinuation`，同时覆盖已解析 `ResolvedPlaceOrder` 和运行时 `CoreMatchingOrder` 两种表示。该 continuation 在槽位回收时清除引用，不改变 Matcher 证据、admission 或重放语义。
 - 阶段 8.8 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通 PLACE admission/撮合、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
 - 下一阶段：阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）。只处理最新调用图中仍在普通异步命令路径实际创建的 submission/guard 对象；先区分必须保留的跨命令批量原子性与可删的 Owner wrapper，再改固定槽位并回归。完成 8.9 后再审计 8.10 的低频控制/查询路径，全部阶段完成后统一压测。
+- 阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）：已完成。普通 CANCEL 在无前置撤单时复用固定 `CancelMatchingContinuation`；普通 REPLACE/AMEND 在无前置撤单时复用固定 `ReplaceMatchingContinuation`，并新增适配器内联的 `replaceWithEvidence`，删除该路径的 `MatchingSubmission`、证据包装和捕获式 lambda。带前置撤单的关闭容量/生命周期兼容路径仍保留原有组合语义，避免为冷路径引入新的状态机。
+- 阶段 8.9 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通撤单、替换/改单、Matcher 证据、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
+- 下一阶段：阶段 8.10（低频控制/查询路径最终审计）。只清理仍被生产调用的重复对象和无必要的 Owner continuation；不改变风险、资金费、强平、ADL、交割/期权的分页/恢复边界。完成后进行一次全局死代码与引用审计，再进入统一 64/128 窗口压测。
