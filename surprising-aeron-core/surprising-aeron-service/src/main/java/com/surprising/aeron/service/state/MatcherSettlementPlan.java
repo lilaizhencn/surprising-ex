@@ -68,8 +68,8 @@ public final class MatcherSettlementPlan {
     void buildDirect(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
                      CoreMatchingResult result, TradingRuntimeState runtime) {
         if (taker == null || instrument == null || result == null
-                || result.nativeCommand().coreSequence() != sequence
-                || result.nativeCommand().orderId() != taker.orderId()
+                || result.nativeCoreSequence() != sequence
+                || result.nativeOrderId() != taker.orderId()
                 || instrument.changeId() != taker.instrumentChangeId())
             throw new IllegalArgumentException("invalid direct matcher fact");
         clearReferences();
@@ -113,8 +113,8 @@ public final class MatcherSettlementPlan {
     /** 撤单只携带目标订单和撮合结论；不构建成交、持仓或 taker 拒单状态。 */
     void buildDirectCancellation(long sequence, long userId, OrderRuntime order, CoreMatchingResult result,
                                  TradingRuntimeState runtime) {
-        if (order == null || result == null || result.nativeCommand().coreSequence() != sequence
-                || result.nativeCommand().orderId() != order.orderId())
+        if (order == null || result == null || result.nativeCoreSequence() != sequence
+                || result.nativeOrderId() != order.orderId())
             throw new IllegalArgumentException("invalid direct cancellation fact");
         var matcherEvents = result.matcherEvents();
         for (int index = 0; index < matcherEvents.size(); index++) {
@@ -302,7 +302,7 @@ public final class MatcherSettlementPlan {
                                                BatchValidationScratch batch, MatcherSettlementPlan target) {
         if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
                 || result == null || runtime == null || identities == null
-                || result.nativeCommand().coreSequence() != coreSequence) {
+                || result.nativeCoreSequence() != coreSequence) {
             throw new IllegalArgumentException("invalid matcher settlement plan input");
         }
         OrderRuntime taker = preparedTaker == null ? requireOpen(runtime, takerOrderId) : preparedTaker;

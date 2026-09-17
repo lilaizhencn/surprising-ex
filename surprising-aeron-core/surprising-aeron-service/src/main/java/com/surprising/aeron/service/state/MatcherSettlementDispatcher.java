@@ -211,7 +211,7 @@ final class MatcherSettlementDispatcher {
         long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
         if (coreSequence <= 0 || commitSequence < 0 || expectedLaneMask == 0
                 || (expectedLaneMask & ~validMask) != 0
-                || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
+                || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence
                 || plan == null || plan.coreSequence() != coreSequence
                 || plan.requiredLaneMask() != expectedLaneMask || identities == null) {
             throw new IllegalArgumentException("invalid matcher settlement lane command");
@@ -349,7 +349,7 @@ final class MatcherSettlementDispatcher {
                 long expectedLaneMask = batch.settlementLaneMask(index);
                 CoreMatchingResult matchingResult = batch.settlementResult(index);
                 if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                        || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                        || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");
                 }
                 OrderRuntime taker = owner.order(takerOrderId);

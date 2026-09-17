@@ -27,7 +27,17 @@ public final class CoreMatchingResult {
      * bound.  Keep these two fields mutable during that construction window so binding does not
      * allocate a second CoreMatchingResult for every command.
      */
-    private NativeCommand nativeCommand;
+    private long nativeCoreSequence;
+    private long nativeCommandIdMostSignificantBits;
+    private long nativeCommandIdLeastSignificantBits;
+    private long nativeOrderId;
+    private long nativeInstrumentChangeId;
+    private long nativeSequenceValue;
+    private long nativeMatcherSequence;
+    private long nativeAeronTimestamp;
+    private int nativeMatcherShardId;
+    /** Compatibility view only; hot paths use the primitive identity fields above. */
+    private NativeCommand nativeCommandView;
     /** Prefix values are kept as primitives on the hot path; the record view is lazy for API compatibility. */
     private long matcherPrefixBefore;
     private long matcherPrefixAfter;
@@ -70,7 +80,7 @@ public final class CoreMatchingResult {
         this.successfulPrefixCount = successfulPrefixCount;
         this.matcherStateChanged = matcherStateChanged;
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
-        this.nativeCommand = nativeCommand;
+        copyNativeCommand(nativeCommand);
         this.matcherPrefixBefore = matcherPrefix.before();
         this.matcherPrefixAfter = matcherPrefix.after();
         this.matcherPrefixView = matcherPrefix;
@@ -86,11 +96,39 @@ public final class CoreMatchingResult {
     static CoreMatchingResult fromNativeWithEvidence(
             MatcherResult result, NativeCommand command, long previousPrefix) {
         if (previousPrefix == 0) throw new IllegalArgumentException("matcher prefix is required");
-        return new CoreMatchingResult(result, command, previousPrefix);
+        Objects.requireNonNull(command, "native command");
+        return fromNativeWithEvidence(result,
+                command.coreSequence(), command.commandIdMostSignificantBits(),
+                command.commandIdLeastSignificantBits(), command.orderId(), command.instrumentChangeId(),
+                command.nativeSequence(), command.matcherSequence(), command.aeronTimestamp(),
+                command.matcherShardId(), previousPrefix);
+    }
+
+    static CoreMatchingResult fromNativeWithEvidence(
+            MatcherResult result, long coreSequence, long commandIdMostSignificantBits,
+            long commandIdLeastSignificantBits, long orderId, long instrumentChangeId,
+            long nativeSequence, long matcherSequence, long aeronTimestamp, int matcherShardId,
+            long previousPrefix) {
+        if (previousPrefix == 0) throw new IllegalArgumentException("matcher prefix is required");
+        return new CoreMatchingResult(result, coreSequence, commandIdMostSignificantBits,
+                commandIdLeastSignificantBits, orderId, instrumentChangeId, nativeSequence,
+                matcherSequence, aeronTimestamp, matcherShardId, previousPrefix);
     }
 
     /** Native events are already immutable; build the result and its evidence once. */
     private CoreMatchingResult(MatcherResult result, NativeCommand command, long previousPrefix) {
+        this(result, command.coreSequence(), command.commandIdMostSignificantBits(),
+                command.commandIdLeastSignificantBits(), command.orderId(), command.instrumentChangeId(),
+                command.nativeSequence(), command.matcherSequence(), command.aeronTimestamp(),
+                command.matcherShardId(), previousPrefix);
+        nativeCommandView = command;
+    }
+
+    private CoreMatchingResult(MatcherResult result, long coreSequence,
+                                long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+                                long orderId, long instrumentChangeId, long nativeSequence,
+                                long matcherSequence, long aeronTimestamp, int matcherShardId,
+                                long previousPrefix) {
         nativeMatcherResult = Objects.requireNonNull(result, "matcher result");
         accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
@@ -99,12 +137,26 @@ public final class CoreMatchingResult {
         successfulPrefixCount = 0;
         matcherStateChanged = false;
         outcome = classify(accepted, resultCode, false);
-        nativeCommand = Objects.requireNonNull(command, "native command");
+        if (coreSequence < 0 || orderId < 0 || instrumentChangeId < 0 || nativeSequence < 0
+                || matcherSequence < 0 || aeronTimestamp < 0 || matcherShardId < -1) {
+            throw new IllegalArgumentException("invalid native command identity");
+        }
+        nativeCoreSequence = coreSequence;
+        nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
+        nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
+        nativeOrderId = orderId;
+        nativeInstrumentChangeId = instrumentChangeId;
+        nativeSequenceValue = nativeSequence;
+        nativeMatcherSequence = matcherSequence;
+        nativeAeronTimestamp = aeronTimestamp;
+        nativeMatcherShardId = matcherShardId;
         matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
         marketData = Objects.requireNonNull(result.marketData(), "matcher market data");
         // The digest reads only the business fields initialized above; it never retains this.
         matcherPrefixBefore = previousPrefix;
-        matcherPrefixAfter = previousPrefix == 0 ? 0 : MatcherPrefixDigest.next(previousPrefix, command, this);
+        matcherPrefixAfter = previousPrefix == 0 ? 0 : MatcherPrefixDigest.next(previousPrefix,
+                coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits,
+                orderId, instrumentChangeId, matcherSequence, aeronTimestamp, this);
         matcherPrefixView = previousPrefix == 0 ? EMPTY_PREFIX : null;
     }
 
@@ -114,7 +166,8 @@ public final class CoreMatchingResult {
 
     /** Matcher-only binding path; called before publication into the completion ring. */
     CoreMatchingResult bindEvidenceInPlace(NativeCommand command, MatcherPrefix prefix) {
-        nativeCommand = Objects.requireNonNull(command, "native command");
+        Objects.requireNonNull(command, "native command");
+        copyNativeCommand(command);
         Objects.requireNonNull(prefix, "matcher prefix");
         matcherPrefixBefore = prefix.before();
         matcherPrefixAfter = prefix.after();
@@ -124,7 +177,29 @@ public final class CoreMatchingResult {
 
     /** Matcher-only binding path that avoids constructing a prefix record for every result. */
     CoreMatchingResult bindEvidenceInPlace(NativeCommand command, long before, long after) {
-        nativeCommand = Objects.requireNonNull(command, "native command");
+        Objects.requireNonNull(command, "native command");
+        copyNativeCommand(command);
+        matcherPrefixBefore = before;
+        matcherPrefixAfter = after;
+        matcherPrefixView = null;
+        return this;
+    }
+
+    /** Matcher-only binding path that keeps native command identity in primitive fields. */
+    CoreMatchingResult bindEvidenceInPlace(
+            long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long instrumentChangeId, long nativeSequence, long matcherSequence,
+            long aeronTimestamp, int matcherShardId, long before, long after) {
+        nativeCoreSequence = coreSequence;
+        nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
+        nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
+        nativeOrderId = orderId;
+        nativeInstrumentChangeId = instrumentChangeId;
+        nativeSequenceValue = nativeSequence;
+        nativeMatcherSequence = matcherSequence;
+        nativeAeronTimestamp = aeronTimestamp;
+        nativeMatcherShardId = matcherShardId;
+        nativeCommandView = null;
         matcherPrefixBefore = before;
         matcherPrefixAfter = after;
         matcherPrefixView = null;
@@ -133,31 +208,37 @@ public final class CoreMatchingResult {
 
     public CoreMatchingResult withCoreSequence(long coreSequence) {
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
-        NativeCommand nativeCommand = nativeCommand();
-        if (nativeCommand.coreSequence() == coreSequence) return this;
-        if (nativeCommand.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
-        NativeCommand command = new NativeCommand(coreSequence,
-                nativeCommand.commandIdMostSignificantBits(), nativeCommand.commandIdLeastSignificantBits(),
-                nativeCommand.orderId(),
-                nativeCommand.instrumentChangeId(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
-                nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
-        return new CoreMatchingResult(this, command, matcherPrefixBefore, matcherPrefixAfter, matcherPrefixView);
+        if (nativeCoreSequence == coreSequence) return this;
+        if (nativeCoreSequence != 0) throw new IllegalStateException("matching result sequence mismatch");
+        return new CoreMatchingResult(this, coreSequence, nativeCommandIdMostSignificantBits,
+                nativeCommandIdLeastSignificantBits, nativeOrderId, nativeInstrumentChangeId,
+                nativeSequenceValue, nativeMatcherSequence, nativeAeronTimestamp, nativeMatcherShardId,
+                matcherPrefixBefore, matcherPrefixAfter, matcherPrefixView);
     }
 
     /** Matcher worker variant that avoids a second result object before publication. */
     public CoreMatchingResult withCoreSequenceInPlace(long coreSequence) {
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
-        NativeCommand current = nativeCommand();
-        if (current.coreSequence() == coreSequence) return this;
-        if (current.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
-        nativeCommand = new NativeCommand(coreSequence,
-                current.commandIdMostSignificantBits(), current.commandIdLeastSignificantBits(), current.orderId(),
-                current.instrumentChangeId(), current.nativeSequence(), current.matcherSequence(),
-                current.aeronTimestamp(), current.matcherShardId());
+        if (nativeCoreSequence == coreSequence) return this;
+        if (nativeCoreSequence != 0) throw new IllegalStateException("matching result sequence mismatch");
+        nativeCoreSequence = coreSequence;
+        nativeCommandView = null;
         return this;
     }
 
     private CoreMatchingResult(CoreMatchingResult source, NativeCommand command,
+                               long prefixBefore, long prefixAfter, MatcherPrefix prefixView) {
+        this(source, command.coreSequence(), command.commandIdMostSignificantBits(),
+                command.commandIdLeastSignificantBits(), command.orderId(), command.instrumentChangeId(),
+                command.nativeSequence(), command.matcherSequence(), command.aeronTimestamp(),
+                command.matcherShardId(), prefixBefore, prefixAfter, prefixView);
+        nativeCommandView = command;
+    }
+
+    private CoreMatchingResult(CoreMatchingResult source, long coreSequence,
+                               long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+                               long orderId, long instrumentChangeId, long nativeSequence,
+                               long matcherSequence, long aeronTimestamp, int matcherShardId,
                                long prefixBefore, long prefixAfter, MatcherPrefix prefixView) {
         accepted = source.accepted;
         resultCode = source.resultCode;
@@ -165,8 +246,16 @@ public final class CoreMatchingResult {
         successfulPrefixCount = source.successfulPrefixCount;
         matcherStateChanged = source.matcherStateChanged;
         outcome = source.outcome;
-        nativeCommand = Objects.requireNonNull(command, "native command");
         if (prefixBefore < 0 || prefixAfter < 0) throw new IllegalArgumentException("invalid matcher prefix");
+        nativeCoreSequence = coreSequence;
+        nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
+        nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
+        nativeOrderId = orderId;
+        nativeInstrumentChangeId = instrumentChangeId;
+        nativeSequenceValue = nativeSequence;
+        nativeMatcherSequence = matcherSequence;
+        nativeAeronTimestamp = aeronTimestamp;
+        nativeMatcherShardId = matcherShardId;
         matcherPrefixBefore = prefixBefore;
         matcherPrefixAfter = prefixAfter;
         matcherPrefixView = prefixView;
@@ -215,17 +304,40 @@ public final class CoreMatchingResult {
     public boolean matcherStateChanged() { return matcherStateChanged; }
     public Outcome outcome() { return outcome; }
     public NativeCommand nativeCommand() {
-        if (nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null) {
-            // The unbound result is queried several times while evidence is attached and
-            // validated. Cache the synthetic identity instead of allocating on every read.
-            nativeCommand = new NativeCommand(0, 0, 0, 0, 0, nativeMatcherResult.sequence(), 0, 0, -1);
-        }
-        return nativeCommand;
+        NativeCommand view = nativeCommandView;
+        if (view != null && view != EMPTY_COMMAND) return view;
+        if (nativeMatcherResult == null && nativeCoreSequence == 0 && nativeOrderId == 0
+                && nativeInstrumentChangeId == 0 && nativeSequenceValue == 0
+                && nativeMatcherSequence == 0 && nativeAeronTimestamp == 0
+                && nativeMatcherShardId == -1 && nativeCommandIdMostSignificantBits == 0
+                && nativeCommandIdLeastSignificantBits == 0) return EMPTY_COMMAND;
+        // Compatibility API: hot paths use primitive accessors and never materialize this view.
+        long sequence = nativeSequenceValue;
+        if (sequence == 0 && nativeMatcherResult != null) sequence = nativeMatcherResult.sequence();
+        view = new NativeCommand(nativeCoreSequence, nativeCommandIdMostSignificantBits,
+                nativeCommandIdLeastSignificantBits, nativeOrderId, nativeInstrumentChangeId,
+                sequence, nativeMatcherSequence, nativeAeronTimestamp, nativeMatcherShardId);
+        nativeCommandView = view;
+        return view;
     }
     /** 原生结果绑定证据前只需序号，直接读取而不物化占位身份。 */
     long nativeSequence() {
-        return nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null
-                ? nativeMatcherResult.sequence() : nativeCommand.nativeSequence();
+        return nativeSequenceValue == 0 && nativeMatcherResult != null
+                ? nativeMatcherResult.sequence() : nativeSequenceValue;
+    }
+    public long nativeCoreSequence() { return nativeCoreSequence; }
+    public long nativeCommandIdMostSignificantBits() { return nativeCommandIdMostSignificantBits; }
+    public long nativeCommandIdLeastSignificantBits() { return nativeCommandIdLeastSignificantBits; }
+    public long nativeOrderId() { return nativeOrderId; }
+    public long nativeInstrumentChangeId() { return nativeInstrumentChangeId; }
+    public long nativeSequenceValue() { return nativeSequence(); }
+    public long nativeMatcherSequence() { return nativeMatcherSequence; }
+    public long nativeAeronTimestamp() { return nativeAeronTimestamp; }
+    public int nativeMatcherShardId() { return nativeMatcherShardId; }
+    public boolean nativeMatches(java.util.UUID commandId) {
+        return commandId != null
+                && nativeCommandIdMostSignificantBits == commandId.getMostSignificantBits()
+                && nativeCommandIdLeastSignificantBits == commandId.getLeastSignificantBits();
     }
     public MatcherPrefix matcherPrefix() {
         MatcherPrefix view = matcherPrefixView;
@@ -241,6 +353,19 @@ public final class CoreMatchingResult {
     public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
     public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }
     public MatcherResult.MarketData marketData() { return marketData; }
+
+    private void copyNativeCommand(NativeCommand command) {
+        nativeCoreSequence = command.coreSequence();
+        nativeCommandIdMostSignificantBits = command.commandIdMostSignificantBits();
+        nativeCommandIdLeastSignificantBits = command.commandIdLeastSignificantBits();
+        nativeOrderId = command.orderId();
+        nativeInstrumentChangeId = command.instrumentChangeId();
+        nativeSequenceValue = command.nativeSequence();
+        nativeMatcherSequence = command.matcherSequence();
+        nativeAeronTimestamp = command.aeronTimestamp();
+        nativeMatcherShardId = command.matcherShardId();
+        nativeCommandView = command;
+    }
 
     private static Outcome classify(boolean accepted, String resultCode, boolean matcherStateChanged) {
         if ("EXCHANGE_CORE_FAILURE".equals(resultCode) || "MATCHING_TIMEOUT".equals(resultCode)) {

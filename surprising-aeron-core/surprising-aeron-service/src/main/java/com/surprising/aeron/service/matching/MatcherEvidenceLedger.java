@@ -80,12 +80,21 @@ final class MatcherEvidenceLedger {
             long coreSequence, java.util.UUID commandId, long orderId, long instrumentChangeId,
             long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result) {
-        CoreMatchingResult.NativeCommand command = advanceCommand(
-                coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, sequence,
-                matcherShardId, nativeMatcherShardId, result.sequence());
-        int offset = offset(index(matcherShardId));
+        if (commandId == null || result == null) throw new IllegalArgumentException("native evidence is required");
+        int matcherIndex = index(matcherShardId);
+        long nativeSequence = result.sequence();
+        if (nativeSequence > 0) {
+            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                    "matcher shard native sequence is not strictly increasing");
+        }
+        advanceStrictly(shardSequences, matcherIndex, sequence,
+                "matcher shard sequence is not strictly increasing");
+        int offset = offset(matcherIndex);
         long before = (long) LONGS.getAcquire(shardPrefixes, offset);
-        CoreMatchingResult bound = CoreMatchingResult.fromNativeWithEvidence(result, command, before);
+        CoreMatchingResult bound = CoreMatchingResult.fromNativeWithEvidence(result,
+                coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, instrumentChangeId, nativeSequence, sequence, aeronTimestamp,
+                matcherShardId, before);
         LONGS.setRelease(shardPrefixes, offset, bound.matcherPrefixAfter());
         return bound;
     }

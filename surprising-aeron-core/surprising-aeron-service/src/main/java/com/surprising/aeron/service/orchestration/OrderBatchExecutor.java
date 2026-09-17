@@ -774,8 +774,8 @@ final class OrderBatchExecutor {
             com.surprising.aeron.service.matching.CoreMatchingResult firstMatchingResult) {
         if (batch.pipelinedMatchingResultCount != batch.items.size()
                 || batch.pipelinedMatchingResultCount == 0
-                || batch.pipelinedMatchingResults[0].nativeCommand().matcherSequence()
-                != firstMatchingResult.nativeCommand().matcherSequence()) {
+                || batch.pipelinedMatchingResults[0].nativeMatcherSequence()
+                != firstMatchingResult.nativeMatcherSequence()) {
             throw failOrderBatch(batch, pending, "pipelined matcher batch result is incomplete", null);
         }
         for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {

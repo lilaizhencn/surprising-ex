@@ -840,7 +840,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     CoreMatchingResult matchingResult() { return matchingResult; }
     /** Final write by the Matcher: subsequent Owner work reads this slot directly. */
     public void publishMatcherResult(int shardId, CoreMatchingResult result) {
-        if (result == null || result.nativeCommand().coreSequence() != coreSequence
+        if (result == null || result.nativeCoreSequence() != coreSequence
                 || completedMatchingResult != null) {
             throw new IllegalStateException("invalid matcher result publication");
         }
@@ -849,7 +849,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     void publishMatchingCompletion(CoreMatchingResult result) {
-        if (result == null || result.nativeCommand().coreSequence() != coreSequence) {
+        if (result == null || result.nativeCoreSequence() != coreSequence) {
             throw new IllegalStateException("invalid matching completion");
         }
         if (completedMatchingResult == null) completedMatchingResult = result;
@@ -943,7 +943,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
-        if (result == null || result.nativeCommand().coreSequence() != coreSequence
+        if (result == null || result.nativeCoreSequence() != coreSequence
                 || (expectedMask & ~validLaneMask) != 0
                 || matchingResult != null) {
             throw new IllegalStateException("invalid immutable matching result fanout");
@@ -1557,18 +1557,18 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public void prepareResponse() {
             prepared = true;
             if (count != 1 || orders[0] == null || matcherResult == null) return;
-            var nativeCommand = matcherResult.nativeCommand();
             long prefixBefore = matcherResult.matcherPrefixBefore();
             long prefixAfter = matcherResult.matcherPrefixAfter();
             if (prefixBefore == 0 || prefixAfter == 0
-                    || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
-                    || nativeCommand.matcherSequence() <= 0) return;
+                    || matcherResult.nativeOrderId() <= 0 || matcherResult.nativeInstrumentChangeId() <= 0
+                    || matcherResult.nativeMatcherSequence() <= 0) return;
             try {
                 response = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrder(
-                        nativeCommand.coreSequence(),
-                        new java.util.UUID(nativeCommand.commandIdMostSignificantBits(),
-                                nativeCommand.commandIdLeastSignificantBits()),
-                        nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
+                        matcherResult.nativeCoreSequence(),
+                        new java.util.UUID(matcherResult.nativeCommandIdMostSignificantBits(),
+                                matcherResult.nativeCommandIdLeastSignificantBits()),
+                        matcherResult.nativeOrderId(), matcherResult.nativeInstrumentChangeId(),
+                        matcherResult.nativeMatcherSequence(),
                         prefixBefore, prefixAfter, source);
             } catch (IllegalArgumentException ignored) {
                 response = null;

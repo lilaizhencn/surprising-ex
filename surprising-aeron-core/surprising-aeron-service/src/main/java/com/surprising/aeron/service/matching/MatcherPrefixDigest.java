@@ -19,14 +19,25 @@ final class MatcherPrefixDigest {
         if (previous == 0 || command == null || result == null) {
             throw new IllegalArgumentException("invalid matcher prefix input");
         }
+        return next(previous, command.coreSequence(), command.commandIdMostSignificantBits(),
+                command.commandIdLeastSignificantBits(), command.orderId(), command.instrumentChangeId(),
+                command.matcherSequence(), command.aeronTimestamp(), result);
+    }
+
+    static long next(long previous, long coreSequence, long commandIdMostSignificantBits,
+                     long commandIdLeastSignificantBits, long orderId, long instrumentChangeId,
+                     long matcherSequence, long aeronTimestamp, CoreMatchingResult result) {
+        if (previous == 0 || result == null) {
+            throw new IllegalArgumentException("invalid matcher prefix input");
+        }
         long hash = mix(previous, DOMAIN);
-        hash = mix(hash, command.coreSequence());
-        hash = mix(hash, command.commandIdMostSignificantBits());
-        hash = mix(hash, command.commandIdLeastSignificantBits());
-        hash = mix(hash, command.orderId());
-        hash = mix(hash, command.instrumentChangeId());
-        hash = mix(hash, command.matcherSequence());
-        hash = mix(hash, command.aeronTimestamp());
+        hash = mix(hash, coreSequence);
+        hash = mix(hash, commandIdMostSignificantBits);
+        hash = mix(hash, commandIdLeastSignificantBits);
+        hash = mix(hash, orderId);
+        hash = mix(hash, instrumentChangeId);
+        hash = mix(hash, matcherSequence);
+        hash = mix(hash, aeronTimestamp);
         hash = mix(hash, result.accepted());
         hash = mix(hash, result.resultCode());
         hash = mix(hash, result.successfulPrefixCount());

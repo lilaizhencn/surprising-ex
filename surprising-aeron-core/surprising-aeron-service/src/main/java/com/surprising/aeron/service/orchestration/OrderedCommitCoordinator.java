@@ -111,8 +111,8 @@ final class OrderedCommitCoordinator {
                 // The normal direct completion path validates and applies the same result before
                 // it reaches this rejection helper. Avoid applying that evidence twice when the
                 // Lane rejection is observed after the Matcher event has completed.
-                int shard = matcherResult.nativeCommand().matcherShardId();
-                if (matcherSequence(shard) != matcherResult.nativeCommand().matcherSequence()
+                int shard = matcherResult.nativeMatcherShardId();
+                if (matcherSequence(shard) != matcherResult.nativeMatcherSequence()
                         || matcherPrefixDigest(shard) != matcherResult.matcherPrefixAfter()) {
                     validateMatchingEvidence(pending, matcherResult);
                     applyMatcherProgress(matcherResult);
@@ -978,21 +978,20 @@ final class OrderedCommitCoordinator {
     void validateMatchingEvidence(
             CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        var nativeCommand = result.nativeCommand();
         long prefixBefore = result.matcherPrefixBefore();
         long prefixAfter = result.matcherPrefixAfter();
-        int matcherShardId = nativeCommand.matcherShardId();
+        int matcherShardId = result.nativeMatcherShardId();
         long appliedMatcherSequence = matcherSequence(matcherShardId);
         long appliedMatcherPrefixDigest = matcherPrefixDigest(matcherShardId);
-        if (nativeCommand.coreSequence() != pending.sequence()
-                || !nativeCommand.matches(pending.command().header().commandId())
-                || nativeCommand.matcherSequence() <= appliedMatcherSequence
+        if (result.nativeCoreSequence() != pending.sequence()
+                || !result.nativeMatches(pending.command().header().commandId())
+                || result.nativeMatcherSequence() <= appliedMatcherSequence
                 || prefixBefore == 0 || prefixAfter == 0
                 || prefixBefore != appliedMatcherPrefixDigest
                 || prefixAfter == prefixBefore) {
             throw owner.failMatching(pending, "matcher result prefix does not continue the applied prefix"
                     + " expectedSequenceAfter=" + appliedMatcherSequence
-                    + " actualSequence=" + nativeCommand.matcherSequence()
+                    + " actualSequence=" + result.nativeMatcherSequence()
                     + " expectedPrefix=" + appliedMatcherPrefixDigest
                     + " actualBefore=" + prefixBefore
                     + " actualAfter=" + prefixAfter, null);
@@ -1013,8 +1012,8 @@ final class OrderedCommitCoordinator {
 
     void applyMatcherProgress(
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        int index = matcherProgressIndex(result.nativeCommand().matcherShardId());
-        appliedMatcherSequences[index] = result.nativeCommand().matcherSequence();
+        int index = matcherProgressIndex(result.nativeMatcherShardId());
+        appliedMatcherSequences[index] = result.nativeMatcherSequence();
         appliedMatcherPrefixDigests[index] = result.matcherPrefixAfter();
     }
 
