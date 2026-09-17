@@ -2073,3 +2073,32 @@ JFR 热点仍以 `SettlementLaneWorker.run` 忙等循环为首（约 `65.29%` �
 JFR 状态：Owner CPU `92.71%`、Matcher `51.18%`、四个 Lane 约 `98.51%`，但 Lane 有效业务执行比仅约 `28.88%`；Owner 上下文高水位 `256`，说明顺序提交/FIFO 背压仍是端到端上限。最终 allocation top 25 已不再出现 `ResponseArena.acquireExactSlot`，说明固定 backing 消除了该路径的变长 `byte[]` 分配；contention 记录中没有响应 arena 的 monitor contention。JFR 线程采样 `912`，未见 DataLoss。
 
 内存配置仍为 Core `-Xms512m -Xmx1536m`、client `-Xms128m -Xmx512m`、G1；最终 plain/JFR 均没有 OOM 或 GC 导致的失败。服务模块全量回归 `935` 项通过、失败/错误 `0`、既有跳过 `1`；协议模块 `111` 项通过、失败/错误 `0`。源码修复已提交并推送：`e920e84c fix: make owner response arena lock-free`。
+
+### 2026-09-17：运行时状态职责拆分性能验证计划（采集前锁定）
+
+- 被测 commit：`7349389c32a5abc09636af9bbb7a6296fb073663`，仅验证当前 master；不检出或比较旧版本
+- 改动范围：`RuntimeCommandProcessor` 的资金、风险、订单提交/清理、撤单定时器、算法单和触发单状态写入拆为明确状态所有者；兼容入口保留，订单/余额/持仓/Account Lane 权威状态不变
+- 目标：确认职责拆分后的实际运行路径满足正确性，并采集当前 plain 吞吐、分业务尾延迟、Owner/Matcher/Lane CPU、分配/GC 和 JFR 状态；不预设性能收益
+- 场景：本机单个真实 Aeron Cluster member、`LINEAR_PERPETUAL`、1 matcher、4 Account Lane、128 symbols、MIXED、batch20、`SHARED_NETWORK`、`YIELDING`
+- 负载：全局/session/Owner window 固定 `256`，异步 open-loop；Matcher/Settlement `BUSY_SPIN`，spin limit `0`；预热 `30s`、稳定测量 `60s`、测量后排空
+- JVM：HotSpot JDK 27、G1；Core `512m/1536m`、client `128m/512m`；plain 轮给吞吐，独立 JFR 轮给归因，不横向比较两轮绝对吞吐
+- 执行命令：
+  - `ASYNC_SKIP_BUILD=false ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=false ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/runtime-state-transition-plain-20260917 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+  - `ASYNC_SKIP_BUILD=true ASYNC_ONLY_STAGE=end_to_end ASYNC_ENABLE_JFR=true ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ARTIFACT_DIR=/tmp/runtime-state-transition-jfr-20260917 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`
+- 通过条件：`clientPass=true`；accepted/terminal 相等；`unfinished=0`；排空后 backlog/pending 为零；`peakInFlight=256`；`fundsDiff=0`；Core 无 fatal；JFR `DataLoss=0`（如工具无该事件则记录缺口）
+- 采集后：追加实际参数、结果、JFR summary/view、原始文件大小/校验和及清理状态；只清理确认属于本轮的 `/tmp/runtime-state-transition-*`
+
+执行结果：
+
+- plain 稳定窗口 `60.017759s`：`businessOpsPerSec=313231.770`、`coreMessagesPerSec=29947.086`、`fillsPerSec=74559.265`；最终 `mixedCapacity=PASS` 为 `313248.425 business ops/s`、`29948.662 core messages/s`、`74552.569 fills/s`
+- plain 完整性：`clientPass=true`、`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、`offeredBusinessOperations=terminalBusinessOperations=18802157`、`offeredCoreMessages=terminalCoreMessages=1797613`、`peakInFlight=256`；排空 `5.389991ms`、`2688` business operations；Core 日志无 fatal/error
+- plain 分业务尾延迟：PLACE `p99=15.056ms/p99.9=23.773ms`，CANCEL `15.671/25.198ms`，APPLY_MARK_PRICE `21.184/27.721ms`，PLACE_BATCH `18.513/31.113ms`，CANCEL_BATCH `26.623/34.013ms`；本轮最大业务 p99 为 `26.623ms`
+- JFR 稳定窗口 `60.003694s`：`businessOpsPerSec=263670.151`、`coreMessagesPerSec=25227.230`、`fillsPerSec=62758.803`；最终 `mixedCapacity=PASS` 为 `263682.972 business ops/s`、`25228.437 core messages/s`、`62751.193 fills/s`。JFR 为独立归因轮，不与 plain 吞吐直接横比
+- JFR 完整性：`clientPass=true`、`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、`offeredBusinessOperations=terminalBusinessOperations=15823871`、`offeredCoreMessages=terminalCoreMessages=1513983`、`peakInFlight=256`；排空 `7.276589ms`、`2688` business operations；Core 日志无 fatal/error
+- JFR 分业务尾延迟：PLACE `p99=17.580ms/p99.9=26.656ms`，CANCEL `18.120/26.673ms`，APPLY_MARK_PRICE `19.824/30.179ms`，PLACE_BATCH `21.151/34.340ms`，CANCEL_BATCH `30.572/42.827ms`；本轮最大业务 p99 为 `30.572ms`
+- JFR 线程与阶段：Owner `96.533%`、Matcher `54.915%`、四个 Lane 分别 `98.527%/98.558%/98.563%/98.563%` 单核；Lane 有效执行比 `33.047%`～`33.431%`，平均 `33.202%`；Owner/context 高水位 `256`、Matcher `223`、completion `128`，说明本轮端到端上限仍受 Owner 顺序提交/窗口背压影响，不能把它解读成 matcher 或 Lane 已达到容量上限
+- JFR 摘要与视图：`jfr-summary.txt`、`thread-cpu-load.txt`、`allocation-by-class.txt`、`allocation-by-site.txt`、`hot-methods.txt`、`contention-by-thread.txt`、`gc.txt`、`safepoints.txt`、`nmt-summary.diff.txt`；聚合 recording 的 `jdk.DataLoss=0`，node/client 各 recording 的 `jdk.DataLoss=0`；采样线程 CPU 事件 `916`，GC view `135` 条，最大 GC pause `19.8ms`。热点为 `SettlementLaneWorker.run()`（`67.79%` samples）；分配 top 为 `OrderRuntime`（`18.77%`）及 `OrderRuntime.snapshot()`（`10.52%`）
+- JFR 原始 recording（路径、字节数、SHA-256）：`/tmp/runtime-state-transition-jfr-20260917/window-256/end_to_end/node.jfr`，`156897586`，`7008e8e2fd6876b6a998a06540d44acfc89a4714ddf320e136aacf11ee4ad4e5`；`client-25327.jfr`，`119810642`，`ac701caf95d46f172007091dcdc480501b37e48a532b7dd0cf217838dd912f2e`；`client-25324.jfr`，`9737397`，`fb12b549c2337dd592df3550b8c796d8db9b89c4729fbc14b7beb649e78c835a`
+- 关键结果文件校验：plain `metrics.pretty.json` SHA-256 `b69d3bf7b8077450779ea3b9af642bdf996826e6519e38e38b34b35a184468dd`、`client.log` `3ef76346a6b9127f8a0c532564c6423ef51efe122ee577029aca91be7bea8e91`；JFR `metrics.pretty.json` `bbedd4c646394a573c087c2b63187ddaedb884097cec9945215059ad52390246`、`client.log` `0539c993530a9267ebbb82a6d5020b6636647b57afdbf60a147fdbce219ca06a`、`jfr-summary.txt` `a0cdbb313e219c7be5855a5d98f8bb6ad0eb36185b8e138289cbb04f98b5e433`
+
+结论：**部分验证**。两轮均满足业务完整性和资金差值校验，未观察到本次职责拆分造成的运行时正确性回归；但本计划没有预锁定数值吞吐/尾延迟门槛，本轮也未覆盖快照恢复、长稳增长斜率和完整资金/持仓对账，因此不把结果记为性能验收“通过”。已清理本轮确认生成的 `/tmp/runtime-state-transition-plain-20260917`、`/tmp/runtime-state-transition-jfr-20260917` 及对应 build log；仓库外其他历史压测产物未触碰。
