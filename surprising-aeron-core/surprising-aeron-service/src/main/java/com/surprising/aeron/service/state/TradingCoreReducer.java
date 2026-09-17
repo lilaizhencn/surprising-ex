@@ -12,8 +12,6 @@ import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
@@ -122,149 +120,18 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             long userId,
             com.surprising.aeron.protocol.CoreCancelAllAfterCommand command) {
-        requireUserId(userId);
-        if (command.userId() != userId) {
-            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_OWNER_MISMATCH",
-                    "cancel-all-after timer belongs to another user");
-        }
-        CoreCancelAllAfterKey key = new CoreCancelAllAfterKey(userId, command.symbolScope());
-        CoreCancelAllAfterState current = state.cancelAllAfterTimers().get(key);
-        CoreCancelAllAfterState next;
-        switch (command.action()) {
-            case SET -> {
-                com.surprising.aeron.protocol.CoreCancelAllAfterStatus status = command.countdownMillis() == 0
-                        ? com.surprising.aeron.protocol.CoreCancelAllAfterStatus.DISABLED
-                        : com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE;
-                if (status == com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE
-                        && command.triggerAtEpochMillis() <= command.updatedAtEpochMillis()) {
-                    throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER",
-                            "active cancel-all-after timer must trigger in the future");
-                }
-                next = new CoreCancelAllAfterState(userId, command.symbolScope(), command.countdownMillis(), status,
-                        status == com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE
-                                ? command.triggerAtEpochMillis() : 0,
-                        command.updatedAtEpochMillis(), 0, 0, current == null ? 1 : Math.incrementExact(current.revision()));
-            }
-            case CLAIM -> {
-                requireTimerRevision(current, command);
-                if (current.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE
-                        || current.triggerAtEpochMillis() > command.updatedAtEpochMillis()) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_DUE", "timer is not due");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERING,
-                        current.triggerAtEpochMillis(), command.updatedAtEpochMillis(), current.canceledOrders(),
-                        current.canceledTriggerOrders(), Math.incrementExact(current.revision()));
-            }
-            case COMPLETE -> {
-                requireTimerRevision(current, command);
-                if (current.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERING) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERED,
-                        current.triggerAtEpochMillis(), command.updatedAtEpochMillis(), command.canceledOrders(),
-                        command.canceledTriggerOrders(), Math.incrementExact(current.revision()));
-            }
-            case RETRY -> {
-                requireTimerRevision(current, command);
-                if (current.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERING) {
-                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
-                }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
-                        com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE,
-                        current.triggerAtEpochMillis(), command.updatedAtEpochMillis(), current.canceledOrders(),
-                        current.canceledTriggerOrders(), Math.incrementExact(current.revision()));
-            }
-            default -> throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_ACTION", "unsupported action");
-        }
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = StateMapSupport.delta(state.cancelAllAfterTimers());
-        timers.put(key, next);
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(),
-                state.instruments(), state.riskState(), state.treasuryState(),
-                state.leverages(), state.algoOrders(), timers, state.clientOrderIndex(), state.triggerOrders());
-    }
-
-    private static void requireTimerRevision(
-            CoreCancelAllAfterState current,
-            com.surprising.aeron.protocol.CoreCancelAllAfterCommand command) {
-        if (current == null) {
-            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_FOUND", "timer not found");
-        }
-        if (command.expectedRevision() != current.revision()) {
-            throw new CoreStateRejectedException("STALE_CANCEL_ALL_AFTER_REVISION", "timer revision is stale");
-        }
+        return CancelAllAfterStateTransitions.update(state, userId, command);
     }
 
     public TradingCoreState upsertAlgoOrder(TradingCoreState state, long userId,
                                              com.surprising.aeron.protocol.CoreAlgoOrderView view) {
-        return upsertAlgoOrder(state, userId, view, null);
+        return AlgoOrderStateTransitions.upsert(state, userId, view);
     }
 
     public TradingCoreState upsertAlgoOrder(TradingCoreState state, long userId,
                                              com.surprising.aeron.protocol.CoreAlgoOrderView view,
                                              AlgoOrderIndex algoOrderIndex) {
-        requireUserId(userId);
-        if (view.userId() != userId) {
-            throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
-        }
-        if (view.clientAlgoOrderId().isBlank()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
-        }
-        CoreAlgoOrderState next = CoreAlgoOrderState.from(view);
-        CoreAlgoOrderState current = state.algoOrders().get(next.algoOrderId());
-        if (current == null) {
-            boolean duplicateClient = algoOrderIndex != null
-                    ? algoOrderIndex.containsClient(userId, next.clientAlgoOrderId())
-                    : !next.clientAlgoOrderId().isEmpty() && state.algoOrders().values().stream()
-                    .anyMatch(value -> value.userId() == userId
-                            && value.clientAlgoOrderId().equals(next.clientAlgoOrderId()));
-            if (duplicateClient) throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
-                    "clientAlgoOrderId already exists");
-            if (!next.childOrderIds().isEmpty() || next.revision() != 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_CREATE", "new algo order must start empty");
-            }
-        } else {
-            requireSameAlgoIntent(current, next);
-            if (next.revision() <= current.revision()) {
-                throw new CoreStateRejectedException("STALE_ALGO_ORDER_REVISION",
-                        "algo order revision is stale");
-            }
-            if (next.revision() != Math.incrementExact(current.revision())
-                    || next.childOrderIds().size() < current.childOrderIds().size()
-                    || !next.childOrderIds().subList(0, current.childOrderIds().size()).equals(current.childOrderIds())
-                    || next.childOrderIds().size() > current.childOrderIds().size() + 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION", "algo order revision is not monotonic");
-            }
-            if (next.childOrderIds().size() > current.childOrderIds().size()) {
-                long childOrderId = next.childOrderIds().getLast();
-                CoreOrderState child = state.order(childOrderId);
-                if (child == null || child.userId() != userId || !child.symbol().equals(next.symbol())) {
-                    throw new CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child order is not authoritative");
-                }
-            }
-        }
-        Map<Long, CoreAlgoOrderState> values = StateMapSupport.delta(state.algoOrders());
-        values.put(next.algoOrderId(), next);
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(),
-                state.instruments(), state.riskState(), state.treasuryState(),
-                state.leverages(), values, state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
-    }
-
-    private static void requireSameAlgoIntent(CoreAlgoOrderState left, CoreAlgoOrderState right) {
-        if (left.userId() != right.userId() || !left.clientAlgoOrderId().equals(right.clientAlgoOrderId())
-                || !left.symbol().equals(right.symbol()) || left.algoTypeCode() != right.algoTypeCode()
-                || left.side() != right.side() || left.priceTicks() != right.priceTicks()
-                || left.quantitySteps() != right.quantitySteps() || left.childQuantitySteps() != right.childQuantitySteps()
-                || left.intervalSeconds() != right.intervalSeconds() || left.durationSeconds() != right.durationSeconds()
-                || left.marginMode() != right.marginMode() || left.positionSide() != right.positionSide()
-                || left.reduceOnly() != right.reduceOnly() || left.postOnly() != right.postOnly()
-                || left.timeInForce() != right.timeInForce() || left.startAtEpochMillis() != right.startAtEpochMillis()
-                || left.createdAtEpochMillis() != right.createdAtEpochMillis()) {
-            throw new CoreStateRejectedException("ALGO_ORDER_INTENT_MISMATCH", "algo order intent is immutable");
-        }
+        return AlgoOrderStateTransitions.upsert(state, userId, view, algoOrderIndex);
     }
 
     public java.util.List<com.surprising.aeron.protocol.CoreRiskSnapshotView> riskSnapshots(

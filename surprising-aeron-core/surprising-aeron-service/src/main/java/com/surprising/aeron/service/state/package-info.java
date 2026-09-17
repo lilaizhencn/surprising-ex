@@ -16,5 +16,9 @@
  *
  * <p>{@code TriggerOrderStateTransitions} 只拥有 {@code triggerOrders} 集合及其状态推进，
  * 不修改余额、普通订单、持仓或成交状态。</p>
+ *
+ * <p>{@code CancelAllAfterStateTransitions} 只拥有 {@code cancelAllAfterTimers} 集合及其版本
+ * 检查和生命周期推进；{@code AlgoOrderStateTransitions} 只拥有 {@code algoOrders} 集合的
+ * 创建与修订。两者都不修改普通订单、余额或持仓。</p>
  */
 package com.surprising.aeron.service.state;
