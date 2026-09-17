@@ -20,6 +20,11 @@ public final class TriggerOrderCommands {
     private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
     /** Reused owner scratch for one OCO cancellation page; never escapes this command. */
     private final PrimitiveLongChangeSet ocoSiblingPage = new PrimitiveLongChangeSet(64);
+    private static final java.util.function.BooleanSupplier COMPLETE = () -> true;
+    /** Risk-trigger scanning is serialized by the owner command loop, so one work object is enough. */
+    private final PendingTriggerScan reusableTriggerScan = new PendingTriggerScan();
+    /** Trigger child execution is also serialized and can reuse its Lane operation and continuation. */
+    private final TriggerExecutionContinuation reusableTriggerExecution = new TriggerExecutionContinuation();
 
     public PrimitiveLongChangeSet closingTriggerIds() { return closingTriggerIds; }
 
@@ -52,8 +57,9 @@ public final class TriggerOrderCommands {
     public java.util.function.BooleanSupplier pendingTriggerScan(String symbol, int maxWork) {
         Integer symbolId = owner.identities().findSymbolId(symbol);
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
-        if (scan == null || scan.triggerComplete()) return () -> true;
-        return new PendingTriggerScan(symbol, scan, Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
+        if (scan == null || scan.triggerComplete()) return COMPLETE;
+        return reusableTriggerScan.prepare(symbol, scan,
+                Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
     }
 
     public void evaluatePendingTriggerScan(String symbol, int maxWork) {
@@ -62,8 +68,8 @@ public final class TriggerOrderCommands {
     }
 
     private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
-        private final String symbol;
-        private final UUID commandId;
+        private String symbol;
+        private UUID commandId;
         private RiskScanRuntime scan;
         private int remaining;
         private TriggerOrderIndex.TriggerCandidatePage page;
@@ -71,12 +77,21 @@ public final class TriggerOrderCommands {
         private boolean ocoComplete, finished;
         private java.util.function.BooleanSupplier pending;
 
-        PendingTriggerScan(String symbol, RiskScanRuntime scan, int remaining) {
+        PendingTriggerScan() {
+        }
+
+        PendingTriggerScan prepare(String symbol, RiskScanRuntime scan, int remaining) {
             this.symbol = symbol;
             this.scan = scan;
             this.remaining = remaining;
             commandId = UUID.nameUUIDFromBytes((owner.productLine().name() + ":MARK_PRICE:" + symbol + ":"
                     + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            candidate = 0;
+            page = null;
+            pending = null;
+            ocoComplete = false;
+            finished = false;
+            return this;
         }
 
         @Override public boolean getAsBoolean() {
@@ -548,7 +563,7 @@ public final class TriggerOrderCommands {
     private java.util.function.BooleanSupplier beginTriggerExecution(long triggerId, long triggerSequence,
             long price, long triggeredAt, UUID commandId, boolean cancelOco) {
         var trigger = executableTrigger(triggerId, triggerSequence, price);
-        if (trigger == null) return () -> true;
+        if (trigger == null) return COMPLETE;
         var instrument = owner.runtimeState().instrument(trigger.symbol());
         com.surprising.aeron.service.state.ResolvedPlaceOrder resolved = null;
         String failureReason = "";
@@ -563,18 +578,51 @@ public final class TriggerOrderCommands {
                         owner.runtimeState(), owner.identities(), trigger.userId(), place, owner.currentClusterTimestamp());
             } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
         }
-        var order = resolved;
-        String preparedFailure = failureReason;
-        var identity = order == null ? null : com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
-                owner.runtimeState(), owner.identities(), trigger.userId(), order);
-        int assetId = order == null ? 0 : owner.identities().assetId(order.reservationAsset());
-        long openInterest = owner.openInterestIndex().openInterestSteps(trigger.symbol());
-        long childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
-        // The control fence keeps this Owner index unchanged until the Lane finishes. No ID copy
-        // or global index mutation is needed on the Lane; publication follows task completion.
-        var siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet() : java.util.Collections.<Long>emptySet();
-        int laneId = owner.runtimeState().topology().accountLaneId(trigger.userId());
-        owner.runtimeState().dispatchControlLanes(1L << laneId, ignored -> {
+        return reusableTriggerExecution.prepare(trigger, triggerId, triggerSequence, price, triggeredAt,
+                commandId, cancelOco, resolved, failureReason);
+    }
+
+    /** Reusable Lane operation for a trigger child; keeps the large capture graph off each command. */
+    private final class TriggerExecutionContinuation
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+        private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
+        private long triggerId, triggerSequence, price, triggeredAt, childSequence;
+        private UUID commandId;
+        private boolean cancelOco;
+        private com.surprising.aeron.service.state.ResolvedPlaceOrder order;
+        private String failureReason;
+        private com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity identity;
+        private int assetId, laneId;
+        private long openInterest;
+        private java.util.NavigableSet<Long> siblings;
+
+        java.util.function.BooleanSupplier prepare(
+                com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+                long triggerId, long triggerSequence, long price, long triggeredAt, UUID commandId,
+                boolean cancelOco, com.surprising.aeron.service.state.ResolvedPlaceOrder order,
+                String failureReason) {
+            this.trigger = trigger;
+            this.triggerId = triggerId;
+            this.triggerSequence = triggerSequence;
+            this.price = price;
+            this.triggeredAt = triggeredAt;
+            this.commandId = commandId;
+            this.cancelOco = cancelOco;
+            this.order = order;
+            this.failureReason = failureReason;
+            identity = order == null ? null : com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
+                    owner.runtimeState(), owner.identities(), trigger.userId(), order);
+            assetId = order == null ? 0 : owner.identities().assetId(order.reservationAsset());
+            openInterest = owner.openInterestIndex().openInterestSteps(trigger.symbol());
+            childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
+            siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet()
+                    : java.util.Collections.emptyNavigableSet();
+            laneId = owner.runtimeState().topology().accountLaneId(trigger.userId());
+            owner.runtimeState().dispatchControlLanes(1L << laneId, this);
+            return this;
+        }
+
+        @Override public Object apply(int ignoredLaneId) {
             for (long siblingId : siblings) {
                 if (siblingId == triggerId) continue;
                 var sibling = owner.runtimeState().triggerOrder(siblingId);
@@ -582,8 +630,9 @@ public final class TriggerOrderCommands {
                     RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState(), trigger.userId(), siblingId);
             }
             RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState(), triggerId, triggerSequence, price, triggeredAt);
-            if (!preparedFailure.isEmpty()) {
-                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState(), triggerId, false, 0, preparedFailure, triggeredAt);
+            if (!failureReason.isEmpty()) {
+                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState(), triggerId, false, 0,
+                        failureReason, triggeredAt);
                 return null;
             }
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
@@ -592,15 +641,19 @@ public final class TriggerOrderCommands {
                         commandId, childSequence, openInterest, identity, key.key(), assetId);
                 return key;
             } catch (CoreStateRejectedException rejected) {
-                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(), order.clientOrderId(), key);
-                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState(), triggerId, false, 0, rejected.code(), triggeredAt);
+                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
+                        order.clientOrderId(), key);
+                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState(), triggerId, false, 0,
+                        rejected.code(), triggeredAt);
                 return null;
             } catch (RuntimeException | Error failure) {
-                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(), order.clientOrderId(), key);
+                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
+                        order.clientOrderId(), key);
                 throw failure;
             }
-        });
-        return () -> {
+        }
+
+        @Override public boolean getAsBoolean() {
             if (!owner.runtimeState().pollControlLanes()) return false;
             var clientKey = (com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey)
                     owner.runtimeState().controlLaneResult(laneId);
@@ -613,7 +666,7 @@ public final class TriggerOrderCommands {
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, order.orderId());
             }
             return true;
-        };
+        }
     }
 
     public void cancelTriggersForClosedPositions() {
