@@ -396,4 +396,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.5b 验收：JDK 27 下协议模块 `111 tests, 0 failures, 0 errors, 0 skipped`；服务模块 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、响应切片编码、结果账本淘汰/恢复和全量服务回归通过。未执行吞吐压测。
 - 阶段 8.6（普通撮合提交闭包收敛）：已完成。普通 PLACE 的 admission receipt 等待与 Lane 拒绝证据构造改为 `CommandSlot` 内复用的 `AdmissionMatchingContinuation`；`submitMatching()` 不再为每条普通 PLACE 创建捕获式 gate，槽位回收时清除原始提交引用。admission、Matcher 证据、跨 Lane 路由和失败重放语义保持不变。
 - 阶段 8.6 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；普通 PLACE admission、拒绝证据、异步 Lane 和恢复目标通过。未执行吞吐压测。
-- 阶段 8.7（撮合构造路径去死代码和重复 after-image）：待完成。审计 `RuntimeDerivativeFillCalculator` 未使用的值语义计算入口、Matcher settlement 的重复运行时 after-image 和 batch-only 兼容适配；只删除无调用路径或合并完全等价的冷路径，保持现有 Lane 就地更新和同步恢复语义。
+- 阶段 8.7（撮合构造路径去死代码和重复 after-image）：已完成本批可安全清理部分。删除生产代码、测试和恢复路径均无调用的 `RuntimeDerivativeFillCalculator.calculate(...)` 与 `FillResult` 值语义入口，保留实际使用的 `FillCursor.begin/applyNext/publish` 及同步恢复分支；未发现可在不改变公开状态所有权的前提下继续合并的 settlement after-image。
+- 阶段 8.7 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；衍生品成交、Lane 就地更新、同步恢复和资金守恒目标通过。未执行吞吐压测。
+- 阶段 8.8（Matcher/Lane 事实对象分配归因）：待完成。基于最新 JFR 重新确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime`、`MatcherResult` 和 primitive 数组的生产调用点，只对确认仍在普通异步路径分配的对象做固定工作区或原地更新，禁止以批量兼容语义扩大 Owner 状态。

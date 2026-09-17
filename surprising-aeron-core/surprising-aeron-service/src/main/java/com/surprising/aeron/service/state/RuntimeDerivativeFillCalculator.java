@@ -77,30 +77,6 @@ public final class RuntimeDerivativeFillCalculator {
         } finally { cursor.clear(); }
     }
 
-    static FillResult calculate(CoreInstrumentState instrument, OrderRuntime order,
-                                ReservationRuntime reservation, PositionRuntime current,
-                                long availableUnits, long lockedUnits, long fillPriceTicks,
-                                long fillQuantitySteps, boolean taker, long leveragePpm,
-                                int settleAssetId, MarkPriceRuntime riskMark) {
-        return calculate(instrument, order, reservation, current, availableUnits, lockedUnits,
-                fillPriceTicks, fillQuantitySteps, taker, leveragePpm, settleAssetId, riskMark, -1, -1);
-    }
-
-    static FillResult calculate(CoreInstrumentState instrument, OrderRuntime order,
-                                ReservationRuntime reservation, PositionRuntime current,
-                                long availableUnits, long lockedUnits, long fillPriceTicks,
-                                long fillQuantitySteps, boolean taker, long leveragePpm,
-                                int settleAssetId, MarkPriceRuntime riskMark,
-                                long commitTimestamp, long commitPosition) {
-        FillCursor cursor = SINGLE.get();
-        try {
-            cursor.reset(instrument, order, reservation, current, availableUnits, lockedUnits, settleAssetId, riskMark);
-            cursor.step(fillPriceTicks, fillQuantitySteps, taker, leveragePpm, commitTimestamp, commitPosition);
-            return new FillResult(cursor.order(), cursor.reservation(), cursor.position(), cursor.available,
-                    cursor.locked, cursor.feeTreasuryUnits, cursor.clearingTreasuryUnits);
-        } finally { cursor.clear(); }
-    }
-
     private static final ThreadLocal<FillCursor> SINGLE = ThreadLocal.withInitial(FillCursor::new);
     private static final ThreadLocal<FillCursor> TAKER = ThreadLocal.withInitial(FillCursor::new);
 
@@ -400,11 +376,6 @@ public final class RuntimeDerivativeFillCalculator {
         state.timestamp = commitTimestamp; state.clusterPosition = commitPosition;
         state.feeTreasuryUnits = Math.negateExact(feeDelta);
         state.clearingTreasuryUnits = Math.negateExact(appliedPnl);
-    }
-
-    record FillResult(OrderRuntime order, ReservationRuntime reservation, PositionRuntime position,
-                      long availableUnits, long lockedUnits, long feeTreasuryUnits,
-                      long clearingTreasuryUnits) {
     }
 
     private static long proportional(long units, long part, long total) {
