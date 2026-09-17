@@ -28,7 +28,7 @@ SurprisingClusterNode.main
 
 ## 2. 现货下单链路
 
-第一阶段只跟踪现货单，不同时改动永续、交割和期权。
+现货链路作为最小业务样本，先用来说明命令、账户 Lane、撮合和提交的边界。产品公式已经按业务归属放入 `business` 包，但本轮不改变任何订单、资金或成交流程。
 
 ```text
 CoreMessage / PlaceOrderCommand
@@ -114,6 +114,26 @@ CoreMessage / PlaceOrderCommand
 - 期权：权利金、买卖方权益、行权和到期失效。
 
 产品规则可以消费通用订单和成交事实，但不能直接依赖 Aeron、Cluster、响应队列或 matcher 线程。
+
+### 3.5 当前产品规则包
+
+业务公式按产品线和共享范围放置，`state` 只保留权威状态、重放入口和运行时流程：
+
+| 包 | 当前职责 | 允许共享范围 |
+|---|---|---|
+| `business.spot` | 现货冻结需求和现货产品规则 | 仅现货 |
+| `business.derivative` | 永续/交割共同的订单冻结和成交开仓保证金公式 | 仅四条衍生品线；不包含现货和期权 |
+| `business.option` | 期权冻结、成交保证金、风险价格校验和期权产品规则 | 仅期权 |
+| `business` | 与产品无关的订单费用扣减数学 | 只允许不含产品分支的通用数学 |
+| `state` | `TradingCoreState`、运行时状态、Reducer、Lane 和确定性重放 | 负责调用产品规则并写入权威状态，不拥有产品公式 |
+
+当前已经归位的关键类：
+
+- 现货：`SpotOrderAdmission`、`SpotTradingRules`。
+- 共享衍生品：`FuturesOrderAdmission`、`FuturesFillCalculator`。
+- 期权：`OptionOrderAdmission`、`OptionFillCalculator`、`OptionRiskRules`、`OptionTradingRules`。
+
+`TradingCoreReducer` 和 `RuntimeDerivativeFillCalculator` 仍是状态侧入口。它们可以把确定性状态或成交事实交给对应产品规则，但不能通过共享父类、统一策略注册或复制快照来消除产品差异。
 
 ## 4. 第一阶段不做的事情
 
