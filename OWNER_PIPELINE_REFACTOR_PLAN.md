@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.14 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.15 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -415,3 +415,5 @@ OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结
 - 阶段 8.14（普通 PLACE 去除 Owner detached OrderRuntime）：已完成。Matcher 直达结算保留已有不可变 `ResolvedPlaceOrder`，`MatcherSettlementPlan` 用原语校验字段构建事实，Lane 在执行时从自己的订单表取得真实 `OrderRuntime`；拒绝准入只保留路由原语，删除 Owner 侧额外 `OrderRuntime` 构造。旧 admission source 引用不再跨线程保留，事件回收时无悬挂引用。
 - 阶段 8.14 验收：JDK 27 下编译通过；服务模块全量 `912 tests, 0 failures, 0 errors, 1 skipped`，普通 PLACE admission、Matcher 拒绝、跨 Lane 结算、批量、snapshot/replay、幂等和资金守恒目标通过。
 - 阶段 8.14 性能复测：统一 async harness（JDK 27、G1、BUSY_SPIN、1 Matcher、4 Lane、128 symbols、MIXED batch20、JFR）64 窗口 `294,099 ops/s`、p99 `7.75 ms`、Owner `94.16%`；128 窗口 `317,241 ops/s`、p99 `15.52 ms`、Owner `97.53%`。相比阶段 8.13，`preparedOrder` 的 Owner detached 构造已从调用链移除，但 Lane 必须创建真实订单，稳态吞吐没有上升；Owner 仍是瓶颈，Matcher 约 58–60%，Lane 约 98%，下一阶段应直接处理 `OrderRuntime.snapshot()`、结果响应/投影和 Owner commit 热点，而不是继续增加 Matcher 并发。
+- 阶段 8.15（Owner 快照、结果投影和终态提交重复工作收敛）：已完成。Matcher settlement 的订单、reservation、position 只在 Lane 终态交接前按变更 key 冻结一次 after-image；重复成交不再为同一 key 保留多份可发布快照。Lane publication 在一次缓冲遍历中同时产出 primitive changed-user/order IDs，删除 Owner 对 settlement/cancel 的第二次 changed-id 遍历及其旧 `appendChangedIds()` API。余额资金增量改为直接读取 Lane primitive before/after 数组，删除 `UserBalance` 临时记录。保留 Owner 必需的全局 revision/hash、最小路由索引、提交日志和按序响应发送；这些不能从确定性恢复和查询语义中删除。
+- 阶段 8.15 验收：JDK 27 下 `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，服务全量 `912 tests, 0 failures, 0 errors, 1 skipped`；包含普通/批量撮合、跨 Lane 结算、撤单、恢复、snapshot、响应账本、幂等和资金守恒。未执行吞吐压测，待正确性审计完成后再按统一 async harness 复测。

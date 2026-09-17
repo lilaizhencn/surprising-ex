@@ -3158,7 +3158,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
         captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
                 runtimeState.collectMatcherSettlement(
-                        event, commandFundsAccumulator, terminalRetention);
+                        event, commandFundsAccumulator, terminalRetention,
+                        resultBuilder.changedUserIds, resultBuilder.changedOrderIds);
+        resultBuilder.markLaneDeltaIdsSeeded();
         laneContext.completeLanes(event.requiredLaneMask());
         return delta;
     }

@@ -341,8 +341,6 @@ final class OrderedCommitCoordinator {
                         owner.suspendMatchingCommitContext(pending);
                         return null;
                     }
-                    pending.settlementEvent().appendChangedIds(
-                            owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
                     owner.resultBuilder.markLaneDeltaIdsSeeded();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
                 }
@@ -369,8 +367,6 @@ final class OrderedCommitCoordinator {
                             pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
                     if (settlementTreasuryDelta == null) return null;
                     requestCommitPublication();
-                    pending.settlementEvent().appendChangedIds(
-                            owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
                     owner.resultBuilder.markLaneDeltaIdsSeeded();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
                 }
@@ -565,13 +561,10 @@ final class OrderedCommitCoordinator {
         owner.captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
-            // LaneDelta already contains the exact users and orders changed by the settlement.
-            // Copy only primitive keys before collection releases the event; do not walk the
-            // matcher plan or perform a second Owner-side order lookup.
-            event.appendChangedIds(owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
-            owner.resultBuilder.markLaneDeltaIdsSeeded();
             settlementTreasuryDelta = owner.runtimeState.collectMatcherSettlement(
-                    event, owner.commandFundsAccumulator, owner.terminalRetention);
+                    event, owner.commandFundsAccumulator, owner.terminalRetention,
+                    owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+            owner.resultBuilder.markLaneDeltaIdsSeeded();
             laneContext.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case CANCEL -> { /* Lane 已按撮合结论完成解冻和撤单。 */ }
@@ -664,9 +657,9 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.LaneCancelEvent event = pending.cancelEvent();
         if (event == null || !event.complete()) return null;
         try {
-            event.appendChangedIds(owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+            owner.runtimeState.collectCancel(event, owner.commandFundsAccumulator, owner.terminalRetention,
+                    owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
             owner.resultBuilder.markLaneDeltaIdsSeeded();
-            owner.runtimeState.collectCancel(event, owner.commandFundsAccumulator, owner.terminalRetention);
             laneContext.completeLanes(event.requiredLaneMask());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.addExact(owner.runtimeState.revision(), event.orderCount()));

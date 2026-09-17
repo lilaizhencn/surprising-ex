@@ -38,26 +38,46 @@ final class LanePublication {
 
     /** Owner 线程调用；重复调用不会再次应用同一批数据。 */
     void publish() {
+        publish(null, null);
+    }
+
+    /**
+     * Publish and collect the primitive changed-key sets in the same traversal. This avoids a
+     * second Owner pass over every Lane buffer just to build the command response descriptor.
+     */
+    void publish(com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         if (delta != null) {
             TradingRuntimeState.LaneDelta changes = delta;
             TradingRuntimeState owner = runtime;
             changes.users.drainTo((id, value) -> {
+                if (changedUsers != null) changedUsers.add(id);
                 owner.publishedUsers.applyPublished(id, value);
                 owner.changedUsers.add(id);
             });
-            changes.orders.forEach((id, value) -> owner.publishedOrders.applyPublished(
-                    id, changes.removedOrderRoutes.contains(id) ? null : value));
+            changes.orders.forEach((id, value) -> {
+                if (changedOrders != null) changedOrders.add(id);
+                owner.publishedOrders.applyPublished(id, changes.removedOrderRoutes.contains(id) ? null : value);
+            });
             changes.reservations.drainTo((id, value) -> {
+                if (changedOrders != null) changedOrders.add(id);
+                if (changedUsers != null && value != null) changedUsers.add(value.userId());
                 owner.publishedReservations.applyPublished(
                         id, changes.removedReservationRoutes.contains(id) ? null : value);
                 owner.changedReservations.add(id);
             });
-            changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value));
+            changes.positions.forEach((id, value) -> {
+                if (changedUsers != null && value != null) changedUsers.add(value.userId());
+                owner.publishedPositions.applyPublished(id, value);
+            });
             // Terminal cleanup may intentionally omit a zero-reservation after-image.  Apply
             // route removals independently so the Owner cannot retain a stale reservation/order
             // merely because the Lane had no value record to drain.
             changes.removedOrderRoutes.forEach(id -> owner.publishedOrders.remove(id));
             changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.remove(id));
+            if (changedOrders != null) {
+                changes.removedOrderRoutes.forEach(changedOrders::add);
+            }
             changes.removedOrderRoutes.clear();
             changes.removedReservationRoutes.clear();
             delta = null;

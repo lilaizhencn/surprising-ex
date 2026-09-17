@@ -985,20 +985,40 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishOrder(long orderId, OrderRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped == null) putOrRemove(publishedOrders, orderId, value == null || !accountLanesStarted ? value : value.publicationValue());
-        else laneDelta(scoped.laneId()).putOrder(orderId, value == null ? null : value.publicationValue());
+        if (scoped == null) {
+            putOrRemove(publishedOrders, orderId,
+                    value == null || !accountLanesStarted ? value : value.publicationValue());
+            return;
+        }
+        MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
+        // Matcher settlement buffers are frozen once at the terminal handoff. Repeated fills for
+        // one order therefore keep only one immutable after-image instead of one per mutation.
+        laneDelta(scoped.laneId()).putOrder(orderId,
+                value == null || changes == null ? value == null ? null : value.publicationValue() : value);
     }
 
     void publishReservation(long orderId, ReservationRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped == null) putOrRemove(publishedReservations, orderId, value == null || !accountLanesStarted ? value : value.publicationValue());
-        else laneDelta(scoped.laneId()).putReservation(orderId, value == null ? null : value.publicationValue());
+        if (scoped == null) {
+            putOrRemove(publishedReservations, orderId,
+                    value == null || !accountLanesStarted ? value : value.publicationValue());
+            return;
+        }
+        MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
+        laneDelta(scoped.laneId()).putReservation(orderId,
+                value == null || changes == null ? value == null ? null : value.publicationValue() : value);
     }
 
     void publishPosition(long positionKey, PositionRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped == null) putOrRemove(publishedPositions, positionKey, value == null || !accountLanesStarted ? value : value.publicationValue());
-        else laneDelta(scoped.laneId()).putPosition(positionKey, value == null ? null : value.publicationValue());
+        if (scoped == null) {
+            putOrRemove(publishedPositions, positionKey,
+                    value == null || !accountLanesStarted ? value : value.publicationValue());
+            return;
+        }
+        MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
+        laneDelta(scoped.laneId()).putPosition(positionKey,
+                value == null || changes == null ? value == null ? null : value.publicationValue() : value);
     }
 
     void publishLiquidation(long liquidationId, LiquidationRuntime value) {
@@ -1029,12 +1049,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void flushPublishedChanges(int laneId) {
+        flushPublishedChanges(laneId, null, null);
+    }
+
+    void flushPublishedChanges(int laneId,
+                               com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                               com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         LaneDelta changes = laneDeltas[laneId];
         changes.recordRiskChanges(this);
         changes.publishTriggersToOwner(this);
-        changes.drainTo(
-                laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
-                publishedLiquidations, publishedRiskSnapshots);
+        changes.drainTo(laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                publishedLiquidations, publishedRiskSnapshots, changedUsers, changedOrders);
     }
 
     MatcherSettlementChanges acquireMatcherSettlementChanges(long laneMask) {
@@ -1136,6 +1161,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime) {
             applyUserRevisions(laneId, lane);
             LaneDelta changes = laneDeltas[laneId];
+            // Freeze only the final value for each changed key. A single settlement can update
+            // an order, reservation, or position several times before the Owner sees it.
+            changes.orders.freezeValues(OrderRuntime::publicationValue);
+            changes.reservations.freezeValues(ReservationRuntime::publicationValue);
+            changes.positions.freezeValues(PositionRuntime::publicationValue);
             changes.orders.forEach((orderId, order) -> {
                 if (order == null || !order.status().terminal()) return;
                 ReservationRuntime reservation = lane.reservations.get(orderId);
@@ -1214,24 +1244,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        /**
-         * Export the already materialized Lane change keys without walking the matcher plan
-         * or looking entities up in the Owner publication maps.  The buffers are still owned by
-         * this event until collectMatcherSettlement() returns, so the copy is primitive-only and
-         * deterministic.
-         */
-        void appendChangedIds(PrimitiveLongChangeSet userIds, PrimitiveLongChangeSet orderIds) {
-            if (userIds == null || orderIds == null) throw new IllegalArgumentException("change sets are required");
-            long lanes = activeLaneMask;
-            while (lanes != 0) {
-                int laneId = Long.numberOfTrailingZeros(lanes);
-                lanes &= lanes - 1;
-                laneDeltas[laneId].appendChangedIds(userIds, orderIds);
-                LaneBalancePatches balances = balancePatches[laneId];
-                for (int index = 0; index < balances.size(); index++) userIds.add(balances.userId(index));
-            }
-        }
-
         void clear() {
             directPositionIdentities = false;
             long lanes = activeLaneMask;
@@ -1257,6 +1269,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         // The Owner is the only reader of the published maps. Apply and reclaim the batch here;
         // a second cleanup command on the Account Lane only added queue pressure.
         publication.publish();
+    }
+
+    void applyLanePublication(LanePublication publication,
+                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+        if (publication == null) return;
+        publication.publish(changedUsers, changedOrders);
     }
 
     static <V> void putOrRemove(Long2ObjectHashMap<V> values, long key, V value) {
@@ -1354,18 +1373,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
         void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
-        void appendChangedIds(PrimitiveLongChangeSet userIds, PrimitiveLongChangeSet orderIds) {
-            users.forEach((userId, ignored) -> userIds.add(userId));
-            orders.forEach((orderId, ignored) -> orderIds.add(orderId));
-            removedOrderRoutes.forEach(orderIds::add);
-            reservations.forEach((orderId, reservation) -> {
-                orderIds.add(orderId);
-                if (reservation != null) userIds.add(reservation.userId());
-            });
-            positions.forEach((positionKey, position) -> {
-                if (position != null) userIds.add(position.userId());
-            });
-        }
         void drainTo(int laneId,
                              LanePublishedMap<UserRuntime> targetUsers,
                              LanePublishedMap<OrderRuntime> targetOrders,
@@ -1373,6 +1380,35 @@ public final class TradingRuntimeState implements AutoCloseable {
                              LanePublishedMap<PositionRuntime> targetPositions,
                              LongObjectHashMap<LiquidationRuntime> targetLiquidations,
                              LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots) {
+            drainTo(laneId, targetUsers, targetOrders, targetReservations, targetPositions,
+                    targetLiquidations, targetRiskSnapshots, null, null);
+        }
+
+        void drainTo(int laneId,
+                             LanePublishedMap<UserRuntime> targetUsers,
+                             LanePublishedMap<OrderRuntime> targetOrders,
+                             LanePublishedMap<ReservationRuntime> targetReservations,
+                             LanePublishedMap<PositionRuntime> targetPositions,
+                             LongObjectHashMap<LiquidationRuntime> targetLiquidations,
+                             LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
+                             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+            if (changedUsers != null || changedOrders != null) {
+                users.forEach((userId, ignored) -> {
+                    if (changedUsers != null) changedUsers.add(userId);
+                });
+                orders.forEach((orderId, ignored) -> {
+                    if (changedOrders != null) changedOrders.add(orderId);
+                });
+                reservations.forEach((orderId, reservation) -> {
+                    if (changedOrders != null) changedOrders.add(orderId);
+                    if (changedUsers != null && reservation != null) changedUsers.add(reservation.userId());
+                });
+                positions.forEach((positionKey, position) -> {
+                    if (changedUsers != null && position != null) changedUsers.add(position.userId());
+                });
+                if (changedOrders != null) removedOrderRoutes.forEach(changedOrders::add);
+            }
             users.drainToPublishedMap(targetUsers);
             orders.drainToPublishedMap(targetOrders);
             reservations.drainToPublishedMap(targetReservations);
@@ -1393,6 +1429,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void commitTerminalToOwner(TradingRuntimeState state, int laneId,
                                            TerminalOrderSink terminalOrderSink, long coreSequence) {
+            commitTerminalToOwner(state, laneId, terminalOrderSink, coreSequence, null, null);
+        }
+
+        void commitTerminalToOwner(TradingRuntimeState state, int laneId,
+                                           TerminalOrderSink terminalOrderSink, long coreSequence,
+                                           com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                                           com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
             publishTriggersToOwner(state);
             if (closedTriggerCount != 0) {
                 state.revision = Math.addExact(state.revision, closedTriggerCount);
@@ -1408,9 +1451,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 });
             }
             // 发布时同遍消费账户/冻结缓冲；订单/持仓缓冲保留到下方直接交给Owner。
-            state.applyLanePublication(publication);
+            state.applyLanePublication(publication, changedUsers, changedOrders);
             if (publication == null) {
                 users.drainTo((userId, user) -> {
+                    if (changedUsers != null) changedUsers.add(userId);
                     state.changedUsers.add(userId);
                     putOrRemove(state.publishedUsers, userId, user);
                 });
@@ -1418,6 +1462,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication == null) {
                 terminalOrderCount = 0;
                 orders.forEach((orderId, order) -> {
+                    if (changedOrders != null) changedOrders.add(orderId);
                     if (order != null && order.status().terminal()) recordTerminalOrder(order);
                     putOrRemove(state.publishedOrders, orderId, order);
                 });
@@ -1428,12 +1473,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             if (publication == null) {
                 reservations.drainTo((orderId, reservation) -> {
+                    if (changedOrders != null) changedOrders.add(orderId);
+                    if (changedUsers != null && reservation != null) changedUsers.add(reservation.userId());
                     state.changedReservations.add(orderId);
                     putOrRemove(state.publishedReservations, orderId, reservation);
                 });
             }
             // 已由 Lane 准备发布版本时，publication 已经完成持仓发布。
             if (publication == null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
+                if (changedUsers != null && position != null) changedUsers.add(position.userId());
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
@@ -1451,6 +1499,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication == null) {
                 removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
                 removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
+            }
+            if (changedOrders != null) {
+                removedOrderRoutes.forEach(changedOrders::add);
             }
             if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
             if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
@@ -1990,7 +2041,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
-                changedUsers.add(balances.userId(index));
+                if (changedUsers != null) changedUsers.add(balances.userId(index));
                 markBalancesChanged();
             }
             if (fundsAccumulator != null) changes.appendFundsDelta(1L << laneId, fundsAccumulator);
@@ -2235,6 +2286,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             MatcherSettlementEvent event,
             RuntimeFundsAccumulator fundsAccumulator,
             TerminalOrderSink terminalOrderSink) {
+        return collectMatcherSettlement(event, fundsAccumulator, terminalOrderSink, null, null);
+    }
+
+    /** Collect settlement facts and build response changed IDs during the same Lane traversal. */
+    public RuntimeTreasuryDelta collectMatcherSettlement(
+            MatcherSettlementEvent event,
+            RuntimeFundsAccumulator fundsAccumulator,
+            TerminalOrderSink terminalOrderSink,
+            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
@@ -2255,7 +2316,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             while (remainingLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
-                if (changes == null) flushPublishedChanges(laneId);
+                if (changes == null) flushPublishedChanges(laneId, changedUsers, changedOrders);
                 else {
                     completed += changes.completedPending[laneId];
                     if (fundsAccumulator != null) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
@@ -2265,11 +2326,12 @@ public final class TradingRuntimeState implements AutoCloseable {
                             event.identities().releasePublishedPosition(positions.keyAt(index));
                     }
                     changes.laneDeltas[laneId].commitTerminalToOwner(
-                            this, laneId, terminalOrderSink, event.plan().coreSequence());
+                            this, laneId, terminalOrderSink, event.plan().coreSequence(),
+                            changedUsers, changedOrders);
                     LaneBalancePatches balances = changes.balancePatches[laneId];
                     for (int index = 0; index < balances.size(); index++) {
                         balances.publishAvailableAt(this, index);
-                        changedUsers.add(balances.userId(index));
+                        if (changedUsers != null) changedUsers.add(balances.userId(index));
                         markBalancesChanged();
                     }
                 }
@@ -2365,17 +2427,25 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void collectCancel(LaneCancelEvent event, RuntimeFundsAccumulator fundsAccumulator,
                               TerminalOrderSink terminalOrderSink) {
+        collectCancel(event, fundsAccumulator, terminalOrderSink, null, null);
+    }
+
+    /** Collect cancel facts and changed IDs without a second buffer traversal. */
+    public void collectCancel(LaneCancelEvent event, RuntimeFundsAccumulator fundsAccumulator,
+                              TerminalOrderSink terminalOrderSink,
+                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) throw new IllegalStateException("cancel event is incomplete");
         int laneId = event.laneId();
         MatcherSettlementChanges changes = event.takeChanges();
         try {
             changes.laneDeltas[laneId].commitTerminalToOwner(
-                    this, laneId, terminalOrderSink, event.coreSequence());
+                    this, laneId, terminalOrderSink, event.coreSequence(), changedUsers, changedOrders);
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
-                changedUsers.add(balances.userId(index));
+                if (changedUsers != null) changedUsers.add(balances.userId(index));
                 markBalancesChanged();
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
@@ -4693,18 +4763,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     static void prepareBalanceFundsDelta(LaneBalancePatches patches,
                                                  RuntimeFundsAccumulator accumulator) {
         accumulator.clear();
-        for (int index = 0; index < patches.size(); index++) {
-            long userId = patches.userId(index);
-            int assetId = patches.assetId(index);
-            RuntimeFactFrame.UserBalance before = patches.before(index);
-            RuntimeFactFrame.UserBalance after = patches.after(index);
-            accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
-                    FundsPosting.Subledger.AVAILABLE,
-                    Math.subtractExact(available(after), available(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
-                    FundsPosting.Subledger.LOCKED,
-                    Math.subtractExact(locked(after), locked(before)));
-        }
+        appendBalanceFundsDelta(patches, accumulator);
     }
 
     static void appendBalanceFundsDelta(LaneBalancePatches balances,
@@ -4712,14 +4771,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int index = 0; index < balances.size(); index++) {
             long userId = balances.userId(index);
             int assetId = balances.assetId(index);
-            RuntimeFactFrame.UserBalance before = balances.before(index);
-            RuntimeFactFrame.UserBalance after = balances.after(index);
+            if (!balances.capturedAfter[index]) {
+                throw new IllegalStateException("balance mutation did not publish its lane after-state");
+            }
+            long beforeAvailable = balances.presentBefore[index] ? balances.availableBefore[index] : 0;
+            long beforeLocked = balances.presentBefore[index] ? balances.lockedBefore[index] : 0;
+            long afterAvailable = balances.presentAfter[index] ? balances.availableAfter[index] : 0;
+            long afterLocked = balances.presentAfter[index] ? balances.lockedAfter[index] : 0;
             accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
                     FundsPosting.Subledger.AVAILABLE,
-                    Math.subtractExact(available(after), available(before)));
+                    Math.subtractExact(afterAvailable, beforeAvailable));
             accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
                     FundsPosting.Subledger.LOCKED,
-                    Math.subtractExact(locked(after), locked(before)));
+                    Math.subtractExact(afterLocked, beforeLocked));
         }
     }
 
