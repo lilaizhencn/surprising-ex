@@ -118,13 +118,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public boolean complete() { return completed; }
     RuntimeIdentityRegistry identities() { return identities; }
 
-    /** Copy the Lane's primitive change keys before the Owner consumes and recycles this event. */
-    public void appendChangedIds(
-            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet userIds,
-            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet orderIds) {
-        if (changes != null) changes.appendChangedIds(userIds, orderIds);
-    }
-
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) throw new IllegalStateException("cancel event is incomplete");
         TradingRuntimeState.MatcherSettlementChanges result = changes;

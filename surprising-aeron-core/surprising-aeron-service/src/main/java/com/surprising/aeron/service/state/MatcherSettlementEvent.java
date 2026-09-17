@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -872,15 +871,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         return changes;
     }
 
-    /**
-     * Copies the Lane-owned primitive change keys before the event is collected and recycled.
-     * The Owner uses this instead of re-walking MatcherSettlementPlan orders and looking them up
-     * in the global publication maps.
-     */
-    public void appendChangedIds(PrimitiveLongChangeSet userIds, PrimitiveLongChangeSet orderIds) {
-        if (changes == null) return;
-        changes.appendChangedIds(userIds, orderIds);
-    }
     boolean hasChanges() { return changes != null; }
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         TradingRuntimeState.MatcherSettlementChanges value = changes();
