@@ -262,13 +262,16 @@ final class OrderBatchExecutor {
 
     void dispatchPipelinedPlaceBatchAdmission(
             CommandSlot pending, OrderBatchPending batch) {
+        int shard = batch.decodedCommand == null
+                ? owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst())
+                : batch.decodedCommand.matcherShard(owner.matchingAdapter, batch.preparedSymbols.getFirst());
         batch.placeBatchAdmissionEvent = owner.runtimeState.dispatchPlaceBatchAdmission(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
                 batch.preparedOrders, batch.preparedOpenInterestSteps,
                 batch.preparedLifecycleSettled, batch.preparedFundingInProgress,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
-                batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch,
+                batch.preparedAdmittedReservations, batch.items.size(), shard, owner.identities, batch,
                 batch.clusterTimestamp, batch.clusterPosition);
     }
 

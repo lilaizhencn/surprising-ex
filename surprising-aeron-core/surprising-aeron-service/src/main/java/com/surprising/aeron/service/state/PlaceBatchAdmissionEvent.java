@@ -24,6 +24,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private int itemCount;
     private int admittedCount;
     private int laneId;
+    private int matcherShard;
     private TradingRuntimeState runtime;
     private TradingRuntimeState.MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
@@ -41,7 +42,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
-            ReservationRuntime[] admittedReservations, int itemCount, int laneId,
+            ReservationRuntime[] admittedReservations, int itemCount, int laneId, int matcherShard,
             TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
@@ -52,7 +53,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                 || itemCount > lifecycleSettled.length || itemCount > fundingInProgress.length
                 || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
                 || itemCount > matchingOrders.length || itemCount > admittedOrders.length
-                || itemCount > admittedReservations.length || laneId < 0 || runtime == null || changes == null) {
+                || itemCount > admittedReservations.length || laneId < 0 || matcherShard < 0
+                || runtime == null || matcherShard >= runtime.topology().matchingEngineCount() || changes == null) {
             throw new IllegalArgumentException("invalid place batch admission event");
         }
         this.coreSequence = coreSequence;
@@ -73,6 +75,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.admittedReservations = admittedReservations;
         this.itemCount = itemCount;
         this.laneId = laneId;
+        this.matcherShard = matcherShard;
         this.runtime = runtime;
         this.changes = changes;
         this.identities = identities;
@@ -82,7 +85,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (publication != null) publication.clear();
         rejection = null;
         completed = false;
-        runtime.expectPlaceAdmission(laneId);
         return this;
     }
 
@@ -165,11 +167,9 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         }
         identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         TradingRuntimeState completionRuntime = runtime;
-        int completionLaneId = laneId;
-        long completionSequence = coreSequence;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         completed = true;
-        completionRuntime.publishPlaceAdmissionReady(completionLaneId, completionSequence);
+        completionRuntime.publishPlaceBatchAdmissionReady(matcherShard);
     }
 
     void clear() {
@@ -194,6 +194,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         rejection = null;
         itemCount = 0;
         admittedCount = 0;
+        matcherShard = 0;
     }
 
     public long takeIdentityAllocations() { long count = identityAllocations; identityAllocations = 0; return count; }
@@ -227,7 +228,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         changes.copyBalanceBeforeTo(target);
     }
     TradingRuntimeState.MatcherSettlementChanges discardChanges() {
-        if (!complete()) runtime.releaseAdmissionExpectation(laneId);
         TradingRuntimeState.MatcherSettlementChanges value = changes;
         changes = null;
         completed = true;

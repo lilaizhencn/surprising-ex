@@ -127,8 +127,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     /** 账户 Lane 工作线程与队列；owner 只负责派发和收集。 */
     final SettlementLaneWorker[] laneWorkers;
-    /** 各 Lane 到 owner 的准入完成通知队列。 */
-    final LaneSequenceQueue[] placeAdmissionReadyQueues;
+    /** 批量准入完成的 shard 唤醒位；批上下文本身保存唯一完成事实。 */
+    private final java.util.concurrent.atomic.AtomicLong placeBatchAdmissionReadyShards =
+            new java.util.concurrent.atomic.AtomicLong();
     /** 各 Lane 到 Matcher 的准入回执；每条链路保持严格 SPSC。 */
     final AdmissionReceiptRing[] admissionReceiptRings;
     private final int admissionReceiptMatcherShardCount;
@@ -374,7 +375,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
         this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
-        this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.admissionReceiptMatcherShardCount = topology.matchingEngineCount();
         this.admissionReceiptRings = new AdmissionReceiptRing[
                 Math.multiplyExact(topology.accountLaneCount(), admissionReceiptMatcherShardCount)];
@@ -394,7 +394,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
-            placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             for (int matcherShard = 0; matcherShard < admissionReceiptMatcherShardCount; matcherShard++) {
                 admissionReceiptRings[admissionReceiptIndex(laneId, matcherShard)] =
                         new AdmissionReceiptRing(topology.accountLaneQueueCapacity());
@@ -1896,7 +1895,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
-            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
+            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount,
+            int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
+            long timestamp, long position) {
         assertOwner();
         if (!accountLanesStarted) {
             throw new IllegalStateException("asynchronous place batch admission requires Account Lane workers");
@@ -1910,7 +1911,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, lifecycleSettled, fundingInProgress,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, laneId, this, changes, identities, source, timestamp, position);
+                admittedReservations, itemCount, laneId, matcherShard, this, changes, identities, source,
+                timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -2007,10 +2009,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userBefore != null) lane.users.put(userId, userBefore);
     }
 
-    /** Owner登记的待收通知范围；序号仍由各 Lane 的 SPSC 队列承载。 */
-    private long expectedAdmissionLanes, expectedSettlementLanes;
-    /** Lane 入队后原子置位；Owner 仅在非空时清位，不再轮询每条空队列。 */
-    private final java.util.concurrent.atomic.AtomicLong admissionReadyLanes = new java.util.concurrent.atomic.AtomicLong();
+    /** Owner 登记的 matcher 结算通知范围；其序号仍由各 Lane 的 SPSC 队列承载。 */
+    private long expectedSettlementLanes;
     private final java.util.concurrent.atomic.AtomicLong settlementReadyLanes = new java.util.concurrent.atomic.AtomicLong();
     /**
      * Direct Matcher->Lane settlements do not need an Owner-consumed sequence queue.  The
@@ -2022,22 +2022,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong admissionReceiptReadyLanes =
             new java.util.concurrent.atomic.AtomicLong();
-    private final int[] expectedAdmissions = new int[64], expectedSettlements = new int[64];
-
-    void expectPlaceAdmission(int laneId) {
-        assertOwner();
-        expectedAdmissions[laneId]++;
-        expectedAdmissionLanes |= 1L << laneId;
-    }
-    void releaseAdmissionExpectation(int laneId) {
-        assertOwner();
-        if (expectedAdmissions[laneId] <= 0) throw new IllegalStateException("unexpected admission completion");
-        if (--expectedAdmissions[laneId] == 0) {
-            long bit = 1L << laneId;
-            expectedAdmissionLanes &= ~bit;
-            if ((admissionReadyLanes.get() & bit) != 0) admissionReadyLanes.getAndAccumulate(~bit, CLEAR_READY_BITS);
-        }
-    }
+    private final int[] expectedSettlements = new int[64];
     void releaseSettlementExpectation(int laneId) {
         assertOwner();
         if (expectedSettlements[laneId] <= 0) throw new IllegalStateException("unexpected settlement completion");
@@ -2105,15 +2090,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /** Batch admission retains its legacy Owner notification cursor until batch routing is migrated. */
-    void publishPlaceAdmissionReady(int laneId, long coreSequence) {
-        placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        admissionReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+    void publishPlaceBatchAdmissionReady(int matcherShard) {
+        if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
+            throw new IllegalArgumentException("invalid matcher shard");
+        }
+        placeBatchAdmissionReadyShards.getAndAccumulate(1L << matcherShard, SET_READY_BITS);
         signalOwnerCompletion();
     }
 
-    public long takePlaceAdmissionReadyLaneMask() {
+    public long takePlaceBatchAdmissionReadyShardMask() {
         assertOwner();
-        return takeReadyLaneMask(admissionReadyLanes, placeAdmissionReadyQueues, expectedAdmissionLanes);
+        return placeBatchAdmissionReadyShards.getAndSet(0L);
     }
 
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
@@ -2133,22 +2120,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Owner 只探测本阶段就绪标记；队列仍是实际结果的唯一来源。 */
     public boolean hasPlaceAdmissionNotifications() {
-        return (admissionReadyLanes.get() & expectedAdmissionLanes) != 0;
+        return placeBatchAdmissionReadyShards.get() != 0;
     }
 
     public boolean hasSettlementNotifications() {
         return (settlementReadyLanes.get() & expectedSettlementLanes) != 0
                 || directSettlementReadyLanes.get() != 0;
-    }
-
-    public long pollPlaceAdmissionReady(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= placeAdmissionReadyQueues.length) {
-            throw new IllegalArgumentException("invalid Account Lane id");
-        }
-        long sequence = placeAdmissionReadyQueues[laneId].poll();
-        if (sequence != 0) releaseAdmissionExpectation(laneId);
-        return sequence;
     }
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {

@@ -1810,7 +1810,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 }
                 if (batchAdmission != null) {
                     if (!batchAdmission.complete()) {
-                        placeAdmissionReadyShardMask &= ~shardBit;
+                        // The shard bit is only a wake-up hint. Keep it until the submission
+                        // head's event is complete; a later batch on the same shard may have
+                        // already coalesced into this bit.
                         break;
                     }
                     identities.recordLaneClientAllocations(batchAdmission.takeIdentityAllocations());
@@ -1880,33 +1882,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** Drain completion cursors only to wake the batch dispatcher or ordered commit head. */
     void drainPlaceAdmissionNotifications() {
-        long readyLaneMask = runtimeState.takePlaceAdmissionReadyLaneMask();
-        while (readyLaneMask != 0) {
-            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
-            readyLaneMask &= readyLaneMask - 1;
-            long sequence;
-            while ((sequence = runtimeState.pollPlaceAdmissionReady(laneId)) != 0) {
-                pendingMatching.progressChanged();
-                CommandSlot pending = pendingMatching.get(sequence);
-                OrderBatchPending batch = pending == null ? null : batches.batch(sequence);
-                if (pending == null) {
-                    continue;
-                }
-                if (batch == null || batch.placeBatchAdmissionEvent == null) {
-                    // Ordinary PLACE admissions publish on the dedicated receipt-ready queue.
-                    // This cursor is reserved for the legacy pipelined batch admission path;
-                    // never collect an ordinary event a second time from the wrong queue.
-                    continue;
-                }
-                if (pending.isMatchingSubmitted()
-                        || batch.finishing() || batch.nextIndex >= batch.items.size()) {
-                    // Ordinary PLACE admissions are already submitted to Matcher.  The queue
-                    // entry is only a wake-up cursor; ordered commit reads event.complete().
-                    continue;
-                }
-                placeAdmissionReadyShardMask |= 1L << pendingSubmissionShard(pending);
-            }
-        }
+        placeAdmissionReadyShardMask |= runtimeState.takePlaceBatchAdmissionReadyShardMask();
     }
 
     boolean matchingSubmissionDeferred(long sequence) {
