@@ -156,6 +156,8 @@ CoreMessage / PlaceOrderCommand
 只拥有标记价和风险扫描失效标记，扫描执行仍由风险扫描流程负责。
 `RiskScanExecution` 负责按 Account Lane 分批推进风险扫描，并物化风险快照和强平计划；Reducer
 只保留风险扫描公开入口及标记价变更后的调用顺序。
+`LiquidationExecution` 只负责撤单游标、强平执行校验，以及强平执行时的余额、持仓、手续费和
+强平状态变更；保险基金决议和 ADL 仍由各自的生命周期入口负责。
 
 ## 4. 第一阶段不做的事情
 

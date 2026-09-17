@@ -39,5 +39,8 @@
  *
  * <p>{@code RiskScanExecution} 负责按 Account Lane 分批推进风险扫描，并物化风险快照和强平计划；
  * {@code TradingCoreReducer} 只保留风险扫描公开入口及标记价变更后的调用顺序。</p>
+ *
+ * <p>{@code LiquidationExecution} 只负责撤单游标、强平执行校验，以及强平执行时的余额、持仓、
+ * 手续费和强平状态变更；保险基金决议和 ADL 仍由各自的生命周期入口负责。</p>
  */
 package com.surprising.aeron.service.state;
