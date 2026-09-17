@@ -54,8 +54,8 @@ public final class CoreProtocol {
         putLong(destination, cursor, response.appliedCommandCount()); cursor += Long.BYTES;
         putLong(destination, cursor, response.requiredExportSequence()); cursor += Long.BYTES;
         putLong(destination, cursor, response.stateHash()); cursor += Long.BYTES;
-        putInt(destination, cursor, data.length); cursor += Integer.BYTES;
-        System.arraycopy(data, 0, destination, cursor, data.length);
+        putInt(destination, cursor, response.dataLength()); cursor += Integer.BYTES;
+        System.arraycopy(data, response.dataOffsetUnsafe(), destination, cursor, response.dataLength());
         return length;
     }
 

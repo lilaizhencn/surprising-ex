@@ -26,6 +26,7 @@ final class CommandResultLedger {
     /** Retention order; eviction advances this queue instead of scanning the hash table. */
     private final int[] retentionSlots = new int[RETENTION_CAPACITY];
     private final int[] retentionPositions = new int[TABLE_CAPACITY];
+    private final ResponseArena responseArena;
     private int retentionHead;
     private int retentionTail;
     private int size;
@@ -35,6 +36,11 @@ final class CommandResultLedger {
     private long nextResultRetentionSequence;
 
     CommandResultLedger(LinkedHashMap<UUID, StoredResult> results) {
+        this(results, null);
+    }
+
+    CommandResultLedger(LinkedHashMap<UUID, StoredResult> results, ResponseArena responseArena) {
+        this.responseArena = responseArena;
         java.util.Arrays.fill(retentionPositions, -1);
         if (results == null || results.size() > MAX_IDEMPOTENCY_RESULTS) {
             throw new IllegalArgumentException("invalid result ledger");
@@ -62,9 +68,10 @@ final class CommandResultLedger {
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash,
                     EMPTY_RESPONSE_DATA);
         }
-        return new CoreResponse(ResponseStatus.DUPLICATE,
+        return CoreResponse.owned(ResponseStatus.DUPLICATE,
                 duplicate.status(), duplicate.resultCode(), duplicate.appliedCommandCount(),
-                duplicate.requiredExportSequence(), duplicate.stateHash(), duplicate.responseDataUnsafe());
+                duplicate.requiredExportSequence(), duplicate.stateHash(), duplicate.responseDataUnsafe(),
+                duplicate.responseDataOffsetUnsafe(), duplicate.responseDataLength());
     }
 
     /** Snapshot-only materialization; no Map node is created on the command hot path. */
@@ -86,7 +93,7 @@ final class CommandResultLedger {
     }
 
     static long resultEntryBytes(StoredResult result) {
-        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataUnsafe().length);
+        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataLength());
     }
 
     static long computeResultEntryDigest(UUID commandId, StoredResult result) {
@@ -101,8 +108,10 @@ final class CommandResultLedger {
         digest = mix(digest, result.appliedCommandCount());
         digest = mix(digest, result.requiredExportSequence());
         digest = mix(digest, result.retentionSequence());
-        for (byte value : result.responseDataUnsafe()) {
-            digest = mix(digest, Byte.toUnsignedInt(value));
+        byte[] response = result.responseDataUnsafe();
+        int end = result.responseDataOffsetUnsafe() + result.responseDataLength();
+        for (int index = result.responseDataOffsetUnsafe(); index < end; index++) {
+            digest = mix(digest, Byte.toUnsignedInt(response[index]));
         }
         return digest;
     }
@@ -135,16 +144,34 @@ final class CommandResultLedger {
 
     void storeResult(UUID commandId, StoredResult result) {
         storeOwnedResult(commandId, result.fingerprint, result.status, result.resultCode,
-                result.appliedCommandCount, result.requiredExportSequence, result.stateHash, result.responseData);
+                result.appliedCommandCount, result.requiredExportSequence, result.stateHash,
+                result.responseData, result.responseOffset, result.responseLength);
     }
 
     /** 在保留序号确定之后只构造一次不可变结果；调用方转移响应字节所有权。 */
     void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
                           CoreResultCode resultCode, long appliedCommandCount, long requiredExportSequence,
                           long stateHash, byte[] responseData) {
-        java.util.Objects.requireNonNull(commandId, "command id");
-        long resultBytes = Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH,
+        storeOwnedResult(commandId, fingerprint, status, resultCode, appliedCommandCount,
+                requiredExportSequence, stateHash, responseData, 0,
                 responseData == null ? 0 : responseData.length);
+    }
+
+    /** Stores a stable response slice without copying arena-backed storage. */
+    void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
+                          CoreResultCode resultCode, long appliedCommandCount, long requiredExportSequence,
+                          long stateHash, byte[] responseData, int responseOffset, int responseLength) {
+        java.util.Objects.requireNonNull(commandId, "command id");
+        if (responseData == null) {
+            responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+            responseOffset = 0;
+            responseLength = 0;
+        } else if (responseOffset < 0 || responseLength < 0
+                || responseOffset > responseData.length - responseLength) {
+            throw new IllegalArgumentException("invalid result response slice");
+        }
+        long resultBytes = Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH,
+                responseLength);
         if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
             throw new IllegalArgumentException("result ledger entry exceeds byte bound");
         }
@@ -152,7 +179,8 @@ final class CommandResultLedger {
         StoredResult previous = results[slot];
         long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
         StoredResult retained = new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, responseData, retentionSequence, true);
+                requiredExportSequence, stateHash, responseData, responseOffset, responseLength,
+                retentionSequence, true);
         long nextSequence = previous == null ? Math.incrementExact(nextResultRetentionSequence)
                 : nextResultRetentionSequence;
         long nextBytes = Math.addExact(commandResultBytes - (previous == null ? 0 : resultEntryBytes(previous)),
@@ -162,6 +190,8 @@ final class CommandResultLedger {
             commandIdLeast[slot] = commandId.getLeastSignificantBits();
             enqueueRetentionSlot(slot);
             size++;
+        } else if (responseArena != null && previous.responseDataUnsafe() != responseData) {
+            responseArena.release(previous.responseDataUnsafe());
         }
         results[slot] = retained;
         nextResultRetentionSequence = nextSequence;
@@ -207,6 +237,9 @@ final class CommandResultLedger {
     }
 
     private void remove(int slot) {
+        if (responseArena != null && results[slot] != null) {
+            responseArena.release(results[slot].responseDataUnsafe());
+        }
         int position = retentionPositions[slot];
         retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;
         retentionPositions[slot] = -1;
@@ -283,6 +316,9 @@ final class CommandResultLedger {
         final long stateHash;
         /** 已保留的协议响应字节；所有权转移或复制后保存。 */
         final byte[] responseData;
+        /** Offset and logical length for an arena-backed response slice. */
+        final int responseOffset;
+        final int responseLength;
         /** 本结果的保留顺序，替换内容不会重新排到队尾。 */
         final long retentionSequence;
         /** 缓存摘要所对应的命令 ID。 */
@@ -298,10 +334,22 @@ final class CommandResultLedger {
         }
 
         StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
-                             long appliedCommandCount, long requiredExportSequence, long stateHash,
-                             byte[] responseData, long retentionSequence, boolean ownedResponseData) {
+                     long appliedCommandCount, long requiredExportSequence, long stateHash,
+                     byte[] responseData, long retentionSequence, boolean ownedResponseData) {
+            this(fingerprint, status, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
+                    responseData, 0, responseData == null ? 0 : responseData.length, retentionSequence,
+                    ownedResponseData);
+        }
+
+        StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
+                     long appliedCommandCount, long requiredExportSequence, long stateHash,
+                     byte[] responseData, int responseOffset, int responseLength,
+                     long retentionSequence, boolean ownedResponseData) {
             if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
-                    || requiredExportSequence < 0 || retentionSequence < 0) {
+                    || requiredExportSequence < 0 || retentionSequence < 0 || responseOffset < 0
+                    || responseLength < 0 || responseData == null
+                    && (responseOffset != 0 || responseLength != 0) || responseData != null
+                    && responseOffset > responseData.length - responseLength) {
                 throw new IllegalArgumentException("invalid stored result");
             }
             this.fingerprint = fingerprint;
@@ -312,8 +360,20 @@ final class CommandResultLedger {
             this.stateHash = stateHash;
             byte[] normalized = responseData == null ? TradingCoreRuntime.EMPTY_RESPONSE_DATA : responseData;
             // The shared empty payload is immutable, so it does not need a defensive clone.
-            this.responseData = ownedResponseData || normalized == TradingCoreRuntime.EMPTY_RESPONSE_DATA
-                    ? normalized : normalized.clone();
+            if (normalized == TradingCoreRuntime.EMPTY_RESPONSE_DATA || responseLength == 0) {
+                this.responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+                this.responseOffset = 0;
+                this.responseLength = 0;
+            } else if (ownedResponseData) {
+                this.responseData = normalized;
+                this.responseOffset = responseOffset;
+                this.responseLength = responseLength;
+            } else {
+                this.responseData = java.util.Arrays.copyOfRange(normalized, responseOffset,
+                        responseOffset + responseLength);
+                this.responseOffset = 0;
+                this.responseLength = responseLength;
+            }
             this.retentionSequence = retentionSequence;
         }
 
@@ -326,7 +386,8 @@ final class CommandResultLedger {
 
         StoredResult withRetentionSequence(long sequence) {
             return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                    requiredExportSequence, stateHash, responseData, sequence, true);
+                    requiredExportSequence, stateHash, responseData, responseOffset, responseLength,
+                    sequence, true);
         }
 
         CommandFingerprint fingerprint() { return fingerprint; }
@@ -350,8 +411,12 @@ final class CommandResultLedger {
             return responseData;
         }
 
+        int responseDataOffsetUnsafe() { return responseOffset; }
+        int responseDataLength() { return responseLength; }
+
         public byte[] responseData() {
-            return responseData.clone();
+            return responseLength == 0 ? TradingCoreRuntime.EMPTY_RESPONSE_DATA
+                    : java.util.Arrays.copyOfRange(responseData, responseOffset, responseOffset + responseLength);
         }
 
         @Override
@@ -365,14 +430,25 @@ final class CommandResultLedger {
                     && fingerprint.equals(result.fingerprint)
                     && status == result.status
                     && resultCode == result.resultCode
-                    && java.util.Arrays.equals(responseData, result.responseData);
+                    && responseBytesEqual(result);
         }
 
         @Override
         public int hashCode() {
             int hash = java.util.Objects.hash(fingerprint, status, resultCode, appliedCommandCount,
                     requiredExportSequence, stateHash, retentionSequence);
-            return 31 * hash + java.util.Arrays.hashCode(responseData);
+            int responseHash = 1;
+            for (int index = responseOffset; index < responseOffset + responseLength; index++)
+                responseHash = 31 * responseHash + responseData[index];
+            return 31 * hash + responseHash;
+        }
+
+        private boolean responseBytesEqual(StoredResult other) {
+            if (responseLength != other.responseLength) return false;
+            for (int index = 0; index < responseLength; index++) {
+                if (responseData[responseOffset + index] != other.responseData[other.responseOffset + index]) return false;
+            }
+            return true;
         }
     }
 }

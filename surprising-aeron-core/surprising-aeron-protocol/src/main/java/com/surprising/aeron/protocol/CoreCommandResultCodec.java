@@ -27,7 +27,17 @@ public final class CoreCommandResultCodec {
     public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
                                 List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions) {
-        if (commandId == null || orders == null || executions == null) {
+        int length = encodedLength(orders, executions);
+        byte[] result = new byte[length];
+        encodeInto(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
+                matcherPrefixBefore, matcherPrefixAfter, orders, executions, result, 0);
+        return result;
+    }
+
+    /** Returns the exact payload length without allocating an output array. */
+    public static int encodedLength(List<? extends CoreOrderStateSource> orders,
+                                    List<CoreExecutionView> executions) {
+        if (orders == null || executions == null) {
             throw new IllegalArgumentException("command result fields are required");
         }
         if (orders.size() > MAX_ITEMS || executions.size() > MAX_ITEMS) {
@@ -39,8 +49,26 @@ public final class CoreCommandResultCodec {
         }
         int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
         length = Math.addExact(length, Integer.BYTES);
-        length = Math.addExact(length, Math.multiplyExact(executions.size(), EXECUTION_LENGTH));
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        return Math.addExact(length, Math.multiplyExact(executions.size(), EXECUTION_LENGTH));
+    }
+
+    /** Writes a result into caller-owned storage and returns the number of bytes written. */
+    public static int encodeInto(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
+                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
+                                 List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions,
+                                 byte[] destination, int offset) {
+        if (commandId == null || destination == null || offset < 0) {
+            throw new IllegalArgumentException("command result fields are required");
+        }
+        int length = encodedLength(orders, executions);
+        if (offset > destination.length - length) {
+            throw new IllegalArgumentException("command result destination is too small");
+        }
+        int ordersLength = Integer.BYTES * 2;
+        for (CoreOrderStateSource order : orders) {
+            ordersLength = Math.addExact(ordersLength, CoreStateQueryCodec.encodedOrderStateLength(order));
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
         buffer.putLong(coreSequence);
         buffer.putLong(commandId.getMostSignificantBits());
@@ -62,7 +90,7 @@ public final class CoreCommandResultCodec {
                 .putLong(execution.makerUserId())
                 .putLong(execution.priceTicks())
                 .putLong(execution.quantitySteps()));
-        return buffer.array();
+        return length;
     }
 
     /**
@@ -73,14 +101,35 @@ public final class CoreCommandResultCodec {
                                            long instrumentChangeId, long matcherSequence,
                                            long matcherPrefixBefore, long matcherPrefixAfter,
                                            CoreOrderStateSource order) {
-        if (commandId == null || order == null) {
-            throw new IllegalArgumentException("command result fields are required");
-        }
+        int length = encodedSingleOrderLength(order);
+        byte[] result = new byte[length];
+        encodeSingleOrderInto(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
+                matcherPrefixBefore, matcherPrefixAfter, order, result, 0);
+        return result;
+    }
+
+    public static int encodedSingleOrderLength(CoreOrderStateSource order) {
+        if (order == null) throw new IllegalArgumentException("command result order is required");
         int orderStateLength = CoreStateQueryCodec.encodedOrderStateLength(order);
         int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
         int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
-        length = Math.addExact(length, Integer.BYTES);
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        return Math.addExact(length, Integer.BYTES);
+    }
+
+    public static int encodeSingleOrderInto(long coreSequence, UUID commandId, long orderId,
+                                            long instrumentChangeId, long matcherSequence,
+                                            long matcherPrefixBefore, long matcherPrefixAfter,
+                                            CoreOrderStateSource order, byte[] destination, int offset) {
+        if (commandId == null || order == null || destination == null || offset < 0) {
+            throw new IllegalArgumentException("command result fields are required");
+        }
+        int length = encodedSingleOrderLength(order);
+        if (offset > destination.length - length) {
+            throw new IllegalArgumentException("command result destination is too small");
+        }
+        int orderStateLength = CoreStateQueryCodec.encodedOrderStateLength(order);
+        int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
+        ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
         buffer.putLong(coreSequence);
         buffer.putLong(commandId.getMostSignificantBits());
@@ -95,7 +144,7 @@ public final class CoreCommandResultCodec {
         buffer.putInt(1);
         CoreStateQueryCodec.writeOrderState(buffer, order);
         buffer.putInt(0);
-        return buffer.array();
+        return length;
     }
 
     public static CoreCommandResultView decode(byte[] encoded) {

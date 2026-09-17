@@ -10,6 +10,8 @@ public final class CoreResponse {
     private final long requiredExportSequence;
     private final long stateHash;
     private final byte[] data;
+    private final int dataOffset;
+    private final int dataLength;
 
     private static final byte[] EMPTY_DATA = new byte[0];
 
@@ -22,9 +24,19 @@ public final class CoreResponse {
     private CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                          int routeVersion, long committedCoreSequence, long appliedCommandCount,
                          long requiredExportSequence, long stateHash, byte[] data, boolean ownedData) {
+        this(status, commandStatus, resultCode, routeVersion, committedCoreSequence, appliedCommandCount,
+                requiredExportSequence, stateHash, data, 0, data == null ? 0 : data.length, ownedData);
+    }
+
+    private CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
+                         int routeVersion, long committedCoreSequence, long appliedCommandCount,
+                         long requiredExportSequence, long stateHash, byte[] data,
+                         int dataOffset, int dataLength, boolean ownedData) {
         if (status == null || commandStatus == null || resultCode == null
                 || routeVersion != CoreRoute.DEFAULT.version() || committedCoreSequence < 0
-                || appliedCommandCount < 0 || requiredExportSequence < 0) {
+                || appliedCommandCount < 0 || requiredExportSequence < 0 || dataOffset < 0
+                || dataLength < 0 || data == null && (dataOffset != 0 || dataLength != 0)
+                || data != null && dataOffset > data.length - dataLength) {
             throw new IllegalArgumentException("invalid core response");
         }
         this.status = status;
@@ -35,7 +47,23 @@ public final class CoreResponse {
         this.appliedCommandCount = appliedCommandCount;
         this.requiredExportSequence = requiredExportSequence;
         this.stateHash = stateHash;
-        this.data = data == null || data.length == 0 ? EMPTY_DATA : (ownedData ? data : data.clone());
+        if (data == null || dataLength == 0) {
+            this.data = EMPTY_DATA;
+            this.dataOffset = 0;
+            this.dataLength = 0;
+        } else if (ownedData && dataOffset == 0 && dataLength == data.length) {
+            this.data = data;
+            this.dataOffset = 0;
+            this.dataLength = dataLength;
+        } else if (ownedData) {
+            this.data = data;
+            this.dataOffset = dataOffset;
+            this.dataLength = dataLength;
+        } else {
+            this.data = java.util.Arrays.copyOfRange(data, dataOffset, dataOffset + dataLength);
+            this.dataOffset = 0;
+            this.dataLength = dataLength;
+        }
     }
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
@@ -81,12 +109,12 @@ public final class CoreResponse {
 
     public CoreResponse withCommittedCoreSequence(long sequence) {
         return new CoreResponse(status, commandStatus, resultCode, routeVersion, sequence,
-                appliedCommandCount, requiredExportSequence, stateHash, data, true);
+                appliedCommandCount, requiredExportSequence, stateHash, data, dataOffset, dataLength, true);
     }
 
     /* Public reads never expose storage transferred by the encoder. */
     public byte[] data() {
-        return data.length == 0 ? EMPTY_DATA : data.clone();
+        return dataLength == 0 ? EMPTY_DATA : java.util.Arrays.copyOfRange(data, dataOffset, dataOffset + dataLength);
     }
 
     /**
@@ -99,6 +127,16 @@ public final class CoreResponse {
                                      long requiredExportSequence, long stateHash, byte[] data) {
         return new CoreResponse(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(),
                 appliedCommandCount, appliedCommandCount, requiredExportSequence, stateHash, data, true);
+    }
+
+    /** Transfers a bounded slice of stable storage without copying it. */
+    public static CoreResponse owned(ResponseStatus status, ResponseStatus commandStatus,
+                                     CoreResultCode resultCode, long appliedCommandCount,
+                                     long requiredExportSequence, long stateHash,
+                                     byte[] data, int offset, int length) {
+        return new CoreResponse(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(),
+                appliedCommandCount, appliedCommandCount, requiredExportSequence, stateHash,
+                data, offset, length, true);
     }
 
     static CoreResponse decoded(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
@@ -156,10 +194,14 @@ public final class CoreResponse {
     }
 
     int dataLength() {
-        return data.length;
+        return dataLength;
     }
 
     byte[] dataUnsafe() {
         return data;
+    }
+
+    int dataOffsetUnsafe() {
+        return dataOffset;
     }
 }

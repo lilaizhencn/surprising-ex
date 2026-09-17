@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.5a 已完成，进入阶段 8.5b**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.5b 已完成，进入阶段 8.6**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -392,3 +392,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.5a：已完成。触发订单单项响应新增直接单项编码，批量触发编码复用同一 writer，删除 singleton List、嵌套状态 byte[] 和重复 writer；结果账本仍接收独立响应字节，幂等、snapshot/replay 和客户端顺序不变。
 - 阶段 8.5a 验收：JDK 27 下协议模块和服务模块全量回归通过，服务 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
 - 阶段 8.5b：待完成。为普通 `CoreCommandResultCodec` 建立有界响应 slab/descriptor，并让结果账本和 session response 共享所有权；只有确认槽位生命周期、snapshot/replay 和超大响应回退后才替换当前 byte[]。
+- 阶段 8.5b：已完成。普通 `CoreCommandResultCodec` 新增外部目标编码；Owner 通过有界 `ResponseArena` 获取稳定 slab，并以 `offset/length` 描述符交给 `CoreResponse` 与 `CommandResultLedger`。账本淘汰时归还 arena 槽位；快照恢复数组、超出 64KiB 的响应和槽位耗尽时使用独立精确数组回退。旧 byte[] 接口、幂等 retention、snapshot/replay 和批量响应语义保持兼容。
+- 阶段 8.5b 验收：JDK 27 下协议模块 `111 tests, 0 failures, 0 errors, 0 skipped`；服务模块 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、响应切片编码、结果账本淘汰/恢复和全量服务回归通过。未执行吞吐压测。
+- 阶段 8.6（普通撮合提交闭包收敛）：待完成。移除 `submitMatching()` 为普通 PLACE admission 创建的每命令捕获式 Matcher 包装，改用 `CommandSlot` 固定提交描述；保持 admission receipt、Matcher 证据、跨 Lane 路由和失败重放语义不变。

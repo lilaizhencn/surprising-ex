@@ -38,8 +38,17 @@ final class CommandResultBuilder {
     private static final byte[] EMPTY_RESULT = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
+    private final ResponseArena responseArena;
+    /** Current encoded payload storage; arena slices carry an explicit logical length. */
+    private byte[] responseStorage = EMPTY_RESULT;
+    private int responseOffset;
+    private int responseLength;
 
-    CommandResultBuilder(TradingCoreRuntime owner) { this.owner = owner; }
+    CommandResultBuilder(TradingCoreRuntime owner) {
+        this.owner = owner;
+        this.responseArena = owner == null ? new ResponseArena(1, ResponseArena.DEFAULT_SLOT_BYTES)
+                : owner.responseArena;
+    }
 
     /** 当前命令需要返回的订单视图，仅响应边界物化。 */
     List<CoreOrderStateView> commandOrderViews = List.of();
@@ -58,6 +67,7 @@ final class CommandResultBuilder {
 
     /** Start a command with the reusable result workspace in its empty state. */
     void beginCommand() {
+        discardResponseStorage();
         clearOrderViews();
         commandChangedUserIds = List.of();
         commandChangedOrderIds = List.of();
@@ -361,32 +371,32 @@ final class CommandResultBuilder {
             CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
         if (commandRiskScanControl != null) {
-            return CoreRiskScanControlCodec.encodeView(commandRiskScanControl);
+            return setResponse(CoreRiskScanControlCodec.encodeView(commandRiskScanControl));
         }
         if (commandFundingProgress != null) {
-            return CoreFundingProgressCodec.encode(commandFundingProgress);
+            return setResponse(CoreFundingProgressCodec.encode(commandFundingProgress));
         }
         if (commandLiquidationProgress != null) {
-            return CoreLiquidationProgressCodec.encode(commandLiquidationProgress);
+            return setResponse(CoreLiquidationProgressCodec.encode(commandLiquidationProgress));
         }
         if (commandLiquidationBatchResult != null) {
-            return CoreLiquidationBatchResultCodec.encode(commandLiquidationBatchResult);
+            return setResponse(CoreLiquidationBatchResultCodec.encode(commandLiquidationBatchResult));
         }
         if (commandSettlementProgress != null) {
-            return CoreSettlementProgressCodec.encode(commandSettlementProgress);
+            return setResponse(CoreSettlementProgressCodec.encode(commandSettlementProgress));
         }
         if (commandTriggerOrderView != null) {
-            return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeSingle(commandTriggerOrderView);
+            return setResponse(com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeSingle(commandTriggerOrderView));
         }
         if (pending != null) {
             byte[] prepared = pending.lanePreparedResponse();
-            if (prepared != null) return prepared;
+            if (prepared != null) return setResponse(prepared);
         }
         if (commandSingleOrder == null && commandOrderViews.isEmpty() && commandOrderSources.isEmpty()) {
-            return EMPTY_RESULT;
+            return setResponse(EMPTY_RESULT);
         }
         if (pending == null || matchingResult == null) {
-            return EMPTY_RESULT;
+            return setResponse(EMPTY_RESULT);
         }
         var nativeCommand = matchingResult.nativeCommand();
         var matcherPrefix = matchingResult.matcherPrefix();
@@ -394,36 +404,85 @@ final class CommandResultBuilder {
                 || !nativeCommand.matches(pending.command().header().commandId())
                 || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
                 || nativeCommand.matcherSequence() <= 0 || !matcherPrefix.bound()) {
-            return EMPTY_RESULT;
+            return setResponse(EMPTY_RESULT);
         }
         try {
             if (commandSingleOrder != null) {
                 commandSingleOrderSource.set(commandSingleOrder, owner.runtimeOrderSymbol(commandSingleOrder));
-                return CoreCommandResultCodec.encodeSingleOrder(
+                int length = CoreCommandResultCodec.encodedSingleOrderLength(commandSingleOrderSource);
+                byte[] destination = prepareResponseStorage(length);
+                responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandSingleOrderSource);
+                        matcherPrefix.before(), matcherPrefix.after(), commandSingleOrderSource,
+                        destination, responseOffset);
+                return destination;
             }
             if (commandOrderViews.size() == 1) {
-                return CoreCommandResultCodec.encodeSingleOrder(
+                int length = CoreCommandResultCodec.encodedSingleOrderLength(commandOrderViews.get(0));
+                byte[] destination = prepareResponseStorage(length);
+                responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandOrderViews.get(0));
+                        matcherPrefix.before(), matcherPrefix.after(), commandOrderViews.get(0),
+                        destination, responseOffset);
+                return destination;
             }
             if (!commandOrderSources.isEmpty()) {
-                return CoreCommandResultCodec.encode(
+                int length = CoreCommandResultCodec.encodedLength(commandOrderSources, List.of());
+                byte[] destination = prepareResponseStorage(length);
+                responseLength = CoreCommandResultCodec.encodeInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandOrderSources, List.of());
+                        matcherPrefix.before(), matcherPrefix.after(), commandOrderSources, List.of(),
+                        destination, responseOffset);
+                return destination;
             }
-            return CoreCommandResultCodec.encode(
+            int length = CoreCommandResultCodec.encodedLength(commandOrderViews, List.of());
+            byte[] destination = prepareResponseStorage(length);
+            responseLength = CoreCommandResultCodec.encodeInto(
                     pending.sequence(), pending.command().header().commandId(),
                     nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                    matcherPrefix.before(), matcherPrefix.after(), commandOrderViews, List.of());
+                    matcherPrefix.before(), matcherPrefix.after(), commandOrderViews, List.of(),
+                    destination, responseOffset);
+            return destination;
         } catch (IllegalArgumentException exception) {
-            return EMPTY_RESULT;
+            return setResponse(EMPTY_RESULT);
         }
     }
+
+    private byte[] setResponse(byte[] response) {
+        discardResponseStorage();
+        responseStorage = response == null ? EMPTY_RESULT : response;
+        responseOffset = 0;
+        responseLength = responseStorage.length;
+        return responseStorage;
+    }
+
+    private byte[] prepareResponseStorage(int length) {
+        discardResponseStorage();
+        responseOffset = 0;
+        responseLength = length;
+        responseStorage = responseArena.acquire(length);
+        return responseStorage;
+    }
+
+    private void discardResponseStorage() {
+        if (responseStorage != EMPTY_RESULT) responseArena.release(responseStorage);
+        responseStorage = EMPTY_RESULT;
+        responseOffset = 0;
+        responseLength = 0;
+    }
+
+    /** The ledger takes over the current stable storage after a successful store. */
+    void transferResponseOwnership() {
+        responseStorage = EMPTY_RESULT;
+        responseOffset = 0;
+        responseLength = 0;
+    }
+
+    int responseDataOffset() { return responseOffset; }
+    int responseDataLength() { return responseLength; }
 
     /** Fixed-size owner list backed by reusable OrderRuntime source adapters. */
     private static final class OrderSourceList extends AbstractList<CoreOrderStateSource> implements RandomAccess {

@@ -470,13 +470,20 @@ final class OrderedCommitCoordinator {
         owner.cachedBusinessStateHash = businessStateHash;
         long stateHash = owner.stateHash(businessStateHash, pending.command().header().commandId(),
                 status, resultCode, applied);
-        byte[] responseData = pending.resultData == null
+        boolean builderEncoded = pending.resultData == null;
+        byte[] responseData = builderEncoded
                 ? owner.resultBuilder.commandResultData(pending, matchingResult) : pending.resultData;
+        int responseOffset = builderEncoded ? owner.resultBuilder.responseDataOffset() : 0;
+        int responseLength = builderEncoded ? owner.resultBuilder.responseDataLength() : responseData.length;
         pending.resultData = null;
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, owner.resultBuilder.commandTradeCount);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
-                status, resultCode, applied, requiredExportSequence, stateHash, responseData);
-        return CoreResponse.owned(status, status, resultCode, applied, requiredExportSequence, stateHash, responseData);
+                status, resultCode, applied, requiredExportSequence, stateHash, responseData,
+                responseOffset, responseLength);
+        CoreResponse response = CoreResponse.owned(status, status, resultCode, applied, requiredExportSequence,
+                stateHash, responseData, responseOffset, responseLength);
+        if (builderEncoded) owner.resultBuilder.transferResponseOwnership();
+        return response;
     }
 
     private CoreResponse finishAppliedMatching(CommandSlot pending, CoreMatchingResult matchingResult,

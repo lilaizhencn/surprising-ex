@@ -164,6 +164,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
             positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
             new TriggerCommandDispatcher(triggers));
 
+    /** Common matching responses use bounded stable slabs; ledger eviction returns their slots. */
+    final ResponseArena responseArena = new ResponseArena();
+
     /** 当前命令的结果与变更 ID；owner 串行复用，在命令完成边界编码。 */
     final CommandResultBuilder resultBuilder = new CommandResultBuilder(this);
 
@@ -487,7 +490,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.appliedCommandCount = appliedCommandCount;
         this.committedCoreSequence = appliedCommandCount;
         this.probeValue = probeValue;
-        this.resultLedger = new CommandResultLedger(commandResults);
+        this.resultLedger = new CommandResultLedger(commandResults, responseArena);
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
         admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
         snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
@@ -848,9 +851,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, appliedCommandCount,
                             0, cachedBusinessStateHash, EMPTY_RESPONSE_DATA);
                 }
-                return new CoreResponse(ResponseStatus.OK, result.status(), result.resultCode(),
+                return CoreResponse.owned(ResponseStatus.OK, result.status(), result.resultCode(),
                         result.appliedCommandCount(), result.requiredExportSequence(), result.stateHash(),
-                        result.responseDataUnsafe());
+                        result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -1317,10 +1320,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
         long stateHash = stateHash(businessStateHash, message.header().commandId(), status, resultCode,
                 appliedCommandCount);
         byte[] responseData = resultBuilder.commandResultData();
+        int responseOffset = resultBuilder.responseDataOffset();
+        int responseLength = resultBuilder.responseDataLength();
         resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
-                appliedCommandCount, requiredExportSequence, stateHash, responseData);
+                appliedCommandCount, requiredExportSequence, stateHash, responseData,
+                responseOffset, responseLength);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, responseData);
+                requiredExportSequence, stateHash, responseData,
+                responseOffset, responseLength);
+        resultBuilder.transferResponseOwnership();
         return finishDirectContext(response);
     }
 
