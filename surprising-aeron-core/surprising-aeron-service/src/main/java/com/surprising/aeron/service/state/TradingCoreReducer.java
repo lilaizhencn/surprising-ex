@@ -141,36 +141,7 @@ public final class TradingCoreReducer {
 
     public java.util.List<com.surprising.aeron.protocol.CoreRiskSnapshotView> riskSnapshots(
             TradingCoreState state, long userId, java.util.Set<String> snapshotKeys) {
-        return snapshotKeys.stream()
-                .map(state.riskState().snapshots()::get)
-                .filter(java.util.Objects::nonNull)
-                .filter(risk -> userId == 0 || risk.userId() == userId)
-                .filter(risk -> {
-                    CoreUserState user = state.user(risk.userId());
-                    CorePositionState position = user.positions()
-                            .get(positionKey(risk.symbol(), risk.positionSide()));
-                    return position != null && position.signedQuantitySteps() != 0;
-                })
-                .map(risk -> {
-                    CoreUserState user = state.user(risk.userId());
-                    CorePositionState position = user.positions().get(positionKey(risk.symbol(), risk.positionSide()));
-                    CoreInstrumentState instrument = state.instruments().get(risk.symbol());
-                    CoreMarkPriceState mark = state.riskState().markPrices().get(risk.symbol());
-                    if (position == null || instrument == null || mark == null) {
-                        throw new IllegalStateException("risk snapshot source state is missing");
-                    }
-                    long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
-                            instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
-                            instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
-                            instrument.settleScaleUnits());
-                    long walletBalance = crossWalletBalance(state, user, instrument.settleAsset());
-                    return new com.surprising.aeron.protocol.CoreRiskSnapshotView(risk.userId(), risk.symbol(),
-                            position.marginMode(), risk.positionSide(), position.instrumentChangeId(),
-                            instrument.settleAsset(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                            mark.markPriceTicks(), notional, position.positionMarginUnits(), risk.priceSequence(), walletBalance,
-                            risk.equityUnits(), risk.unrealizedPnlUnits(), risk.maintenanceMarginUnits(),
-                            risk.marginRatioPpm(), risk.status().name());
-                }).toList();
+        return RiskSnapshotQueries.find(state, userId, snapshotKeys);
     }
 
     private static final long PPM = 1_000_000L;
@@ -684,21 +655,7 @@ public final class TradingCoreReducer {
     public TradingCoreState updateRiskScanControl(TradingCoreState state,
                                                   UpdateRiskScanControlCommand command,
                                                   long updatedAtEpochMillis) {
-        CoreRiskScanControlView current = state.riskState().scanControl();
-        if (command.expectedVersion() != current.version()) {
-            throw new CoreStateRejectedException("STALE_RISK_SCAN_CONTROL_VERSION",
-                    "risk scan control version does not match");
-        }
-        CoreRiskScanControlView updated = new CoreRiskScanControlView(
-                Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
-                command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),
-                Math.max(0, updatedAtEpochMillis));
-        CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                state.riskState().liquidations(), state.riskState().scans(),
-                state.riskState().nextLiquidationId(), updated, state.riskState().marketRevision());
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(), state.instruments(), risk, state.treasuryState(), state.leverages(),
-                state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
+        return RiskScanControlStateTransitions.update(state, command, updatedAtEpochMillis);
     }
 
     private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
@@ -873,25 +830,6 @@ public final class TradingCoreReducer {
 
     private CoreRiskStatus riskStatus(long ratio) {
         return CoreRiskPolicy.status(ratio);
-    }
-
-    private long crossWalletBalance(TradingCoreState state, CoreUserState user, String asset) {
-        AssetBalance balance = user.balances().get(asset);
-        long wallet = balance == null ? 0 : balance.totalUnits();
-        for (CorePositionState position : user.positions().values()) {
-            if (position.marginMode() == CoreMarginMode.ISOLATED && position.marginAsset().equals(asset)) {
-                wallet = Math.subtractExact(wallet, position.positionMarginUnits());
-            }
-        }
-        for (OrderReservation reservation : user.reservations().values()) {
-            CoreOrderState order = state.orders().get(reservation.orderId());
-            if (order != null && order.marginMode() == CoreMarginMode.ISOLATED
-                    && reservation.asset().equals(asset)) {
-                wallet = Math.subtractExact(wallet, reservation.remainingUnits());
-            }
-        }
-        if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
-        return wallet;
     }
 
     private record PositionRisk(CorePositionState position, CoreInstrumentState instrument,
