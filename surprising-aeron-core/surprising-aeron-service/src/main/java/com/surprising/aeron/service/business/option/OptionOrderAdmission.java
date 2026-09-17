@@ -1,23 +1,32 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.business.option;
 
-import com.surprising.aeron.service.state.math.*;
-
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.business.OrderAdmissionMath;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreUserState;
+import com.surprising.aeron.service.state.PositionRuntime;
+import com.surprising.aeron.service.state.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
-
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CorePositionState;
 
-import static com.surprising.aeron.service.state.ReducerSettlementSupport.*;
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
-import static com.surprising.aeron.service.business.OrderAdmissionMath.fragmentationSafeFeeDebit;
+import java.util.List;
 
+/** 期权订单准入的权利金、卖方保证金和已有持仓风险计算。 */
 public final class OptionOrderAdmission {
-    private OptionOrderAdmission() {}
+    private OptionOrderAdmission() {
+    }
 
     public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
-                                 ResolvedPlaceOrder order, long leverage, AdmissionSummary admissionSummary) {
+                                        ResolvedPlaceOrder order, long leverage,
+                                        AdmissionSummary admissionSummary) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());
@@ -26,7 +35,7 @@ public final class OptionOrderAdmission {
         boolean opposite = current != 0 && Long.signum(current) != Long.signum(signedOrder);
         long closeSteps = opposite ? Math.min(currentAbs, order.quantitySteps()) : 0;
         long openSteps = order.reduceOnly() ? 0 : Math.subtractExact(order.quantitySteps(), closeSteps);
-        long feeDebit = fragmentationSafeFeeDebit(instrument, order);
+        long feeDebit = OrderAdmissionMath.fragmentationSafeFeeDebit(instrument, order);
         if (order.side() == CoreOrderSide.BUY) {
             long premium = OptionContractMath.optionPremiumUnits(
                     instrument, order.reservationPriceTicks(), order.quantitySteps());
@@ -46,9 +55,10 @@ public final class OptionOrderAdmission {
                 order.reservationPriceTicks(), order.markPriceTicks(), openSteps,
                 order.indexPriceTicks(), order.forwardPriceTicks(), bracket);
         return Math.max(1, Math.addExact(margin, feeDebit));
-
     }
-    static long reservationUnitsForState(
+
+    /** 由确定性状态重放使用的期权冻结计算入口。 */
+    public static long reservationUnitsForState(
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
@@ -96,5 +106,21 @@ public final class OptionOrderAdmission {
                 command.reservationPriceTicks(), command.markPriceTicks(), openSteps,
                 command.indexPriceTicks(), command.forwardPriceTicks(), bracket);
         return Math.max(1, Math.addExact(margin, feeDebit));
-        }
+    }
+
+    private static long proportional(long units, long part, long total) {
+        return part == total ? units : Math.multiplyExact(units, part) / total;
+    }
+
+    private static String positionKey(String symbol, CorePositionSide side) {
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
+    }
+
+    private static List<CoreOrderState> userOrders(TradingCoreState state, CoreUserState user) {
+        return user.reservations().keySet().stream()
+                .map(state.orders()::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
 }

@@ -5,7 +5,6 @@ import com.surprising.aeron.service.state.math.*;
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
-import com.surprising.aeron.service.state.OptionOrderAdmission;
 import com.surprising.aeron.service.state.math.OptionContractMath;
 
 import com.surprising.aeron.service.state.CoreInstrumentState;
