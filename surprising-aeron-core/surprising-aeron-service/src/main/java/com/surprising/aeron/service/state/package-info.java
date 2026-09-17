@@ -48,6 +48,9 @@
  * <p>{@code InstrumentStateTransitions} 只拥有 {@code instruments} 的版本化配置写入；
  * {@code MarkPriceStateTransitions} 只拥有标记价和风险扫描失效标记，扫描执行仍由风险扫描流程负责。</p>
  *
+ * <p>{@code RuntimeInstrumentStateTransitions} 只拥有运行时 {@code instrument} 配置和维护状态的版本校验、
+ * 生命周期互斥检查及写入；{@code RuntimeCommandProcessor} 仅保留兼容命令入口，不再混合承载合约配置业务。</p>
+ *
  * <p>{@code RiskScanExecution} 负责按 Account Lane 分批推进风险扫描，并物化风险快照和强平计划；
  * {@code TradingCoreReducer} 只保留风险扫描公开入口及标记价变更后的调用顺序。</p>
  *
