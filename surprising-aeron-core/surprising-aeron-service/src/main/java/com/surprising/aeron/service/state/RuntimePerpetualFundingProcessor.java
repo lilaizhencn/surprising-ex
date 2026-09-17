@@ -43,6 +43,13 @@ public final class RuntimePerpetualFundingProcessor {
 
     public static FundingWork prepare(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
             UUID chunkCommandId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return prepare(null, command, indexedUserIds, chunkCommandId, runtime, identities);
+    }
+
+    /** Re-arm a previous asynchronous work object while retaining its per-Lane user buffers. */
+    public static FundingWork prepare(FundingWork reuse, ApplyFundingCommand command,
+            Iterable<Long> indexedUserIds, UUID chunkCommandId, TradingRuntimeState runtime,
+            RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
         }
@@ -91,27 +98,29 @@ public final class RuntimePerpetualFundingProcessor {
 
         UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(),
                 chunked ? command.maxUsers() : Integer.MAX_VALUE);
-        return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
+        if (reuse == null) return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId,
+                settleAssetId, fundingMark, fundingPriceSequence, userPage);
+        return reuse.reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
                 fundingMark, fundingPriceSequence, userPage);
     }
 
     /** 一页资金费的账户计算与 owner 财库提交；各 Lane 只处理自己持有的账户。 */
     public static final class FundingWork {
         /** 原始资金费参数及幂等分页标识，跨回调保持不变。 */
-        private final ApplyFundingCommand command;
-        private final UUID chunkCommandId;
+        private ApplyFundingCommand command;
+        private UUID chunkCommandId;
         /** owner 负责财库和进度；Lane 通过作用域访问自己的账户。 */
-        private final TradingRuntimeState runtime;
+        private TradingRuntimeState runtime;
         /** 本页固定币对、结算资产和标记价，禁止中途切换价格。 */
-        private final CoreInstrumentState instrument;
-        private final int symbolId, settleAssetId;
-        private final long fundingMark, fundingPriceSequence;
+        private CoreInstrumentState instrument;
+        private int symbolId, settleAssetId;
+        private long fundingMark, fundingPriceSequence;
         /** 原有全局用户分页及其 Lane 参与范围。 */
-        private final UserPage userPage;
-        private final ImmutableLongArrayList selectedUserIds;
-        private final boolean chunked;
-        private final long laneMask;
-        private final LongArrayList[] usersByLane;
+        private UserPage userPage;
+        private ImmutableLongArrayList selectedUserIds;
+        private boolean chunked;
+        private long laneMask;
+        private LongArrayList[] usersByLane;
         /** 一次派发一次终态，重复轮询不重复收付资金费。 */
         private boolean started;
         private FundingResult result;
@@ -119,17 +128,34 @@ public final class RuntimePerpetualFundingProcessor {
         private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingRuntimeState runtime,
                 CoreInstrumentState instrument, int symbolId, int settleAssetId, long fundingMark,
                 long fundingPriceSequence, UserPage userPage) {
+            reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
+                    fundingMark, fundingPriceSequence, userPage);
+        }
+
+        private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
+                TradingRuntimeState runtime, CoreInstrumentState instrument, int symbolId,
+                int settleAssetId, long fundingMark, long fundingPriceSequence, UserPage userPage) {
             this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
             this.userPage = userPage; this.selectedUserIds = userPage.userIds();
             this.chunked = chunkCommandId != null;
-            this.usersByLane = groupUsers(selectedUserIds, runtime);
+            if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
+                usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
+                for (int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
+            } else {
+                for (LongArrayList users : usersByLane) users.clear();
+            }
+            for (int index = 0; index < selectedUserIds.size(); index++) {
+                long userId = selectedUserIds.valueAt(index);
+                usersByLane[runtime.topology().accountLaneId(userId)].add(userId);
+            }
             long mask = 0;
             for (int lane = 0; lane < usersByLane.length; lane++) {
                 if (!usersByLane[lane].isEmpty()) mask |= 1L << lane;
             }
-            laneMask = mask;
+            laneMask = mask; started = false; result = null;
+            return this;
         }
 
         private LaneFundingResult applyLane(int laneId) {
@@ -268,16 +294,6 @@ public final class RuntimePerpetualFundingProcessor {
             }
         }
         return new LaneFundingResult(payments, changedUserIds.freeze(), treasuryDelta);
-    }
-
-    private static LongArrayList[] groupUsers(ImmutableLongArrayList userIds, TradingRuntimeState runtime) {
-        LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
-        for (int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
-        for (int index = 0; index < userIds.size(); index++) {
-            long userId = userIds.valueAt(index);
-            groups[runtime.topology().accountLaneId(userId)].add(userId);
-        }
-        return groups;
     }
 
     public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,
