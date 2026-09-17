@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.5b 已完成，进入阶段 8.6**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.8 已完成，进入阶段 8.9**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -399,3 +399,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 8.7（撮合构造路径去死代码和重复 after-image）：已完成本批可安全清理部分。删除生产代码、测试和恢复路径均无调用的 `RuntimeDerivativeFillCalculator.calculate(...)` 与 `FillResult` 值语义入口，保留实际使用的 `FillCursor.begin/applyNext/publish` 及同步恢复分支；未发现可在不改变公开状态所有权的前提下继续合并的 settlement after-image。
 - 阶段 8.7 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；衍生品成交、Lane 就地更新、同步恢复和资金守恒目标通过。未执行吞吐压测。
 - 阶段 8.8（Matcher/Lane 事实对象分配归因）：待完成。基于最新 JFR 重新确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime`、`MatcherResult` 和 primitive 数组的生产调用点，只对确认仍在普通异步路径分配的对象做固定工作区或原地更新，禁止以批量兼容语义扩大 Owner 状态。
+- 阶段 8.8（Matcher/Lane 事实对象分配归因）：已完成。审查普通 PLACE 的 Matcher 构造调用点后，确认 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime` 和 `MatcherResult` 在异步 Lane-owned 路径没有新的每笔替换对象可安全删除；同步/恢复分支仍需值语义。唯一确认属于普通热路径的分配是 `prepareMatchingCommand()` 为每笔 PLACE 创建的捕获式提交 lambda，已改为 `CommandSlot` 内固定复用的 `PlaceMatchingContinuation`，同时覆盖已解析 `ResolvedPlaceOrder` 和运行时 `CoreMatchingOrder` 两种表示。该 continuation 在槽位回收时清除引用，不改变 Matcher 证据、admission 或重放语义。
+- 阶段 8.8 验收：JDK 27 下服务模块全量回归 `933 tests, 0 failures, 0 errors, 1 skipped`；编译、普通 PLACE admission/撮合、Lane 结算、批量兼容、snapshot/replay 和资金守恒目标通过。未执行吞吐压测。
+- 下一阶段：阶段 8.9（普通 CANCEL/REPLACE/AMEND 及冷路径提交对象审计）。只处理最新调用图中仍在普通异步命令路径实际创建的 submission/guard 对象；先区分必须保留的跨命令批量原子性与可删的 Owner wrapper，再改固定槽位并回归。完成 8.9 后再审计 8.10 的低频控制/查询路径，全部阶段完成后统一压测。

@@ -2077,18 +2077,16 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 var admittedOrder = pending.admittedPlaceOrder();
                 int shard = matcherShard(pending);
                 if (admittedOrder != null) {
-                    return () -> matchingAdapter.placeWithEvidence(shard, pending.sequence(),
-                            pending.command().header().commandId(), command.instrumentChangeId(),
-                            pending.command().header().submittedAtEpochMillis(), userId, admittedOrder);
+                    return pending.preparePlaceMatching(this, shard, command.instrumentChangeId(), userId,
+                            admittedOrder, null);
                 }
                 // Ordinary PLACE admissions are dispatched to the Account Lane and the Matcher
                 // concurrently.  Until the Lane publishes its mutable runtime object, use the
                 // immutable resolved admission input captured by the event.
                 var order = pending.placeAdmission() == null
                         ? matchingOrder(command.orderId()) : pending.placeAdmission().matchingOrder();
-                return () -> matchingAdapter.placeWithEvidence(shard, pending.sequence(),
-                        pending.command().header().commandId(), command.instrumentChangeId(),
-                        pending.command().header().submittedAtEpochMillis(), userId, order);
+                return pending.preparePlaceMatching(this, shard, command.instrumentChangeId(), userId,
+                        null, order);
             }
             if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
                 var command = pending.decodedCommand().cancelOrder();

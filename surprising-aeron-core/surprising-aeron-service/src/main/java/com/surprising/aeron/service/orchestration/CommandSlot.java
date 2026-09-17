@@ -118,6 +118,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
     /** Fixed wrapper for the only admission-gated Matcher submission. */
     private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation();
+    /** Fixed wrapper for the ordinary PLACE Matcher submission. */
+    private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation();
     com.surprising.aeron.protocol.ResponseStatus status;
     CoreResultCode resultCode;
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
@@ -172,6 +174,18 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             java.util.function.Supplier<CoreMatchingResult> original) {
         admissionMatching.prepare(owner, admissionLaneId, matcherShard, settlement, original);
         return admissionMatching;
+    }
+
+    /**
+     * Prepares the fixed-slot ordinary PLACE submission without allocating a capturing lambda.
+     * The matcher receives either the resolved Lane admission object or the immutable runtime
+     * order snapshot already required by the existing path.
+     */
+    java.util.function.Supplier<CoreMatchingResult> preparePlaceMatching(TradingCoreRuntime owner,
+            int matcherShard, long instrumentChangeId, long userId,
+            ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder) {
+        placeMatching.prepare(owner, matcherShard, instrumentChangeId, userId, resolvedOrder, matchingOrder);
+        return placeMatching;
     }
 
     void deferControl(java.util.function.BooleanSupplier work) {
@@ -995,6 +1009,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         accountControl.clear();
         triggerControl.clear();
         admissionMatching.clear();
+        placeMatching.clear();
     }
 
     private final class AdmissionMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
@@ -1031,6 +1046,49 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                         settlement.admissionResultCode());
             }
             return original.get();
+        }
+    }
+
+    private final class PlaceMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+        private TradingCoreRuntime owner;
+        private int matcherShard;
+        private long instrumentChangeId;
+        private long userId;
+        private ResolvedPlaceOrder resolvedOrder;
+        private CoreMatchingOrder matchingOrder;
+
+        void prepare(TradingCoreRuntime owner, int matcherShard, long instrumentChangeId, long userId,
+                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder) {
+            if ((resolvedOrder == null) == (matchingOrder == null)) {
+                throw new IllegalArgumentException("exactly one ordinary PLACE order representation is required");
+            }
+            this.owner = Objects.requireNonNull(owner);
+            this.matcherShard = matcherShard;
+            this.instrumentChangeId = instrumentChangeId;
+            this.userId = userId;
+            this.resolvedOrder = resolvedOrder;
+            this.matchingOrder = matchingOrder;
+        }
+
+        void clear() {
+            owner = null;
+            matcherShard = 0;
+            instrumentChangeId = 0;
+            userId = 0;
+            resolvedOrder = null;
+            matchingOrder = null;
+        }
+
+        @Override
+        public CoreMatchingResult get() {
+            if (resolvedOrder != null) {
+                return owner.matchingAdapter.placeWithEvidence(
+                        matcherShard, coreSequence, command.header().commandId(), instrumentChangeId,
+                        command.header().submittedAtEpochMillis(), userId, resolvedOrder);
+            }
+            return owner.matchingAdapter.placeWithEvidence(
+                    matcherShard, coreSequence, command.header().commandId(), instrumentChangeId,
+                    command.header().submittedAtEpochMillis(), userId, matchingOrder);
         }
     }
 
