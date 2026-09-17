@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 7.7a 已完成，进入阶段 7.7b**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 7.7b 已完成，进入阶段 7.8**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -369,4 +369,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 下一阶段：最终正确性门槛审计（普通、批量、风控、资金费、强平、ADL、交割/期权、snapshot/replay、幂等和资金守恒），全部通过后使用统一 JDK 27/G1/BUSY_SPIN 配置执行 64/128 窗口吞吐与 JFR 分配归因。
 - 阶段 7.7a（顺序批量结算直达）：已完成。顺序 PLACE、AMEND 和 CANCEL batch 的 pooled settlement event 在提交 Matcher 前标记为 Matcher-owned publication；Matcher 生成事实后直接发布到 Lane，Owner 不再预先把同一事件提交到 Lane。保留流水 PLACE batch 的分区队首门，避免跨命令提前发布破坏批量顺序。
 - 阶段 7.7a 验收：JDK 27 下服务模块批量、管线、结算和恢复定向回归通过；完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
-- 阶段 7.7b（流水批量结算门控直达）：待完成。Matcher 先构造流水 batch 事实，Owner 只在分区队首释放后触发已构造事实的 Lane 交接；不得让 Matcher 绕过 `PendingMatchingRing` 的分区顺序。
+- 阶段 7.7b（流水批量结算门控直达）：已完成。流水 PLACE batch 的 settlement event 在 Matcher 提交前预留为 Matcher-owned publication；Matcher 线程完成批量事实后直接写入各 Lane 的 shard ring。Owner 只记录一次逻辑分区 dispatch 位和 in-flight 计数，不再在 Matcher 完成后调用 `dispatchDirectMatcherSettlement`；Lane 以 `coreSequence` 合并控制与结算，保留跨命令顺序。
+- 阶段 7.7b 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；批量流水、跨 Lane 结算、恢复和快照目标测试通过。未执行吞吐压测。
+- 阶段 7.8（删除异步普通路径的旧 dispatch 兼容调用）：待完成。确认同步模式和恢复测试不再需要旧 Owner→Lane dispatch 后，删除 `dispatchDirectMatcherSettlement` 的异步兼容入口及重复完成收集分支；保留必要的同步 API 直到对应测试迁移完成。

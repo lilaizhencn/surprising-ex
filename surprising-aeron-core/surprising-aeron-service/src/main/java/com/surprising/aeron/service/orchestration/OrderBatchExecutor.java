@@ -284,18 +284,27 @@ final class OrderBatchExecutor {
                     null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
                     shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), batch);
+            // The Matcher publishes this batch fact directly to the Lane rings.  Reserve the
+            // logical dispatch before submission so the partition gate can advance without an
+            // Owner-side Lane enqueue after the Matcher completes.
+            batch.settlementEvent.markMatcherOwnedPublication();
+            batch.settlementEvent.reserveMatcherPublication();
         }
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
         }, batch.settlementEvent);
         if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
-            // Pipelined batches can be submitted before their partition dispatch head is free.
-            // Keep the existing gate for this compatibility path; sequential items use the
-            // Matcher-owned publication reservation above and never enter this branch.
-            if (owner.predispatchDirectSettlement(pending, batch.settlementEvent)) {
-                batch.markPredispatched();
-            }
+            // This is a logical partition handoff only; no Lane queue is touched by the Owner.
+            // The Lane merge gate orders the direct fact against any earlier control record.
+            owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
+            owner.pendingMatching.progressChanged();
+            batch.markPredispatched();
+            pending.countPipelinedSettlement();
+            owner.commits.dispatchedSettlementInFlight++;
+            owner.commits.dispatchedSettlementHighWaterMark = Math.max(
+                    owner.commits.dispatchedSettlementHighWaterMark,
+                    owner.commits.dispatchedSettlementInFlight);
         }
     }
 
