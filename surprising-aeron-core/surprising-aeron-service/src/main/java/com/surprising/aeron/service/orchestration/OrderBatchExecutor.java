@@ -290,9 +290,9 @@ final class OrderBatchExecutor {
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
         }, batch.settlementEvent);
         if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
-            // Queue the pooled event before the matcher result arrives.  The Lane worker
-            // blocks on event.ready(), so the matcher can publish the result directly without
-            // making the owner drain and redispatch the completion first.
+            // Pipelined batches can be submitted before their partition dispatch head is free.
+            // Keep the existing gate for this compatibility path; sequential items use the
+            // Matcher-owned publication reservation above and never enter this branch.
             if (owner.predispatchDirectSettlement(pending, batch.settlementEvent)) {
                 batch.markPredispatched();
             }
@@ -543,10 +543,10 @@ final class OrderBatchExecutor {
                     owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), batch);
             batch.itemSettlementEvent = direct;
-            // Sequential batches are deliberately excluded from partition pre-dispatch: their
-            // next item is not submitted until this item is collected, so dispatching this event
-            // here preserves the batch's account dependency without advancing the shared head.
-            owner.runtimeState.dispatchDirectMatcherSettlement(direct);
+            // Reserve the event without enqueueing it. The Matcher owns publication after it
+            // has produced the item fact; the Owner only observes the ordered terminal fence.
+            direct.markMatcherOwnedPublication();
+            direct.reserveMatcherPublication();
         }
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
@@ -558,7 +558,8 @@ final class OrderBatchExecutor {
                     pending.preMatchingCancellationOrderIds());
             batch.itemSettlementEvent = direct;
             if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = direct.admittedOrder();
-            owner.runtimeState.dispatchDirectMatcherSettlement(direct);
+            direct.markMatcherOwnedPublication();
+            direct.reserveMatcherPublication();
         }
         owner.matcherPipeline.submit(shard, pending.sequence(),
                 prepareOrderBatchMatchingCommand(pending, batch, batch.items.get(batch.nextIndex), shard), direct);
@@ -604,7 +605,8 @@ final class OrderBatchExecutor {
                 pending.command().header().commandId(), shard, owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
         batch.itemSettlementEvent = direct;
-        owner.runtimeState.dispatchDirectMatcherSettlement(direct);
+        direct.markMatcherOwnedPublication();
+        direct.reserveMatcherPublication();
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             batch.pipelinedMatchingResultCount = 0;
             for (int index = start; index < chunkEnd; index++) {
