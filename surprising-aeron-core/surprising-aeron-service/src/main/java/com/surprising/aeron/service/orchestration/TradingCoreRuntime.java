@@ -1738,7 +1738,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             return false;
         }
         pending.establishCommitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-        runtimeState.dispatchDirectMatcherSettlement(event);
+        runtimeState.dispatchOwnerControlledSettlement(event);
         pendingMatching.completePartitionDispatch(pending.sequence(), shard);
         pendingMatching.progressChanged();
         pending.countPipelinedSettlement();

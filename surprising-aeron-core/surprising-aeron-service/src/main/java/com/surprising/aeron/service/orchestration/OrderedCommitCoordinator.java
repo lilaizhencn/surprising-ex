@@ -1257,7 +1257,7 @@ final class OrderedCommitCoordinator {
                 pending.establishCommitFence(clusterTimestamp, clusterPosition);
                 var event = pending.settlementEvent();
                 event.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-                owner.runtimeState.dispatchDirectMatcherSettlement(event);
+                owner.runtimeState.dispatchOwnerControlledSettlement(event);
                 owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
                 owner.pendingMatching.progressChanged();
                 pending.countPipelinedSettlement();
@@ -1276,7 +1276,7 @@ final class OrderedCommitCoordinator {
                     if (!batch.admissionCollected() || !batch.canPredispatch()) return;
                     pending.establishCommitFence(clusterTimestamp, clusterPosition);
                     batch.settlementEvent.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-                    owner.runtimeState.dispatchDirectMatcherSettlement(batch.settlementEvent);
+                    owner.runtimeState.dispatchOwnerControlledSettlement(batch.settlementEvent);
                     batch.markPredispatched();
                     owner.pendingMatching.progressChanged();
                     owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);

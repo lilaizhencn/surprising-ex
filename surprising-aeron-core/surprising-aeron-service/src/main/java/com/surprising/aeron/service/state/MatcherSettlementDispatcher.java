@@ -134,7 +134,12 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
-    void dispatchDirect(MatcherSettlementEvent event) {
+    /**
+     * Legacy synchronous handoff.  Asynchronous commands are Matcher-owned and never enter
+     * this method; keeping the name explicit prevents new code from accidentally reintroducing
+     * an Owner-produced Lane settlement.
+     */
+    void dispatchOwnerControlled(MatcherSettlementEvent event) {
         owner.assertOwner();
         if (event == null || event.runtime() != owner || !event.direct() || event.dispatched())
             throw new IllegalStateException("invalid direct Lane ordering slot");

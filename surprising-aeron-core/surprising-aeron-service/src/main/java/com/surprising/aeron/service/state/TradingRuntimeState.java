@@ -5861,7 +5861,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 identities, timestamp, position, resultTarget);
     }
 
-    public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }
+    /** Synchronous compatibility handoff; asynchronous settlement is Matcher-owned. */
+    public void dispatchOwnerControlledSettlement(MatcherSettlementEvent event) {
+        settlements.dispatchOwnerControlled(event);
+    }
 
     /** Matcher-owned direct publication; the Matcher thread is the sole producer for each shard ring. */
     void publishMatcherSettlementDirect(MatcherSettlementEvent event) {

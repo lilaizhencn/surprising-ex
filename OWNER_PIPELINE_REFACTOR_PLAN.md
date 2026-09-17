@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 7.7b 已完成，进入阶段 7.8**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 7.8 已完成，进入阶段 8.1**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -371,4 +371,6 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 7.7a 验收：JDK 27 下服务模块批量、管线、结算和恢复定向回归通过；完整服务回归 `931 tests, 0 failures, 0 errors, 1 skipped`。未执行吞吐压测。
 - 阶段 7.7b（流水批量结算门控直达）：已完成。流水 PLACE batch 的 settlement event 在 Matcher 提交前预留为 Matcher-owned publication；Matcher 线程完成批量事实后直接写入各 Lane 的 shard ring。Owner 只记录一次逻辑分区 dispatch 位和 in-flight 计数，不再在 Matcher 完成后调用 `dispatchDirectMatcherSettlement`；Lane 以 `coreSequence` 合并控制与结算，保留跨命令顺序。
 - 阶段 7.7b 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；批量流水、跨 Lane 结算、恢复和快照目标测试通过。未执行吞吐压测。
-- 阶段 7.8（删除异步普通路径的旧 dispatch 兼容调用）：待完成。确认同步模式和恢复测试不再需要旧 Owner→Lane dispatch 后，删除 `dispatchDirectMatcherSettlement` 的异步兼容入口及重复完成收集分支；保留必要的同步 API 直到对应测试迁移完成。
+- 阶段 7.8（删除异步普通路径的旧 dispatch 兼容调用）：已完成。旧 `dispatchDirectMatcherSettlement`/`dispatchDirect` API 已删除并替换为明确限定同步兼容用途的 `dispatchOwnerControlledSettlement`；异步普通和批量路径只使用 Matcher-owned publication，避免后续代码误把 Owner 当作 settlement producer。同步测试和恢复仍保留必要的 Owner-controlled handoff。
+- 阶段 7.8 验收：JDK 27 下服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；全仓源码无 `dispatchDirectMatcherSettlement` 或 `dispatchDirect` 调用。未执行吞吐压测。
+- 阶段 8.1（全命令生命周期统一槽位）：待完成。将剩余资金费、标记价格、保险基金、交割/期权和 ADL 控制续步统一为固定 `CommandSlot` 工作区，删除每条业务线重复的 Owner continuation 和临时集合；每类命令保留自己的确定性业务状态和恢复字段，不新增通用对象层。
