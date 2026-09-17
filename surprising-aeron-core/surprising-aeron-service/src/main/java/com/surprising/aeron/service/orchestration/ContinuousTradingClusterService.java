@@ -56,6 +56,12 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     private OwnerLogContext logContext;
     private final SurprisingClusteredService processor;
     private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
+    /** Optional owner-gate diagnostics; disabled by default so the normal hot path has no clock reads. */
+    private final boolean ownerPollDiagnostics = Boolean.getBoolean("surprising.owner.poll-diagnostics");
+    private long ownerPollCalls;
+    private long ownerNoProgressPolls;
+    private long ownerNoProgressNanos;
+    private long ownerGateSkippedPending;
     /** 可替换的会话传输实现，隔离集群业务回调与只读终态出口。 */
     private final EgressFactory egressFactory;
     @FunctionalInterface
@@ -80,6 +86,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
 
     public void onStart(Cluster cluster, Image snapshot) {
         this.cluster = cluster;
+        ownerPollCalls = ownerNoProgressPolls = ownerNoProgressNanos = ownerGateSkippedPending = 0;
         logContext = new OwnerLogContext(cluster.memberId(), cluster.timeUnit(), cluster.role(),
                 cluster.time(), cluster.logPosition());
         byte[] restored = readSnapshot(snapshot);
@@ -189,6 +196,11 @@ public final class ContinuousTradingClusterService implements ClusteredService {
             input.clear(); output.clear(); deferred.clear();
             sessions.forEachValue(TransportSession::disconnect);
             sessions.clear();
+            if (ownerPollDiagnostics) {
+                System.out.printf("Aeron core owner-poll calls=%d noProgress=%d noProgressNanos=%d "
+                                + "gateSkippedPending=%d%n",
+                        ownerPollCalls, ownerNoProgressPolls, ownerNoProgressNanos, ownerGateSkippedPending);
+            }
         }
     }
 
@@ -211,11 +223,25 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     }
                     work++;
                 }
-                // Avoid rebuilding the full command scope on an empty Owner turn.  In-flight
-                // commands and matcher/Lane completion notifications remain eligible; a truly
-                // empty turn goes straight to OwnerIdleStrategy's bounded backoff.
-                if (initialized && !stopping && processor.ownerWorkAvailable()) {
-                    work += processor.pollCommands();
+                // Avoid rebuilding the full command scope when the ordered head is waiting.
+                // New ingress and Matcher/Lane completion notifications remain eligible; a
+                // blocked in-flight head goes straight to OwnerIdleStrategy's bounded backoff.
+                if (initialized && !stopping) {
+                    boolean ownerWorkAvailable = processor.ownerWorkAvailable();
+                    if (ownerWorkAvailable) {
+                        long pollStarted = ownerPollDiagnostics ? System.nanoTime() : 0;
+                        int polled = processor.pollCommands();
+                        if (ownerPollDiagnostics) {
+                            ownerPollCalls++;
+                            if (polled == 0) {
+                                ownerNoProgressPolls++;
+                                ownerNoProgressNanos += System.nanoTime() - pollStarted;
+                            }
+                        }
+                        work += polled;
+                    } else if (ownerPollDiagnostics && processor.pendingCommandCount() != 0) {
+                        ownerGateSkippedPending++;
+                    }
                 }
                 ownerIdle.idle(work, processor.pendingCommandCount() != 0);
             }

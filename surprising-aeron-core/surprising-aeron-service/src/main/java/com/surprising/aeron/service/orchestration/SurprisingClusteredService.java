@@ -408,12 +408,30 @@ public final class SurprisingClusteredService implements ClusteredService {
     /**
      * Owner 在调用完整推进器前的廉价门禁。
      *
-     * <p>没有入站命令、在途窗口或跨线程完成时，重复执行
-     * {@link #pollCommands()} 只会重建异步命令作用域并扫描空队列；让持续 Owner
-     * 直接进入退避，保留完成通知作为唯一的跨线程唤醒来源。</p>
+     * <p>在途窗口本身不是工作：队首等待 Matcher/Lane 时再次调用
+     * {@link #pollCommands()} 只会重复探测同一个未就绪前缀。新的、尚未判定为该前缀
+     * 阻塞的入站命令仍需要一次推进；完成通知或 Owner 本地可推进状态则由 Runtime
+     * 提供其余唤醒来源。</p>
      */
     boolean ownerWorkAvailable() {
-        return pendingCommandCount() != 0 || ownerCompletionAvailable();
+        if (pendingIngressReady()) return true;
+        // pollCommandPrefix already observed an unchanged completion cursor.  Until a producer
+        // publishes a new notification, entering the full command scope cannot make progress.
+        if (waitingMatchingNotification) return ownerCompletionAvailable();
+        return state != null && state.hasMatchingDrainWork();
+    }
+
+    /**
+     * 已被当前队首依赖挡住的入站命令不能把 Owner 重新拉入完整推进循环；队首完成后
+     * {@link #ownerCompletionAvailable()} 或 Runtime 的本地进展门禁会再次放行。
+     */
+    private boolean pendingIngressReady() {
+        var next = pendingIngress.first();
+        if (next == null) return false;
+        if (commandWindow.size() == commandWindow.capacity()) return false;
+        return next.command != blockedIngress
+                || commandWindow.size() == 0
+                || commandWindow.get(0).request != blockedWindowHead;
     }
 
     int commandWindowSize() { return commandWindow.size(); }
