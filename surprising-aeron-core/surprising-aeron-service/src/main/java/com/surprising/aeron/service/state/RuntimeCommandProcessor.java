@@ -179,123 +179,39 @@ public final class RuntimeCommandProcessor {
     public static void placeOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, ResolvedPlaceOrder command, UUID commandId,
                                   long requiredReservation) {
-        if (runtime == null || identities == null || command == null || commandId == null || userId <= 0
-                || requiredReservation <= 0) {
-            throw new IllegalArgumentException("invalid runtime place order");
-        }
-        runtime.assertOwner();
-        long clientKey = identities.clientKey(userId, command.clientOrderId());
-        int symbolId = identities.symbolId(command.symbol());
-        int assetId = identities.assetId(command.reservationAsset());
-        placeOrderPrepared(runtime, userId, command, commandId, requiredReservation,
-                clientKey, symbolId, assetId);
+        RuntimeOrderStateTransitions.place(runtime, identities, userId, command, commandId, requiredReservation);
     }
 
     public static void placeOrderPrepared(
             TradingRuntimeState runtime, long userId, ResolvedPlaceOrder command, UUID commandId,
             long requiredReservation, long clientKey, int symbolId, int assetId) {
-        if (runtime == null || command == null || commandId == null || userId <= 0
-                || requiredReservation <= 0 || clientKey < 0 || symbolId < 0 || assetId < 0) {
-            throw new IllegalArgumentException("invalid prepared runtime place order");
-        }
-        runtime.assertOwner();
-        if (runtime.order(command.orderId()) != null) {
-            throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
-        }
-        if (clientKey != 0 && runtime.orderIdByClient(userId, clientKey) != null) {
-            throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
-        }
-        UserRuntime user = runtime.user(userId);
-        BalanceRuntime balance = runtime.balance(userId, assetId);
-        if (user == null || balance == null || balance.availableUnits() < requiredReservation) {
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                    "available balance is insufficient");
-        }
-        OrderRuntime order = new OrderRuntime(command.orderId(), runtime.productLine(), userId, symbolId,
-                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
-                command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
-                command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
-                command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                0, 0, 0, CoreOrderStatus.OPEN, 1);
-        ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
-                0, 0, command.quantitySteps());
-        runtime.reserveOrder(order, reservation, clientKey);
-        runtime.putUser(new UserRuntime(runtime.productLine(), userId,
-                Math.incrementExact(user.revision()), user.positionMode()));
-        incrementRevision(runtime);
+        RuntimeOrderStateTransitions.placePrepared(runtime, userId, command, commandId, requiredReservation,
+                clientKey, symbolId, assetId);
     }
 
     /** Trigger claim, OCO cancellations and this reservation share one control Lane task. */
     public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
             AdmissionIdentity identity, long clientKey, int assetId) {
-        AccountLaneState lane = runtime.laneCommandScope.get();
-        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
-            throw new IllegalStateException("trigger child requires its Account Lane");
-        long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
-                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), identity);
-        placeOrderPrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
-        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+        RuntimeOrderStateTransitions.placeTriggerChildInLane(runtime, userId, command, commandId,
+                coreSequence, openInterestSteps, identity, clientKey, assetId);
     }
 
     /** One account task writes the admitted order and its local pending marker. */
     public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
             long clientKey, int assetId, long coreSequence) {
-        AccountLaneState lane = runtime.laneCommandScope.get();
-        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
-            throw new IllegalStateException("batch reservation requires its Account Lane");
-        placeOrderPrepared(runtime, userId, command, commandId, requiredReservation,
-                clientKey, command.symbolId(), assetId);
-        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+        RuntimeOrderStateTransitions.reserveBatchOrderInLane(runtime, userId, command, commandId,
+                requiredReservation, clientKey, assetId, coreSequence);
     }
 
     public static boolean cancelOrder(TradingRuntimeState runtime, long userId, long orderId) {
-        if (runtime == null || userId <= 0 || orderId <= 0) {
-            throw new IllegalArgumentException("invalid runtime cancel order");
-        }
-        runtime.assertOwner();
-        OrderRuntime order = runtime.order(orderId);
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        if (order.userId() != userId) {
-            throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-        }
-        if (order.status().terminal()) return false;
-        ReservationRuntime reservation = runtime.reservation(orderId);
-        if (reservation == null) throw new IllegalStateException("open order is missing reservation");
-        runtime.cancelOrder(orderId, userId, reservation.reservedUnits());
-        incrementRevision(runtime);
-        return true;
+        return RuntimeOrderStateTransitions.cancel(runtime, userId, orderId);
     }
 
     public static void rejectPlaceOrder(TradingRuntimeState runtime, long userId, long orderId,
                                         long coreSequence) {
-        if (runtime == null || userId <= 0 || orderId <= 0 || coreSequence <= 0) {
-            throw new IllegalArgumentException("invalid runtime rejected order");
-        }
-        runtime.assertOwner();
-        OrderRuntime order = runtime.order(orderId);
-        if (order == null || order.userId() != userId) {
-            throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        }
-        ReservationRuntime reservation = runtime.reservation(orderId);
-        if (reservation == null) throw new IllegalStateException("rejected order reservation is missing");
-        if (runtime.pendingReservation(orderId, userId)) {
-            runtime.completePendingReservation(userId, orderId, coreSequence);
-        }
-        BalanceRuntime balance = runtime.balance(userId, reservation.assetId());
-        if (balance == null) throw new IllegalStateException("rejected order balance is missing");
-        long releaseUnits = reservation.reservedUnits();
-        if (releaseUnits > 0) {
-            if (balance.lockedUnits() < releaseUnits) throw new IllegalArgumentException("invalid runtime release");
-            runtime.replaceBalance(new BalanceRuntime(userId, reservation.assetId(),
-                    Math.addExact(balance.availableUnits(), releaseUnits), balance.lockedUnits() - releaseUnits));
-        }
-        runtime.replaceOrder(order.withStatus(CoreOrderStatus.REJECTED, Math.incrementExact(order.revision())));
-        runtime.removeReservation(orderId, userId);
-        runtime.advanceUserRevision(userId);
-        incrementRevision(runtime);
+        RuntimeOrderStateTransitions.reject(runtime, userId, orderId, coreSequence);
     }
 
     public static void validateOrderStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
