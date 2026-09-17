@@ -1458,6 +1458,34 @@ public final class TradingRuntimeState implements AutoCloseable {
             state.changedPositions.adopt(laneId, positions);
         }
 
+        /**
+         * Commit the marker side of a batch admission whose immutable publication was already
+         * applied by the Owner before Matcher submission. Admission directly mutates the private
+         * Lane maps and stages its public user/order/reservation after-images in the event
+         * publication, so replaying the normal terminal drain would duplicate the map walk.
+         * Balance and funds patches remain consumed by collectPlaceBatchAdmission.
+         */
+        void commitBatchAdmissionToOwner(TradingRuntimeState state, int laneId) {
+            if (state == null || laneId < 0 || laneId >= state.accountLanes.length) {
+                throw new IllegalArgumentException("invalid batch admission owner handoff");
+            }
+            publishTriggersToOwner(state);
+            if (closedTriggerCount != 0) {
+                state.revision = Math.addExact(state.revision, closedTriggerCount);
+                closedTriggerCount = 0;
+            }
+            users.forEach((userId, ignored) -> state.changedUsers.add(userId));
+            reservations.forEach((orderId, ignored) -> state.changedReservations.add(orderId));
+            state.changedOrders.adopt(laneId, orders);
+            state.changedPositions.adopt(laneId, positions);
+            liquidations.forEach(state.changedLiquidations::put);
+            riskSnapshots.forEach(state.changedRiskSnapshots::put);
+            removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
+            removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
+            if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
+            if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
+        }
+
         void putTrigger(long id, CoreTriggerOrderState value) {
             if (triggers == null) triggers = new RuntimeChangeBuffer<>();
             triggers.put(id, value);
@@ -1959,8 +1987,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = topology.accountLaneId(event.userId());
         MatcherSettlementChanges changes = event.takeChanges();
         try {
-            changes.laneDeltas[laneId].commitTerminalToOwner(
-                    this, laneId, null, event.coreSequence());
+            // The batch admission publication was already applied by stagePlaceBatchAdmission
+            // before the matcher was submitted. Replaying the normal terminal drain here would
+            // walk and write the same user/order/reservation buffers a second time. The
+            // admission delta only needs primitive change markers and funds/available-balance
+            // handoff at the ordered commit boundary.
+            changes.laneDeltas[laneId].commitBatchAdmissionToOwner(this, laneId);
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
