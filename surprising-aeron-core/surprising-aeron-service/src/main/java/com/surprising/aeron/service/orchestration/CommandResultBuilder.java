@@ -399,11 +399,12 @@ final class CommandResultBuilder {
             return setResponse(EMPTY_RESULT);
         }
         var nativeCommand = matchingResult.nativeCommand();
-        var matcherPrefix = matchingResult.matcherPrefix();
+        long matcherPrefixBefore = matchingResult.matcherPrefixBefore();
+        long matcherPrefixAfter = matchingResult.matcherPrefixAfter();
         if (nativeCommand.coreSequence() != pending.sequence()
                 || !nativeCommand.matches(pending.command().header().commandId())
                 || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
-                || nativeCommand.matcherSequence() <= 0 || !matcherPrefix.bound()) {
+                || nativeCommand.matcherSequence() <= 0 || matcherPrefixBefore == 0 || matcherPrefixAfter == 0) {
             return setResponse(EMPTY_RESULT);
         }
         try {
@@ -414,7 +415,7 @@ final class CommandResultBuilder {
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandSingleOrderSource,
+                        matcherPrefixBefore, matcherPrefixAfter, commandSingleOrderSource,
                         destination, responseOffset);
                 return destination;
             }
@@ -424,7 +425,7 @@ final class CommandResultBuilder {
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandOrderViews.get(0),
+                        matcherPrefixBefore, matcherPrefixAfter, commandOrderViews.get(0),
                         destination, responseOffset);
                 return destination;
             }
@@ -434,7 +435,7 @@ final class CommandResultBuilder {
                 responseLength = CoreCommandResultCodec.encodeInto(
                         pending.sequence(), pending.command().header().commandId(),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        matcherPrefix.before(), matcherPrefix.after(), commandOrderSources, List.of(),
+                        matcherPrefixBefore, matcherPrefixAfter, commandOrderSources, List.of(),
                         destination, responseOffset);
                 return destination;
             }
@@ -443,7 +444,7 @@ final class CommandResultBuilder {
             responseLength = CoreCommandResultCodec.encodeInto(
                     pending.sequence(), pending.command().header().commandId(),
                     nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                    matcherPrefix.before(), matcherPrefix.after(), commandOrderViews, List.of(),
+                    matcherPrefixBefore, matcherPrefixAfter, commandOrderViews, List.of(),
                     destination, responseOffset);
             return destination;
         } catch (IllegalArgumentException exception) {

@@ -1558,8 +1558,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             prepared = true;
             if (count != 1 || orders[0] == null || matcherResult == null) return;
             var nativeCommand = matcherResult.nativeCommand();
-            var prefix = matcherResult.matcherPrefix();
-            if (!prefix.bound() || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
+            long prefixBefore = matcherResult.matcherPrefixBefore();
+            long prefixAfter = matcherResult.matcherPrefixAfter();
+            if (prefixBefore == 0 || prefixAfter == 0
+                    || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
                     || nativeCommand.matcherSequence() <= 0) return;
             try {
                 response = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrder(
@@ -1567,7 +1569,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                         new java.util.UUID(nativeCommand.commandIdMostSignificantBits(),
                                 nativeCommand.commandIdLeastSignificantBits()),
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
-                        prefix.before(), prefix.after(), source);
+                        prefixBefore, prefixAfter, source);
             } catch (IllegalArgumentException ignored) {
                 response = null;
             }

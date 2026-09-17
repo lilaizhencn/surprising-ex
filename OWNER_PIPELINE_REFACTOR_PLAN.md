@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 8.11 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 8.12 已完成，进入最终正确性审计**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -407,4 +407,7 @@ OwnerCommitPublisher 只负责全局提交、revision/hash、投影/日志、结
 - 阶段 8.11（撮合结果遍历分配收敛）：已完成。Matcher/Owner 热路径中对 `matcherEvents()` 和 `cancellations()` 的增强 for 已改为索引读取，避免 JDK 不可变 List 迭代器在每次结果处理时创建；顺序、前缀校验、撤单授权和恢复语义保持不变。生产代码无对应结果列表的增强 for 残留。
 - 阶段 8.11 验收：JDK 27 下服务模块全量回归 `912 tests, 0 failures, 0 errors, 1 skipped`；撮合结果、批量、跨 Lane 结算、恢复、幂等和资金守恒目标通过。统一 64/128 窗口吞吐复测待完成。
 - 阶段 8.11 性能复测：统一 async harness（JDK 27、G1、BUSY_SPIN、1 Matcher、4 Lane、128 symbols、MIXED batch20、JFR）64 窗口 `305,015 ops/s`、p99 `7.52 ms`、Owner `93.87%`；128 窗口 `317,647 ops/s`、p99 `12.93 ms`、Owner `97.13%`。客户端校验和 saturation gate 均通过；`ImmutableCollections$ListItr` 由上一轮约 6% 降至约 2.1%（64）/2.97%（128），但 Owner 饱和、p99 和整体分配门槛仍未达标，不能宣称最终性能目标完成。
+- 阶段 8.12（MatcherPrefix 结果对象延迟物化）：已完成。`CoreMatchingResult` 在热路径只保存 prefix before/after 两个 primitive；Matcher 证据绑定、Owner 前缀校验、终态编码和 Lane 交接均绕过 `MatcherPrefix` 记录。保留兼容 `matcherPrefix()`，仅在外部旧 API 首次读取时懒创建并缓存记录，快照/恢复字段和前缀确定性不变。
+- 阶段 8.12 验收：JDK 27 下服务模块全量回归 `912 tests, 0 failures, 0 errors, 1 skipped`；撮合证据、前缀恢复、批量、跨 Lane 结算、响应编码和资金守恒目标通过。统一 64/128 窗口吞吐复测已完成，详见下一条记录。
+- 阶段 8.12 性能复测：统一 async harness（JDK 27、G1、BUSY_SPIN、1 Matcher、4 Lane、128 symbols、MIXED batch20、JFR）64 窗口 `307,223 ops/s`、p99 `8.44 ms`、Owner `93.16%`；128 窗口 `321,334 ops/s`、p99 `16.04 ms`、Owner `97.22%`。客户端校验和 saturation gate 均通过；`MatcherPrefix` 已从 Core 分配热点中消失，但 Owner 饱和、p99 和总分配门槛仍未达标。
 - 最终正确性审计进行中：service 模块门槛保持绿色；全仓 benchmark 套件唯一失败为 `LinearPerpetualBenchmarkSupportTest.saturatedWorkloadMaintainsOneSharedCoreWindowAndPreservesFunds` 的既有口径问题。该测试通过同步 `state.apply()` 驱动，基线 `752ec39f` 与当前代码均报告 `settlementInFlightHighWaterMark=0`，但断言要求异步结算才会产生的值至少为 2；其业务计数、成交、资金守恒、订单和 client identity 均通过。该 benchmark 不作为本次代码回归失败依据，后续压测使用独立 async cluster harness；统一 64/128 窗口压测及 JFR 归因仍待审计记录收敛后执行。

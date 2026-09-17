@@ -342,10 +342,12 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                                  com.surprising.aeron.service.matching.CoreMatchingResult previous) {
         if (!direct || directPublished || result == null) throw new IllegalStateException("invalid direct publication");
         var nativeCommand = result.nativeCommand();
-        var prefix = result.matcherPrefix();
+        long prefixBefore = result.matcherPrefixBefore();
+        long prefixAfter = result.matcherPrefixAfter();
         if (nativeCommand.coreSequence() != directCoreSequence || !nativeCommand.matches(directCommandId)
-                || nativeCommand.matcherShardId() != directShard || !prefix.bound() || prefix.after() == prefix.before()
-                || previous != null && (prefix.before() != previous.matcherPrefix().after()
+                || nativeCommand.matcherShardId() != directShard || prefixBefore == 0 || prefixAfter == 0
+                || prefixAfter == prefixBefore
+                || previous != null && (prefixBefore != previous.matcherPrefixAfter()
                 || nativeCommand.matcherSequence() <= previous.nativeCommand().matcherSequence())
                 || result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.FATAL_DIVERGENCE)
             throw new IllegalStateException("direct matcher result proof is inconsistent");

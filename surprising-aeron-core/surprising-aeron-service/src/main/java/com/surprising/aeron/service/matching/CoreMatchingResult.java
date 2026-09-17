@@ -28,7 +28,10 @@ public final class CoreMatchingResult {
      * allocate a second CoreMatchingResult for every command.
      */
     private NativeCommand nativeCommand;
-    private MatcherPrefix matcherPrefix;
+    /** Prefix values are kept as primitives on the hot path; the record view is lazy for API compatibility. */
+    private long matcherPrefixBefore;
+    private long matcherPrefixAfter;
+    private MatcherPrefix matcherPrefixView;
     private final MatcherResult nativeMatcherResult;
     private final List<MatcherResult.MatcherEvent> matcherEvents;
     private final MatcherResult.MarketData marketData;
@@ -68,7 +71,9 @@ public final class CoreMatchingResult {
         this.matcherStateChanged = matcherStateChanged;
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
         this.nativeCommand = nativeCommand;
-        this.matcherPrefix = matcherPrefix;
+        this.matcherPrefixBefore = matcherPrefix.before();
+        this.matcherPrefixAfter = matcherPrefix.after();
+        this.matcherPrefixView = matcherPrefix;
         this.nativeMatcherResult = nativeMatcherResult;
         this.matcherEvents = matcherEvents;
         this.marketData = marketData;
@@ -98,18 +103,31 @@ public final class CoreMatchingResult {
         matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
         marketData = Objects.requireNonNull(result.marketData(), "matcher market data");
         // The digest reads only the business fields initialized above; it never retains this.
-        matcherPrefix = previousPrefix == 0 ? EMPTY_PREFIX
-                : new MatcherPrefix(previousPrefix, MatcherPrefixDigest.next(previousPrefix, command, this));
+        matcherPrefixBefore = previousPrefix;
+        matcherPrefixAfter = previousPrefix == 0 ? 0 : MatcherPrefixDigest.next(previousPrefix, command, this);
+        matcherPrefixView = previousPrefix == 0 ? EMPTY_PREFIX : null;
     }
 
     CoreMatchingResult withEvidence(NativeCommand command, MatcherPrefix prefix) {
-        return new CoreMatchingResult(this, command, prefix);
+        return new CoreMatchingResult(this, command, prefix.before(), prefix.after(), prefix);
     }
 
     /** Matcher-only binding path; called before publication into the completion ring. */
     CoreMatchingResult bindEvidenceInPlace(NativeCommand command, MatcherPrefix prefix) {
         nativeCommand = Objects.requireNonNull(command, "native command");
-        matcherPrefix = Objects.requireNonNull(prefix, "matcher prefix");
+        Objects.requireNonNull(prefix, "matcher prefix");
+        matcherPrefixBefore = prefix.before();
+        matcherPrefixAfter = prefix.after();
+        matcherPrefixView = prefix;
+        return this;
+    }
+
+    /** Matcher-only binding path that avoids constructing a prefix record for every result. */
+    CoreMatchingResult bindEvidenceInPlace(NativeCommand command, long before, long after) {
+        nativeCommand = Objects.requireNonNull(command, "native command");
+        matcherPrefixBefore = before;
+        matcherPrefixAfter = after;
+        matcherPrefixView = null;
         return this;
     }
 
@@ -123,7 +141,7 @@ public final class CoreMatchingResult {
                 nativeCommand.orderId(),
                 nativeCommand.instrumentChangeId(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
                 nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
-        return new CoreMatchingResult(this, command, matcherPrefix);
+        return new CoreMatchingResult(this, command, matcherPrefixBefore, matcherPrefixAfter, matcherPrefixView);
     }
 
     /** Matcher worker variant that avoids a second result object before publication. */
@@ -139,7 +157,8 @@ public final class CoreMatchingResult {
         return this;
     }
 
-    private CoreMatchingResult(CoreMatchingResult source, NativeCommand command, MatcherPrefix prefix) {
+    private CoreMatchingResult(CoreMatchingResult source, NativeCommand command,
+                               long prefixBefore, long prefixAfter, MatcherPrefix prefixView) {
         accepted = source.accepted;
         resultCode = source.resultCode;
         cancellations = source.cancellations;
@@ -147,7 +166,10 @@ public final class CoreMatchingResult {
         matcherStateChanged = source.matcherStateChanged;
         outcome = source.outcome;
         nativeCommand = Objects.requireNonNull(command, "native command");
-        matcherPrefix = Objects.requireNonNull(prefix, "matcher prefix");
+        if (prefixBefore < 0 || prefixAfter < 0) throw new IllegalArgumentException("invalid matcher prefix");
+        matcherPrefixBefore = prefixBefore;
+        matcherPrefixAfter = prefixAfter;
+        matcherPrefixView = prefixView;
         nativeMatcherResult = source.nativeMatcherResult;
         matcherEvents = source.matcherEvents;
         marketData = source.marketData;
@@ -205,7 +227,17 @@ public final class CoreMatchingResult {
         return nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null
                 ? nativeMatcherResult.sequence() : nativeCommand.nativeSequence();
     }
-    public MatcherPrefix matcherPrefix() { return matcherPrefix; }
+    public MatcherPrefix matcherPrefix() {
+        MatcherPrefix view = matcherPrefixView;
+        if (view != null) return view;
+        if (matcherPrefixBefore == 0 && matcherPrefixAfter == 0) return EMPTY_PREFIX;
+        view = new MatcherPrefix(matcherPrefixBefore, matcherPrefixAfter);
+        matcherPrefixView = view;
+        return view;
+    }
+    public long matcherPrefixBefore() { return matcherPrefixBefore; }
+    public long matcherPrefixAfter() { return matcherPrefixAfter; }
+    public boolean matcherPrefixBound() { return matcherPrefixBefore != 0 && matcherPrefixAfter != 0; }
     public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
     public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }
     public MatcherResult.MarketData marketData() { return marketData; }

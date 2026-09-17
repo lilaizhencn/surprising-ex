@@ -113,7 +113,7 @@ final class OrderedCommitCoordinator {
                 // Lane rejection is observed after the Matcher event has completed.
                 int shard = matcherResult.nativeCommand().matcherShardId();
                 if (matcherSequence(shard) != matcherResult.nativeCommand().matcherSequence()
-                        || matcherPrefixDigest(shard) != matcherResult.matcherPrefix().after()) {
+                        || matcherPrefixDigest(shard) != matcherResult.matcherPrefixAfter()) {
                     validateMatchingEvidence(pending, matcherResult);
                     applyMatcherProgress(matcherResult);
                 }
@@ -979,22 +979,23 @@ final class OrderedCommitCoordinator {
             CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         var nativeCommand = result.nativeCommand();
-        var prefix = result.matcherPrefix();
+        long prefixBefore = result.matcherPrefixBefore();
+        long prefixAfter = result.matcherPrefixAfter();
         int matcherShardId = nativeCommand.matcherShardId();
         long appliedMatcherSequence = matcherSequence(matcherShardId);
         long appliedMatcherPrefixDigest = matcherPrefixDigest(matcherShardId);
         if (nativeCommand.coreSequence() != pending.sequence()
                 || !nativeCommand.matches(pending.command().header().commandId())
                 || nativeCommand.matcherSequence() <= appliedMatcherSequence
-                || !prefix.bound()
-                || prefix.before() != appliedMatcherPrefixDigest
-                || prefix.after() == prefix.before()) {
+                || prefixBefore == 0 || prefixAfter == 0
+                || prefixBefore != appliedMatcherPrefixDigest
+                || prefixAfter == prefixBefore) {
             throw owner.failMatching(pending, "matcher result prefix does not continue the applied prefix"
                     + " expectedSequenceAfter=" + appliedMatcherSequence
                     + " actualSequence=" + nativeCommand.matcherSequence()
                     + " expectedPrefix=" + appliedMatcherPrefixDigest
-                    + " actualBefore=" + prefix.before()
-                    + " actualAfter=" + prefix.after(), null);
+                    + " actualBefore=" + prefixBefore
+                    + " actualAfter=" + prefixAfter, null);
         }
     }
 
@@ -1014,7 +1015,7 @@ final class OrderedCommitCoordinator {
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         int index = matcherProgressIndex(result.nativeCommand().matcherShardId());
         appliedMatcherSequences[index] = result.nativeCommand().matcherSequence();
-        appliedMatcherPrefixDigests[index] = result.matcherPrefix().after();
+        appliedMatcherPrefixDigests[index] = result.matcherPrefixAfter();
     }
 
     long matcherSequence(int matcherShardId) {
