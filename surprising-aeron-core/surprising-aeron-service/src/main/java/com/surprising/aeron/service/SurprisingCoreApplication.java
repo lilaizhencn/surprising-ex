@@ -1,7 +1,6 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
-import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
@@ -25,12 +24,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.event.ContextClosedEvent;
 
 /** Spring Boot composition root for the Aeron node; it is intentionally non-web. */
 @SpringBootConfiguration
-@Import(CoreConfiguration.class)
+@ComponentScan
 public class SurprisingCoreApplication {
 
     private SurprisingCoreApplication() {
