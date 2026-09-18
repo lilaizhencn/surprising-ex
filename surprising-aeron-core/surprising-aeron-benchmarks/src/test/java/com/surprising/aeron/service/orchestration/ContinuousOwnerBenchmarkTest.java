@@ -6,6 +6,21 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ContinuousOwnerBenchmarkTest {
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void pairedAccountsReleaseDependencyFencesAndRestoreFunds(ProductLine product) {
+        try (var workload = new ContinuousOwnerBenchmark()) {
+            workload.productLine = product;
+            workload.batchSize = 20;
+            workload.accountPattern = "PAIRED";
+            workload.setup();
+            var counters = new ContinuousOwnerBenchmark.Counters();
+            workload.placeCancelWithoutTimers(counters);
+            assertEquals(10240, counters.terminalBusinessOperations);
+            assertEquals(counters.acceptedCoreMessages, counters.terminalCoreMessages);
+        }
+    }
+
     @org.junit.jupiter.api.Test
     @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "core.settlementLatencyDiagnostics", matches = "true")
     void recordsQueueResidenceAcrossOwnerAndTransportWithoutChangingResponses() throws Exception {

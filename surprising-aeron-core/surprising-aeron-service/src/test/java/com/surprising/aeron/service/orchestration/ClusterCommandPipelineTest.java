@@ -24,6 +24,56 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries(ProductLine product) throws Exception {
+        var release = new CountDownLatch(1);
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var state = live.service.state();
+            var entered = new CountDownLatch(1);
+            var gate = state.matcherPipeline.readAtSubmissionFence(
+                    state.matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                        entered.countDown();
+                        try {
+                            if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher timeout");
+                        } catch (InterruptedException failure) { throw new AssertionError(failure); }
+                        return true;
+                    });
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            var first = live.place(11, "BTC-USDT", 81000, 80, 1, CoreOrderSide.BUY);
+            var second = live.place(disjointUser(11), "BTC-USDT", 81001, 80, 1, CoreOrderSide.BUY);
+            live.send(first);
+            live.send(second);
+            var firstPending = state.pendingMatching(state.matchingSequence(first.header().commandId()));
+            var secondPending = state.pendingMatching(state.matchingSequence(second.header().commandId()));
+            live.progressUntil(() -> firstPending.settlementEvent() != null
+                    && firstPending.settlementEvent().dispatched()
+                    && secondPending.settlementEvent() != null && secondPending.settlementEvent().dispatched());
+            release.countDown();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while ((!firstPending.settlementEvent().complete() || !secondPending.settlementEvent().complete())
+                    && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(firstPending.settlementEvent().complete()).isTrue();
+            assertThat(secondPending.settlementEvent().complete()).isTrue();
+            assertThat(live.responses).isEmpty();
+            live.service.pollCommands();
+            assertThat(live.responses).hasSize(2);
+            assertThat(live.service.pendingCommandCount()).isZero();
+            assertThat(live.responses.get(0).committedCoreSequence())
+                    .isLessThan(live.responses.get(1).committedCoreSequence());
+            serial.apply(first);
+            serial.apply(second);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.service.state().tradingState().users())
+                    .isEqualTo(serial.service.state().tradingState().users());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+            assertThat(gate.join()).isTrue();
+        } finally { release.countDown(); }
+    }
+
     @Test
     @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "core.settlementLatencyDiagnostics", matches = "true")
     void sampledSettlementTimesSurviveEventReuseAndCoverOrdinaryAndBatchOrders() throws Exception {

@@ -29,20 +29,16 @@ final class OwnerCommandPipelineState {
     /** 当前控制命令收到的 Matcher 终态响应。 */
     private CoreResponse matchingResponse;
 
-    /** 当前正在提交的日志前缀长度；当前实现按一条命令建立确定性提交边界。 */
-    private int drainingSize;
-    /** 当前提交前缀对应的核心序号。 */
-    private long drainingSequence;
+    /** 当前已建立捕获边界的 FIFO 队首；退休前不移动窗口头。 */
+    private ClusterCommandWindow.Entry committingHead;
     /** 当前异步命令的超时截止时间。 */
     private long progressDeadline;
 
     /** 上一轮被依赖关系挡住的入站命令，用于避免重复准备。 */
     private CoreMessage blockedIngress;
-    /** 上一轮阻挡入站命令的窗口队首。 */
-    private CoreMessage blockedWindowHead;
+    /** 必须退休的最后一个依赖项；引用窗口已有条目，不复制依赖状态。 */
+    private ClusterCommandWindow.Entry blockedThrough;
 
-    /** 上一轮等待 Matcher 通知时观察到的提交前缀序号。 */
-    private long waitingPrefixSequence;
     /** 上一轮等待 Matcher 通知时观察到的派发上限。 */
     private long waitingDispatchSequence;
     /** 上一轮等待 Matcher 通知时观察到的完成游标。 */
@@ -55,8 +51,6 @@ final class OwnerCommandPipelineState {
 
     /** 命令窗口的历史峰值，不参与资金和订单状态判断。 */
     private int commandWindowHighWaterMark;
-    /** 已经建立的确定性提交窗口数量。 */
-    private long drainedWindows;
     /** 已经进入确定性提交边界的命令数量。 */
     private long drainedCommands;
     /** 因已有依赖而等待的次数。 */
@@ -78,18 +72,15 @@ final class OwnerCommandPipelineState {
         controlResponse = null;
         matchingResponseSequence = 0;
         matchingResponse = null;
-        drainingSize = 0;
-        drainingSequence = 0;
+        committingHead = null;
         progressDeadline = 0;
         blockedIngress = null;
-        blockedWindowHead = null;
-        waitingPrefixSequence = 0;
+        blockedThrough = null;
         waitingDispatchSequence = 0;
         waitingMatchingProgress = 0;
         waitingMatchingNotification = false;
         commandProgress = 0;
         commandWindowHighWaterMark = 0;
-        drainedWindows = 0;
         drainedCommands = 0;
         dependencyFences = 0;
         controlFences = 0;
@@ -108,11 +99,10 @@ final class OwnerCommandPipelineState {
         controlResponse = null;
         matchingResponseSequence = 0;
         matchingResponse = null;
-        drainingSize = 0;
-        drainingSequence = 0;
+        committingHead = null;
         progressDeadline = 0;
         blockedIngress = null;
-        blockedWindowHead = null;
+        blockedThrough = null;
         waitingMatchingNotification = false;
     }
 
@@ -183,22 +173,23 @@ final class OwnerCommandPipelineState {
         return pendingIngress;
     }
 
-    /** 记录当前入站命令被依赖关系挡住，避免相同窗口头部下重复准备。 */
-    void rememberBlockedIngress(CoreMessage request) {
+    /** 记录实际依赖前缀的末项；无关队首退休不触发重新准备。 */
+    void rememberBlockedIngress(CoreMessage request, int prefixSize) {
+        if (prefixSize <= 0 || prefixSize > commandWindow.size())
+            throw new IllegalArgumentException("invalid ingress dependency prefix");
         blockedIngress = request;
-        blockedWindowHead = commandWindow.get(0).request;
+        blockedThrough = commandWindow.get(prefixSize - 1);
     }
 
     /** 清除旧的依赖阻塞记录，允许重新准备当前队首命令。 */
     void clearBlockedIngress() {
         blockedIngress = null;
-        blockedWindowHead = null;
+        blockedThrough = null;
     }
 
-    /** 判断当前入站命令是否仍被同一个窗口队首挡住。 */
-    boolean isBlockedBySameWindowHead(CoreMessage request) {
-        return request == blockedIngress && commandWindow.size() != 0
-                && commandWindow.get(0).request == blockedWindowHead;
+    /** 依赖项退休时同步清除引用，避免环形槽位复用造成误判。 */
+    boolean isIngressBlocked(CoreMessage request) {
+        return request == blockedIngress && blockedThrough != null;
     }
 
     /** 保留被阻塞命令的解码结果，并在命令离开队首时释放临时解码对象。 */
@@ -209,35 +200,23 @@ final class OwnerCommandPipelineState {
         if (pending != blockedIngress || pending == null) clearBlockedIngress();
     }
 
-    /** 开始提交当前命令窗口的确定性前缀。 */
-    void beginDrainingPrefix() {
-        if (commandWindow.size() == 0 || drainingSize != 0) {
+    /** 为当前 FIFO 队首建立独立的确定性提交边界。 */
+    void beginHeadCommit() {
+        if (commandWindow.size() == 0 || committingHead != null) {
             throw new IllegalStateException("invalid command drain boundary");
         }
-        drainingSize = 1;
-        drainingSequence = commandWindow.get(0).sequence;
-        drainedWindows++;
+        committingHead = commandWindow.get(0);
         drainedCommands++;
     }
 
-    /** 返回当前提交前缀是否已经建立。 */
-    boolean hasDrainingPrefix() {
-        return drainingSize != 0;
+    /** 返回当前队首是否已经建立提交边界。 */
+    boolean hasCommittingHead() {
+        return committingHead != null;
     }
 
-    /** 返回当前提交前缀的最后一个窗口条目。 */
-    ClusterCommandWindow.Entry drainingEntry() {
-        return commandWindow.get(drainingSize - 1);
-    }
-
-    /** 返回当前提交前缀长度。 */
-    int drainingSize() {
-        return drainingSize;
-    }
-
-    /** 返回当前提交前缀对应的核心序号。 */
-    long drainingSequence() {
-        return drainingSequence;
+    /** 返回正在提交的队首，其序号、时间和日志位置直接取自窗口。 */
+    ClusterCommandWindow.Entry committingHead() {
+        return committingHead;
     }
 
     /** 设置当前异步命令的截止时间。 */
@@ -253,7 +232,6 @@ final class OwnerCommandPipelineState {
     /** 记录一次“等待完成通知但未提交”的状态，供下一轮廉价判断使用。 */
     void rememberMatchingWait(long dispatchThrough, long matchingProgress, long progressBefore,
                               boolean hasLocalMatchingWork) {
-        waitingPrefixSequence = drainingSequence;
         waitingDispatchSequence = dispatchThrough;
         waitingMatchingProgress = matchingProgress;
         waitingMatchingNotification = matchingProgress == progressBefore && !hasLocalMatchingWork;
@@ -263,7 +241,6 @@ final class OwnerCommandPipelineState {
     boolean canSkipMatchingPoll(long dispatchThrough, long progressBefore,
                                 boolean hasMatchingNotifications) {
         return waitingMatchingNotification
-                && waitingPrefixSequence == drainingSequence
                 && waitingDispatchSequence == dispatchThrough
                 && waitingMatchingProgress == progressBefore
                 && !hasMatchingNotifications;
@@ -279,11 +256,12 @@ final class OwnerCommandPipelineState {
         return waitingMatchingNotification;
     }
 
-    /** 完成当前提交前缀并记录一次 Owner 推进。 */
-    void finishDrainingPrefix() {
-        commandWindow.removePrefix(drainingSize);
-        drainingSize = 0;
-        drainingSequence = 0;
+    /** 完成当前命令；先释放依赖引用，再清空可复用槽位。 */
+    void finishHeadCommit() {
+        if (committingHead == null) throw new IllegalStateException("no command commit boundary");
+        if (committingHead == blockedThrough) clearBlockedIngress();
+        commandWindow.removePrefix(1);
+        committingHead = null;
         waitingMatchingNotification = false;
         commandProgress++;
     }
@@ -333,7 +311,6 @@ final class OwnerCommandPipelineState {
     String terminationSummary() {
         return "highWaterMark=" + commandWindowHighWaterMark
                 + " pending=" + commandWindow.size()
-                + " windows=" + drainedWindows
                 + " commands=" + drainedCommands
                 + " dependencyFences=" + dependencyFences
                 + " controlFences=" + controlFences

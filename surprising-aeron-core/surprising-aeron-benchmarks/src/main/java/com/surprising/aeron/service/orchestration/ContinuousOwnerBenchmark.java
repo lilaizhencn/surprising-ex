@@ -23,6 +23,9 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     /** 20项批量响应覆盖不可变payload跨线程交接及复用编码缓冲区。 */
     @Param({"1", "20"})
     public int batchSize = 1;
+    /** 独立账户覆盖连续退休，相邻同账户覆盖依赖阻塞与解锁。 */
+    @Param({"DISTINCT", "PAIRED"})
+    public String accountPattern = "DISTINCT";
     /** 分别覆盖阻塞唤醒合并及忙轮询所有权交接；每个fork固定一种策略。 */
     @Param({"BLOCKING", "BUSY_SPIN"})
     public String laneWaitStrategy = "BLOCKING";
@@ -127,7 +130,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             for (int item = 0; item < batchSize; item++) items.add(new PlaceOrderCommand(orderId++,
                     "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
-            send(batchSize == 1 ? CoreMessageType.PLACE_ORDER : CoreMessageType.PLACE_ORDER_BATCH, 1000 + i,
+            send(batchSize == 1 ? CoreMessageType.PLACE_ORDER : CoreMessageType.PLACE_ORDER_BATCH, accountUser(i),
                     batchSize == 1 ? TradingCommandCodec.encodePlaceOrder(items.getFirst())
                             : TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(items)));
         }
@@ -139,7 +142,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         for (int i = 0; i < 256; i++) {
             var items = new java.util.ArrayList<CancelOrderCommand>(batchSize);
             for (int item = 0; item < batchSize; item++) items.add(new CancelOrderCommand(orders[i] + item));
-            send(batchSize == 1 ? CoreMessageType.CANCEL_ORDER : CoreMessageType.CANCEL_ORDER_BATCH, 1000 + i,
+            send(batchSize == 1 ? CoreMessageType.CANCEL_ORDER : CoreMessageType.CANCEL_ORDER_BATCH, accountUser(i),
                     batchSize == 1 ? TradingCommandCodec.encodeCancelOrder(items.getFirst())
                             : TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(items)));
         }
@@ -151,6 +154,14 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         counters.terminalCoreMessages += 512;
         validateBatchResponses = false;
         return terminal;
+    }
+
+    private long accountUser(int index) {
+        return switch (accountPattern) {
+            case "DISTINCT" -> 1000 + index;
+            case "PAIRED" -> 1000 + index / 2;
+            default -> throw new IllegalArgumentException("unknown account pattern " + accountPattern);
+        };
     }
 
     /** 只用于功能回归：模拟慢出口后恢复，核对队列内旧响应未被下一条编码覆盖。 */

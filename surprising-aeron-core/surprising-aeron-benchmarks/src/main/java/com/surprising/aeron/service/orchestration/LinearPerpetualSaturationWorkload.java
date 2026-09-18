@@ -500,6 +500,8 @@ final class LinearPerpetualSaturationWorkload {
                 boolean incompletePair = false;
                 for (boolean inFlight : pairInFlight) incompletePair |= inFlight;
                 int settlementInFlightHighWaterMark = harness.dispatchedSettlementHighWaterMark();
+                // 该峰值只覆盖 Owner 派发，Matcher->Lane 直达路径可以合法为零。
+                // 满载用实际 pending backlog 验证；不把线程调度下的瞬时结算重叠当成资金不变量。
                 if (latencySamples != operationsPerRun
                         || scheduledOperations != operationsPerRun
                         || scheduledEntrySequence != operationsPerRun
@@ -512,7 +514,7 @@ final class LinearPerpetualSaturationWorkload {
                         || laneOperations <= Math.multiplyExact(operationsPerRun, 2L)
                         || laneOperations > Math.multiplyExact(operationsPerRun, 3L)
                         || parallelSettlementLanes < 2
-                        || maxInFlight > 1 && settlementInFlightHighWaterMark < 2
+                        || maxBacklog() > maxInFlight || maxBacklog() < 2
                         || rejectedLaneSubmissions != 0
                         || queuedLaneOperations != 0
                         || backlogSamples == 0

@@ -1150,13 +1150,16 @@ final class OrderedCommitCoordinator {
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, long throughSequence, TradingCoreRuntime.MatchingCommitHandler handler) {
         return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst,
-                throughSequence, throughSequence, handler);
+                throughSequence, throughSequence, true, handler);
     }
 
-    /** 派发上限只覆盖已准入的独立命令；最终提交上限与每命令的日志时间不变。 */
+    /**
+     * 派发上限只覆盖已准入的独立命令；最终提交上限与每命令的日志时间不变。
+     * Owner 连续退休已 ready 队首时可跳过公共推进，但发布作用域仍逐命令保留。
+     */
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, long throughSequence, long dispatchThroughSequence,
-                            TradingCoreRuntime.MatchingCommitHandler handler) {
+                            boolean advanceProgress, TradingCoreRuntime.MatchingCommitHandler handler) {
         owner.assertOwner();
         owner.assertHealthy();
         if (maxCompletions <= 0 || handler == null) {
@@ -1164,7 +1167,7 @@ final class OrderedCommitCoordinator {
         }
         owner.beginDownstreamPublicationBatch();
         try {
-            advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+            if (advanceProgress) advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {

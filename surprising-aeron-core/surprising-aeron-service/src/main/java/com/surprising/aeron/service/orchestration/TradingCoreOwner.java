@@ -164,17 +164,22 @@ public final class TradingCoreOwner {
         finally { state.runtimeState.exitAsynchronousCommandScope(); }
     }
 
-    /** 按“提交前缀、异步控制、命令准入”的业务顺序执行一轮流水线。 */
+    /** 按“队首提交、异步控制、命令准入”的业务顺序执行一轮流水线。 */
     private void progressCommandsInScope() {
         boolean awaitingCompletion = false;
+        // 每轮先推进异步工作；随后连续 ready 的队首直接退休，不重复收集整个窗口。
+        boolean advanceMatching = true;
         ClusterCommandWindow window = commandPipeline.commandWindow();
         for (int work = 0; work < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE; work++) {
-            // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
-            if (!commandPipeline.hasDrainingPrefix() && window.size() != 0) beginCommandPrefix();
+            // 当前命令的提交边界不变；未完成时仍可准入与在途命令无依赖的后续订单。
+            if (!commandPipeline.hasCommittingHead() && window.size() != 0) beginCommandCommit();
             // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
-            if (commandPipeline.hasDrainingPrefix() && !awaitingCompletion) {
+            if (commandPipeline.hasCommittingHead() && !awaitingCompletion) {
                 // 先提交已经就绪的结果；本轮预算限制单次 Owner 调度时间。
-                if (pollCommandPrefix()) continue;
+                if (pollCommandCommit(advanceMatching)) {
+                    advanceMatching = false;
+                    continue;
+                }
                 awaitingCompletion = true;
             }
             if (window.size() == window.capacity()) return;
@@ -184,18 +189,18 @@ public final class TradingCoreOwner {
             }
             var next = commandPipeline.pendingIngress().first();
             if (next == null) return;
-            if (commandPipeline.isBlockedBySameWindowHead(next.command)) return;
+            if (commandPipeline.isIngressBlocked(next.command)) return;
             commandPipeline.clearBlockedIngress();
             boolean eligible = state.prepareClusterPipelineScope(next.command, window);
             boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0) {
-                commandPipeline.rememberBlockedIngress(next.command);
+                commandPipeline.rememberBlockedIngress(next.command, prefix);
                 // 记录等待决定，否则最繁忙的依赖等待会从诊断中消失。
                 if (!eligible) commandPipeline.recordControlFence();
                 else commandPipeline.recordDependencyFence(retry);
-                if (commandPipeline.hasDrainingPrefix()) return;
-                beginCommandPrefix();
+                if (commandPipeline.hasCommittingHead()) return;
+                beginCommandCommit();
                 continue;
             }
             if (!eligible) {
@@ -229,6 +234,7 @@ public final class TradingCoreOwner {
             entry.response = entry.sequence == 0 ? result : null;
             commandPipeline.pendingIngress().remove();
             commandPipeline.recordAdmission();
+            advanceMatching = true;
         }
     }
 
@@ -238,43 +244,45 @@ public final class TradingCoreOwner {
     }
 
     /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
-    private void beginCommandPrefix() {
-        commandPipeline.beginDrainingPrefix();
-        var last = commandPipeline.drainingEntry();
+    private void beginCommandCommit() {
+        commandPipeline.beginHeadCommit();
+        var last = commandPipeline.committingHead();
         beginCapture(last.position, last.timestamp);
         commandPipeline.startProgressDeadline();
     }
 
-    /** 收集 Matcher 和账户 Lane 的完成结果，并提交当前确定性命令前缀。 */
-    private boolean pollCommandPrefix() {
+    /** 公共推进按需执行；每条队首仍独立完成捕获、发布、响应和退休。 */
+    private boolean pollCommandCommit(boolean advanceMatching) {
         ClusterCommandWindow window = commandPipeline.commandWindow();
-        var last = commandPipeline.drainingEntry();
-        long dispatchThrough = Math.max(commandPipeline.drainingSequence(), window.lastMatchingSequence());
+        var last = commandPipeline.committingHead();
+        long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
         long progressBefore = state.matchingProgressSequence();
-        if (commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
+        if (commandPipeline.waitingForMatchingNotification()
+                && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
                 state.hasMatchingNotifications())) {
             checkProgressDeadline();
             return false;
         }
         commandPipeline.beginMatchingPoll();
-        state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
-                last.timestamp, last.position, false, commandPipeline.drainingSequence(),
-                dispatchThrough, matchingCommitHandler);
+        // 新队首可能需要激活批量、派发结算或收取队列通知；不能因本轮已收集过而饿死续接。
+        if (!advanceMatching && last.sequence != 0) {
+            advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching(last.sequence));
+        }
+        state.commits.commitReadyMatching(1,
+                last.timestamp, last.position, false, last.sequence,
+                dispatchThrough, advanceMatching, matchingCommitHandler);
         if (state.firstPendingMatchingSequence() != 0
-                && state.firstPendingMatchingSequence() <= commandPipeline.drainingSequence()) {
+                && state.firstPendingMatchingSequence() <= last.sequence) {
             commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
                     progressBefore, state.hasLocalMatchingWork());
             checkProgressDeadline();
             return false;
         }
-        if (commandPipeline.drainingSize() == window.size()) state.assertClusterCallbackComplete();
+        if (window.size() == 1) state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, last.position);
-        for (int i = 0; i < commandPipeline.drainingSize(); i++) {
-            var entry = window.get(i);
-            if (entry.response == null) throw new IllegalStateException("missing pipeline terminal response");
-            if (entry.session != null) offerResponse(entry.session, entry.request, entry.response);
-        }
-        commandPipeline.finishDrainingPrefix();
+        if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
+        if (last.session != null) offerResponse(last.session, last.request, last.response);
+        commandPipeline.finishHeadCommit();
         state.runtimeState.releaseCompletedSequentialLaneStage();
         if (window.size() == 0) progressRealtimeReads(System.nanoTime());
         return true;
@@ -360,7 +368,7 @@ public final class TradingCoreOwner {
         if (next == null) return false;
         ClusterCommandWindow window = commandPipeline.commandWindow();
         if (window.size() == window.capacity()) return false;
-        return !commandPipeline.isBlockedBySameWindowHead(next.command);
+        return !commandPipeline.isIngressBlocked(next.command);
     }
 
     /** 返回当前撮合命令窗口大小，供兼容测试和运行诊断使用。 */

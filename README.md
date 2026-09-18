@@ -21,6 +21,12 @@ Surprising 是一个正在开发和验证中的多产品线交易系统。本仓
 
 ## 总体架构
 
+交易核心的 Owner 流水线位于 `surprising-aeron-core/surprising-aeron-service`：
+`TradingCoreOwner` 每轮按需收集 Matcher/Lane 完成结果，再按 FIFO 连续退休 ready 命令，
+不等待凑批；新准入或未 ready 的队首会重新推进异步工作。每条命令独立保留日志时间、位置、
+资金校验、发布与响应边界。`OwnerCommandPipelineState` 直接引用窗口队首及实际依赖末项，
+不复制命令序号、不维护单元素“批量前缀”；依赖项退休时清除引用，再复用槽位。
+
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 
 ```mermaid
