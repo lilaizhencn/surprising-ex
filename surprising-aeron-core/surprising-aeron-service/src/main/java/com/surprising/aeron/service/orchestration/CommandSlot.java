@@ -82,7 +82,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     // Matching controls reuse the same continuation fields as settlement/clearing work.
     java.util.function.BooleanSupplier controlWork;
     /** Slot-owned settlement continuation; retained across reuse to avoid per-command lambdas. */
-    private com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork reusableSettlementWork;
+    private com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork reusableSettlementWork;
     private final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
     private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
     private final LiquidationExecutionContinuation liquidationExecutionControl =
@@ -183,16 +183,16 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         controlWork = Objects.requireNonNull(work);
     }
 
-    com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork settlementWork() {
+    com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork settlementWork() {
         return reusableSettlementWork;
     }
 
-    void settlementWork(com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+    void settlementWork(com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork work) {
         reusableSettlementWork = Objects.requireNonNull(work);
     }
 
     void deferSettlementControl(OrderedCommitCoordinator coordinator,
-            com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+            com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         settlementControl.prepare(coordinator, work);
         controlWork = settlementControl;
@@ -986,10 +986,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** Owner-confined callback shared by all settlement polls for this fixed command slot. */
     private final class SettlementControlContinuation implements java.util.function.BooleanSupplier {
         private OrderedCommitCoordinator coordinator;
-        private com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work;
+        private com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork work;
 
         void prepare(OrderedCommitCoordinator coordinator,
-                com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork work) {
+                com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork work) {
             this.coordinator = Objects.requireNonNull(coordinator);
             this.work = Objects.requireNonNull(work);
         }

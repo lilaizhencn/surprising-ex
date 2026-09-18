@@ -104,7 +104,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(opening, identities);
         runtime.startAccountLanes();
         try {
-            CoreSettlementProgressView actual = RuntimeSettlementProcessor.applyRuntime(command,
+            CoreSettlementProgressView actual = RuntimeLifecycleSettlement.applyRuntime(command,
                     List.of(USER_ID, SECOND_MAKER_ID), null, new ActiveOrderIndex(opening), runtime, identities);
 
             assertThat(actual.complete()).isTrue();

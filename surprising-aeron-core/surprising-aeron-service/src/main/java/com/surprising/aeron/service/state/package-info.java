@@ -39,7 +39,8 @@
  * 变更、资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。</p>
  *
  * <p>{@code SettlementStateTransitions} 负责交割/期权结算的 {@code TradingCoreState} 投影/物化桥接和订单
- * 取消后的 lifecycle 游标推进；逐 Lane 的结算计算仍由 {@code RuntimeSettlementProcessor} 负责。</p>
+ * 取消后的 lifecycle 游标推进；同步结算流程由 {@code RuntimeLifecycleSettlement} 负责，
+ * 异步 Lane 阶段由 {@code RuntimeLifecycleSettlementContinuation} 负责。</p>
  *
  * <p>{@code RiskSnapshotQueries} 只从风险快照、用户、持仓和行情状态组装查询视图，不写入任何
  * 权威状态；{@code RiskScanControlStateTransitions} 只更新版本化扫描控制，不修改扫描进度、风险

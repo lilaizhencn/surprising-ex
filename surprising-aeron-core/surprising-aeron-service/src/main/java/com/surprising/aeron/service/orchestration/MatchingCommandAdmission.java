@@ -19,7 +19,6 @@ import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeSettlementProcessor;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;

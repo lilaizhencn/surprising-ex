@@ -1,7 +1,8 @@
 package com.surprising.aeron.service.command.settlement;
 
 import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.service.state.RuntimeSettlementProcessor;
+import com.surprising.aeron.service.state.RuntimeLifecycleSettlement;
+import com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,21 +58,21 @@ public final class InstrumentSettlementCommands {
     public void settleInstrumentRuntime(com.surprising.aeron.protocol.SettleInstrumentCommand command,
                                         UUID commandId) {
         long beforeRevision = owner.runtimeState().revision();
-        owner.setCommandSettlementProgress(RuntimeSettlementProcessor.applyRuntime(command,
+        owner.setCommandSettlementProgress(RuntimeLifecycleSettlement.applyRuntime(command,
                 owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId()), commandId,
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities()));
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
     }
 
-    public RuntimeSettlementProcessor.SettlementWork beginAsyncSettlement(
+    public RuntimeLifecycleSettlementContinuation.SettlementWork beginAsyncSettlement(
             com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
         return beginAsyncSettlement(null, command, commandId);
     }
 
-    public RuntimeSettlementProcessor.SettlementWork beginAsyncSettlement(
-            RuntimeSettlementProcessor.SettlementWork reuse,
+    public RuntimeLifecycleSettlementContinuation.SettlementWork beginAsyncSettlement(
+            RuntimeLifecycleSettlementContinuation.SettlementWork reuse,
             com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
-        return RuntimeSettlementProcessor.prepareAsync(reuse, command,
+        return RuntimeLifecycleSettlementContinuation.prepare(reuse, command,
                 owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId()), commandId,
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
     }

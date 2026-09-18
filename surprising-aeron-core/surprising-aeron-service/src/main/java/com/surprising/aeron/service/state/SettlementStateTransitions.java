@@ -23,7 +23,7 @@ final class SettlementStateTransitions {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
         try {
-            CoreSettlementProgressView progress = RuntimeSettlementProcessor.apply(state, command, indexedUserIds,
+            CoreSettlementProgressView progress = RuntimeLifecycleSettlement.apply(state, command, indexedUserIds,
                     chunkCommandId, activeOrderIndex, runtime, identities);
             if (runtime.revision() == state.revision()) {
                 return new TradingCoreReducer.SettlementApplication(state, progress);

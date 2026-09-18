@@ -161,9 +161,10 @@ CoreMessage / PlaceOrderCommand
 `FundingStateTransitions` 只负责永续资金费的产品线校验、标记价冻结、分页游标、用户余额变更、
 资金费事实输出和 treasury 资金费进度；交割/期权到期结算不复用这条流程。
 `SettlementStateTransitions` 负责交割/期权结算的 TradingCoreState 投影/物化桥接和订单取消后的
- lifecycle 游标推进；逐 Lane 的结算计算仍由 `RuntimeSettlementProcessor` 负责。结算命令的产品线准入、
+ lifecycle 游标推进；同步运行时主流程由 `RuntimeLifecycleSettlement` 负责，异步 Lane 阶段由
+ `RuntimeLifecycleSettlementContinuation` 负责。结算命令的产品线准入、
 维护门禁和结算价格校验由 `ProductTradingRules.validateLifecycleSettlement` 负责，交割/期权/永续
-的差异实现位于各自 `business.*` 产品规则类；`RuntimeSettlementProcessor` 只负责游标、订单撤销、
+ 的差异实现位于各自 `business.*` 产品规则类；运行时结算只负责游标、订单撤销、
 Lane 分组、账户状态变更和 treasury 合并，并通过 `lifecycleSettlementCashDeltaUnits` 消费产品结算
 现金变化，不再直接按 `ContractType` 选择永续或交割公式。
 `RiskSnapshotQueries` 只组装风险查询视图，不写入权威状态；`RiskScanControlStateTransitions`
