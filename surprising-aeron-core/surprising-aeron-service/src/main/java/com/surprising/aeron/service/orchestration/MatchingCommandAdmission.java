@@ -220,7 +220,7 @@ final class MatchingCommandAdmission {
             preMatchingCancellations = preMatchingCloseCapacityCancellations(
                     operation, message, decodedCommand, admission);
         } catch (CoreStateRejectedException exception) {
-            if (owner.commits.commitPublicationDirty) {
+            if (owner.commits.commitPublicationDirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
@@ -231,7 +231,7 @@ final class MatchingCommandAdmission {
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
-            if (owner.commits.commitPublicationDirty) {
+            if (owner.commits.commitPublicationDirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
@@ -243,7 +243,8 @@ final class MatchingCommandAdmission {
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
         }
-        boolean tradingStateChanged = owner.commits.commitPublicationDirty && !owner.commits.commitPublicationProvisionalOnly;
+        boolean tradingStateChanged = owner.commits.commitPublicationDirty()
+                && !owner.commits.commitPublicationProvisionalOnly();
         if (tradingStateChanged) {
             try {
                 owner.stampOrderChangesRuntime(clusterTimestamp, clusterPosition, owner.resultBuilder.commandChangedOrderIds);

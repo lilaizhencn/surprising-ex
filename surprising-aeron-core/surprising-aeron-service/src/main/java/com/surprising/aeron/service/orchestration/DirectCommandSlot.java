@@ -262,7 +262,7 @@ final class DirectCommandSlot {
             controlWork = null;
         }
         if (status != ResponseStatus.APPLIED
-                && (owner.commits.commitPublicationDirty
+                && (owner.commits.commitPublicationDirty()
                 || owner.runtimeState.revision() != beforeRevision
                 || owner.runtimeState.hasUncommittedCommandChanges())) {
             if (controlWork == null) {

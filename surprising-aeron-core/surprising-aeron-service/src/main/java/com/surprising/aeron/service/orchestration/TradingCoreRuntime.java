@@ -554,7 +554,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 : restoredAuditFundsStateHash;
         this.auditHashCoreSequence = Long.MIN_VALUE;
         this.cachedBusinessStateHash = currentBusinessStateHash();
-        commits.runtimePatchRevision = snapshotState.revision();
+        commits.initializeCommitPublication(snapshotState.revision());
         this.factIndexes.rebuild(snapshotState, identities);
         this.runtimeProjectionJournal = com.surprising.aeron.service.state.RuntimeCommitJournal.passive(
                 productLine, snapshotState, cachedBusinessStateHash, auditFundsStateHash,
@@ -900,7 +900,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
         if (!directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
-                    && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
+                    && (commits.commitPublicationDirty() || runtimeState.revision() != beforeRuntimeRevision
                         || runtimeState.hasUncommittedCommandChanges())) {
                 rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                         Math.incrementExact(appliedCommandCount));
@@ -2651,11 +2651,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void deferProvisionalSnapshotProjection() {
-        if (!commits.commitPublicationDeferred) {
-            throw new IllegalStateException("provisional projection requires a command batch");
-        }
-        if (!commits.commitPublicationDirty) commits.commitPublicationProvisionalOnly = true;
-        commits.commitPublicationDirty = true;
+        commits.deferProvisionalCommitPublication();
     }
 
     com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
@@ -2797,7 +2793,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void suspendMatchingCommitContext(CommandSlot pending) {
-        if (!commits.commitPublicationDeferred || pending == null
+        if (!commits.commitPublicationDeferred() || pending == null
                 || pending.settlementEvent() == null && pending.cancelEvent() == null
                 && pending.orderBatch == null
                 && !commits.controlPending(pending.sequence())) {
@@ -2811,10 +2807,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         CommandSlot context = pending;
         context.suspendCommitContext(
                 resultBuilder, commandFundsAccumulator,
-                commits.commitPublicationDirty, commits.commitPublicationProvisionalOnly);
-        commits.commitPublicationDeferred = false;
-        commits.commitPublicationDirty = false;
-        commits.commitPublicationProvisionalOnly = false;
+                commits.commitPublicationDirty(), commits.commitPublicationProvisionalOnly());
+        commits.suspendCommitPublication();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
         resultBuilder.resetChangeAccumulators();
@@ -2822,14 +2816,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void restoreMatchingCommitContext(CommandSlot pending) {
-        if (commits.commitPublicationDeferred || factContextActive) {
+        if (commits.commitPublicationDeferred() || factContextActive) {
             throw new IllegalStateException("another owner commit context is active");
         }
         CommandSlot context = pending;
         activateFactContext(pending.command(), pending.fingerprint());
-        commits.commitPublicationDeferred = true;
-        commits.commitPublicationDirty = context.commitSnapshotDirty();
-        commits.commitPublicationProvisionalOnly = context.commitSnapshotProvisionalOnly();
+        commits.restoreCommitPublication(context.commitSnapshotDirty(), context.commitSnapshotProvisionalOnly());
         context.restoreCommitContext(resultBuilder);
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();

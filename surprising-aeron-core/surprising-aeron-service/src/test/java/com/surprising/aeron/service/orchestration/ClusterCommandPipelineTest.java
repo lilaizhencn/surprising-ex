@@ -507,7 +507,7 @@ class ClusterCommandPipelineTest {
                 live.send(first);
                 long sequence = state.matchingSequence(first.header().commandId());
                 live.service.pollCommands();
-                assertThat(state.commits.commitPublicationDeferred).as("batch waiting for matcher").isFalse();
+                assertThat(state.commits.commitPublicationDeferred()).as("batch waiting for matcher").isFalse();
                 live.send(next);
                 live.tick();
                 assertThat(live.responses).hasSize(2).allSatisfy(response ->
@@ -666,27 +666,39 @@ class ClusterCommandPipelineTest {
                 var firstPending = state.pendingMatching(sequence);
                 var firstEvent = firstPending.orderBatch != null
                         ? firstPending.orderBatch.itemSettlementEvent : firstPending.settlementEvent();
-                boolean alreadyDispatched = firstEvent != null && firstEvent.direct() && firstEvent.dispatched();
                 try {
                     for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
                             new Class<?>[]{task}, (proxy, method, args) -> {
                                 entered.countDown();
                                 if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout");
                                 return null;
-                            }));
+                    }));
                     assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                    // Dispatched only means the event entered the route.  Observe completion
+                    // after the barrier is established so this assertion does not race that
+                    // final Lane transition.
+                    boolean alreadySettled = firstEvent != null && firstEvent.direct()
+                            && firstEvent.dispatched() && firstEvent.complete();
                     firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
-                    if (alreadyDispatched) {
+                    if (alreadySettled) {
                         assertThat(firstResponse).as("%s already settled", type).isNotNull();
                         assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                         assertThat(state.pendingMatching(sequence)).isNull();
-                    } else {
-                        assertThat(firstResponse).isNull();
+                    } else if (firstResponse == null) {
                         for (int i = 0; i < 3; i++) {
-                            assertThat(state.completeMatching(sequence, matching, timestamp, 0)).isNull();
-                            assertThat(state.commits.commitPublicationDeferred).isFalse();
+                            CoreResponse polled = state.completeMatching(sequence, matching, timestamp, 0);
+                            if (polled != null) {
+                                firstResponse = polled;
+                                assertThat(polled.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                                assertThat(state.pendingMatching(sequence)).isNull();
+                                break;
+                            }
+                            assertThat(state.commits.commitPublicationDeferred()).isFalse();
                             assertThat(state.laneCommandContexts.required(sequence).hasCommitContext()).isTrue();
                         }
+                    } else {
+                        assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                        assertThat(state.pendingMatching(sequence)).isNull();
                     }
                     state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
                 } finally { release.countDown(); }

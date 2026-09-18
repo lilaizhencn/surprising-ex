@@ -45,7 +45,10 @@ final class OrderedCommitCoordinator {
     private long checkedDispatchRevision = Long.MIN_VALUE;
     private long checkedDispatchThrough = Long.MIN_VALUE;
 
-    OrderedCommitCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
+    OrderedCommitCoordinator(TradingCoreRuntime owner) {
+        this.owner = owner;
+        this.publication = new CommitPublication(owner);
+    }
 
     /** 各撮合分片已核验的序号；提交时逐分片验证连续性。 */
     long[] appliedMatcherSequences;
@@ -59,20 +62,8 @@ final class OrderedCommitCoordinator {
     /** 结算在途数量峰值，仅用于运行观测。 */
     int dispatchedSettlementHighWaterMark;
 
-    /** 已发布变更的运行时 revision，禁止发布倒退。 */
-    long runtimePatchRevision;
-
-    /** 唯一增量发布位置；同步更新资金增量、索引与提交水位。 */
-    final OwnerCommitPublisher ownerCommitPublisher = new OwnerCommitPublisher();
-
-    /** 当前范围内延后发布，等待完整的有序提交边界。 */
-    boolean commitPublicationDeferred;
-
-    /** 当前范围存在尚未发布的变更。 */
-    boolean commitPublicationDirty;
-
-    /** 当前变更仅为暂存准入，尚不能作为终态对外发布。 */
-    boolean commitPublicationProvisionalOnly;
+    /** 只拥有撮合完成顺序；提交发布批次由独立的状态 owner 管理。 */
+    final CommitPublication publication;
 
     CoreResponse completeRejectedMatching(long sequence) {
         owner.assertOwner();
@@ -176,7 +167,7 @@ final class OrderedCommitCoordinator {
                                 validAccountLaneMask());
                     pending.commitEvent = owner.runtimeState.dispatchLaneMutation(sequence,
                             owner.resultBuilder.commandChangedUserIds,
-                            commitPublicationDirty ? owner.resultBuilder.commandChangedOrderIds : List.of(),
+                            publication.dirty() ? owner.resultBuilder.commandChangedOrderIds : List.of(),
                             clusterTimestamp, clusterPosition);
                 }
                 if (pending.commitEvent != null) {
@@ -505,7 +496,7 @@ final class OrderedCommitCoordinator {
             owner.resultBuilder.materializeChangeAccumulators();
             pending.commitEvent = owner.runtimeState.dispatchLaneMutation(sequence,
                     owner.resultBuilder.commandChangedUserIds,
-                    commitPublicationDirty ? owner.resultBuilder.commandChangedOrderIds : List.of(),
+                    publication.dirty() ? owner.resultBuilder.commandChangedOrderIds : List.of(),
                     clusterTimestamp, clusterPosition);
             if (pending.commitEvent != null) {
                 if (!owner.runtimeState.laneCommitComplete(pending.commitEvent)) {
@@ -1362,79 +1353,20 @@ final class OrderedCommitCoordinator {
         }
     }
 
-    void requestCommitPublication() {
-        if (commitPublicationDeferred) {
-            commitPublicationDirty = true;
-            commitPublicationProvisionalOnly = false;
-            return;
-        }
-        publishCommittedChanges();
+    void requestCommitPublication() { publication.request(); }
+    void beginCommitPublicationBatch() { publication.begin(); }
+    void completeCommitPublicationBatch() { publication.complete(); }
+    void abortCommitPublicationBatch() { publication.abort(); }
+    void publishCommittedChanges() { publication.publish(); }
+    boolean commitPublicationDeferred() { return publication.deferred(); }
+    boolean commitPublicationDirty() { return publication.dirty(); }
+    boolean commitPublicationProvisionalOnly() { return publication.provisionalOnly(); }
+    void initializeCommitPublication(long runtimePatchRevision) {
+        publication.initialize(runtimePatchRevision);
     }
-
-    void beginCommitPublicationBatch() {
-        if (commitPublicationDeferred) {
-            throw new IllegalStateException("snapshot projection batch is already active");
-        }
-        commitPublicationDeferred = true;
-        commitPublicationDirty = false;
-        commitPublicationProvisionalOnly = false;
-    }
-
-    void completeCommitPublicationBatch() {
-        boolean dirty = commitPublicationDirty;
-        boolean provisionalOnly = commitPublicationProvisionalOnly;
-        commitPublicationDeferred = false;
-        commitPublicationDirty = false;
-        commitPublicationProvisionalOnly = false;
-        if (dirty && provisionalOnly) owner.runtimeState.clearChangedKeys();
-        else if (dirty) publishCommittedChanges();
-    }
-
-    void abortCommitPublicationBatch() {
-        commitPublicationDeferred = false;
-        commitPublicationDirty = false;
-        commitPublicationProvisionalOnly = false;
-    }
-
-    void publishCommittedChanges() {
-        ownerCommitPublisher.execute();
-    }
-
-    final class OwnerCommitPublisher {
-        /** 发布方法重入保护，只在执行期间置为 true。 */
-        boolean active;
-
-        void execute() {
-            if (active) throw new IllegalStateException("owner commit publisher is already active");
-            active = true;
-            try {
-                long sequence = Math.incrementExact(owner.runtimeProjectionJournal.publishedSequence());
-                try {
-                    if (!owner.factContextActive) {
-                        throw new IllegalStateException("runtime commit requires an active command scope");
-                    }
-                    owner.runtimeState.appendFundsDelta(owner.commandFundsAccumulator);
-                    if (owner.realtimeCapture != null) owner.runtimeState.captureRealtimeChanges(owner.realtimeCapture);
-                    if (owner.runtimeState.committedRevision() < runtimePatchRevision)
-                        throw new IllegalStateException("runtime changed-index commit is out of order");
-                    owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
-                    owner.runtimeProjectionJournal.publish(sequence,
-                            owner.runtimeProjectionJournal.auditBusinessStateHash(),
-                            owner.runtimeProjectionJournal.auditFundsStateHash());
-                    owner.currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
-                    owner.currentProjectionPoint.completeSequence();
-                    runtimePatchRevision = owner.runtimeState.committedRevision();
-                    owner.runtimeState.releaseRetiredPositionIdentities(owner.identities);
-                    owner.runtimeState.clearChangedKeys();
-                } catch (RuntimeException failure) {
-                    owner.commitPublicationFailure = new IllegalStateException(
-                            "owner commit failed after deterministic mutation; restart from snapshot and log is required",
-                            failure);
-                    throw failure;
-                }
-            } finally {
-                active = false;
-            }
-        }
+    void deferProvisionalCommitPublication() { publication.deferProvisionalProjection(); }
+    void suspendCommitPublication() { publication.suspend(); }
+    void restoreCommitPublication(boolean dirty, boolean provisionalOnly) {
+        publication.restore(dirty, provisionalOnly);
     }
 }

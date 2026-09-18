@@ -134,7 +134,7 @@ final class CoreSnapshotLifecycle {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
             if (owner.snapshotHasPendingCommands()
-                    || owner.commits.commitPublicationDeferred || owner.commits.commitPublicationDirty) {
+                    || owner.commits.commitPublicationDeferred() || owner.commits.commitPublicationDirty()) {
                 throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
             owner.runtimeState.requireSnapshotFenceReady();
