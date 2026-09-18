@@ -1,11 +1,9 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CoreMessageCodec;
-import com.surprising.aeron.protocol.CoreMessageHeader;
-import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.protocol.WireMessageKind;
+import com.surprising.aeron.client.AeronRealtimeReceiver;
+import com.surprising.aeron.client.AeronRealtimeSender;
+import com.surprising.aeron.client.RealtimeOutbox;
+import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -13,6 +11,7 @@ import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.FragmentHandler;
 import java.util.function.BooleanSupplier;
 import org.agrona.concurrent.IdleStrategy;
+import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
 
 /**
@@ -45,12 +44,12 @@ public final class TradingCoreOwner {
 
     private final ProductLine productLine;
     private TradingCoreRuntime state;
-    private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
-    private com.surprising.aeron.client.AeronRealtimeSender realtimeSender;
-    private com.surprising.aeron.client.AeronRealtimeReceiver realtimeControl;
-    private com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
-    private final org.agrona.concurrent.ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame>
-            snapshotRequests = new org.agrona.concurrent.ManyToOneConcurrentArrayQueue<>(256);
+    private RealtimeOutbox realtimeOutbox;
+    private AeronRealtimeSender realtimeSender;
+    private AeronRealtimeReceiver realtimeControl;
+    private RealtimeStateCapture realtimeCapture;
+    private final ManyToOneConcurrentArrayQueue<RealtimeFrame>
+            snapshotRequests = new ManyToOneConcurrentArrayQueue<>(256);
     private boolean realtimeLeader;
     private long lastCommittedPosition;
     /** 仅 Owner 写入：上一轮已耗尽本地推进时的命令前缀、派发上限和进度。 */
@@ -105,13 +104,13 @@ public final class TradingCoreOwner {
         realtimeLeader = cluster.role() == Cluster.Role.LEADER;
         String channel = System.getProperty("surprising.realtime.channel", "");
         if (!channel.isBlank() && realtimeOutbox == null) {
-            realtimeOutbox = new com.surprising.aeron.client.RealtimeOutbox(8192, 8 * 1024 * 1024);
+            realtimeOutbox = new RealtimeOutbox(8192, 8 * 1024 * 1024);
             realtimeCapture = state.attachRealtime(realtimeOutbox);
             String directory = System.getProperty("surprising.realtime.directory", io.aeron.CommonContext.getAeronDirectoryName());
-            realtimeSender = new com.surprising.aeron.client.AeronRealtimeSender(realtimeOutbox, directory,
+            realtimeSender = new AeronRealtimeSender(realtimeOutbox, directory,
                     channel, Integer.getInteger("surprising.realtime.stream", 2101));
             String control = System.getProperty("surprising.realtime.control-channel", "");
-            if (!control.isBlank()) realtimeControl = new com.surprising.aeron.client.AeronRealtimeReceiver(
+            if (!control.isBlank()) realtimeControl = new AeronRealtimeReceiver(
                     directory, control, Integer.getInteger("surprising.realtime.control-stream", 2102), frame -> {
                         if (frame.productLine() == productLine && frame.snapshotId() > 0 && frame.payloadLength() == 0
                                 && frame.ordinal() == 0 && frame.sequence() == 0
@@ -589,7 +588,7 @@ public final class TradingCoreOwner {
         return state;
     }
 
-    void attachRealtime(com.surprising.aeron.client.RealtimeOutbox outbox,
+    void attachRealtime(RealtimeOutbox outbox,
                         com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture) {
         realtimeOutbox = outbox;
         realtimeCapture = capture == null ? state.attachRealtime(outbox) : capture;
