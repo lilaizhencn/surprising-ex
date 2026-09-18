@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.client.AeronRealtimeReceiver;
-import com.surprising.aeron.client.AeronRealtimeSender;
 import com.surprising.aeron.client.RealtimeOutbox;
-import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.CommandFingerprint;
+import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
@@ -12,7 +14,6 @@ import io.aeron.logbuffer.FragmentHandler;
 import java.util.function.BooleanSupplier;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
-import org.agrona.concurrent.UnsafeBuffer;
 
 /**
  * 交易 Owner：按确定性边界推进交易，未完成命令与响应跨推进轮次保留。
@@ -23,105 +24,72 @@ import org.agrona.concurrent.UnsafeBuffer;
  */
 public final class TradingCoreOwner {
 
-    private static final int MATCHING_COMPLETION_BATCH_SIZE = 64;
-    private static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+    /** 快照阶段的最长等待时间；交易命令本身使用命令流水线的截止时间。 */
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
-    private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
-    private int commandWindowHighWaterMark;
-    private long drainedWindows, drainedCommands, dependencyFences, controlFences;
-    private long retryFences;
-    /** Owner 独占：只有准入、控制执行或提交推进时递增，等待中的命令不算工作。 */
-    private long commandProgress;
-    /** 已提交结果的异步出口，网络背压不占用交易回调的执行时间。 */
-    private final DeferredSessionResponses pendingResponses = new DeferredSessionResponses();
 
-    /** 不可变终态跨线程出口；为空时由当前线程直接编码并使用会话。 */
-    private final ResponseSink responseSink;
+    /** 复制日志命令的执行阶段、依赖等待和提交边界的唯一状态持有者。 */
+    private final OwnerCommandPipelineState commandPipeline = new OwnerCommandPipelineState();
+    /** 已提交响应的交接边界，不参与业务状态计算。 */
+    private final OwnerResponsePublisher responsePublisher;
+    /** 实时盘口和快照的独立传输边界，不阻塞撮合主流程。 */
+    private final TradingRealtimeBoundary realtimeBoundary;
+
+    /** 兼容旧的 ClusteredService 测试和独立回放工具的响应交接函数。 */
     @FunctionalInterface
     interface ResponseSink {
+        /** 接收已经提交的不可变响应，由外部出口负责网络线程交接。 */
         void offer(ClientSession session, CoreMessageHeader header, CoreResponse response, long committedSequence);
     }
 
+    /** 所属产品线；它决定命令、账户、撮合器和快照的隔离边界。 */
     private final ProductLine productLine;
+    /** 当前产品线的权威交易运行时；Owner 只在自己的线程访问它。 */
     private TradingCoreRuntime state;
-    private RealtimeOutbox realtimeOutbox;
-    private AeronRealtimeSender realtimeSender;
-    private AeronRealtimeReceiver realtimeControl;
-    private RealtimeStateCapture realtimeCapture;
-    private final ManyToOneConcurrentArrayQueue<RealtimeFrame>
-            snapshotRequests = new ManyToOneConcurrentArrayQueue<>(256);
-    private boolean realtimeLeader;
-    private long lastCommittedPosition;
-    /** 仅 Owner 写入：上一轮已耗尽本地推进时的命令前缀、派发上限和进度。 */
-    private long waitingPrefixSequence, waitingDispatchSequence, waitingMatchingProgress;
-    /** 没有本地进展时只探测完成通知，仍持续接收入站命令，不使用定时器。 */
-    private boolean waitingMatchingNotification;
-    private long nextRealtimeSnapshotNs;
-    // Aeron's cluster idle strategy can reenter doBackgroundWork on this same thread.
+    /** Aeron 集群对象，Owner 只用于时间、角色和日志位置边界。 */
+    private Cluster cluster;
+    /** 集群等待策略，所有者是当前 Owner 线程。 */
+    private IdleStrategy idleStrategy;
+    /** Aeron 回调可能重入背景工作，使用该标记保护交易推进边界。 */
     private boolean processingLogCallback;
 
-    private Cluster cluster;
-    private IdleStrategy idleStrategy;
-    private byte[] responseScratch = new byte[4 * 1024];
-    private final UnsafeBuffer responseBuffer = new UnsafeBuffer(responseScratch);
-    // 跨回调保留控制命令的终态关联；普通订单使用 commandWindow。
-    private long responseSequence;
-    private CoreResponse matchingResponse;
+    /** Matcher 完成通知使用的统一回调，最终结果回到命令流水线状态。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
+    /** 快照屏障尚未就绪的诊断次数，不参与业务判断。 */
     private long snapshotFenceNotReadyCount;
+    /** 快照屏障超时的诊断次数，不参与业务判断。 */
     private long snapshotFenceTimeoutCount;
 
+    /** 创建指定产品线的 Owner。 */
     public TradingCoreOwner(ProductLine productLine) { this(productLine, null); }
 
     TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
-        this.responseSink = responseSink;
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
+        this.responsePublisher = new OwnerResponsePublisher(responseSink);
+        this.realtimeBoundary = new TradingRealtimeBoundary(productLine);
     }
 
+    /**
+     * 启动 Owner 的集群边界和交易运行时。
+     *
+     * <p>这里只初始化运行时资源，不执行任何业务命令；业务命令必须来自已复制的 Cluster 日志。</p>
+     */
     void start(Cluster cluster) {
         this.cluster = cluster;
         if (state == null) state = new TradingCoreRuntime(productLine);
-        responseSequence = 0;
-        matchingResponse = null;
         processingLogCallback = false;
-        commandWindow.clear();
-        pendingIngress.clear();
-        blockedIngress = blockedWindowHead = null;
-        activeControl = null;
-        controlResponse = null;
-        drainingSize = 0;
-        pendingResponses.clear();
-        commandWindowHighWaterMark = 0;
-        drainedWindows = drainedCommands = dependencyFences = controlFences = retryFences = 0;
+        commandPipeline.reset();
+        responsePublisher.clear();
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
         System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
-        lastCommittedPosition = Math.max(0, cluster.logPosition());
-        realtimeLeader = cluster.role() == Cluster.Role.LEADER;
-        String channel = System.getProperty("surprising.realtime.channel", "");
-        if (!channel.isBlank() && realtimeOutbox == null) {
-            realtimeOutbox = new RealtimeOutbox(8192, 8 * 1024 * 1024);
-            realtimeCapture = state.attachRealtime(realtimeOutbox);
-            String directory = System.getProperty("surprising.realtime.directory", io.aeron.CommonContext.getAeronDirectoryName());
-            realtimeSender = new AeronRealtimeSender(realtimeOutbox, directory,
-                    channel, Integer.getInteger("surprising.realtime.stream", 2101));
-            String control = System.getProperty("surprising.realtime.control-channel", "");
-            if (!control.isBlank()) realtimeControl = new AeronRealtimeReceiver(
-                    directory, control, Integer.getInteger("surprising.realtime.control-stream", 2102), frame -> {
-                        if (frame.productLine() == productLine && frame.snapshotId() > 0 && frame.payloadLength() == 0
-                                && frame.ordinal() == 0 && frame.sequence() == 0
-                                && ((frame.userId() > 0 && frame.kind() == com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST)
-                                || (frame.userId() == 0 && frame.kind() == com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK_REQUEST
-                                    && frame.symbol().matches("[A-Z0-9][A-Z0-9_-]{1,63}"))))
-                            snapshotRequests.offer(frame);
-                    });
-        }
+        realtimeBoundary.start(cluster, state);
     }
 
+    /** 接收一条已复制命令，并在当前日志回调内推进命令流水线。 */
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
         acceptCommittedCommand(session, request, timestamp, position, null);
     }
@@ -138,16 +106,17 @@ public final class TradingCoreOwner {
         acceptCommittedCommand(session, request, timestamp, position, fingerprint, false);
     }
 
+    /** 统一处理两种入口，确保响应轮询、入队、推进和异常转换使用同一顺序。 */
     private void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                         CommandFingerprint fingerprint, boolean advance) {
         try {
             processingLogCallback = true;
-            pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
+            responsePublisher.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
             processIngress(session, request, timestamp, position, fingerprint, advance);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
-            // AgentRunner otherwise logs ordinary exceptions and may consume the next message.
+            // AgentRunner 否则可能只记录普通异常并继续消费后续日志消息。
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
             retainPendingPreparation();
@@ -155,87 +124,69 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 已复制入口及当前控制命令由服务线程持有，跨回调保留原始日志上下文。 */
-    private final PendingClusterIngress pendingIngress = new PendingClusterIngress();
-    /** 当前已执行一次、仍在等待子任务或查询结果的控制命令。 */
-    private PendingClusterIngress.Entry activeControl;
-    /** 控制命令最终响应的候选值；子任务终态收齐前不发送。 */
-    private CoreResponse controlResponse;
-    /** 正在提交的确定性窗口前缀；不因下一次轮询的线程速度改变边界。 */
-    private int drainingSize;
-    private long drainingSequence, progressDeadline;
-    /** 已判定必须等待的入口及当时窗口队首；队首提交前不重复准备同一依赖范围。 */
-    private CoreMessage blockedIngress, blockedWindowHead;
-
+    /** 保留当前队首命令的解码准备状态，避免等待异步完成时重复解码。 */
     private void retainPendingPreparation() {
-        var next = pendingIngress.first();
-        CoreMessage pending = next == null ? null : next.command;
-        commandWindow.retainDecoded(pending);
-        if (pending != blockedIngress || pending == null) {
-            blockedIngress = blockedWindowHead = null;
-        }
+        commandPipeline.retainPendingPreparation();
     }
 
+    /** 把一条已复制命令放入 Owner 队列，并按入口模式决定是否立即推进。 */
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position,
                                 CommandFingerprint fingerprint, boolean advance) {
         awaitIngressCapacity(request);
-        pendingIngress.add(session, request, timestamp, position, fingerprint);
-        if (advance) progressCommands(false);
+        commandPipeline.pendingIngress().add(session, request, timestamp, position, fingerprint);
+        if (advance) progressCommands();
     }
 
     /** 队列满时暂停日志消费，在原日志上下文内推进已复制命令；不改变业务顺序或拒绝结果。 */
     private void awaitIngressCapacity(CoreMessage request) {
-        if (pendingIngress.hasCapacity(request)) return;
-        long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
+        if (commandPipeline.pendingIngress().hasCapacity(request)) return;
+        long deadline = System.nanoTime() + OwnerCommandPipelineState.COMMAND_TIMEOUT_NANOS;
         do {
-            progressCommands(false);
-            if (pendingIngress.hasCapacity(request)) return;
+            progressCommands();
+            if (commandPipeline.pendingIngress().hasCapacity(request)) return;
             idleCommand(0, deadline);
         } while (true);
     }
 
-    private void progressCommands(boolean flushWindow) {
+    /** 在 Owner 线程中绑定运行时并推进一轮命令状态。 */
+    private void progressCommands() {
         state.bindOwner();
         state.runtimeState.enterAsynchronousCommandScope();
-        try { progressCommandsInScope(flushWindow); }
+        try { progressCommandsInScope(); }
         finally { state.runtimeState.exitAsynchronousCommandScope(); }
     }
 
-    private void progressCommandsInScope(boolean flushWindow) {
+    /** 按“提交前缀、异步控制、命令准入”的业务顺序执行一轮流水线。 */
+    private void progressCommandsInScope() {
         boolean awaitingCompletion = false;
-        for (int work = 0; work < MATCHING_COMPLETION_BATCH_SIZE; work++) {
+        ClusterCommandWindow window = commandPipeline.commandWindow();
+        for (int work = 0; work < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE; work++) {
             // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
-            if (drainingSize == 0 && commandWindow.size() != 0) beginCommandPrefix();
+            if (!commandPipeline.hasDrainingPrefix() && window.size() != 0) beginCommandPrefix();
             // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
-            if (drainingSize != 0 && !awaitingCompletion) {
-                // Retire ready results before adding more work; the existing turn budget bounds this drain.
+            if (commandPipeline.hasDrainingPrefix() && !awaitingCompletion) {
+                // 先提交已经就绪的结果；本轮预算限制单次 Owner 调度时间。
                 if (pollCommandPrefix()) continue;
                 awaitingCompletion = true;
             }
-            if (commandWindow.size() == commandWindow.capacity()) return;
-            if (activeControl != null) {
+            if (window.size() == window.capacity()) return;
+            if (commandPipeline.hasActiveControl()) {
                 if (!pollControl()) return;
                 continue;
             }
-            var next = pendingIngress.first();
+            var next = commandPipeline.pendingIngress().first();
             if (next == null) return;
-            if (next.command == blockedIngress && commandWindow.size() != 0
-                    && commandWindow.get(0).request == blockedWindowHead) return;
-            blockedIngress = blockedWindowHead = null;
-            boolean eligible = state.prepareClusterPipelineScope(next.command, commandWindow);
+            if (commandPipeline.isBlockedBySameWindowHead(next.command)) return;
+            commandPipeline.clearBlockedIngress();
+            boolean eligible = state.prepareClusterPipelineScope(next.command, window);
             boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
-            int prefix = !eligible || retry ? commandWindow.size() : commandWindow.conflictingPrefixSize();
+            int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0) {
-                blockedIngress = next.command;
-                blockedWindowHead = commandWindow.get(0).request;
-                // A prefix is normally already draining. Count the decision before returning,
-                // otherwise the busiest dependency waits disappear from the diagnostics.
-                if (!eligible) controlFences++;
-                else {
-                    dependencyFences++;
-                    if (retry) retryFences++;
-                }
-                if (drainingSize != 0) return;
+                commandPipeline.rememberBlockedIngress(next.command);
+                // 记录等待决定，否则最繁忙的依赖等待会从诊断中消失。
+                if (!eligible) commandPipeline.recordControlFence();
+                else commandPipeline.recordDependencyFence(retry);
+                if (commandPipeline.hasDrainingPrefix()) return;
                 beginCommandPrefix();
                 continue;
             }
@@ -243,24 +194,24 @@ public final class TradingCoreOwner {
                 if (state.requiresOwnerLaneAccessForPreparation(next.command)
                         && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
                 CoreMatchingPhaseMetrics.recordBoundary("ingressToControl", next.command.header(), next.queuedNanos);
-                activeControl = next;
+                commandPipeline.beginControl(next);
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position, next.timestamp);
-                progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
-                controlResponse = state.applyDecodedCommand(next.command, next.timestamp, next.position,
-                        commandWindow.decodedIfPresent(next.command), false, next.fingerprint);
-                commandProgress++;
-                responseSequence = state.matchingSequence(next.command.header().commandId());
-                matchingResponse = null;
+                commandPipeline.startProgressDeadline();
+                commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp, next.position,
+                        window.decodedIfPresent(next.command), false, next.fingerprint));
+                commandPipeline.recordControlProgress();
+                commandPipeline.rememberMatchingResponseSequence(
+                        state.matchingSequence(next.command.header().commandId()));
                 continue;
             }
-            if (commandWindow.size() == 0) state.assertClusterCallbackComplete();
+            if (window.size() == 0) state.assertClusterCallbackComplete();
             CoreMatchingPhaseMetrics.recordBoundary("ingressToAdmission", next.command.header(), next.queuedNanos);
             long admissionStart = CoreMatchingPhaseMetrics.sampleStart(next.command.header());
-            var entry = commandWindow.add(next.session, next.command, next.timestamp, next.position);
+            var entry = window.add(next.session, next.command, next.timestamp, next.position);
             CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
-                    commandWindow.decoded(next.command), true, next.fingerprint);
-            commandWindow.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
+                    window.decoded(next.command), true, next.fingerprint);
+            window.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
             if (entry.sequence != 0) {
                 var pending = state.pendingMatching(entry.sequence);
                 pending.establishCommitFence(next.timestamp, next.position);
@@ -268,120 +219,113 @@ public final class TradingCoreOwner {
             }
             CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
             entry.response = entry.sequence == 0 ? result : null;
-            pendingIngress.remove();
-            commandProgress++;
-            commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
+            commandPipeline.pendingIngress().remove();
+            commandPipeline.recordAdmission();
         }
     }
 
+    /** 在命令开始改变业务状态前建立实时事件捕获边界。 */
     private void beginCapture(long position, long timestamp) {
-        if (realtimeCapture != null && realtimeLeader) {
-            try { realtimeCapture.begin(position, timestamp, 0, state.realtimeExportSequence()); }
-            catch (RuntimeException failure) { realtimeCapture.failed(); }
-        }
+        realtimeBoundary.beginCapture(state, position, timestamp);
     }
 
     /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
     private void beginCommandPrefix() {
-        if (commandWindow.size() == 0 || drainingSize != 0)
-            throw new IllegalStateException("invalid command drain boundary");
-        drainingSize = 1;
-        var last = commandWindow.get(0);
-        drainingSequence = last.sequence;
-        drainedWindows++;
-        drainedCommands++;
+        commandPipeline.beginDrainingPrefix();
+        var last = commandPipeline.drainingEntry();
         beginCapture(last.position, last.timestamp);
-        progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
+        commandPipeline.startProgressDeadline();
     }
 
+    /** 收集 Matcher 和账户 Lane 的完成结果，并提交当前确定性命令前缀。 */
     private boolean pollCommandPrefix() {
-        var last = commandWindow.get(drainingSize - 1);
-        long dispatchThrough = Math.max(drainingSequence, commandWindow.lastMatchingSequence());
+        ClusterCommandWindow window = commandPipeline.commandWindow();
+        var last = commandPipeline.drainingEntry();
+        long dispatchThrough = Math.max(commandPipeline.drainingSequence(), window.lastMatchingSequence());
         long progressBefore = state.matchingProgressSequence();
-        if (waitingMatchingNotification && waitingPrefixSequence == drainingSequence
-                && waitingDispatchSequence == dispatchThrough && waitingMatchingProgress == progressBefore
-                && !state.hasMatchingNotifications()) {
+        if (commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
+                state.hasMatchingNotifications())) {
             checkProgressDeadline();
             return false;
         }
-        waitingMatchingNotification = false;
-        state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
-                last.timestamp, last.position, false, drainingSequence,
+        commandPipeline.beginMatchingPoll();
+        state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
+                last.timestamp, last.position, false, commandPipeline.drainingSequence(),
                 dispatchThrough, matchingCommitHandler);
-        if (state.firstPendingMatchingSequence() != 0 && state.firstPendingMatchingSequence() <= drainingSequence) {
-            waitingMatchingProgress = state.matchingProgressSequence();
-            waitingPrefixSequence = drainingSequence;
-            waitingDispatchSequence = dispatchThrough;
-            waitingMatchingNotification = waitingMatchingProgress == progressBefore && !state.hasLocalMatchingWork();
+        if (state.firstPendingMatchingSequence() != 0
+                && state.firstPendingMatchingSequence() <= commandPipeline.drainingSequence()) {
+            commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
+                    progressBefore, state.hasLocalMatchingWork());
             checkProgressDeadline();
             return false;
         }
-        if (drainingSize == commandWindow.size()) state.assertClusterCallbackComplete();
-        lastCommittedPosition = last.position;
-        if (realtimeCapture != null) realtimeCapture.commit(state.realtimeExportSequence());
-        for (int i = 0; i < drainingSize; i++) {
-            var entry = commandWindow.get(i);
+        if (commandPipeline.drainingSize() == window.size()) state.assertClusterCallbackComplete();
+        realtimeBoundary.commit(state, last.position);
+        for (int i = 0; i < commandPipeline.drainingSize(); i++) {
+            var entry = window.get(i);
             if (entry.response == null) throw new IllegalStateException("missing pipeline terminal response");
-            if (entry.session != null) offerResponse(entry.session,
-                    entry.request.header().response(responseType(entry.request.header())), entry.response);
+            if (entry.session != null) offerResponse(entry.session, entry.request, entry.response);
         }
-        commandWindow.removePrefix(drainingSize);
-        commandProgress++;
-        drainingSize = 0;
-        drainingSequence = 0;
+        commandPipeline.finishDrainingPrefix();
         state.runtimeState.releaseCompletedSequentialLaneStage();
-        if (commandWindow.size() == 0) progressRealtimeReads(System.nanoTime());
+        if (window.size() == 0) progressRealtimeReads(System.nanoTime());
         return true;
     }
 
+    /** 推进单条控制命令的异步子任务、查询结果和终态提交。 */
     private boolean pollControl() {
+        PendingClusterIngress.Entry activeControl = commandPipeline.activeControl();
         var request = activeControl.command;
         if (state.hasPendingDirectCommand()) {
-            controlResponse = state.pollDirectCommand();
-            if (controlResponse == null) { checkProgressDeadline(); return false; }
+            commandPipeline.controlResponse(state.pollDirectCommand());
+            if (commandPipeline.controlResponse() == null) { checkProgressDeadline(); return false; }
         }
-        state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+        state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
                 activeControl.timestamp, activeControl.position, false, matchingCommitHandler);
         if (state.firstPendingMatchingSequence() != 0) { checkProgressDeadline(); return false; }
-        if (responseSequence != 0) {
-            if (matchingResponse == null) throw new IllegalStateException("missing terminal callback result");
-            controlResponse = matchingResponse;
+        if (commandPipeline.hasMatchingResponseSequence()) {
+            if (commandPipeline.matchingResponse() == null) {
+                throw new IllegalStateException("missing terminal callback result");
+            }
+            commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
         long querySequence = state.querySequence(request.header().commandId());
         if (querySequence != 0) {
             CoreResponse result = state.takeQueryResult(querySequence);
             if (result == null) { checkProgressDeadline(); return false; }
-            controlResponse = result;
+            commandPipeline.controlResponse(result);
         }
         state.assertClusterCallbackComplete();
-        lastCommittedPosition = activeControl.position;
-        if (realtimeCapture != null) realtimeCapture.commit(state.realtimeExportSequence());
-        if (activeControl.session != null) offerResponse(activeControl.session,
-                request.header().response(responseType(request.header())), controlResponse);
+        realtimeBoundary.commit(state, activeControl.position);
+        if (activeControl.session != null) {
+            offerResponse(activeControl.session, request, commandPipeline.controlResponse());
+        }
         state.runtimeState.releaseOwnerLaneAccess();
-        activeControl = null;
-        controlResponse = matchingResponse = null;
-        responseSequence = 0;
-        pendingIngress.remove();
-        commandProgress++;
+        commandPipeline.finishControl();
+        commandPipeline.pendingIngress().remove();
+        commandPipeline.recordControlProgress();
         return true;
     }
 
+    /** 检查异步命令是否被中断或超过允许的等待时间。 */
     private void checkProgressDeadline() {
-        if (Thread.currentThread().isInterrupted() || System.nanoTime() - progressDeadline >= 0)
+        if (Thread.currentThread().isInterrupted()
+                || System.nanoTime() - commandPipeline.progressDeadline() >= 0)
             throw new IllegalStateException("asynchronous command progress interrupted or timed out");
     }
 
     /** 仅框架快照边界需要等待：快照不能遗漏已经复制但尚未完成的业务。 */
     private void finishSnapshotPrefix(long deadline) {
-        while (pendingIngress.size() != 0 || commandWindow.size() != 0 || activeControl != null) {
-            progressCommands(true);
+        while (commandPipeline.pendingIngress().size() != 0
+                || commandPipeline.commandWindow().size() != 0
+                || commandPipeline.hasActiveControl()) {
+            progressCommands();
             idleCommand(0, deadline);
         }
     }
 
     /** 已复制但尚未返回终态的命令及日志推进边界数量，用于运行积压观测。 */
-    public int pendingCommandCount() { return pendingIngress.size() + commandWindow.size(); }
+    public int pendingCommandCount() { return commandPipeline.pendingCommandCount(); }
 
     /**
      * Owner 在调用完整推进器前的廉价门禁。
@@ -391,11 +335,11 @@ public final class TradingCoreOwner {
      * 阻塞的入站命令仍需要一次推进；完成通知或 Owner 本地可推进状态则由 Runtime
      * 提供其余唤醒来源。</p>
      */
+    /** 判断 Owner 是否存在可以产生实际进展的入站命令或完成通知。 */
     boolean ownerWorkAvailable() {
         if (pendingIngressReady()) return true;
-        // pollCommandPrefix already observed an unchanged completion cursor.  Until a producer
-        // publishes a new notification, entering the full command scope cannot make progress.
-        if (waitingMatchingNotification) return ownerCompletionAvailable();
+        // 已经观察到完成游标没有变化；在生产者发布新通知前，重复进入完整推进器不会产生进展。
+        if (commandPipeline.waitingForMatchingNotification()) return ownerCompletionAvailable();
         return state != null && state.hasMatchingDrainWork();
     }
 
@@ -404,49 +348,58 @@ public final class TradingCoreOwner {
      * {@link #ownerCompletionAvailable()} 或 Runtime 的本地进展门禁会再次放行。
      */
     private boolean pendingIngressReady() {
-        var next = pendingIngress.first();
+        var next = commandPipeline.pendingIngress().first();
         if (next == null) return false;
-        if (commandWindow.size() == commandWindow.capacity()) return false;
-        return next.command != blockedIngress
-                || commandWindow.size() == 0
-                || commandWindow.get(0).request != blockedWindowHead;
+        ClusterCommandWindow window = commandPipeline.commandWindow();
+        if (window.size() == window.capacity()) return false;
+        return !commandPipeline.isBlockedBySameWindowHead(next.command);
     }
 
-    int commandWindowSize() { return commandWindow.size(); }
-    int commandWindowHighWaterMark() { return commandWindowHighWaterMark; }
-    ClusterCommandWindow commandWindow() { return commandWindow; }
-    org.agrona.concurrent.ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame>
-    snapshotRequests() { return snapshotRequests; }
+    /** 返回当前撮合命令窗口大小，供兼容测试和运行诊断使用。 */
+    int commandWindowSize() { return commandPipeline.commandWindow().size(); }
 
+    /** 返回撮合命令窗口峰值，供兼容测试和运行诊断使用。 */
+    int commandWindowHighWaterMark() { return commandPipeline.commandWindowHighWaterMark(); }
+
+    /** 返回 Owner 持有的撮合命令窗口，供同包测试检查提交边界。 */
+    ClusterCommandWindow commandWindow() { return commandPipeline.commandWindow(); }
+
+    /** 返回实时请求队列，供兼容测试和独立回放工具注入请求。 */
+    ManyToOneConcurrentArrayQueue<RealtimeFrame> snapshotRequests() {
+        return realtimeBoundary.requests();
+    }
+
+    /** 把 Matcher 的终态响应放回订单窗口或当前控制命令。 */
     private void completeMatching(long sequence, CoreResponse response) {
-        if (commandWindow.size() != 0) {
-            commandWindow.complete(sequence, response);
-            return;
-        }
-        if (sequence == responseSequence) matchingResponse = response;
+        commandPipeline.completeMatching(sequence, response);
     }
 
+    /** 在异步命令等待期间让出 Owner 线程，同时执行中断和超时保护。 */
     private void idleCommand(int work, long deadline) {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
-            // Operational failure, never a replicated business rejection or a deferred completion.
+            // 这是运行时故障，不是复制的业务拒绝，也不能转换成延迟完成。
             throw new IllegalStateException("cluster log callback completion interrupted or timed out");
         }
         idleStrategy.idle(work);
     }
 
+    /** 使用默认超时时间捕获一致性快照。 */
     byte[] captureSnapshot(long snapshotId) {
         return captureSnapshot(snapshotId, snapshotDeadline());
     }
 
+    /** 在指定截止时间内捕获一致性快照。 */
     byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
         return captureSnapshotSections(snapshotId, deadlineNanos).toByteArray();
     }
 
+    /** 计算快照屏障截止时间。 */
     private long snapshotDeadline() {
         return Math.addExact(System.nanoTime(),
                 java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
     }
 
+    /** 先排空已复制命令，再轮询交易运行时的快照屏障。 */
     private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
             long snapshotId, long deadlineNanos) {
         try {
@@ -474,101 +427,94 @@ public final class TradingCoreOwner {
         }
     }
 
+    /** 返回快照因已有异步工作未就绪的次数。 */
     public long snapshotFenceNotReadyCount() {
         return snapshotFenceNotReadyCount;
     }
 
+    /** 返回快照屏障超时次数。 */
     public long snapshotFenceTimeoutCount() {
         return snapshotFenceTimeoutCount;
     }
 
+    /** 处理集群角色切换，清理不能跨 Leader 任期继续发送的出口状态。 */
     void roleChange(Cluster.Role newRole) {
-        realtimeLeader = newRole == Cluster.Role.LEADER;
-        pendingResponses.clear();
-        if (realtimeCapture != null) realtimeCapture.abort();
+        realtimeBoundary.roleChange(newRole);
+        responsePublisher.clear();
         System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
     }
 
+    /** 推进不属于交易命令主流程的实时读取工作。 */
     int pollBackgroundWork(long nowNs) {
-        if (processingLogCallback || pendingIngress.size() != 0 || commandWindow.size() != 0 || realtimeCapture == null || !realtimeLeader) return 0;
+        if (processingLogCallback || commandPipeline.pendingCommandCount() != 0 || !realtimeBoundary.enabled()) {
+            return 0;
+        }
         return progressRealtimeReads(nowNs);
     }
 
+    /** 从实时请求队列取出一个请求，并在已提交位置上生成快照或盘口。 */
     private int progressRealtimeReads(long nowNs) {
-        if (realtimeCapture == null || !realtimeLeader) return 0;
-        int work=state.pollRealtimeSnapshot()+state.pollRealtimeBook();
-        if (state.realtimeSnapshotPending() || state.realtimeBookPending() || nowNs < nextRealtimeSnapshotNs) return work;
-        var request = snapshotRequests.poll();
-        if (request == null) return 0;
-        nextRealtimeSnapshotNs = nowNs + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(10);
-        if(request.kind()==com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK_REQUEST)
-            state.captureRealtimeBook(request.symbol(),lastCommittedPosition,cluster.time());
-        else state.captureRealtimeSnapshot(request.userId(), request.snapshotId(), lastCommittedPosition, cluster.time());
-        return 1;
+        return realtimeBoundary.poll(state, cluster, nowNs);
     }
 
+    /** 输出命令流水线诊断并释放 Owner、实时出口和交易运行时资源。 */
     void terminate() {
-        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d retryFences=%d%n",
-                productLine, commandWindowHighWaterMark, commandWindow.size(), drainedWindows,
-                drainedCommands, dependencyFences, controlFences, retryFences);
-        commandWindow.clear();
-        pendingIngress.clear();
-        blockedIngress = blockedWindowHead = null;
-        activeControl = null;
-        controlResponse = null;
-        drainingSize = 0;
-        pendingResponses.clear();
-        responseSequence = 0;
-        matchingResponse = null;
+        System.out.printf("Aeron core command-window productLine=%s %s%n",
+                productLine, commandPipeline.terminationSummary());
+        commandPipeline.clearCommandContainers();
+        responsePublisher.clear();
         this.cluster = null;
-        if (realtimeControl != null) { realtimeControl.close(); realtimeControl = null; }
-        if (realtimeSender != null) { realtimeSender.close(); realtimeSender = null; }
-        realtimeCapture = null;
-        realtimeOutbox = null;
+        realtimeBoundary.close();
         if (state != null) {
             state.close();
             state = null;
         }
     }
 
+    /** 会话打开后尝试推进之前积压的命令。 */
     void sessionOpened() {
         processingLogCallback = true;
         try {
-            pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            progressCommands(false);
+            responsePublisher.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
+            progressCommands();
         } catch (RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally { processingLogCallback = false; }
     }
 
+    /** 会话关闭时丢弃对应的未发送响应，并继续推进交易状态。 */
     void sessionClosed(long sessionId) {
-        if (responseSink == null) pendingResponses.remove(sessionId);
+        responsePublisher.removeSession(sessionId);
         drainFromLogEvent();
     }
 
+    /** 从集群回调边界触发一次 Owner 命令推进。 */
     private void drainFromLogEvent() { pollCommands(); }
 
-    /** 只能由持有交易状态的Owner线程调用；不属于Aeron的背景回调。 */
+    /** 只能由持有交易状态的 Owner 线程调用；不属于 Aeron 的背景回调。 */
     void ownerCompletionSignal(Runnable signal) {
         state.runtimeState.ownerCompletionSignal(signal);
         state.matcherPipeline.completionSignal(signal);
     }
 
-    /** 启动尚未收到首条日志时journal未激活；休眠探测只能读完成队列，不能执行运行期健康门禁。 */
+    /** 启动尚未收到首条日志时 journal 未激活；休眠探测只能读完成队列，不能执行运行期健康门禁。 */
     boolean ownerCompletionAvailable() {
         return state != null && (state.runtimeState.hasMatchingNotifications()
                 || state.matcherPipeline.hasMatchingCompletions());
     }
 
+    /** 在 Owner 线程上收集完成通知、提交命令并推进实时读取。 */
     int pollCommands() {
-        long before = commandProgress;
+        long before = commandPipeline.commandProgress();
         long matchingBefore = state.matchingProgressSequence();
         processingLogCallback = true;
         try {
-            int responseWork = pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            progressCommands(false);
+            int responseWork = responsePublisher.poll(System.nanoTime(),
+                    OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
+            progressCommands();
             int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
-            return (before != commandProgress || matchingBefore != state.matchingProgressSequence() ? 1 : 0)
+            return (before != commandPipeline.commandProgress()
+                    || matchingBefore != state.matchingProgressSequence() ? 1 : 0)
                     + responseWork + realtimeWork;
         } catch (org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;
@@ -583,21 +529,24 @@ public final class TradingCoreOwner {
     /** 角色切换和快照等控制边界先完成其前面的已复制命令。 */
     void finishCommands() { finishSnapshotPrefix(snapshotDeadline()); }
 
+    /** 返回当前产品线的权威交易运行时。 */
     TradingCoreRuntime state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
         return state;
     }
 
+    /** 绑定外部创建的实时输出，供兼容测试和独立回放工具使用。 */
     void attachRealtime(RealtimeOutbox outbox,
-                        com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture) {
-        realtimeOutbox = outbox;
-        realtimeCapture = capture == null ? state.attachRealtime(outbox) : capture;
+                        RealtimeStateCapture capture) {
+        realtimeBoundary.attach(outbox, capture, state);
     }
 
+    /** 释放已经交给网络出口或因会话关闭而丢弃的响应对象。 */
     void releaseResponse(CoreResponse response) {
         if (state != null) state.releaseResponse(response);
     }
 
+    /** 从 Aeron 快照片段恢复交易运行时。 */
     void loadSnapshot(SnapshotFragmentSource snapshotSource, BooleanSupplier endOfStream) {
         SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
         while (!endOfStream.getAsBoolean()) {
@@ -608,7 +557,7 @@ public final class TradingCoreOwner {
         replaceState(recovery.decode(productLine));
     }
 
-    /** Validates the shared snapshot size limit before Aeron fragments are accumulated. */
+    /** 在累积 Aeron 快照片段前校验共享的快照大小上限。 */
     public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         if (currentLength < 0 || fragmentLength < 0
                 || currentLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
@@ -616,60 +565,27 @@ public final class TradingCoreOwner {
         }
     }
 
+    /** 从完整快照字节恢复交易运行时。 */
     void restoreSnapshot(byte[] snapshot) {
         replaceState(TradingCoreRuntime.fromSnapshot(productLine, snapshot));
     }
 
+    /** 替换交易运行时，并重新绑定实时捕获器。 */
     private void replaceState(TradingCoreRuntime restored) {
         state.close();
         state = restored;
-        if (realtimeOutbox != null) realtimeCapture = state.attachRealtime(realtimeOutbox);
+        realtimeBoundary.rebindState(state);
     }
 
+    /** 提供快照片段读取能力，避免 Owner 依赖具体的 Aeron Image 类型。 */
     @FunctionalInterface
     interface SnapshotFragmentSource {
+        /** 读取最多指定数量的快照片段，并把片段交给回调。 */
         int poll(FragmentHandler fragmentHandler, int fragmentLimit);
     }
 
-    private void offerResponse(ClientSession session, CoreMessageHeader header, CoreResponse response) {
-        if (responseSink != null) {
-            responseSink.offer(session, header, response, state.committedCoreSequence());
-            return;
-        }
-        if (session.isClosing()) {
-            state.releaseResponse(response);
-            return;
-        }
-        int length = CoreMessageCodec.encodedResponseLength(response);
-        if (responseScratch.length < length) {
-            responseScratch = new byte[length];
-            responseBuffer.wrap(responseScratch);
-        }
-        try {
-            CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), responseScratch);
-            pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
-        } finally {
-            state.releaseResponse(response);
-        }
-    }
-
-    private static CoreMessageType responseType(com.surprising.aeron.protocol.CoreMessageHeader requestHeader) {
-        return switch (requestHeader.messageType()) {
-            case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
-            case ORDER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
-            case BOOK_STATE_QUERY -> CoreMessageType.BOOK_STATE_RESULT;
-            case ORDER_BOOK_BOOTSTRAP_QUERY -> CoreMessageType.ORDER_BOOK_BOOTSTRAP_RESULT;
-            case LIQUIDATION_WORK_QUERY -> CoreMessageType.LIQUIDATION_WORK_RESULT;
-            case USER_OPEN_ORDERS_QUERY -> CoreMessageType.USER_OPEN_ORDERS_RESULT;
-            case TRIGGER_ORDER_QUERY -> CoreMessageType.TRIGGER_ORDER_RESULT;
-            case USER_OPEN_TRIGGER_ORDERS_QUERY -> CoreMessageType.USER_OPEN_TRIGGER_ORDERS_RESULT;
-            case FUNDING_PROGRESS_QUERY -> CoreMessageType.FUNDING_PROGRESS_RESULT;
-            case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
-            case COMMAND_RESULT_QUERY -> CoreMessageType.COMMAND_RESULT_RESULT;
-            case RISK_SCAN_CONTROL_QUERY -> CoreMessageType.RISK_SCAN_CONTROL_RESULT;
-            case INSTRUMENT_MAINTENANCE_QUERY -> CoreMessageType.INSTRUMENT_MAINTENANCE_RESULT;
-            default -> requestHeader.kind() == WireMessageKind.QUERY
-                    ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
-        };
+    /** 将已经提交的命令响应交给响应出口，不在交易 Owner 中编码网络协议。 */
+    private void offerResponse(ClientSession session, CoreMessage request, CoreResponse response) {
+        responsePublisher.publish(session, request, response, state);
     }
 }

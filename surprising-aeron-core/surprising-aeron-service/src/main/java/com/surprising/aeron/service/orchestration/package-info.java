@@ -1,16 +1,16 @@
 /**
- * Owner-side orchestration: {@code TradingOwnerLoop} owns the trading thread, and {@code ClusterServiceEgress} owns
- * session state and response handoff; {@code TradingCoreOwner} owns replicated
- * command admission, matching progress, ordered commit, snapshot fences and realtime reads;
- * {@code TradingCoreQueryRouter} owns read-only query protocol routing.
- * {@code DirectCommandSlot} owns the single asynchronous control-command continuation;
- * {@code CommandSlot} owns only in-flight matching command state.
- * {@code SurprisingClusteredService} is a compatibility callback adapter only. Business command handlers live under
- * {@code service.command.<business>} and receive narrow owner contexts; matcher workers and
- * account-lane mutation belong to their own packages.
- * Protocol ingress decoding, cluster-thread idle scheduling, operational metrics, and public
- * snapshot metadata are separated into {@code orchestration.ingress},
- * {@code orchestration.cluster}, {@code orchestration.metrics}, and
- * {@code orchestration.snapshot}; classes that directly share Owner/Runtime state remain here.
+ * 交易核心的 Owner 编排边界。
+ *
+ * <p>{@code TradingOwnerLoop} 拥有交易线程，{@code ClusterServiceEgress} 拥有会话状态和响应交接；
+ * {@code TradingCoreOwner} 只负责复制命令的准入、撮合完成推进和有序提交。
+ * {@code OwnerCommandPipelineState} 保存命令阶段状态，{@code OwnerResponsePublisher} 负责响应编码和出口交接，
+ * {@code TradingRealtimeBoundary} 负责实时快照/盘口请求，三者不拥有订单、余额或持仓等业务事实。</p>
+ *
+ * <p>{@code TradingCoreQueryRouter} 负责只读查询协议路由；{@code DirectCommandSlot} 负责单条异步控制命令续步；
+ * {@code CommandSlot} 只保存单条在途撮合命令状态。{@code SurprisingClusteredService} 仅是兼容旧测试和回放工具的
+ * Cluster 回调适配器。业务命令处理器位于 {@code service.command.<business>}，Matcher 工作线程和账户 Lane 变更由各自包拥有。</p>
+ *
+ * <p>协议解码、集群线程调度、运行指标和公开快照元数据分别位于 {@code orchestration.ingress}、
+ * {@code orchestration.cluster}、{@code orchestration.metrics} 和 {@code orchestration.snapshot}。</p>
  */
 package com.surprising.aeron.service.orchestration;
