@@ -34,6 +34,11 @@ public final class LinearPerpetualTradingRules implements ProductTradingRules {
         return CoreContractMath.fundingDeltaUnits(instrument, quantity, mark, rate);
     }
     @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrumentState instrument,
+                                                  long quantity, long entry, long settlement) {
+        return realizedPnlUnits(instrument, quantity, entry, settlement);
+    }
+    @Override
     public long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {

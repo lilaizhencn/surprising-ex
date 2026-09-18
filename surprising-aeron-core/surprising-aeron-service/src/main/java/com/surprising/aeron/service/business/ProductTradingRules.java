@@ -85,4 +85,14 @@ public interface ProductTradingRules {
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                 "lifecycle settlement is unsupported for " + productLine());
     }
+
+    /** Cash change for one position at the product line's lifecycle settlement boundary. */
+    default long lifecycleSettlementCashDeltaUnits(CoreInstrumentState instrument,
+                                                   long signedQuantitySteps,
+                                                   long entryPriceTicks,
+                                                   long settlementPriceTicks) {
+        requireInstrument(instrument);
+        throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
+                "lifecycle settlement is unsupported for " + productLine());
+    }
 }

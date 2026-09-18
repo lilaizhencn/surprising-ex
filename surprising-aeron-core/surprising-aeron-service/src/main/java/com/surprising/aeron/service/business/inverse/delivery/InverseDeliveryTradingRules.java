@@ -30,6 +30,11 @@ public final class InverseDeliveryTradingRules implements ProductTradingRules {
         return CoreContractMath.pnlUnits(instrument, quantity, entry, settlement);
     }
     @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrumentState instrument,
+                                                  long quantity, long entry, long settlement) {
+        return lifecycleCashDeltaUnits(instrument, quantity, entry, settlement);
+    }
+    @Override
     public long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {

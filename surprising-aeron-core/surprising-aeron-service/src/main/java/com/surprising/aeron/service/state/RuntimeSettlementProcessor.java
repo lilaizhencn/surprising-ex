@@ -528,10 +528,9 @@ public final class RuntimeSettlementProcessor {
                 long key = indexedKeys.get(positionIndex);
                 PositionRuntime position = runtime.position(key);
                 if (position == null || position.signedQuantitySteps() == 0) continue;
-                long pnl = instrument.contractType().isPerpetual()
-                        ? kernel.realizedPnlUnits(instrument, position.signedQuantitySteps(), position.entryPriceTicks(), command.settlementPriceTicks())
-                        : kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
-                            position.entryPriceTicks(), command.settlementPriceTicks());
+                long pnl = kernel.lifecycleSettlementCashDeltaUnits(
+                        instrument, position.signedQuantitySteps(), position.entryPriceTicks(),
+                        command.settlementPriceTicks());
                 totalPnl = Math.addExact(totalPnl, pnl);
                 long margin = position.positionMarginUnits();
                 locked = Math.subtractExact(locked, margin);

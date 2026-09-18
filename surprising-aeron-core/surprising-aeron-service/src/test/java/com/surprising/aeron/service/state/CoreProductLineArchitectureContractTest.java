@@ -87,6 +87,13 @@ class CoreProductLineArchitectureContractTest {
                 assertThat(rules.lifecycleCashDeltaUnits(own, 2, 100, 110)).isEqualTo(20);
                 assertThat(rules.lifecycleCashDeltaUnits(own, -2, 100, 110)).isEqualTo(-20);
             }
+            if (line.isFundingProduct()) {
+                assertThat(rules.lifecycleSettlementCashDeltaUnits(own, 1, 100, 110))
+                        .isEqualTo(rules.realizedPnlUnits(own, 1, 100, 110));
+            } else if (line.isDeliveryProduct()) {
+                assertThat(rules.lifecycleSettlementCashDeltaUnits(own, 1, 100, 110))
+                        .isEqualTo(rules.lifecycleCashDeltaUnits(own, 1, 100, 110));
+            }
         }
     }
 
