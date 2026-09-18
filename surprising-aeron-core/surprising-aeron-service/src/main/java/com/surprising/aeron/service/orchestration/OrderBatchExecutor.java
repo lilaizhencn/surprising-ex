@@ -279,16 +279,8 @@ final class OrderBatchExecutor {
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
         if (owner.runtimeState.asynchronousCommands()) {
-            batch.settlementEvent = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    owner.commits.validAccountLaneMask(),
-                    null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
-                    shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), batch);
-            // The Matcher publishes this batch fact directly to the Lane rings.  Reserve the
-            // logical dispatch before submission so the partition gate can advance without an
-            // Owner-side Lane enqueue after the Matcher completes.
-            batch.settlementEvent.markMatcherOwnedPublication();
-            batch.settlementEvent.reserveMatcherPublication();
+            batch.settlementEvent = owner.directMatcherSettlements.preparePipelinedPlaceBatch(
+                    pending, batch, shard);
         }
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
@@ -545,30 +537,15 @@ final class OrderBatchExecutor {
             OrderRuntime admitted = owner.runtimeOrder(item.orderId());
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), 0,
-                    owner.commits.validAccountLaneMask(),
-                    admitted, null, 1, pending.command().header().commandId(), shard,
-                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), batch);
+            direct = owner.directMatcherSettlements.prepareBatchPlaceItem(pending, batch, admitted, shard);
             batch.itemSettlementEvent = direct;
-            // Reserve the event without enqueueing it. The Matcher owns publication after it
-            // has produced the item fact; the Owner only observes the ordered terminal fence.
-            direct.markMatcherOwnedPublication();
-            direct.reserveMatcherPublication();
         }
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.runtimeState.prepareDirectReplacement(pending.sequence(), 0,
-                    owner.commits.validAccountLaneMask(),
-                    java.util.Objects.requireNonNull(batch.replacementAdmission),
-                    pending.command().header().commandId(), shard, owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds());
+            direct = owner.directMatcherSettlements.prepareBatchAmend(pending,
+                    java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
             batch.itemSettlementEvent = direct;
             if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = direct.admittedOrder();
-            direct.markMatcherOwnedPublication();
-            direct.reserveMatcherPublication();
         }
         owner.matcherPipeline.submit(shard, pending.sequence(),
                 prepareOrderBatchMatchingCommand(pending, batch, batch.items.get(batch.nextIndex), shard), direct);
@@ -609,13 +586,9 @@ final class OrderBatchExecutor {
             }
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-        var direct = owner.runtimeState.prepareDirectCancelBatch(pending.sequence(), finalChunk,
-                pending.command().header().userId(), batch.preparedAdmittedOrders, end - start,
-                pending.command().header().commandId(), shard, owner.identities,
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
+        var direct = owner.directMatcherSettlements.prepareCancelBatch(
+                pending, batch, shard, finalChunk, end - start);
         batch.itemSettlementEvent = direct;
-        direct.markMatcherOwnedPublication();
-        direct.reserveMatcherPublication();
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             batch.pipelinedMatchingResultCount = 0;
             for (int index = start; index < chunkEnd; index++) {
