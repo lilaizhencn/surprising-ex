@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 

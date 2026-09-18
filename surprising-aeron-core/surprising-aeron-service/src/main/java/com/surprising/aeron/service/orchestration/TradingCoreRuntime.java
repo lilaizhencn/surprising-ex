@@ -58,7 +58,7 @@ import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.LiquidationRuntime;
-import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreState;

@@ -34,7 +34,7 @@ import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;

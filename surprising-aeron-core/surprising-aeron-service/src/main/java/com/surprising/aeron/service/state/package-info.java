@@ -17,6 +17,9 @@
  * <p>{@code state.risk} 只包含风险策略以及风险扫描进度/快照值类型；风险扫描执行和强平状态
  * 仍由根包中的状态所有者和执行流程负责。</p>
  *
+ * <p>{@code state.instrument} 只包含版本化的 instrument 配置值；instrument 生命周期写入仍由
+ * 状态运行时负责。{@code state.market} 只包含标记价等行情运行值，不拥有行情来源或风险扫描。</p>
+ *
  * <p>{@code OrderStateTransitions} 是持久化订单生命周期的状态所有者：它原子更新订单、余额、
  * 预留和客户端订单索引；{@code TradingCoreReducer} 只保留兼容入口及其他风险、成交、结算流程。</p>
  *

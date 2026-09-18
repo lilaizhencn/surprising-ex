@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.market;
 
 public record MarkPriceRuntime(int symbolId, long instrumentChangeId, long markPriceTicks,
                                long indexPriceTicks, long forwardPriceTicks, long priceSequence,

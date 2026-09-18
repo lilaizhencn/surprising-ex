@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.business.derivative;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.CoreInstrumentState;
-import com.surprising.aeron.service.state.MarkPriceRuntime;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
 /** Calculates opening margin for perpetual and delivery fills. */

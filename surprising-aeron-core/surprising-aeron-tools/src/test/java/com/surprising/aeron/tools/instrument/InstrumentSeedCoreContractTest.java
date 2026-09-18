@@ -2,7 +2,7 @@ package com.surprising.aeron.tools.instrument;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;

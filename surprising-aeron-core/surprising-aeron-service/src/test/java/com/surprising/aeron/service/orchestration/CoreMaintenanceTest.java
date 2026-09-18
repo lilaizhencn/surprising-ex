@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.*;
@@ -46,7 +47,7 @@ class CoreMaintenanceTest {
         }
     }
 
-    private static UpsertInstrumentCommand config(com.surprising.aeron.service.state.CoreInstrumentState v,long calculationId,long auditId,int status) {
+    private static UpsertInstrumentCommand config(com.surprising.aeron.service.state.instrument.CoreInstrumentState v,long calculationId,long auditId,int status) {
         return new UpsertInstrumentCommand(v.symbol(),calculationId,v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
                 v.notionalMultiplierUnits(),v.priceTickUnits(),v.settleScaleUnits(),v.initialMarginRatePpm(),v.maintenanceMarginRatePpm(),
                 v.makerFeeRatePpm(),v.takerFeeRatePpm(),v.expiryEpochMillis(),v.optionType()==null?-1:v.optionType().ordinal(),v.strikePriceTicks(),

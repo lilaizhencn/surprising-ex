@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;

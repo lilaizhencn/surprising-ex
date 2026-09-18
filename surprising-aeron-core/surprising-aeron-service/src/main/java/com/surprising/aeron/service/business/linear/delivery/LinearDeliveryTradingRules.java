@@ -5,7 +5,7 @@ import com.surprising.aeron.service.state.math.CoreContractMath;
 
 import com.surprising.aeron.service.business.derivative.FuturesOrderAdmission;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;

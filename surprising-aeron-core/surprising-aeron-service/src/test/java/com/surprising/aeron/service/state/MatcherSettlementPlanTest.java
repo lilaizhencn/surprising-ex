@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;

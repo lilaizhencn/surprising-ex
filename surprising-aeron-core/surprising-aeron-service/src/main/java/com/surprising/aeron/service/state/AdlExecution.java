@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;

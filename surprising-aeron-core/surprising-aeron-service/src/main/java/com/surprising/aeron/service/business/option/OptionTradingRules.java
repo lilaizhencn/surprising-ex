@@ -4,7 +4,7 @@ import com.surprising.aeron.service.business.ProductTradingRules;
 
 import com.surprising.aeron.service.state.math.OptionContractMath;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 

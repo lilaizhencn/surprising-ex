@@ -2,7 +2,7 @@ package com.surprising.aeron.service.business.spot;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 

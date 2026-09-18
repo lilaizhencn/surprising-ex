@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.math;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 import static com.surprising.aeron.service.state.math.CoreArithmetic.*;

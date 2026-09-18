@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.business.spot;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;

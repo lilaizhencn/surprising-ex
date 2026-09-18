@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business.option;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Validates the risk prices required by option marking and risk checks. */

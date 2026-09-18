@@ -1,6 +1,7 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.instrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;

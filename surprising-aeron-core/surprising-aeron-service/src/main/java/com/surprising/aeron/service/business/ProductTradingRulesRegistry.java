@@ -1,14 +1,12 @@
 package com.surprising.aeron.service.business;
 
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.business.spot.SpotTradingRules;
 import com.surprising.aeron.service.business.linear.perpetual.LinearPerpetualTradingRules;
 import com.surprising.aeron.service.business.linear.delivery.LinearDeliveryTradingRules;
 import com.surprising.aeron.service.business.inverse.perpetual.InversePerpetualTradingRules;
 import com.surprising.aeron.service.business.inverse.delivery.InverseDeliveryTradingRules;
 import com.surprising.aeron.service.business.option.OptionTradingRules;
-
-import com.surprising.aeron.service.state.CoreInstrumentState;
 
 import com.surprising.product.api.ProductLine;
 

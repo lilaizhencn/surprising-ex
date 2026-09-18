@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.command.trigger;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -418,7 +419,7 @@ public final class TriggerOrderCommands {
     }
 
     private PlaceOrderCommand childOrder(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
-            long price, com.surprising.aeron.service.state.CoreInstrumentState instrument) {
+            long price, com.surprising.aeron.service.state.instrument.CoreInstrumentState instrument) {
         long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
         return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId(), owner.runtimeState()),

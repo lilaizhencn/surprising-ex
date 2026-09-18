@@ -3,7 +3,7 @@ package com.surprising.aeron.service.matching;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.TradingCoreState;
