@@ -1,4 +1,4 @@
-package com.surprising.aeron.service;
+package com.surprising.aeron.service.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -6,12 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import io.aeron.cluster.client.ClusterEvent;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
+import com.surprising.aeron.service.SurprisingCoreApplication;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.agrona.ErrorHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,20 +32,20 @@ class SurprisingCoreApplicationThreadingModeTest {
     void acceptsConfiguredThreadingMode() {
         System.setProperty(PROPERTY, "DEDICATED");
 
-        assertThat(SurprisingCoreApplication.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
+        assertThat(AeronCoreLifecycle.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
     }
 
     @Test
     void rejectsUnknownThreadingMode() {
         System.setProperty(PROPERTY, "invalid");
 
-        assertThatIllegalArgumentException().isThrownBy(SurprisingCoreApplication::coreThreadingMode)
+        assertThatIllegalArgumentException().isThrownBy(AeronCoreLifecycle::coreThreadingMode)
                 .withMessageContaining("valid Aeron ThreadingMode");
     }
 
     @Test
     void defaultsClientLivenessAboveTheObservedDiagnosticFreeze() throws Exception {
-        Method method = SurprisingCoreApplication.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
+        Method method = AeronCoreLifecycle.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null)).isEqualTo(TimeUnit.SECONDS.toNanos(30));
@@ -53,30 +53,19 @@ class SurprisingCoreApplicationThreadingModeTest {
 
     @Test
     void keepsPublicationUnblockingAboveClientLiveness() throws Exception {
-        Method method = SurprisingCoreApplication.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
+        Method method = AeronCoreLifecycle.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null))
-                .isGreaterThan(SurprisingCoreApplication.coreClientLivenessTimeoutNs());
+                .isGreaterThan(AeronCoreLifecycle.coreClientLivenessTimeoutNs());
     }
 
     @Test
-    void doesNotLabelAeronWarningEventsAsFailures() throws Exception {
-        Method method = SurprisingCoreApplication.class.getDeclaredMethod("errorHandler", String.class);
-        method.setAccessible(true);
-        ErrorHandler handler = (ErrorHandler) method.invoke(null, "consensus-module");
-        ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        PrintStream originalError = System.err;
-        try {
-            System.setErr(new PrintStream(captured));
-            handler.onError(new ClusterEvent("leader heartbeat timeout"));
-        } finally {
-            System.setErr(originalError);
-        }
-
-        assertThat(captured.toString())
-                .contains("Aeron consensus-module warning")
-                .doesNotContain("Aeron consensus-module failure");
+    void doesNotTerminateOnAeronWarning() {
+        AtomicInteger exit = new AtomicInteger();
+        ErrorHandler handler = AeronCoreLifecycle.errorHandler("consensus-module", exit::set);
+        handler.onError(new ClusterEvent("leader heartbeat timeout"));
+        assertThat(exit).hasValue(0);
     }
 
     @Test

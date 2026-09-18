@@ -1,4 +1,4 @@
-package com.surprising.aeron.service;
+package com.surprising.aeron.service.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -12,15 +12,15 @@ import org.junit.jupiter.api.Test;
 class SurprisingCoreApplicationIdleStrategyTest {
     @Test
     void leavesAeronDefaultsIntactWhenUnconfigured() {
-        assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier((String) null)).isNull();
-        assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier(" ")).isNull();
+        assertThat(AeronCoreLifecycle.serviceIdleStrategySupplier((String) null)).isNull();
+        assertThat(AeronCoreLifecycle.serviceIdleStrategySupplier(" ")).isNull();
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> SurprisingCoreApplication.serviceIdleStrategySupplier("invalid"));
+                .isThrownBy(() -> AeronCoreLifecycle.serviceIdleStrategySupplier("invalid"));
     }
 
     @Test
     void givesEachServiceItsOwnMutableBackoffState() {
-        var supplier = SurprisingCoreApplication.serviceIdleStrategySupplier(" backoff ");
+        var supplier = AeronCoreLifecycle.serviceIdleStrategySupplier(" backoff ");
         var first = supplier.get();
         assertThat(first).isInstanceOf(BackoffIdleStrategy.class).isNotSameAs(supplier.get());
     }
@@ -34,7 +34,7 @@ class SurprisingCoreApplicationIdleStrategyTest {
         try {
             System.setProperty(global, "org.agrona.concurrent.BackoffIdleStrategy");
             System.setProperty(property, "yielding");
-            assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier().get())
+            assertThat(AeronCoreLifecycle.serviceIdleStrategySupplier().get())
                     .isInstanceOf(YieldingIdleStrategy.class);
             assertThat(new ConsensusModule.Context().idleStrategySupplier(
                     ClusteredServiceContainer.Configuration.idleStrategySupplier(null)).idleStrategy())
