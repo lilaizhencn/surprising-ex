@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
+import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -23,6 +24,8 @@ class SurprisingCoreApplicationTest {
         try (ConfigurableApplicationContext context = application.run()) {
             assertThat(context.getBean(ClusterTopology.class).productLine().name())
                     .isEqualTo("LINEAR_PERPETUAL");
+            assertThat(context.getBean(ContinuousTradingClusterService.class))
+                    .isSameAs(context.getBean(ContinuousTradingClusterService.class));
         }
     }
 

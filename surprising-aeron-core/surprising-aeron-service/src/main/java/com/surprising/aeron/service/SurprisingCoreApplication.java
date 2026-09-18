@@ -47,17 +47,19 @@ public class SurprisingCoreApplication {
                 }
             });
             try {
-                run(context.getBean(ClusterTopology.class), barrier);
+                run(context.getBean(ClusterTopology.class),
+                        context.getBean(ContinuousTradingClusterService.class), barrier);
             } finally {
                 barrier.close();
             }
         }
     }
 
-    /** Runs the Aeron lifecycle with topology and shutdown ownership supplied by the application. */
+    /** Runs the Aeron lifecycle with node-scoped infrastructure supplied by Spring. */
     @SuppressWarnings("try")
-    public static void run(ClusterTopology topology, ShutdownSignalBarrier barrier) {
-        if (topology == null || barrier == null) {
+    public static void run(ClusterTopology topology, ContinuousTradingClusterService clusteredService,
+                           ShutdownSignalBarrier barrier) {
+        if (topology == null || clusteredService == null || barrier == null) {
             throw new IllegalArgumentException("core application inputs are required");
         }
         Supplier<IdleStrategy> serviceIdleStrategy = serviceIdleStrategySupplier();
@@ -117,7 +119,7 @@ public class SurprisingCoreApplication {
                     .aeronDirectoryName(aeronDirectoryName)
                     .archiveContext(localArchiveClient.clone())
                     .clusterDir(clusterDirectory)
-                    .clusteredService(new ContinuousTradingClusterService(topology.productLine()))
+                    .clusteredService(clusteredService)
                     .errorHandler(errorHandler("clustered-service"));
             if (serviceIdleStrategy != null) {
                 serviceContext.idleStrategySupplier(serviceIdleStrategy);

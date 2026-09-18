@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.config;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
+import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -63,5 +64,11 @@ public class CoreConfiguration {
         }
         return new ClusterTopology(ProductLine.requireExternalCode(productLine), nodeId,
                 Arrays.stream(hostnames.split(",")).map(String::trim).toList(), dataDir);
+    }
+
+    /** Creates the one node-scoped ClusteredService owned by this Spring context. */
+    @Bean
+    public ContinuousTradingClusterService continuousTradingClusterService(ClusterTopology topology) {
+        return new ContinuousTradingClusterService(topology.productLine());
     }
 }
