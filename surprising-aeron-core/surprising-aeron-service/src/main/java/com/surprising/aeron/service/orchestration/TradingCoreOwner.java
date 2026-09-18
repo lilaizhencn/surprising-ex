@@ -6,6 +6,9 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
+import com.surprising.aeron.service.orchestration.realtime.TradingRealtimeBoundary;
+import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -14,6 +17,8 @@ import io.aeron.logbuffer.FragmentHandler;
 import java.util.function.BooleanSupplier;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 交易 Owner：按确定性边界推进交易，未完成命令与响应跨推进轮次保留。
@@ -23,6 +28,9 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
  * 推进交易状态并产生终态交接。</p>
  */
 public final class TradingCoreOwner {
+
+    /** 交易 Owner 的运行日志；仅记录生命周期和诊断信息，不进入交易状态计算。 */
+    private static final Logger log = LoggerFactory.getLogger(TradingCoreOwner.class);
 
     /** 快照阶段的最长等待时间；交易命令本身使用命令流水线的截止时间。 */
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
@@ -85,7 +93,7 @@ public final class TradingCoreOwner {
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
-        System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
+        log.info("Aeron core role productLine={} role={}", productLine, cluster.role());
         realtimeBoundary.start(cluster, state);
     }
 
@@ -441,7 +449,7 @@ public final class TradingCoreOwner {
     void roleChange(Cluster.Role newRole) {
         realtimeBoundary.roleChange(newRole);
         responsePublisher.clear();
-        System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
+        log.info("Aeron core role-change productLine={} role={}", productLine, newRole);
     }
 
     /** 推进不属于交易命令主流程的实时读取工作。 */
@@ -459,7 +467,7 @@ public final class TradingCoreOwner {
 
     /** 输出命令流水线诊断并释放 Owner、实时出口和交易运行时资源。 */
     void terminate() {
-        System.out.printf("Aeron core command-window productLine=%s %s%n",
+        log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
         commandPipeline.clearCommandContainers();
         responsePublisher.clear();

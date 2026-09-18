@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.List;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 
 final class SectionedCoreSnapshotValidation {
 

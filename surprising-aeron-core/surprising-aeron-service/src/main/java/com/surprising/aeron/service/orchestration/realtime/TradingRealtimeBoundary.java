@@ -1,9 +1,10 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.orchestration.realtime;
 
 import com.surprising.aeron.client.AeronRealtimeReceiver;
 import com.surprising.aeron.client.AeronRealtimeSender;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.RealtimeFrame;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
 import io.aeron.CommonContext;
@@ -16,7 +17,7 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
  * <p>实时读取不是撮合提交的一部分：它只能读取已经提交的状态，并且不能阻塞订单和资金主流程。
  * 本类拥有实时传输对象、请求队列、Leader 状态和已提交位置水位，TradingCoreOwner 只调用业务含义明确的方法。</p>
  */
-final class TradingRealtimeBoundary implements AutoCloseable {
+public final class TradingRealtimeBoundary implements AutoCloseable {
     /** 实时请求队列的固定容量，满载时由请求方稍后重试。 */
     private static final int REQUEST_CAPACITY = 256;
     /** 连续实时快照请求之间的最短间隔。 */
@@ -44,7 +45,7 @@ final class TradingRealtimeBoundary implements AutoCloseable {
     private long nextSnapshotNanos;
 
     /** 创建指定产品线的实时边界。 */
-    TradingRealtimeBoundary(ProductLine productLine) {
+    public TradingRealtimeBoundary(ProductLine productLine) {
         this.productLine = java.util.Objects.requireNonNull(productLine, "product line is required");
     }
 
@@ -53,7 +54,7 @@ final class TradingRealtimeBoundary implements AutoCloseable {
      *
      * <p>没有配置实时通道时保持禁用，不影响交易主流程。</p>
      */
-    void start(Cluster cluster, TradingCoreRuntime state) {
+    public void start(Cluster cluster, TradingCoreRuntime state) {
         leader = cluster.role() == Cluster.Role.LEADER;
         committedPosition = Math.max(0, cluster.logPosition());
         nextSnapshotNanos = 0;
@@ -86,7 +87,7 @@ final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 在一条命令开始修改实时导出状态时建立捕获边界。 */
-    void beginCapture(TradingCoreRuntime state, long position, long timestamp) {
+    public void beginCapture(TradingCoreRuntime state, long position, long timestamp) {
         if (capture == null || !leader) return;
         try {
             capture.begin(position, timestamp, 0, state.realtimeExportSequence());
@@ -96,13 +97,13 @@ final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 在交易命令提交后发布本次实时状态变化，并推进可读位置水位。 */
-    void commit(TradingCoreRuntime state, long position) {
+    public void commit(TradingCoreRuntime state, long position) {
         committedPosition = position;
         if (capture != null) capture.commit(state.realtimeExportSequence());
     }
 
     /** 角色切换时撤销未完成的实时捕获，Follower 不产生实时输出。 */
-    void roleChange(Cluster.Role role) {
+    public void roleChange(Cluster.Role role) {
         leader = role == Cluster.Role.LEADER;
         if (capture != null) capture.abort();
     }
@@ -112,7 +113,7 @@ final class TradingRealtimeBoundary implements AutoCloseable {
      *
      * @return 本轮完成的实时工作数量
      */
-    int poll(TradingCoreRuntime state, Cluster cluster, long nowNanos) {
+    public int poll(TradingCoreRuntime state, Cluster cluster, long nowNanos) {
         if (capture == null || !leader) return 0;
         int work = state.pollRealtimeSnapshot() + state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending()
@@ -131,24 +132,24 @@ final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 为测试和兼容回放入口提供实时请求队列。 */
-    ManyToOneConcurrentArrayQueue<RealtimeFrame> requests() {
+    public ManyToOneConcurrentArrayQueue<RealtimeFrame> requests() {
         return requests;
     }
 
     /** 绑定外部创建的实时输出，供独立测试和回放工具使用。 */
-    void attach(RealtimeOutbox externalOutbox, RealtimeStateCapture externalCapture,
+    public void attach(RealtimeOutbox externalOutbox, RealtimeStateCapture externalCapture,
                 TradingCoreRuntime state) {
         outbox = java.util.Objects.requireNonNull(externalOutbox, "realtime outbox is required");
         capture = externalCapture == null ? state.attachRealtime(outbox) : externalCapture;
     }
 
     /** 交易状态从快照恢复后重新绑定实时捕获器，不复制业务状态。 */
-    void rebindState(TradingCoreRuntime state) {
+    public void rebindState(TradingCoreRuntime state) {
         if (outbox != null) capture = state.attachRealtime(outbox);
     }
 
     /** 返回是否已经建立实时捕获边界。 */
-    boolean enabled() {
+    public boolean enabled() {
         return capture != null;
     }
 

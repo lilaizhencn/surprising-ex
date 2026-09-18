@@ -135,12 +135,10 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
         return throwable -> {
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.WARN) {
-                log.error("Aeron {} warning", component);
-                log.error("e: ", aeronException);
+                log.warn("Aeron {} warning", component, aeronException);
                 return;
             }
-            log.error("Aeron {} failure", component);
-            throwable.printStackTrace(System.err);
+            log.error("Aeron {} failure", component, throwable);
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.FATAL
                     || throwable instanceof org.agrona.concurrent.AgentTerminationException

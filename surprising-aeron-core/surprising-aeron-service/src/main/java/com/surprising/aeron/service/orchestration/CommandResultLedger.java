@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -15,7 +16,7 @@ import java.util.UUID;
 
 /** 命令幂等结果账本：独占保留顺序、字节上限和结果摘要；仅 owner 读写。 */
 final class CommandResultLedger {
-    /** 命令结果及其保留顺序；不是第二份订单或账户状态。 */
+    /* 命令结果及其保留顺序；不是第二份订单或账户状态。 */
     /** Keep the probe table below half load while retaining at most 128 results. */
     private static final int TABLE_CAPACITY = 512;
     private static final int TABLE_MASK = TABLE_CAPACITY - 1;

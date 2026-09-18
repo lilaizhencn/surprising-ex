@@ -17,14 +17,18 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
+import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import java.util.zip.CRC32C;
 
-final class SectionedCoreSnapshotWriter {
+/** 快照协议内部写入器：从 Owner 线程提供的不可变输入生成分片结果。 */
+public final class SectionedCoreSnapshotWriter {
 
     private SectionedCoreSnapshotWriter() {
     }
 
-    static SectionedCoreSnapshotCodec.SectionedSnapshot encode(
+    /** 按默认快照元数据编码交易运行时。 */
+    public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(
             TradingCoreRuntime state,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,

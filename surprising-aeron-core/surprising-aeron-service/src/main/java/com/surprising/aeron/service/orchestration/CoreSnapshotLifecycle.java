@@ -7,6 +7,7 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -166,7 +167,7 @@ final class CoreSnapshotLifecycle {
             if (matcherSnapshot == null || owner.appliedCommandCount != fence.coreSequence || !owner.pendingMatching.isEmpty()) {
                 throw new IllegalStateException("snapshot fence state changed during capture");
             }
-            CoreSnapshotImage image = SectionedCoreSnapshotCodec.capture(owner, matcherSnapshot, fence.snapshotId,
+            CoreSnapshotImage image = SectionedCoreSnapshotWriter.capture(owner, matcherSnapshot, fence.snapshotId,
                     fence.coreSequence, clusterTimestamp, clusterPosition);
             image.verifyFullState();
             fence.encodedSnapshot = snapshotEncoder.encode(image);

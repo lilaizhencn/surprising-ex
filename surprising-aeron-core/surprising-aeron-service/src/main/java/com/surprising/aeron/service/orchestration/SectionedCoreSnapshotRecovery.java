@@ -2,6 +2,8 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
+import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -9,7 +11,12 @@ import java.util.Arrays;
 import java.util.zip.CRC32C;
 import org.agrona.DirectBuffer;
 
-final class SectionedCoreSnapshotRecovery {
+/** 快照协议内部恢复器：按分片校验并组装恢复所需的运行时组件。 */
+public final class SectionedCoreSnapshotRecovery {
+
+    /** 创建一个按分片接收快照的恢复器。 */
+    public SectionedCoreSnapshotRecovery() {
+    }
 
     private final byte[] envelope = new byte[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH];
     private final byte[] sectionHeader = new byte[SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH];
@@ -24,7 +31,7 @@ final class SectionedCoreSnapshotRecovery {
     private boolean complete;
     private int sectionCount;
 
-    void accept(DirectBuffer source, int offset, int length) {
+    public void accept(DirectBuffer source, int offset, int length) {
         if (source == null || offset < 0 || length < 0 || offset > source.capacity() - length) {
             throw new ProtocolException("invalid snapshot fragment");
         }
@@ -64,23 +71,23 @@ final class SectionedCoreSnapshotRecovery {
         }
     }
 
-    TradingCoreRuntime decode(ProductLine expectedProductLine) {
+    public TradingCoreRuntime decode(ProductLine expectedProductLine) {
         return components(expectedProductLine).restore(expectedProductLine);
     }
 
-    CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
+    public CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
         return components(expectedProductLine).manifest(expectedProductLine);
     }
 
-    int ownedSectionCount() {
+    public int ownedSectionCount() {
         return sectionIndex;
     }
 
-    int totalLength() {
+    public int totalLength() {
         return totalLength;
     }
 
-    int allocatedBytes() {
+    public int allocatedBytes() {
         int allocated = envelope.length + sectionHeader.length;
         if (payloads == null) return allocated;
         for (byte[] payload : payloads) {

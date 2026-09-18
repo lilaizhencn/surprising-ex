@@ -224,6 +224,7 @@ java_args_for() {
     "--enable-native-access=ALL-UNNAMED"
     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+    "--add-opens=java.base/java.util.zip=ALL-UNNAMED"
     "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=5,filesize=100M"
   )
   if [[ "$JVM_GC" == ZGC ]]; then

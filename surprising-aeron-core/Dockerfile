@@ -11,7 +11,13 @@ RUN mkdir -p /var/lib/surprising/aeron \
     && chown -R surprising:surprising /var/lib/surprising /opt/surprising
 
 USER surprising
-ENTRYPOINT ["java", "--add-opens", "java.base/jdk.internal.misc=ALL-UNNAMED"]
+ENTRYPOINT [
+    "java",
+    "--enable-native-access=ALL-UNNAMED",
+    "--add-opens", "java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-opens", "java.base/java.util.zip=ALL-UNNAMED"
+]
 
 FROM runtime AS validation
 COPY --chown=surprising:surprising surprising-aeron-benchmarks/target/product-core-benchmarks.jar /opt/surprising/benchmarks.jar

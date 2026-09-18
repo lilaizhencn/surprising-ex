@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinator;
 import com.surprising.aeron.service.orchestration.ClusterCommandWindow;import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import static org.assertj.core.api.Assertions.assertThat;

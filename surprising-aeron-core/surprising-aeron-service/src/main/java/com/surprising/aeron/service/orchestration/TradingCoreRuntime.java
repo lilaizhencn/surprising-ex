@@ -3,6 +3,9 @@ import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
+import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
+import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinator;
 
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
@@ -182,7 +185,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
-    com.surprising.aeron.service.state.realtime.RealtimeStateCapture attachRealtime(
+    /** 绑定实时事件出口，并创建实时快照/盘口读取协调器。 */
+    public com.surprising.aeron.service.state.realtime.RealtimeStateCapture attachRealtime(
             com.surprising.aeron.client.RealtimeOutbox outbox) {
         realtimeCapture = new com.surprising.aeron.service.state.realtime.RealtimeStateCapture(
                 outbox, productLine, identities);
@@ -194,19 +198,26 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 异步实时快照和盘口读取的生命周期管理。 */
     RealtimeReadCoordinator realtimeReads;
 
-    long realtimeExportSequence() { return runtimeProjectionJournal.publishedSequence(); }
-    boolean realtimeSnapshotPending() { return realtimeReads != null && realtimeReads.realtimeSnapshotPending(); }
-    boolean realtimeBookPending() { return realtimeReads != null && realtimeReads.realtimeBookPending(); }
-    int pollRealtimeSnapshot() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeSnapshot(); }
-    int pollRealtimeBook() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeBook(); }
+    /** 返回已经提交并可对外发布的实时事件水位。 */
+    public long realtimeExportSequence() { return runtimeProjectionJournal.publishedSequence(); }
+    /** 返回是否存在尚未完成的用户实时快照读取。 */
+    public boolean realtimeSnapshotPending() { return realtimeReads != null && realtimeReads.realtimeSnapshotPending(); }
+    /** 返回是否存在尚未完成的盘口读取。 */
+    public boolean realtimeBookPending() { return realtimeReads != null && realtimeReads.realtimeBookPending(); }
+    /** 推进用户实时快照读取，并返回本轮完成的工作数。 */
+    public int pollRealtimeSnapshot() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeSnapshot(); }
+    /** 推进盘口读取，并返回本轮完成的工作数。 */
+    public int pollRealtimeBook() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeBook(); }
 
-    void captureRealtimeSnapshot(long userId, long snapshotId, long position, long timestamp) {
+    /** 在已提交位置上登记一个用户实时快照请求。 */
+    public void captureRealtimeSnapshot(long userId, long snapshotId, long position, long timestamp) {
         if (realtimeReads == null || realtimeReads.realtimeSnapshotPending()) return;
         assertClusterCallbackComplete();
         realtimeReads.captureRealtimeSnapshot(userId, snapshotId, position, timestamp, realtimeExportSequence());
     }
 
-    void captureRealtimeBook(String symbol, long position, long timestamp) {
+    /** 在已提交位置上登记一个盘口读取请求。 */
+    public void captureRealtimeBook(String symbol, long position, long timestamp) {
         if (realtimeReads == null || realtimeReads.realtimeBookPending()) return;
         assertClusterCallbackComplete();
         realtimeReads.captureRealtimeBook(symbol, position, timestamp);
@@ -515,7 +526,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture;
         if (snapshotEncoder == null) {
             snapshots.snapshotEncoder = image -> CompletableFuture.completedFuture(
-                    SectionedCoreSnapshotCodec.encode(image));
+                    SectionedCoreSnapshotWriter.encode(image));
         } else {
             snapshots.snapshotEncoder = snapshotEncoder;
         }
