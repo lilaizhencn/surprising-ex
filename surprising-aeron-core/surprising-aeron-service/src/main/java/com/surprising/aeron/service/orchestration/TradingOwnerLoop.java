@@ -14,7 +14,7 @@ import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 
 /** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
-final class TradingOwnerLoop {
+final class TradingOwnerLoop implements Runnable {
     private static final long DEADLINE_NS = 30_000_000_000L;
     private static final long INPUT_BYTES = 64L * 1024 * 1024;
 
@@ -52,7 +52,7 @@ final class TradingOwnerLoop {
         ownerEpoch = 0;
         logContext = new OwnerLogContext(cluster.memberId(), cluster.timeUnit(), cluster.role(),
                 cluster.time(), cluster.logPosition());
-        ownerThread = new Thread(this::run, "trading-owner-" + cluster.memberId());
+        ownerThread = new Thread(this, "trading-owner-" + cluster.memberId());
         ownerThread.start();
         boundary(() -> {
             processor.start(logContext);
@@ -120,7 +120,8 @@ final class TradingOwnerLoop {
         if (failure != null) throw new AgentTerminationException(failure);
     }
 
-    private void run() {
+    @Override
+    public void run() {
         ownerIdle.bindOwner();
         boolean initialized = false;
         try {
