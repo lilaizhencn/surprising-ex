@@ -185,6 +185,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
     /** 已准入命令到确定性 Matcher 输入的协议转换与证据包装。 */
     final MatcherCommandSubmission matcherCommands = new MatcherCommandSubmission(this);
+    /** 普通命令的 Matcher→Account Lane 直接结算事件准备。 */
+    final DirectMatcherSettlementPreparation directMatcherSettlements =
+            new DirectMatcherSettlementPreparation(this);
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
@@ -1396,72 +1399,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
             return;
         }
         var command = matcherCommands.prepareMatchingCommand(pending);
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct = null;
-        // The direct event is preconstructed with a detached taker when Lane admission is still
-        // in flight.  The event is queued after the admission on that Lane and binds the
-        // authoritative OrderRuntime just before applying the Matcher result.
-        if (pending.operation() == CommandSlot.Operation.PLACE && runtimeState.asynchronousCommands()) {
-            OrderRuntime directTaker = pending.placeAdmission() == null
-                    ? runtimeOrder(pending.decodedCommand().placeOrder().orderId()) : null;
-            if (pending.placeAdmission() != null) {
-                direct = runtimeState.prepareDirectMatcherSettlement(
-                        pending.sequence(), directInitialLaneMask(pending.placeAdmission().userId()), pending.placeAdmission(),
-                        pending.command().header().commandId(), matcherShard(pending), identities,
-                        pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                        pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            } else if (directTaker != null) {
-                direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                        directInitialLaneMask(directTaker.userId()), directTaker, null, 1,
-                        pending.command().header().commandId(), matcherShard(pending), identities,
-                        pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                        pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            }
-            pending.settlement(direct, direct.plan(), System.nanoTime());
-            direct.markMatcherOwnedPublication();
-            direct.reserveMatcherPublication();
-            if (realtimeCapture != null)
-                pending.realtimeTakerOrder = directTaker;
-        }
-        if (pending.operation() == CommandSlot.Operation.REPLACE || pending.operation() == CommandSlot.Operation.AMEND) {
-            var admission = requireMatchingAdmission(pending);
-            requireUnchangedAdmissionState(admission);
-            direct = runtimeState.prepareDirectReplacement(pending.sequence(), pending.sequence(),
-                    directInitialLaneMask(admission.userId()),
-                    admission, pending.command().header().commandId(), matcherShard(pending), identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            pending.settlement(direct, direct.plan(), System.nanoTime());
-            if (runtimeState.asynchronousCommands()) {
-                direct.markMatcherOwnedPublication();
-                direct.reserveMatcherPublication();
-            }
-            if (realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
-        }
-        if (pending.operation() == CommandSlot.Operation.TRIGGER && runtimeState.asynchronousCommands()) {
-            long[] execute = pending.decodedCommand().trigger();
-            var trigger = java.util.Objects.requireNonNull(runtimeState.triggerOrder(execute[0]),
-                    "admitted trigger is missing");
-            OrderRuntime triggerOrder = runtimeOrder(pending.admittedMatchingOrder().orderId());
-            direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    directInitialLaneMask(triggerOrder.userId()),
-                    triggerOrder, null, 1, pending.command().header().commandId(), matcherShard(pending),
-                    identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            direct.triggerCompletion(trigger, execute[3]);
-            pending.settlement(direct, direct.plan(), System.nanoTime());
-            direct.markMatcherOwnedPublication();
-            direct.reserveMatcherPublication();
-            if (realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
-        }
-        if (pending.operation() == CommandSlot.Operation.CANCEL && runtimeState.asynchronousCommands()) {
-            OrderRuntime canceledOrder = runtimeOrder(pending.decodedCommand().cancelOrder().orderId());
-            direct = runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
-                    pending.command().header().commandId(), matcherShard(pending), identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
-            pending.settlement(direct, direct.plan(), System.nanoTime());
-            direct.markMatcherOwnedPublication();
-            direct.reserveMatcherPublication();
-        }
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct =
+                directMatcherSettlements.prepareForMatching(pending);
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> matcherSubmission =
                 command;
         if (direct != null && pending.placeAdmission() != null) {
@@ -1483,12 +1422,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // block later admissions on the same Lane. The completion pump queues it after Matcher
         // publication, together with any maker-Lane extensions.
         if (direct != null && !direct.matcherOwnedPublication()) predispatchDirectSettlement(pending, direct);
-    }
-
-    /** Before Matcher has inspected the book only the taker's Account Lane is known. */
-    private long directInitialLaneMask(long userId) {
-        if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
-        return runtimeState.topology().accountLaneMask(userId);
     }
 
     /** Enqueue the initial taker-Lane route once its partition dependency allows it. */
