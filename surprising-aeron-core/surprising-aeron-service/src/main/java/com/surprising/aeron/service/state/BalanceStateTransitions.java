@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
 /** Owns direct available-balance adjustments in the authoritative user state. */

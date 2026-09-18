@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 
 /** Owns runtime algorithm-order identity, intent and child-order revision changes. */

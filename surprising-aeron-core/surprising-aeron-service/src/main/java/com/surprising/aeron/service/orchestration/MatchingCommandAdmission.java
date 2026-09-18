@@ -1,26 +1,19 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
-import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
-
-import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.PositionCloseCapacity;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.OrderRuntime;
@@ -588,8 +581,8 @@ final class MatchingCommandAdmission {
     void validatePendingSettlement(DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.settlement();
         var instrument = owner.runtimeState.instrument(command.symbol());
-        if (instrument != null) RuntimeSettlementProcessor.validateSettlement(instrument,
-                com.surprising.aeron.service.business.ProductTradingRulesRegistry.forInstrument(instrument),command);
+        if (instrument != null) ProductTradingRulesRegistry.forInstrument(instrument)
+                .validateLifecycleSettlement(instrument, command);
         if (instrument != null && !instrument.administrativeSettlement(command)
                 && instrument.expiryEpochMillis() > owner.currentClusterTimestamp) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument has not reached expiry");

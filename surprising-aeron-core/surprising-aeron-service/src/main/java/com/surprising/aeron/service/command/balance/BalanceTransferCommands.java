@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
 import com.surprising.aeron.service.state.AccountTransferOut;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 
 /**

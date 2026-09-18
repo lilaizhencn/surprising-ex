@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -16,7 +17,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.instrument.api.model.ContractType;
-import com.surprising.product.api.ProductLine;
+
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

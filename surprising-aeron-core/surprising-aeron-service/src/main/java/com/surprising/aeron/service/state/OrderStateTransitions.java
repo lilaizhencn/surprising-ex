@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.business.derivative.FuturesOrderAdmission;
 import com.surprising.aeron.service.business.option.OptionOrderAdmission;
 import com.surprising.aeron.service.business.spot.SpotOrderAdmission;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;

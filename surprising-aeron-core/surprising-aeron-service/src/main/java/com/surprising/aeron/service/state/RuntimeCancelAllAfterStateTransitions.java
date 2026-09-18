@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 

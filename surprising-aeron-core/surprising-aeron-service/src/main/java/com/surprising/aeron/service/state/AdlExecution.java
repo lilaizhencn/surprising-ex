@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.aeron.service.state.model.AssetBalance;

@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Owns instrument configuration and maintenance transitions in runtime state. */
 final class RuntimeInstrumentStateTransitions {

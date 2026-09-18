@@ -7,7 +7,9 @@ import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -84,6 +86,25 @@ class CoreProductLineArchitectureContractTest {
             if (line == ProductLine.OPTION) {
                 assertThat(rules.lifecycleCashDeltaUnits(own, 2, 100, 110)).isEqualTo(20);
                 assertThat(rules.lifecycleCashDeltaUnits(own, -2, 100, 110)).isEqualTo(-20);
+            }
+        }
+    }
+
+    @Test
+    void lifecycleSettlementAdmissionIsOwnedByTheProductRule() {
+        for (ProductLine line : ProductLine.values()) {
+            ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
+            CoreInstrumentState own = reducer.upsertInstrument(TradingCoreState.empty(line), instrument(line))
+                    .instruments().values().iterator().next();
+            SettleInstrumentCommand command = new SettleInstrumentCommand(
+                    7, own.symbol(), own.changeId(), 100, 0);
+
+            if (line.isDeliveryProduct()) {
+                rules.validateLifecycleSettlement(own, command);
+            } else {
+                assertThatThrownBy(() -> rules.validateLifecycleSettlement(own, command))
+                        .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                                error -> assertThat(error.code()).isEqualTo("PRODUCT_LINE_UNSUPPORTED"));
             }
         }
     }

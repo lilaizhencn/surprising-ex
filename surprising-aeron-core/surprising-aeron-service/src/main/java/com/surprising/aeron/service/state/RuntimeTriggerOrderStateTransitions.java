@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.product.api.ProductLine;
 

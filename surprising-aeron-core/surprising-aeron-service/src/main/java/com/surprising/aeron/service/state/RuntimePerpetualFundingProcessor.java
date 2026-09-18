@@ -7,6 +7,7 @@ import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
 import java.util.ArrayList;

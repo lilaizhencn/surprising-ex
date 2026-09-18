@@ -1,10 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
 
-import com.surprising.aeron.service.orchestration.ClusterCommandWindow;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.command.order.OrderBatchKind;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.command.DirectCommandDispatcher;
@@ -27,41 +25,28 @@ import com.surprising.aeron.service.command.fee.FeePolicyCommands;
 import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
 import com.surprising.aeron.service.command.trigger.TriggerCommandDispatcher;
 import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
-import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 
-import com.surprising.aeron.service.orchestration.CoreSnapshotLifecycle.SnapshotFence;
-import com.surprising.aeron.service.orchestration.OrderBookQueryService.CompletedBookQuery;
-import com.surprising.aeron.service.orchestration.OrderBookQueryService.BookBootstrapSession;
 import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreOrderStateView;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.WireMessageKind;
-import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
-import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
-import com.surprising.aeron.protocol.AmendOrderBatchCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
-import com.surprising.aeron.protocol.CancelOrderBatchCommand;
-import com.surprising.aeron.protocol.CancelOrderCommand;
-import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
-import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.OpenInterestIndex;
 import com.surprising.aeron.service.state.index.AlgoOrderIndex;
 import com.surprising.aeron.service.state.index.LiquidationIndex;
@@ -82,9 +67,7 @@ import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
-import com.surprising.aeron.service.state.RuntimeSettlementProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
@@ -95,12 +78,9 @@ import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -359,7 +339,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final TradingRuntimeState runtimeState;
 
     /** 撮合或确定性执行的不可恢复错误，阻止继续交易。 */
-    com.surprising.aeron.service.matching.FatalMatchingDivergenceException fatalFailure;
+    FatalMatchingDivergenceException fatalFailure;
 
     /** 收集各 Lane 国库变化的复用缓冲；提交完清空。 */
     final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
@@ -1911,7 +1891,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encode(CoreSnapshotImage image);
     }
 
-    com.surprising.aeron.service.matching.FatalMatchingDivergenceException failMatching(
+    FatalMatchingDivergenceException failMatching(
             CommandSlot pending,
             String detail,
             Throwable cause) {
@@ -1923,9 +1903,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
             else cause = poisonFailure;
         }
         fatalFailure = cause == null
-                ? new com.surprising.aeron.service.matching.FatalMatchingDivergenceException(
+                ? new FatalMatchingDivergenceException(
                         pending.operation().name(), pending.sequence(), 0, detail)
-                : new com.surprising.aeron.service.matching.FatalMatchingDivergenceException(
+                : new FatalMatchingDivergenceException(
                         pending.operation().name(), pending.sequence(), 0, detail, cause);
         return fatalFailure;
     }

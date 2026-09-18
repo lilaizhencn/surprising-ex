@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
@@ -54,7 +55,7 @@ public final class RuntimeSettlementProcessor {
             return new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0);
         }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
-        validateSettlement(instrument, kernel, command);
+        kernel.validateLifecycleSettlement(instrument, command);
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
         validateProgress(previousProgress, command, chunked);
@@ -181,7 +182,7 @@ public final class RuntimeSettlementProcessor {
                     : reuse.resetCompleted(runtime, completed);
         }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
-        validateSettlement(instrument, kernel, command);
+        kernel.validateLifecycleSettlement(instrument, command);
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(previousProgress, command, true);
         boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
@@ -487,7 +488,8 @@ public final class RuntimeSettlementProcessor {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
         CoreInstrumentState instrument = requireInstrument(runtime, command);
-        validateSettlement(instrument, ProductTradingRulesRegistry.forInstrument(instrument), command);
+        ProductTradingRulesRegistry.forInstrument(instrument)
+                .validateLifecycleSettlement(instrument, command);
         int symbolId = identities.symbolId(instrument.symbol());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
@@ -673,25 +675,6 @@ public final class RuntimeSettlementProcessor {
                     "instrument lifecycle version precedes execution version");
         }
         return instrument;
-    }
-
-    public static void validateSettlement(CoreInstrumentState instrument, ProductTradingRules kernel, SettleInstrumentCommand command) {
-        if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
-                && !instrument.administrativeSettlement(command)) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "settlement differs from approved maintenance task");
-        }
-        switch (kernel.productLine()) {
-            case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
-            case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> {
-                if (!instrument.administrativeSettlement(command)) throw new CoreStateRejectedException(
-                        "PRODUCT_LINE_UNSUPPORTED", "perpetual settlement requires an approved maintenance gate");
-            }
-            case SPOT -> throw new CoreStateRejectedException(
-                    "PRODUCT_LINE_UNSUPPORTED", "instrument settlement requires delivery or option product");
-        }
-        if (command.settlementPriceTicks() <= 0) {
-            throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");
-        }
     }
 
     private static void validateProgress(TreasuryRuntime.LifecycleProgressRuntime progress,

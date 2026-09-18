@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.RiskLaneProgress;

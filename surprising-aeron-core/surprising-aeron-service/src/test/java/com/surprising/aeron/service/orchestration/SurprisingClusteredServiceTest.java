@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.ClusterCommandWindow;import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
-import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
+import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -22,7 +23,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
@@ -36,7 +36,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -774,7 +773,7 @@ class SurprisingClusteredServiceTest {
             Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, matcherFailure, 2_000, 3));
 
             assertThat(fatal).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             assertThatThrownBy(() -> service.onTakeSnapshot(null)).isSameAs(fatal);
         } finally {
             service.onTerminate(null);

@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -175,7 +176,7 @@ class CoreOrderedOrderBatchTest {
             Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
                     completeEventually(state, sequence, matching, 2_000, 6));
             assertThat(failure).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
+                    FatalMatchingDivergenceException.class)
                     .hasRootCauseInstanceOf(ArithmeticException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
@@ -316,7 +317,7 @@ class CoreOrderedOrderBatchTest {
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> completeEventually(state, sequence, matching, 2_000, 4));
             assertThat(divergence).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
@@ -827,7 +828,7 @@ class CoreOrderedOrderBatchTest {
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> state.completeMatching(fatalSequence, fatal, 3_000, 5));
             assertThat(divergence).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
             assertThat(state.takeMatchingResult(fatalSequence)).isNull();
@@ -998,7 +999,7 @@ class CoreOrderedOrderBatchTest {
                     () -> completeEventually(state, sequence, partialMatcherFailure, 2_000, 4));
 
             assertThat(divergence).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             assertThat(state.runtimeOrder(12_101).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
             assertThat(state.runtimeOrder(12_102)).isNull();
@@ -1150,7 +1151,7 @@ class CoreOrderedOrderBatchTest {
                     sequence, awaitMatching(state, sequence), 2_000, 3));
 
             assertThat(failure).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             assertThat(runtime.order(15_201)).isNotNull();
             assertThat(runtime.revision()).isGreaterThan(revisionBefore);
             assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessBefore);
@@ -1207,7 +1208,7 @@ class CoreOrderedOrderBatchTest {
                     () -> completeEventually(state, sequence, first, 3_000, 3));
 
             assertThat(divergence).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                    FatalMatchingDivergenceException.class);
             long[] observedSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             long[] observedPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(java.util.Arrays.stream(observedSequences).anyMatch(value -> value > 0)).isTrue();
@@ -1257,7 +1258,7 @@ class CoreOrderedOrderBatchTest {
                 sequence, new com.surprising.aeron.service.matching.CoreMatchingResult(
                         false, "EXCHANGE_CORE_FAILURE"), 2_001, 4));
         assertThat(divergence).isInstanceOf(
-                com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+                FatalMatchingDivergenceException.class);
 
         state.close();
 

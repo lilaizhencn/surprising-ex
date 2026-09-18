@@ -2,7 +2,7 @@ package com.surprising.aeron.service.business.option;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.CoreInstrumentState;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 import com.surprising.aeron.service.state.math.OptionContractMath;

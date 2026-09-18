@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 import java.util.Locale;
 

@@ -15,7 +15,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import java.util.List;
 import java.util.UUID;

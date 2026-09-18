@@ -1,12 +1,11 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
 
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
-import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 

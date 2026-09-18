@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Owns direct runtime treasury insurance-fund adjustments. */
 final class RuntimeInsuranceFundStateTransitions {

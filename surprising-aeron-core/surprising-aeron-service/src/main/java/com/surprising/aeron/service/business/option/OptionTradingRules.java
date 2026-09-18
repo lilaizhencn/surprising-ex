@@ -1,24 +1,26 @@
 package com.surprising.aeron.service.business.option;
 
-import com.surprising.aeron.service.state.math.*;
-
 import com.surprising.aeron.service.business.ProductTradingRules;
-import com.surprising.aeron.service.state.math.CoreContractMath;
 
 import com.surprising.aeron.service.state.math.OptionContractMath;
 
 import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 
 public final class OptionTradingRules implements ProductTradingRules {
     public ProductLine productLine() { return ProductLine.OPTION; }
     public ContractType contractType() { return ContractType.VANILLA_OPTION; }
+    @Override
+    public void validateLifecycleSettlementProductRule(CoreInstrumentState instrument,
+                                                        SettleInstrumentCommand command) {
+        // Option expiry settlement is admitted by the shared maintenance validation.
+    }
     public long premiumDeltaUnits(CoreInstrumentState instrument, CoreOrderSide side,
                                   long priceTicks, long quantitySteps) {
         requireInstrument(instrument);

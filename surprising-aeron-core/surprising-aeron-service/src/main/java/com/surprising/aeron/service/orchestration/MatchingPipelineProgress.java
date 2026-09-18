@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.command.order.OrderBatchKind;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 

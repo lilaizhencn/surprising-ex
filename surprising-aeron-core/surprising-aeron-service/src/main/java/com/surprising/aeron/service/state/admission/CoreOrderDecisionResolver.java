@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state.admission;
 
 import com.surprising.aeron.service.state.CoreInstrumentState;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.MarkPriceRuntime;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;

@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.matching;
+package com.surprising.aeron.service.exception;
 
 public final class FatalMatchingDivergenceException extends IllegalStateException {
 

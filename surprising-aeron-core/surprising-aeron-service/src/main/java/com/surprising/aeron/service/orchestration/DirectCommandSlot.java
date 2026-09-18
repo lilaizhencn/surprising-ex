@@ -11,6 +11,7 @@ import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.command.balance.BalanceCommandContext;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
 import com.surprising.aeron.service.state.AccountLeverageChange;
 import com.surprising.aeron.service.state.AccountPositionMarginAdjustment;
@@ -249,7 +250,7 @@ final class DirectCommandSlot {
                 if (!controlWork.getAsBoolean()) return null;
                 status = ResponseStatus.APPLIED;
                 resultCode = CoreResultCode.NONE;
-            } catch (com.surprising.aeron.service.state.CoreStateRejectedException failure) {
+            } catch (CoreStateRejectedException failure) {
                 status = ResponseStatus.REJECTED;
                 resultCode = CoreResultCode.fromRejectionCode(failure.code());
             } catch (ArithmeticException failure) {

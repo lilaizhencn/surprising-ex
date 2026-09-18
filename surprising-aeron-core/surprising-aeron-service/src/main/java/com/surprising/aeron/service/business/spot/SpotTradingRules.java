@@ -1,14 +1,10 @@
 package com.surprising.aeron.service.business.spot;
 
-import com.surprising.aeron.service.state.math.*;
-
 import com.surprising.aeron.service.business.ProductTradingRules;
-import com.surprising.aeron.service.state.math.CoreContractMath;
 
 import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;

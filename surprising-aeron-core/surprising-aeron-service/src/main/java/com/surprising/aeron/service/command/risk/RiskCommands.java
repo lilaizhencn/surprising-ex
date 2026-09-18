@@ -3,7 +3,7 @@ package com.surprising.aeron.service.command.risk;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;

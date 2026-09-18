@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.OrderBatchKind;
-import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
@@ -16,8 +15,7 @@ import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.service.state.CoreStateRejectedException;
-import com.surprising.aeron.service.state.PositionRuntime;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
@@ -27,14 +25,11 @@ import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
-import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
-
 
 
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
@@ -817,7 +812,7 @@ final class OrderBatchExecutor {
         if (endScope) owner.runtimeState.endOrderBatchMutationScope();
     }
 
-    com.surprising.aeron.service.matching.FatalMatchingDivergenceException failOrderBatch(
+    FatalMatchingDivergenceException failOrderBatch(
             OrderBatchPending batch, CommandSlot pending, String detail, Throwable cause) {
         // Exchange-core facts are irreversible here. Preserve their observed sequence/prefix for replay evidence,
         // stop every continuation, and roll back only the unpublished Product Core runtime command.
