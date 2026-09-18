@@ -50,13 +50,15 @@ public final class ClusterServiceEgress {
         this.egressFactory = Objects.requireNonNull(egressFactory);
     }
 
-    void start(Cluster cluster) {
+    /** Initializes the Aeron-side session boundary after Cluster starts. */
+    public void start(Cluster cluster) {
         this.cluster = Objects.requireNonNull(cluster);
         epoch = 0;
         leadershipTermId = 0;
     }
 
-    ClientSession transportSession(ClientSession session) {
+    /** Returns the Owner-safe session facade for a Cluster callback session. */
+    public ClientSession transportSession(ClientSession session) {
         TransportSession transport = sessions.get(session.id());
         if (transport == null) {
             transport = new TransportSession(session);
@@ -66,14 +68,14 @@ public final class ClusterServiceEgress {
         return transport;
     }
 
-    void closeSession(ClientSession session) {
+    public void closeSession(ClientSession session) {
         if (session == null) return;
         deferred.remove(session.id());
         TransportSession transport = sessions.remove(session.id());
         if (transport != null) transport.disconnect();
     }
 
-    void flushSessionClosures() {
+    public void flushSessionClosures() {
         if (!closeRequests) return;
         closeRequests = false;
         sessions.forEachValue(session -> {
@@ -81,7 +83,7 @@ public final class ClusterServiceEgress {
         });
     }
 
-    long onRoleChange(Cluster.Role role) {
+    public long onRoleChange(Cluster.Role role) {
         long next = ++epoch;
         deferred.clear();
         sessions.forEachValue(session -> {
@@ -91,7 +93,7 @@ public final class ClusterServiceEgress {
         return next;
     }
 
-    void leadershipTerm(long termId) {
+    public void leadershipTerm(long termId) {
         leadershipTermId = termId;
     }
 
@@ -139,7 +141,7 @@ public final class ClusterServiceEgress {
         return work + deferred.poll(System.nanoTime(), 256);
     }
 
-    void clear() {
+    public void clear() {
         output.clear();
         deferred.clear();
         sessions.forEachValue(TransportSession::disconnect);

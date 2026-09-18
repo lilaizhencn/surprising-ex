@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.config;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
-import com.surprising.aeron.service.orchestration.AeronTradingClusterService;
+import com.surprising.aeron.service.cluster.AeronTradingClusterService;
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
 import io.aeron.archive.client.AeronArchive;

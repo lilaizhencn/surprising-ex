@@ -1,8 +1,11 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.cluster;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.WireMessageKind;
+import com.surprising.aeron.service.orchestration.ClusterServiceEgress;
+import com.surprising.aeron.service.orchestration.TradingCoreOwner;
+import com.surprising.aeron.service.orchestration.TradingOwnerLoop;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
@@ -35,12 +38,16 @@ public final class AeronTradingClusterService implements ClusteredService {
     }
 
     public AeronTradingClusterService(ProductLine productLine) {
-        this(productLine, SessionResponsePublication::new);
+        this(productLine, new ClusterServiceEgress());
     }
 
-    AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress.EgressFactory egressFactory) {
-        egress = new ClusterServiceEgress(egressFactory);
-        owner = new TradingOwnerLoop(productLine, egress);
+    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress) {
+        this.egress = java.util.Objects.requireNonNull(egress);
+        this.owner = new TradingOwnerLoop(productLine, egress);
+    }
+
+    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress.EgressFactory egressFactory) {
+        this(productLine, new ClusterServiceEgress(egressFactory));
     }
 
     @Override
@@ -61,8 +68,8 @@ public final class AeronTradingClusterService implements ClusteredService {
             return;
         }
         owner.enqueue(command, session == null ? null : egress.transportSession(session), timestamp,
-                header.position(), CoreMatchingPhaseMetrics.sampleStart(command.header()),
-                command.header().kind() == WireMessageKind.COMMAND ? CommandFingerprint.of(command) : null);
+                header.position(), command.header().kind() == WireMessageKind.COMMAND
+                        ? CommandFingerprint.of(command) : null);
         owner.drainResponses();
     }
 
@@ -130,7 +137,8 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    byte[] captureSnapshot() {
+    /** Captures the current Owner snapshot for diagnostics and benchmark recovery checks. */
+    public byte[] captureSnapshot() {
         return owner.captureSnapshot(cluster.logPosition(), cluster.time());
     }
 

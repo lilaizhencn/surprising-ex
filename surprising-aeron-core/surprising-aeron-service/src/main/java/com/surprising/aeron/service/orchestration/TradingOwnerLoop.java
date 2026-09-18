@@ -46,12 +46,13 @@ public final class TradingOwnerLoop implements Runnable {
         this(topology.productLine(), egress);
     }
 
-    TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
+    public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
         this.egress = egress;
         processor = new TradingCoreOwner(productLine, this::publishResponse);
     }
 
-    void start(Cluster cluster, byte[] restored) {
+    /** Starts the Owner thread after the Aeron Cluster service has started. */
+    public void start(Cluster cluster, byte[] restored) {
         this.cluster = cluster;
         inputProduced = 0;
         inputConsumed = 0;
@@ -71,16 +72,22 @@ public final class TradingOwnerLoop implements Runnable {
         }, false);
     }
 
+    /** Transfers one replicated command from the Aeron callback thread to the Owner thread. */
+    public void enqueue(CoreMessage command, ClientSession session, long timestamp, long position,
+                        CommandFingerprint fingerprint) {
+        enqueue(command, session, timestamp, position, CoreMatchingPhaseMetrics.sampleStart(command.header()), fingerprint);
+    }
+
     void enqueue(CoreMessage command, ClientSession session, long timestamp, long position,
                  long enqueuedNanos, CommandFingerprint fingerprint) {
         enqueue(new Input(command, session, timestamp, position, null, enqueuedNanos, fingerprint));
     }
 
-    int drainResponses() {
+    public int drainResponses() {
         return egress.drainResponses(processor);
     }
 
-    void onRoleChange(Cluster.Role role, long nextEpoch) {
+    public void onRoleChange(Cluster.Role role, long nextEpoch) {
         boundary(() -> {
             logContext.role = role;
             ownerEpoch = nextEpoch;
@@ -89,7 +96,7 @@ public final class TradingOwnerLoop implements Runnable {
         }, true);
     }
 
-    byte[] captureSnapshot(long position, long timestamp) {
+    public byte[] captureSnapshot(long position, long timestamp) {
         return boundary(() -> {
             logContext.position = position;
             logContext.timestamp = timestamp;
@@ -97,7 +104,7 @@ public final class TradingOwnerLoop implements Runnable {
         }, true);
     }
 
-    void terminate() {
+    public void terminate() {
         if (ownerThread == null) return;
         try {
             if (failure == null && ownerThread.isAlive()) {
@@ -125,7 +132,7 @@ public final class TradingOwnerLoop implements Runnable {
         }
     }
 
-    void checkFailure() {
+    public void checkFailure() {
         if (failure != null) throw new AgentTerminationException(failure);
     }
 

@@ -19,7 +19,7 @@ import org.agrona.concurrent.UnsafeBuffer;
  * 交易 Owner：按确定性边界推进交易，未完成命令与响应跨推进轮次保留。
  *
  * <p>该类不实现 {@link ClusteredService}。Aeron 回调、会话和网络出口由
- * {@link AeronTradingClusterService} 持有；Owner 只接收已复制的不可变命令、
+ * {@link com.surprising.aeron.service.cluster.AeronTradingClusterService} 持有；Owner 只接收已复制的不可变命令、
  * 推进交易状态并产生终态交接。</p>
  */
 public final class TradingCoreOwner {
@@ -609,7 +609,8 @@ public final class TradingCoreOwner {
         replaceState(recovery.decode(productLine));
     }
 
-    static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
+    /** Validates the shared snapshot size limit before Aeron fragments are accumulated. */
+    public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         if (currentLength < 0 || fragmentLength < 0
                 || currentLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
             throw new IllegalStateException("Aeron core snapshot exceeds maximum size");

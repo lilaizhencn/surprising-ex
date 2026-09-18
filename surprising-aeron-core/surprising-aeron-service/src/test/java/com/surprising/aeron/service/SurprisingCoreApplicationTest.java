@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
-import com.surprising.aeron.service.orchestration.AeronTradingClusterService;
+import com.surprising.aeron.service.cluster.AeronTradingClusterService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;

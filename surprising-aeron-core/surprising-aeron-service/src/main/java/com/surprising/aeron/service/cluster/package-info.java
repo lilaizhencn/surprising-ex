@@ -1,7 +1,7 @@
 /**
- * Aeron Cluster 运行时拓扑配置。
+ * Aeron Cluster 运行时拓扑与服务适配。
  *
- * <p>节点启动入口位于父包 {@code com.surprising.aeron.service}；本包只负责集群拓扑配置。
- * 订单、余额、持仓、撮合和产品线规则不属于本包。</p>
+ * <p>{@code ClusterTopology} 描述节点拓扑，{@code AeronTradingClusterService} 实现
+ * Aeron Cluster 到交易 Owner 的回调适配。订单、余额、持仓、撮合和产品线规则不属于本包。</p>
  */
 package com.surprising.aeron.service.cluster;

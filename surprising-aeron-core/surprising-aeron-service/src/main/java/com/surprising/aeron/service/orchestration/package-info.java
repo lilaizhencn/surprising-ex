@@ -1,6 +1,5 @@
 /**
- * Owner-side orchestration: {@code AeronTradingClusterService} adapts Aeron callbacks,
- * {@code TradingOwnerLoop} owns the trading thread, and {@code ClusterServiceEgress} owns
+ * Owner-side orchestration: {@code TradingOwnerLoop} owns the trading thread, and {@code ClusterServiceEgress} owns
  * session state and response handoff; {@code TradingCoreOwner} owns replicated
  * command admission, matching progress, ordered commit, snapshot fences and realtime reads;
  * {@code TradingCoreQueryRouter} owns read-only query protocol routing.
