@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.service.command.CommandResultContext;
+import com.surprising.aeron.service.state.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import java.util.Collection;
@@ -19,11 +20,11 @@ public final class LiquidationCommands {
     public void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            var work = RuntimeDerivativeLiquidationProcessor.beginResolution(owner.reusableLiquidationResolutionWork(), command,
+            var work = RuntimeLiquidationResolution.begin(owner.reusableLiquidationResolutionWork(), command,
                     owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
             owner.deferLiquidationResolutionControl(work);
         } else {
-            RuntimeDerivativeLiquidationProcessor.applyResolutionRuntime(command, owner.runtimeState(),
+            RuntimeLiquidationResolution.applyRuntime(command, owner.runtimeState(),
                     owner.identities(), owner.activeLiquidationIds());
             owner.requestCommitPublication();
         }

@@ -47,7 +47,8 @@ final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyResolutionRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
+        return RuntimeLiquidationResolution.applyRuntime(command, runtime, identities,
+                before.riskState().liquidations().keySet());
     }
 
     public static TradingRuntimeState simulateAdl(TradingCoreState before, ExecuteAdlCommand command,

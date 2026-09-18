@@ -6,8 +6,8 @@ import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
-import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimeAdlExecution;
+import com.surprising.aeron.service.state.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
@@ -41,9 +41,9 @@ public interface CommandResultContext extends CommandOwnerContext {
 
     RuntimeAdlExecution.AdlWork reusableAdlWork();
 
-    void deferLiquidationResolutionControl(RuntimeDerivativeLiquidationProcessor.ResolutionWork work);
+    void deferLiquidationResolutionControl(RuntimeLiquidationResolution.ResolutionWork work);
 
-    RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableLiquidationResolutionWork();
+    RuntimeLiquidationResolution.ResolutionWork reusableLiquidationResolutionWork();
 
     AccountBalanceAdjustment reusableBalanceAdjustment();
 

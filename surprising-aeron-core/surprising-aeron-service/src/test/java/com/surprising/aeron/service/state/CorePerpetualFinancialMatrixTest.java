@@ -697,7 +697,7 @@ class CorePerpetualFinancialMatrixTest {
                 TradingStateSnapshotCodec.encode(funded), variant.productLine());
         assertThat(restoredFunded).isEqualTo(funded);
         TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyResolution(
+        assertThat(RuntimeLiquidationResolution.apply(
                 restoredFunded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.resolveLiquidation(funded, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);

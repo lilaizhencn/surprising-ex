@@ -1057,11 +1057,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     @Override public void deferLiquidationResolutionControl(
-            com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ResolutionWork work) {
+            com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork work) {
         directCommand.deferLiquidationResolutionControl(this, work);
     }
 
-    @Override public com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ResolutionWork
+    @Override public com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork
             reusableLiquidationResolutionWork() {
         return directCommand.reusableLiquidationResolutionWork();
     }
