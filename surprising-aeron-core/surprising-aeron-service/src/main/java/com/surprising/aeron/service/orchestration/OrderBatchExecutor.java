@@ -1252,7 +1252,7 @@ final class OrderBatchExecutor {
         long instrumentChangeId;
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
         List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
-                owner.preMatchingCancellationOrders(pending);
+                owner.matcherCommands.preMatchingCancellationOrders(pending);
         switch (batch.kind) {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;

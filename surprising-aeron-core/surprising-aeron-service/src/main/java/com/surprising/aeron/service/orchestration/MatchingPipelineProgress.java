@@ -164,7 +164,7 @@ final class MatchingPipelineProgress {
                 // A normal PLACE that was held behind an earlier submission can now enter the
                 // Matcher even while its Account Lane admission is still running. This is a
                 // submission-head transition, not an admission poll.
-                if (admission != null && !pending.isMatchingSubmitted()) {
+                if (!pending.isMatchingSubmitted()) {
                     owner.submitMatching(pending);
                     if (pending.isMatchingSubmitted()) continue;
                 }

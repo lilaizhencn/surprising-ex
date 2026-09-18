@@ -183,6 +183,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final TradingCoreQueryRouter queryRouter = new TradingCoreQueryRouter(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
     final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
+    /** 已准入命令到确定性 Matcher 输入的协议转换与证据包装。 */
+    final MatcherCommandSubmission matcherCommands = new MatcherCommandSubmission(this);
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
@@ -1388,12 +1390,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 return;
             }
             matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), prepareMatchingCommand(pending));
+                    pending.sequence(), matcherCommands.prepareMatchingCommand(pending));
             pending.matchingSubmitted();
             matchingSubmissionCompleted(pending);
             return;
         }
-        var command = prepareMatchingCommand(pending);
+        var command = matcherCommands.prepareMatchingCommand(pending);
         com.surprising.aeron.service.state.MatcherSettlementEvent direct = null;
         // The direct event is preconstructed with a detached taker when Lane admission is still
         // in flight.  The event is queued after the admission on that Lane and binds the
@@ -1552,185 +1554,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         CommandSlot context = laneCommandContexts.required(sequence);
         context.publishMatchingCompletion(result);
         pendingMatching.progressChanged();
-    }
-
-    java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
-            prepareMatchingCommand(
-            CommandSlot pending) {
-        if (MATCHING_PHASE_METRICS_ENABLED) {
-            matchingSubmitNanos.put(pending.sequence(), System.nanoTime());
-        }
-        try {
-            List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
-                    preMatchingCancellationOrders(pending);
-            long userId = pending.command().header().userId();
-            if (pending.operation() == CommandSlot.Operation.PLACE && preMatchingCancellations.isEmpty()) {
-                var command = pending.decodedCommand().placeOrder();
-                var admittedOrder = pending.admittedPlaceOrder();
-                int shard = matcherShard(pending);
-                if (admittedOrder != null) {
-                    return pending.preparePlaceMatching(this, shard, command.instrumentChangeId(), userId,
-                            admittedOrder, null);
-                }
-                // Ordinary PLACE admissions are dispatched to the Account Lane and the Matcher
-                // concurrently.  Until the Lane publishes its mutable runtime object, use the
-                // immutable resolved admission input captured by the event.
-                var order = pending.placeAdmission() == null
-                        ? matchingOrder(command.orderId()) : pending.placeAdmission().matchingOrder();
-                return pending.preparePlaceMatching(this, shard, command.instrumentChangeId(), userId,
-                        null, order);
-            }
-            if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
-                var command = pending.decodedCommand().cancelOrder();
-                var order = runtimeState.order(command.orderId());
-                if (order != null) {
-                    String symbol = identities.symbol(order.symbolId());
-                    long instrumentChangeId = order.instrumentChangeId();
-                    int shard = matcherShard(pending);
-                    return pending.prepareCancelMatching(this, shard, command.orderId(), instrumentChangeId,
-                            userId, symbol);
-                }
-            }
-            if ((pending.operation() == CommandSlot.Operation.REPLACE
-                    || pending.operation() == CommandSlot.Operation.AMEND)
-                    && preMatchingCancellations.isEmpty()) {
-                ResolvedMatchingAdmission admission = requireMatchingAdmission(pending);
-                requireUnchangedAdmissionState(admission);
-                var order = runtimeOrder(admission.originalOrderId());
-                String symbol = runtimeOrderSymbol(order);
-                return pending.prepareReplaceMatching(this, matcherShard(pending), admission.resolved().orderId(),
-                        admission.resolved().instrumentChangeId(), userId, admission.originalOrderId(), symbol,
-                        admission.matchingOrder());
-            }
-            MatchingSubmission matching = switch (pending.operation()) {
-                case PLACE -> {
-                    var command = pending.decodedCommand().placeOrder();
-                    var admittedOrder = pending.admittedPlaceOrder();
-                    if (admittedOrder != null) {
-                        yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
-                                () -> matchingAdapter.place(userId, admittedOrder));
-                    }
-                    var order = pending.placeAdmission() == null
-                            ? matchingOrder(command.orderId()) : pending.placeAdmission().matchingOrder();
-                    yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
-                            () -> matchingAdapter.place(userId, order));
-                }
-                case CANCEL -> {
-                    var command = pending.decodedCommand().cancelOrder();
-                    var order = runtimeState.order(command.orderId());
-                    String symbol = order == null ? "" : identities.symbol(order.symbolId());
-                    long instrumentChangeId = order == null ? 0 : order.instrumentChangeId();
-                    yield new MatchingSubmission(command.orderId(), instrumentChangeId,
-                            () -> matchingAdapter.cancelForContinuation(userId, command.orderId(), symbol));
-                }
-                case REPLACE, AMEND -> {
-                    ResolvedMatchingAdmission admission = requireMatchingAdmission(pending);
-                    var order = runtimeOrder(admission.originalOrderId());
-                    String symbol = runtimeOrderSymbol(order);
-                    yield new MatchingSubmission(admission.resolved().orderId(),
-                            admission.resolved().instrumentChangeId(),
-                            () -> matchingAdapter.replaceOrder(userId, admission.originalOrderId(),
-                                    symbol, admission.matchingOrder()));
-                }
-                case TRIGGER -> {
-                    long[] execute = pending.decodedCommand().trigger();
-                    var trigger = runtimeState.triggerOrder(execute[0]);
-                    if (trigger == null) {
-                        yield new MatchingSubmission(0, 0, () ->
-                                new com.surprising.aeron.service.matching.CoreMatchingResult(
-                                        false, "TRIGGER_ORDER_NOT_FOUND"));
-                    }
-                    var order = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(), "trigger admission is missing");
-                    yield new MatchingSubmission(order.orderId(), trigger.instrumentChangeId(),
-                            () -> matchingAdapter.place(trigger.userId(), order));
-                }
-                case LIQUIDATION -> {
-                    var command = pending.decodedCommand().liquidation();
-                    var liquidation = runtimeState.liquidation(command.liquidationId());
-                    if (liquidation == null || !com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
-                            .isExecutable(runtimeState, identities, command)) {
-                        yield new MatchingSubmission(command.liquidationId(),
-                                liquidation == null ? 0 : liquidation.instrumentChangeId(),
-                                () ->
-                                new com.surprising.aeron.service.matching.CoreMatchingResult(
-                                        true, "SUCCESS"));
-                    }
-                    var orders = lifecycleOrders(liquidation.userId(),
-                            runtimeLiquidationSymbol(liquidation),
-                            command.cursorOrderId(), command.maxOrders()).orders();
-                    yield new MatchingSubmission(command.liquidationId(), liquidation.instrumentChangeId(),
-                            () -> matchingAdapter.cancelBatch(orders));
-                }
-                case LIQUIDATION_BATCH -> {
-                    var orders = batchCancellationOrders(pending);
-                    yield new MatchingSubmission(0, 0, () -> matchingAdapter.cancelBatch(orders));
-                }
-                case SETTLEMENT -> {
-                    var command = pending.decodedCommand().settlement();
-                    var progress = runtimeLifecycleProgress(command.symbol());
-                    if (progress != null && progress.ordersComplete()) {
-                        yield new MatchingSubmission(0, command.instrumentChangeId(),
-                                () ->
-                                new com.surprising.aeron.service.matching.CoreMatchingResult(
-                                        true, "SUCCESS"));
-                    }
-                    var orders = lifecycleOrders(0, command.symbol(), command.cursorOrderId(),
-                            command.maxOrders()).orders();
-                    yield new MatchingSubmission(0, command.instrumentChangeId(),
-                            () -> matchingAdapter.cancelBatch(orders));
-                }
-            };
-            java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> guarded =
-                    () -> matchingAdapter.executeAfterCancellationsSync(
-                            preMatchingCancellations, matching.submission());
-            return matchingEvidenceCommand(pending, matching.orderId(), matching.instrumentChangeId(),
-                    matchingControlCommand(pending), guarded);
-        } catch (RuntimeException exception) {
-            return matchingEvidenceCommand(pending, 0, 0, matchingControlCommand(pending), () ->
-                    new com.surprising.aeron.service.matching.CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE"));
-        }
-    }
-
-    boolean matchingControlCommand(CommandSlot pending) {
-        return pending.operation() == CommandSlot.Operation.LIQUIDATION
-                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
-                || pending.operation() == CommandSlot.Operation.SETTLEMENT;
-    }
-
-    java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
-            matchingEvidenceCommand(
-                    CommandSlot pending, long orderId, long instrumentChangeId, boolean control,
-                    java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> command) {
-        long coreSequence = pending.sequence();
-        UUID commandId = pending.command().header().commandId();
-        long aeronTimestamp = pending.command().header().submittedAtEpochMillis();
-        int shard = control ? -1 : matcherShard(pending);
-        return control
-                ? () -> matchingAdapter.executeControlWithEvidenceSync(
-                        coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command)
-                : () -> matchingAdapter.executeShardWithEvidenceSync(
-                        shard, coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command);
-    }
-
-    List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellationOrders(
-            CommandSlot pending) {
-        List<Long> orderIds = pending.preMatchingCancellationOrderIds();
-        if (orderIds.isEmpty()) return List.of();
-        ArrayList<DeterministicExchangeCoreAdapter.CancellationOrder> orders = new ArrayList<>(orderIds.size());
-        for (long orderId : orderIds) {
-            OrderRuntime order = runtimeOrder(orderId);
-            if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
-                orders.add(new DeterministicExchangeCoreAdapter.CancellationOrder(
-                        order.orderId(), order.userId(), runtimeOrderSymbol(order)));
-            }
-        }
-        return orders.isEmpty() ? List.of() : orders;
-    }
-
-    record MatchingSubmission(
-            long orderId,
-            long instrumentChangeId,
-            java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission) {
     }
 
     com.surprising.aeron.protocol.PlaceOrderCommand replacementFor(CoreMessage message,
