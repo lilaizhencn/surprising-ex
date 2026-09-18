@@ -17,7 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class SurprisingCoreBootstrapThreadingModeTest {
+class SurprisingCoreApplicationThreadingModeTest {
 
     private static final String PROPERTY = "surprising.aeron.core.threading-mode";
     @TempDir
@@ -32,20 +32,20 @@ class SurprisingCoreBootstrapThreadingModeTest {
     void acceptsConfiguredThreadingMode() {
         System.setProperty(PROPERTY, "DEDICATED");
 
-        assertThat(SurprisingCoreBootstrap.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
+        assertThat(SurprisingCoreApplication.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
     }
 
     @Test
     void rejectsUnknownThreadingMode() {
         System.setProperty(PROPERTY, "invalid");
 
-        assertThatIllegalArgumentException().isThrownBy(SurprisingCoreBootstrap::coreThreadingMode)
+        assertThatIllegalArgumentException().isThrownBy(SurprisingCoreApplication::coreThreadingMode)
                 .withMessageContaining("valid Aeron ThreadingMode");
     }
 
     @Test
     void defaultsClientLivenessAboveTheObservedDiagnosticFreeze() throws Exception {
-        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
+        Method method = SurprisingCoreApplication.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null)).isEqualTo(TimeUnit.SECONDS.toNanos(30));
@@ -53,16 +53,16 @@ class SurprisingCoreBootstrapThreadingModeTest {
 
     @Test
     void keepsPublicationUnblockingAboveClientLiveness() throws Exception {
-        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
+        Method method = SurprisingCoreApplication.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null))
-                .isGreaterThan(SurprisingCoreBootstrap.coreClientLivenessTimeoutNs());
+                .isGreaterThan(SurprisingCoreApplication.coreClientLivenessTimeoutNs());
     }
 
     @Test
     void doesNotLabelAeronWarningEventsAsFailures() throws Exception {
-        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("errorHandler", String.class);
+        Method method = SurprisingCoreApplication.class.getDeclaredMethod("errorHandler", String.class);
         method.setAccessible(true);
         ErrorHandler handler = (ErrorHandler) method.invoke(null, "consensus-module");
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
@@ -105,7 +105,7 @@ class SurprisingCoreBootstrapThreadingModeTest {
                     "-Dsurprising.aeron.hostnames=127.0.0.1,127.0.0.1,127.0.0.1",
                     "-Dsurprising.aeron.data-dir=" + tempDirectory.resolve("cluster-data"),
                     "-cp", testClasspath,
-                    SurprisingCoreBootstrap.class.getName())
+                    SurprisingCoreApplication.class.getName())
                     .redirectErrorStream(true)
                     .redirectOutput(childOutput.toFile())
                     .start();

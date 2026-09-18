@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.bootstrap;
 
-import com.surprising.aeron.service.SurprisingCoreBootstrap;
+import com.surprising.aeron.service.SurprisingCoreApplication;
 import com.surprising.aeron.service.cluster.ClusterTopology;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 
@@ -24,7 +24,7 @@ public final class SurprisingCoreNode implements AutoCloseable {
         ShutdownSignalBarrier next = new ShutdownSignalBarrier();
         barrier = next;
         try {
-            SurprisingCoreBootstrap.run(topology, next);
+            SurprisingCoreApplication.run(topology, next);
         } finally {
             barrier = null;
             next.close();

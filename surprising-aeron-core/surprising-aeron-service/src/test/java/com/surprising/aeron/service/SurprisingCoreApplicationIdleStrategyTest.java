@@ -9,18 +9,18 @@ import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.YieldingIdleStrategy;
 import org.junit.jupiter.api.Test;
 
-class SurprisingCoreBootstrapIdleStrategyTest {
+class SurprisingCoreApplicationIdleStrategyTest {
     @Test
     void leavesAeronDefaultsIntactWhenUnconfigured() {
-        assertThat(SurprisingCoreBootstrap.serviceIdleStrategySupplier((String) null)).isNull();
-        assertThat(SurprisingCoreBootstrap.serviceIdleStrategySupplier(" ")).isNull();
+        assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier((String) null)).isNull();
+        assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier(" ")).isNull();
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> SurprisingCoreBootstrap.serviceIdleStrategySupplier("invalid"));
+                .isThrownBy(() -> SurprisingCoreApplication.serviceIdleStrategySupplier("invalid"));
     }
 
     @Test
     void givesEachServiceItsOwnMutableBackoffState() {
-        var supplier = SurprisingCoreBootstrap.serviceIdleStrategySupplier(" backoff ");
+        var supplier = SurprisingCoreApplication.serviceIdleStrategySupplier(" backoff ");
         var first = supplier.get();
         assertThat(first).isInstanceOf(BackoffIdleStrategy.class).isNotSameAs(supplier.get());
     }
@@ -34,7 +34,7 @@ class SurprisingCoreBootstrapIdleStrategyTest {
         try {
             System.setProperty(global, "org.agrona.concurrent.BackoffIdleStrategy");
             System.setProperty(property, "yielding");
-            assertThat(SurprisingCoreBootstrap.serviceIdleStrategySupplier().get())
+            assertThat(SurprisingCoreApplication.serviceIdleStrategySupplier().get())
                     .isInstanceOf(YieldingIdleStrategy.class);
             assertThat(new ConsensusModule.Context().idleStrategySupplier(
                     ClusteredServiceContainer.Configuration.idleStrategySupplier(null)).idleStrategy())

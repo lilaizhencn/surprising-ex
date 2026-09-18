@@ -11,7 +11,7 @@ class ClusterFatalErrorTest {
     @Test
     void fatalConductorFailureStopsTheProcessBeforeMappedResourceCleanup() {
         AtomicInteger exit = new AtomicInteger();
-        var handler = SurprisingCoreBootstrap.errorHandler("test", exit::set);
+        var handler = SurprisingCoreApplication.errorHandler("test", exit::set);
         handler.onError(new DriverTimeoutException("paused beyond driver liveness"));
         assertThat(exit).hasValue(1);
         exit.set(0);
@@ -22,7 +22,7 @@ class ClusterFatalErrorTest {
     @Test
     void recoverableElectionWarningDoesNotStopTheProcess() {
         AtomicInteger exit = new AtomicInteger();
-        SurprisingCoreBootstrap.errorHandler("test", exit::set)
+        SurprisingCoreApplication.errorHandler("test", exit::set)
                 .onError(new AeronException("leader heartbeat timeout", AeronException.Category.WARN));
         assertThat(exit).hasValue(0);
     }
