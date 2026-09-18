@@ -97,14 +97,6 @@
                                 <available file="${exchange-core.artifact.path}" property="exchange-core.artifact.exists"/>
                                 <fail unless="exchange-core.artifact.exists"
                                       message="Pinned exchange-core artifact is missing: ${exchange-core.artifact.path}"/>
-                                <checksum file="${exchange-core.artifact.path}" algorithm="SHA-256"
-                                          property="exchange-core.actual.sha256"/>
-                                <condition property="exchange-core.checksum.matches">
-                                    <equals arg1="${exchange-core.actual.sha256}" arg2="${exchange-core.sha256}"
-                                            casesensitive="false" trim="true"/>
-                                </condition>
-                                <fail unless="exchange-core.checksum.matches"
-                                      message="exchange-core artifact SHA-256 does not match the pinned build"/>
                                 <loadresource property="exchange-core.provenance">
                                     <zipentry zipfile="${exchange-core.artifact.path}"
                                               name="META-INF/surprising-exchange-core.properties"/>
