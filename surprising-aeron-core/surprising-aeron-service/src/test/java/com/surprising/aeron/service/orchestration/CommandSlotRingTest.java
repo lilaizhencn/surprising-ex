@@ -10,6 +10,7 @@ import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.settlement.FundsPosting;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import java.util.List;
@@ -54,8 +55,8 @@ class CommandSlotRingTest {
         var first = ring.claim(1);
         var second = ring.claim(2);
         var active = new RuntimeFundsAccumulator();
-        active.add(7, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 11,
-                com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE, -100);
+        active.add(7, FundsPosting.OwnerKind.USER, 11,
+                FundsPosting.Subledger.AVAILABLE, -100);
         var firstExpected = active.toDelta();
         PrimitiveLongChangeSet firstUsers = new PrimitiveLongChangeSet();
         firstUsers.add(11L);
@@ -66,8 +67,8 @@ class CommandSlotRingTest {
         firstBuilder.changedOrderIds = firstOrders;
         first.suspendCommitContext(firstBuilder, active, true, false);
         assertThat(active.toDelta()).isSameAs(RuntimeFundsDelta.empty());
-        active.add(8, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 22,
-                com.surprising.aeron.service.state.FundsPosting.Subledger.LOCKED, 50);
+        active.add(8, FundsPosting.OwnerKind.USER, 22,
+                FundsPosting.Subledger.LOCKED, 50);
         var secondExpected = active.toDelta();
         PrimitiveLongChangeSet secondUsers = new PrimitiveLongChangeSet();
         secondUsers.add(22L);

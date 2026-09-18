@@ -1,6 +1,10 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.settlement;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreTreasuryState;
+import com.surprising.aeron.service.state.CoreUserState;
+import com.surprising.aeron.service.state.TradingCoreState;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;

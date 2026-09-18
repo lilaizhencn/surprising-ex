@@ -2,7 +2,7 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.service.state.MarkPriceRuntime;
 import com.surprising.aeron.service.state.PositionRuntime;
-import com.surprising.aeron.service.state.RiskScanRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;

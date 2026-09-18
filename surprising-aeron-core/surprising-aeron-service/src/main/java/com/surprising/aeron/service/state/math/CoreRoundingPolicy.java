@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.math;
 
-import com.surprising.aeron.service.state.FundsPosting;
+import com.surprising.aeron.service.state.settlement.FundsPosting;
 
 import java.math.BigInteger;
 

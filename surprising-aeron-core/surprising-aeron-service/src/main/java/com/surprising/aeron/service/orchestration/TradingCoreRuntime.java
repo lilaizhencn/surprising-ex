@@ -56,7 +56,7 @@ import com.surprising.aeron.service.state.index.CancelAllAfterIndex;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
-import com.surprising.aeron.service.state.RiskScanRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.MarkPriceRuntime;
 import com.surprising.aeron.service.state.PositionRuntime;

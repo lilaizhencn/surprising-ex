@@ -4,6 +4,8 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
 
 import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.settlement.FundsPosting;
+import com.surprising.aeron.service.state.settlement.FundsDelta;
 
 
 import com.surprising.aeron.service.state.model.AssetBalance;

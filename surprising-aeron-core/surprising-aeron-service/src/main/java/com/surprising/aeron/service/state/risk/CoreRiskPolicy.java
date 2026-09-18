@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.risk;
 
 import com.surprising.aeron.service.state.model.CoreRiskStatus;
 
@@ -20,7 +20,7 @@ public final class CoreRiskPolicy {
         return quantity != 0 && !(type.isOption() && quantity > 0);
     }
 
-    static CoreRiskStatus status(long ratioPpm) {
+    public static CoreRiskStatus status(long ratioPpm) {
         return ratioPpm >= LIQUIDATION_MARGIN_RATIO_PPM ? CoreRiskStatus.LIQUIDATION
                 : ratioPpm >= WARNING_MARGIN_RATIO_PPM ? CoreRiskStatus.WARNING : CoreRiskStatus.NORMAL;
     }

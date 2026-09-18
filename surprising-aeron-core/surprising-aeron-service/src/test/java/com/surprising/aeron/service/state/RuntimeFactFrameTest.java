@@ -4,6 +4,7 @@ import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.settlement.FundsPosting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

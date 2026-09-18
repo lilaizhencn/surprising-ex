@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.settlement;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 

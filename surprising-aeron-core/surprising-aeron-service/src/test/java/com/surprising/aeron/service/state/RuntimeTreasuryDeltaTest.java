@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.settlement.FundsPosting;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 
 import static org.assertj.core.api.Assertions.assertThat;

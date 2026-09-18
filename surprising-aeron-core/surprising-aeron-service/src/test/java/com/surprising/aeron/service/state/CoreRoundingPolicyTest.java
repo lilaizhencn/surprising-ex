@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.math.*;
+import com.surprising.aeron.service.state.settlement.FundsPosting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

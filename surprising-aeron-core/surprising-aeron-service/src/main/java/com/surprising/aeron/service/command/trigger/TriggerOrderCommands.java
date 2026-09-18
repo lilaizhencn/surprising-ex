@@ -2,7 +2,7 @@ package com.surprising.aeron.service.command.trigger;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RiskScanRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;

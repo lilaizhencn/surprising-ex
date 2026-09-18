@@ -5,7 +5,7 @@ import com.surprising.aeron.service.state.RealtimeUserSnapshot;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ReservationRuntime;
-import com.surprising.aeron.service.state.RiskSnapshotRuntime;
+import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.UserRuntime;
 
