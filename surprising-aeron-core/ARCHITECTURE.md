@@ -26,7 +26,7 @@ SurprisingCoreBootstrap.main
 - `ContinuousTradingClusterService` 负责 Aeron 回调、输入输出队列、会话出口和 owner 线程生命周期。
 - `TradingCoreOwner` 负责已复制命令的准入、撮合推进、有序提交、实时读取和快照状态边界；不实现 `ClusteredService`，不访问真实 Aeron 会话。
 - `SurprisingClusteredService` 只保留旧的 `ClusteredService` 回调适配，供兼容测试和独立回放使用，生产入口不再依赖它。
-- `TradingCoreRuntime` 保留命令路由、撮合流程、提交推进和状态组合；`TradingCoreQueryRouter` 负责只读查询协议路由，不拥有业务状态。
+- `TradingCoreRuntime` 是状态所有权和组件组合根；`CoreCommandIngress`、`CoreDirectCommandFlow`、`CoreMatchingFlow`、`CoreRuntimeStateView` 和 `CoreRuntimeLifecycle` 分别拥有入口、直接命令、撮合在途、提交状态读视图和生命周期边界。`TradingCoreQueryRouter` 负责只读查询协议路由，不拥有业务状态。
 
 ## 2. 现货下单链路
 
@@ -37,7 +37,8 @@ CoreMessage / PlaceOrderCommand
     -> ContinuousTradingClusterService.onSessionMessage
     -> owner queue
     -> TradingCoreOwner.enqueueCommittedCommand
-    -> TradingCoreRuntime.apply / applyCommandIngress
+    -> TradingCoreRuntime.apply
+    -> CoreCommandIngress
     -> MatchingCommandAdmission
         - 解码和通用订单校验
         - 检查订单、用户、Instrument 和依赖序列
@@ -92,7 +93,12 @@ CoreMessage / PlaceOrderCommand
 
 主要位置：
 
-- `TradingCoreRuntime`
+- `TradingCoreRuntime`（状态所有权与组件组合根）
+- `CoreCommandIngress`（产品线/查询闸门、幂等、来源序号和命令分流）
+- `CoreDirectCommandFlow`（直接控制命令的 Lane 续步、回滚、提交和资金守恒）
+- `CoreMatchingFlow`（在途命令环、Matcher 路由、Lane 结算事件和完成结果）
+- `CoreRuntimeStateView`（已提交状态物化、版本缓存和风险/资金/持仓读视图）
+- `CoreRuntimeLifecycle`（owner 绑定、启动、健康检查和释放顺序）
 - `MatchingCommandAdmission`
 - `OrderedCommitCoordinator`
 - `CommandSlot`、`PendingMatchingRing`
@@ -220,7 +226,7 @@ ADL 对手方持仓变更。
 
 `TradingCoreRuntime` 的查询协议路由已与命令准入分开：
 
-1. `TradingCoreRuntime.apply` 只负责生命周期检查、账户 Lane 读取屏障、消息类型分流和命令准入顺序。
+1. `TradingCoreRuntime.apply` 只保留对外入口；生命周期检查、账户 Lane 读取屏障、消息类型分流和命令准入顺序由 `CoreCommandIngress` 承担。
 2. `TradingCoreQueryRouter` 负责状态哈希、账户/订单、盘口、风险、资金费、清算、Instrument 维护等查询的解码、校验和响应编码。
 3. 查询路由只读取 `TradingRuntimeState` 及由提交变化维护的索引；不复制余额、订单、持仓或产品状态。
 4. 盘口查询的异步会话仍由 `OrderBookQueryService` 持有；账户读取屏障仍在 Owner 入口先完成，避免绕过提交水位。
@@ -238,3 +244,15 @@ ADL 对手方持仓变更。
 4. 直接控制命令仍只能由 Owner 线程推进，失败仍在所属 Lane 回滚；没有改变异步完成顺序、错误码、幂等结果或快照格式。
 
 这次拆分的理由是同一个 `CommandSlot` 同时承担“一个控制命令的续步”和“多个撮合命令的在途状态”两种生命周期，复用时机、状态清理和并发含义均不同。新槽是单实例固定对象，不增加撮合命令分配，也没有新增通用接口或业务状态副本。
+
+## 8. 已完成的第四处代码边界
+
+`TradingCoreRuntime` 已按真实执行流程完成第一轮职责拆分，保留一个薄的兼容门面：
+
+1. `CoreCommandIngress` 负责集群日志入口的产品线校验、查询读屏障、终态/在途/资金幂等、来源序号校验和撮合/直接命令分流；不写订单、余额或持仓。
+2. `CoreDirectCommandFlow` 负责直接控制命令的“业务执行—Lane 续步—失败回滚—变更发布—资金守恒—结果账本”顺序；不处理 Matcher 事件。
+3. `CoreMatchingFlow` 负责 `PendingMatchingRing` 的序号生命周期、固定 Matcher 路由、Matcher→Lane 结算事件、批量/跨 shard 提交和完成结果读取；不复制权威业务状态。
+4. `CoreRuntimeStateView` 负责已提交 `TradingCoreState` 的边界物化、版本缓存及风险/资金/持仓查询视图；不把物化读模型带入 matcher 或 Account Lane 热路径。
+5. `CoreRuntimeLifecycle` 负责 owner 线程绑定、Matcher/Lane/投影日志/快照资源的启停、健康检查和关闭顺序；`TradingCoreRuntime` 仍唯一持有 `TradingRuntimeState`、身份字典、结果账本、索引和在途槽。
+
+主流程现在可以按业务顺序阅读：入口闸门 → 命令分流 → 撮合或直接命令执行 → Lane/Matcher 交接 → 有序提交 → 结果/快照读视图。该拆分没有新增状态副本、产品线策略框架、协议字段或并发阶段。

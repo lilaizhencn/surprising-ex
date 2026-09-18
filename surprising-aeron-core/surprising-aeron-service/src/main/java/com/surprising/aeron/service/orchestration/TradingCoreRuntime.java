@@ -66,10 +66,8 @@ import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.state.TradingRuntimeState;
-import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import exchange.core2.core.common.MatcherEventType;
@@ -142,6 +140,16 @@ public final class TradingCoreRuntime implements AutoCloseable,
             balances, instruments, funding, risk, liquidations, adl, insurance,
             positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
             new TriggerCommandDispatcher(triggers));
+    /** 直接控制命令的异步终结边界。 */
+    final CoreDirectCommandFlow directCommandFlow = new CoreDirectCommandFlow(this);
+    /** 集群日志入口的幂等、来源序号与命令分流边界。 */
+    final CoreCommandIngress commandIngress = new CoreCommandIngress(this, directCommandFlow);
+    /** 撮合在途命令、Matcher 提交及 Lane 结算事件的完整流程。 */
+    final CoreMatchingFlow matchingFlow = new CoreMatchingFlow(this);
+    /** 已提交状态的查询与快照读视图。 */
+    final CoreRuntimeStateView stateView = new CoreRuntimeStateView(this);
+    /** Owner 绑定、启动、健康检查和释放顺序。 */
+    final CoreRuntimeLifecycle lifecycle = new CoreRuntimeLifecycle(this);
 
     /** Common matching responses use bounded stable slabs; ledger eviction returns their slots. */
     final ResponseArena responseArena = new ResponseArena();
@@ -323,11 +331,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
      * while the committed state is unchanged (which used to recreate TreeMap entries, user
      * records and order snapshots on every query/verification call).
      */
-    private TradingCoreState materializedStateCache;
-    private long materializedStateCacheRevision = Long.MIN_VALUE;
-    private long materializedStateCacheMarketRevision = Long.MIN_VALUE;
-    private long materializedStateCacheSequence = Long.MIN_VALUE;
-    private long materializedStateCacheBusinessHash = Long.MIN_VALUE;
     /** 手续费策略摘要缓存，策略变化时更新。 */
     long cachedFeePolicyHash;
     /** 待完成转账摘要缓存，转账状态变化时更新。 */
@@ -579,448 +582,49 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
-    /** 当前入口是否允许独立命令流水准入。 */
-    boolean clusterPipelineAdmission;
-    /** 当前解码缓存对应的信封身份；入口返回时恢复上一上下文。 */
-    CoreMessage decodedIngressMessage;
-    /** 当前信封不可变解码结果；作用域重算不会再次解码。 */
-    DecodedMatchingCommand decodedIngressCommand;
+    public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+        return commandIngress.apply(message, clusterTimestamp, clusterPosition);
+    }
 
-    /** 全局元数据更新及 Lane 控制任务派发，不要求事先停驻所有账户。 */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
-        return switch (message.header().messageType()) {
-            // These commands only modify Owner metadata, never account state.
-            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER, ACK_EXPORT -> false;
-            case UPSERT_ALGO_ORDER, EXECUTE_TRIGGER_ORDER -> false;
-            case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
-                    UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
-                    ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE, UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
-                    UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, UPSERT_INSTRUMENT,
-                    UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
-            case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER, CANCEL_ORDER_BATCH -> false;
-            case CONTINUE_RISK_SCAN, AMEND_ORDER_BATCH, PLACE_ORDER_BATCH, EXECUTE_ADL, RESOLVE_LIQUIDATION,
-                    EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH, SETTLE_INSTRUMENT -> false;
-            default -> true;
-        };
+        return commandIngress.requiresOwnerLaneAccessForPreparation(message);
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
-        return applyClusterCommand(message, timestamp, position, null);
+        return commandIngress.applyClusterCommand(message, timestamp, position);
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded) {
-        // Keep this package-level adapter equivalent to the real clustered service callback:
-        // cluster ingress owns Account Lane workers for the whole apply, even when tests invoke
-        // the runtime directly instead of going through SurprisingClusteredService.
-        boolean entered = !runtimeState.asynchronousCommands();
-        if (entered) runtimeState.enterAsynchronousCommandScope();
-        try {
-            return applyDecodedCommand(message, timestamp, position, decoded, true);
-        } finally {
-            if (entered) runtimeState.exitAsynchronousCommandScope();
-        }
+        return commandIngress.applyClusterCommand(message, timestamp, position, decoded);
     }
-
-    /** 仅当前apply范围持有的预计算摘要，嵌套命令不能误用外层摘要。 */
-    private CommandFingerprint preparedIngressFingerprint;
-    /** Static ingress route captured before apply() creates the pending matcher. */
-    private long preparedRouteUserLaneBit;
-    private int preparedRouteMatcherShard = -1;
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
-        return applyDecodedCommand(message, timestamp, position, decoded, independent, null);
+        return commandIngress.applyDecodedCommand(message, timestamp, position, decoded, independent);
     }
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent,
                                      CommandFingerprint fingerprint) {
-        CommandFingerprint previousFingerprint = preparedIngressFingerprint;
-        preparedIngressFingerprint = fingerprint;
-        boolean previousAdmission = clusterPipelineAdmission;
-        CoreMessage previousMessage = decodedIngressMessage;
-        DecodedMatchingCommand previousCommand = decodedIngressCommand;
-        clusterPipelineAdmission = independent;
-        decodedIngressMessage = message;
-        decodedIngressCommand = decoded;
-        try { return apply(message, timestamp, position); }
-        finally {
-            preparedIngressFingerprint = previousFingerprint;
-            clusterPipelineAdmission = previousAdmission;
-            decodedIngressMessage = previousMessage;
-            decodedIngressCommand = previousCommand;
-        }
+        return commandIngress.applyDecodedCommand(message, timestamp, position, decoded, independent, fingerprint);
     }
 
     DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
-        return message == decodedIngressMessage && decodedIngressCommand != null
-                ? decodedIngressCommand : DecodedMatchingCommand.decode(message);
+        return commandIngress.decodeMatchingCommand(message);
     }
 
-    /**
-     * Capture only deterministic ingress routing.  Potential maker accounts are
-     * discovered by the Matcher from its order book after the command is admitted;
-     * the Owner must not scan counterparty or instrument indexes here.
-     */
     boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
-        if (!activated) activate();
-        assertOwner();
-        long user = message.header().userId();
-        if (message.header().productLine() != productLine || user <= 0) {
-            preparedRouteUserLaneBit = 0;
-            preparedRouteMatcherShard = -1;
-            return false;
-        }
-        window.resetCandidate(user);
-        try {
-            // Decode once for the whole command. The window keeps the same
-            // cached object while this command remains at the ingress head.
-            DecodedMatchingCommand decoded = window.decoded(message);
-            switch (message.header().messageType()) {
-                case PLACE_ORDER -> {
-                    PlaceOrderCommand command = decoded.placeOrder();
-                    int shard = decoded.matcherShard(matchingAdapter, command.symbol());
-                    window.route(shard, runtimeState.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                case CANCEL_ORDER -> {
-                    long orderId = decoded.cancelOrder().orderId();
-                    var route = activeOrderIndex.activeOrderRoute(orderId);
-                    if (route == null || route.userId() != user || route.symbol() == null
-                            || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                    window.route(matchingAdapter.matcherShardId(route.symbol()),
-                            runtimeState.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                case PLACE_ORDER_BATCH -> {
-                    int shard = -1;
-                    for (var order : decoded.placeOrderBatch().orders()) {
-                        int current = decoded.matcherShard(matchingAdapter, order.symbol());
-                        // A mixed-shard batch remains on the deterministic sequential item path;
-                        // each item becomes its own fixed matcher submission.  The Owner only
-                        // resolves the static symbol route and never scans active orders.
-                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
-                        if (shard < 0) {
-                            shard = current;
-                            window.route(shard, runtimeState.topology().accountLaneMask(user));
-                        }
-                    }
-                    if (shard < 0) return rememberPipelineRoute(window, false);
-                    return rememberPipelineRoute(window, true);
-                }
-                case CANCEL_ORDER_BATCH -> {
-                    int shard = -1;
-                    for (var order : decoded.cancelOrderBatch().orders()) {
-                        var route = activeOrderIndex.activeOrderRoute(order.orderId());
-                        if (route == null || route.userId() != user || route.symbol() == null
-                                || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                        int current = matchingAdapter.matcherShardId(route.symbol());
-                        // The minimum order route index is the only allowed per-item lookup for
-                        // cancellation. Mixed shards use the existing deterministic sequential
-                        // chunk path instead of building an Owner-side candidate collection.
-                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
-                        shard = current;
-                    }
-                    window.route(shard, runtimeState.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                default -> { return rememberPipelineRoute(window, false); }
-            }
-        } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
-            return rememberPipelineRoute(window, false);
-        }
+        return commandIngress.prepareClusterPipelineScope(message, window);
     }
-
-    private boolean rememberPipelineRoute(ClusterCommandWindow window, boolean eligible) {
-        preparedRouteUserLaneBit = eligible ? window.routeUserLaneBit() : 0;
-        preparedRouteMatcherShard = eligible ? window.routeMatcherShard() : -1;
-        return eligible;
-    }
-
-    public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        if (!activated) activate();
-        assertOwner();
-        if (directCommand.active()) throw new IllegalStateException("asynchronous control command is still active");
-        admissionPreviousClusterTimestamp = currentClusterTimestamp;
-        admissionPreviousClusterPosition = currentClusterPosition;
-        currentClusterTimestamp = clusterTimestamp;
-        currentClusterPosition = clusterPosition;
-        assertHealthy();
-        if (snapshots.snapshotFence != null && snapshots.snapshotFence.encodedSnapshot == null) {
-            throw new IllegalStateException("snapshot fence is active");
-        }
-        if (!pendingMatching.isEmpty() && !isCommitCursorSafeWhileMatching(message)) {
-            long userId = message.header().userId();
-            if (userId <= 0 || pendingMatching.hasUser(userId)) {
-                throw new IllegalStateException("command or query crossed its account-lane matching cursor");
-            }
-        }
-        if (message.header().productLine() != productLine) {
-            return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
-        }
-        if (message.header().messageType() == CoreMessageType.ACK_EXPORT
-                || message.header().messageType() == CoreMessageType.EXPORT_BATCH_QUERY
-                || message.header().messageType() == CoreMessageType.EXPORT_STATUS_QUERY) {
-            return rejected(CoreResultCode.INVALID_MESSAGE);
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && accountLaneReadQuery(message.header().messageType())) {
-            if (singleUserLaneQuery(message.header().messageType()) && message.header().userId() > 0) {
-                runtimeState.readFence(
-                        message.header().userId(), committedCoreSequence);
-            } else {
-                runtimeState.readFenceAll(committedCoreSequence);
-            }
-        }
-        CoreResponse queryResponse = queryRouter.apply(message, clusterTimestamp);
-        if (queryResponse != null) return queryResponse;
-        if (message.header().kind() != WireMessageKind.COMMAND) {
-            return rejected(CoreResultCode.INVALID_MESSAGE);
-        }
-        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
-    }
-
-    /**
-     * Command-only ingress path.  Query dispatch and lifecycle fences stay in
-     * {@link #apply(CoreMessage, long, long)}; this method owns the command
-     * admission boundary and hands accepted work to the existing matching or
-     * direct command processors without creating a command context object.
-     */
-    private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
-                ? preparedIngressFingerprint : CommandFingerprint.of(message);
-        CoreResponse replayResponse = checkCommandReplay(message, fingerprint);
-        if (replayResponse != null) return replayResponse;
-
-        long lastSourceSequence = lastSourceSequences.lookupOrDefault(
-                message.header().source(), message.header().sourceId(), -1);
-        SourceKey sourceKey = lastSourceSequences.lastLookupKey();
-        if (sourceKey == null) sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
-        CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
-        if (sourceSequenceResponse != null) return sourceSequenceResponse;
-
-        if (isMatchingCommand(message.header().messageType())) {
-            if (pendingMatching.size() >= pendingMatching.capacity()) {
-                throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
-            }
-            if (isOrderBatchCommand(message.header().messageType())) {
-                return batches.beginOrderBatchMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-            }
-            return admissions.beginMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-        }
-        return applyDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-    }
-
-    /**
-     * Checks terminal, in-flight and funds-specific replay before a command mutates state.
-     * The response is returned here so the command path cannot accidentally route a duplicate
-     * into either the matcher or a direct business handler.
-     */
-    private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
-        StoredResult terminalDuplicate = resultLedger.get(message.header().commandId());
-        if (terminalDuplicate != null) {
-            return resultLedger.duplicateResponse(terminalDuplicate, fingerprint, appliedCommandCount, stateHash());
-        }
-        CommandSlot pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
-        if (pendingDuplicate != null) {
-            if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
-                return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(),
-                        EMPTY_RESPONSE_DATA);
-            }
-            return new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.OK, matchingPendingCode(),
-                    pendingDuplicate.sequence(), 0, pendingDuplicate.pendingStateHash(), EMPTY_RESPONSE_DATA);
-        }
-        if (isFundsIdempotencyCommand(message.header().messageType())) {
-            CommandFingerprint retained = terminalRetention.fundsCommand(message.header().commandId());
-            if (retained != null) {
-                if (!retained.equals(fingerprint)) {
-                    return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                            CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
-                }
-                return new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.APPLIED,
-                        CoreResultCode.NONE, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
-            }
-            if (!terminalRetention.hasFundsCommandCapacity(message.header().commandId())) {
-                return rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);
-            }
-        }
-        return null;
-    }
-
-    /** Checks monotonicity and bounded capacity of the external source sequence index. */
-    private CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
-        if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
-            return new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.DUPLICATE,
-                    CoreResultCode.STALE_SOURCE_SEQUENCE, appliedCommandCount, stateHash());
-        }
-        if (lastSourceSequence < 0 && lastSourceSequences.size() >= MAX_SOURCE_SEQUENCES) {
-            return rejected(CoreResultCode.SOURCE_SEQUENCE_TRACKING_FULL);
-        }
-        return null;
-    }
-
-    /** Applies a direct command and keeps its continuation/finalization lifecycle in one place. */
-    private CoreResponse applyDirectCommand(
-            CoreMessage message, long clusterTimestamp, long clusterPosition,
-            SourceKey sourceKey, CommandFingerprint fingerprint) {
-        ResponseStatus status;
-        CoreResultCode resultCode = CoreResultCode.NONE;
-        activateFactContext(message, fingerprint);
-        RuntimeProjectionPoint beforeProjection = currentProjectionPoint;
-        long beforeRuntimeRevision = runtimeState.revision();
-        long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
-        long positionIdentityCheckpoint = identities.positionCheckpoint();
-        directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
-                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
-        resultBuilder.beginCommand();
-        admissions.queuedMatching.clear();
-        commits.beginCommitPublicationBatch();
-        try {
-            status = applyCommand(message, clusterTimestamp);
-        } catch (CoreStateRejectedException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.fromRejectionCode(exception.code());
-        } catch (ArithmeticException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-        } catch (IllegalArgumentException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.INVALID_COMMAND;
-        }
-        if (!directCommand.hasControlWork() && runtimeState.asynchronousCommands()
-                && !clusterPipelineAdmission) {
-            // 控制命令统一通过续步提交；失败时账户回滚也在所属 Lane 执行。
-            directCommand.result(status, resultCode);
-        }
-        if (directCommand.hasControlWork() || directCommand.status() != null) {
-            return null;
-        }
-        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
-                positionIdentityCheckpoint, status, resultCode);
-    }
-
     CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
             SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
-        long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
-        if (!directCommand.finalizationPrepared()) {
-            if (status != ResponseStatus.APPLIED
-                    && (commits.commitPublicationDirty() || runtimeState.revision() != beforeRuntimeRevision
-                        || runtimeState.hasUncommittedCommandChanges())) {
-                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                        Math.incrementExact(appliedCommandCount));
-            }
-            if (status == null) {
-                commits.abortCommitPublicationBatch();
-                return finishDirectContext(rejected(CoreResultCode.INVALID_MESSAGE));
-            }
-            if (status == ResponseStatus.APPLIED) {
-                if (runtimeState.asynchronousCommands()) {
-                    try {
-                        if (!triggers.collectClosingTriggerIds().isEmpty()) commits.requestCommitPublication();
-                    }
-                    catch (ArithmeticException failure) {
-                        deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW);
-                        return null;
-                    }
-                } else triggers.cancelTriggersForClosedPositions();
-                if (pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
-                    admissions.queuedMatching.clear();
-                    if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
-                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                            Math.incrementExact(appliedCommandCount));
-                    return finishDirectContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
-                }
-            }
-            if (status == ResponseStatus.APPLIED) {
-                List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null ? List.of() : resultBuilder.commandChangedOrderIds;
-                try {
-                    if (runtimeState.asynchronousCommands())
-                        RuntimeCommandProcessor.validateOrderStampInputs(clusterTimestamp, clusterPosition, changedOrderIds);
-                    else stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
-                } catch (IllegalStateException exception) {
-                    if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
-                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                            Math.incrementExact(appliedCommandCount));
-                    return finishDirectContext(rejected(CoreResultCode.INVALID_COMMAND));
-                }
-            }
-            // Direct control commands finish on the Owner before another command can reuse
-            // this workspace. Keep changed IDs as reusable primitive views; matching commands
-            // still take immutable snapshots because their Lane continuation may suspend.
-            resultBuilder.materializeDirectChangeAccumulators();
-            if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
-                // 业务任务已经结束。把发布序号交给实际参与 Lane，不接管全部账户。
-                if (runtimeState.asynchronousCommands()) {
-                    runtimeState.releaseCompletedSequentialLaneStage();
-                    directCommand.commitEvent(runtimeState.dispatchLaneMutation(
-                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
-                            resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
-                            clusterTimestamp, clusterPosition));
-                } else {
-                    runtimeState.stageLaneMutation(nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
-                }
-            }
-            directCommand.markFinalizationPrepared();
-        }
-        if (directCommand.commitEvent() != null) {
-            if (!runtimeState.laneCommitComplete(directCommand.commitEvent())) {
-                directCommand.result(status, resultCode);
-                return null;
-            }
-            runtimeState.releaseLaneCommit(directCommand.commitEvent());
-            directCommand.clearCommitEvent();
-        }
-        directCommand.clearFinalizationPrepared();
-        commits.completeCommitPublicationBatch();
-        if (status == ResponseStatus.APPLIED) {
-            validateFundsConservation(message);
-        }
-        boolean tradingStateChanged = status == ResponseStatus.APPLIED
-                && currentProjectionPoint != beforeProjection;
-        long businessStateHash = tradingStateChanged ? currentBusinessStateHash() : cachedBusinessStateHash;
-        appliedCommandCount = nextAppliedCommandCount;
-        refreshCommittedCoreSequence();
-        long requiredExportSequence = 0;
-        cachedBusinessStateHash = businessStateHash;
-        admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
-        lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        if (isFundsIdempotencyCommand(message.header().messageType())
-                && status == ResponseStatus.APPLIED) {
-            terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
-        }
-        long stateHash = stateHash(businessStateHash, message.header().commandId(), status, resultCode,
-                appliedCommandCount);
-        byte[] responseData = resultBuilder.commandResultData();
-        int responseOffset = resultBuilder.responseDataOffset();
-        int responseLength = resultBuilder.responseDataLength();
-        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
-                appliedCommandCount, requiredExportSequence, stateHash, responseData,
-                responseOffset, responseLength);
-        CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, responseData,
-                responseOffset, responseLength);
-        resultBuilder.transferResponseOwnership();
-        return finishDirectContext(response);
+        return directCommandFlow.finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
+                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                positionIdentityCheckpoint, status, resultCode);
     }
-
-    private CoreResponse finishDirectContext(CoreResponse response) {
-        directCommand.clear();
-        return finishFactContext(response);
-    }
-
-    /** Reuse the direct command continuation for failures discovered during terminal preparation. */
-    private boolean deferFinalizationRejection(CoreResultCode code) {
-        if (!runtimeState.asynchronousCommands()) return false;
-        if (!directCommand.active())
-            throw new IllegalStateException("asynchronous finalization has no command context");
-        directCommand.result(ResponseStatus.REJECTED, code);
-        return true;
-    }
-
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
     final DirectCommandSlot directCommand = new DirectCommandSlot();
 
@@ -1206,446 +810,85 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     CoreResponse recordRejectedMatching(CoreMessage message, SourceKey sourceKey,
-                                                CommandFingerprint fingerprint, CoreResultCode resultCode,
-                                                CommandSlot deferredPending) {
-        return deferredPending == null ? recordRejectedMatching(message, sourceKey, fingerprint, resultCode)
-                : admissions.recordRejectedDeferredMatching(deferredPending, resultCode);
+                                        CommandFingerprint fingerprint, CoreResultCode resultCode,
+                                        CommandSlot deferredPending) {
+        return matchingFlow.recordRejectedMatching(message, sourceKey, fingerprint, resultCode, deferredPending);
     }
 
     CoreResponse recordRejectedMatching(CoreMessage message, SourceKey sourceKey,
-                                                CommandFingerprint fingerprint, CoreResultCode resultCode) {
-        if (!pendingMatching.isEmpty()) {
-            long sequence = Math.incrementExact(appliedCommandCount);
-            CommandSlot pending = admissions.newPendingMatching(sequence,
-                    MatchingCommandAdmission.matchingOperation(message.header().messageType()), message, fingerprint);
-            putPendingMatching(pending);
-            laneCommandContexts.required(sequence).rejectMatching(resultCode);
-            pendingMatching.completeSubmission(sequence);
-            appliedCommandCount = sequence;
-            recordSourceSequence(sourceKey, message.header().sourceSequence());
-            long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
-                    ResponseStatus.OK, matchingPendingCode(), sequence);
-            pending.withPendingStateHash(stateHash);
-            return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
-                    sequence, 0, stateHash, EMPTY_RESPONSE_DATA);
-        }
-        long sequence = Math.incrementExact(appliedCommandCount);
-        long requiredExportSequence = 0;
-        appliedCommandCount = sequence;
-        refreshCommittedCoreSequence();
-        lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
-                ResponseStatus.REJECTED, resultCode, appliedCommandCount);
-        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint,
-                ResponseStatus.REJECTED, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
-                TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-        return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                appliedCommandCount, requiredExportSequence, stateHash, EMPTY_RESPONSE_DATA);
+                                        CommandFingerprint fingerprint, CoreResultCode resultCode) {
+        return matchingFlow.recordRejectedMatching(message, sourceKey, fingerprint, resultCode);
     }
 
-    CommandSlot removePendingMatching(long sequence) {
-        admissions.pendingLifecycleScopes.remove(sequence);
-        int shard = pendingMatching.submissionShard(sequence);
-        boolean releasesSubmissionHead = shard >= 0 && pendingMatching.isSubmissionHead(sequence, shard);
-        CommandSlot current = pendingMatching.get(sequence);
-        if (current != null) current.committed();
-        CommandSlot removed = pendingMatching.remove(sequence);
-        // A wholly rejected batch can finish without submitting anything to the matcher.
-        // Its successor's Lane notification may already have been consumed while blocked.
-        if (releasesSubmissionHead) matchingProgress.submissionHeadReleased(shard);
-        refreshCommittedCoreSequence();
-        return removed;
-    }
-
-    void refreshCommittedCoreSequence() {
-        long candidate = pendingMatching.isEmpty()
-                ? appliedCommandCount : Math.subtractExact(pendingMatching.firstSequence(), 1);
-        // No per-sequence side effect remains: advance only the continuous completed prefix.
-        if (candidate > committedCoreSequence) committedCoreSequence = candidate;
-    }
-
-    void commitMatchingSequence(long sequence) {
-        if (!pendingMatching.contains(sequence) || sequence <= committedCoreSequence) {
-            throw new IllegalStateException("matching sequence is not pending above the committed watermark");
-        }
-    }
-
-    void putPendingMatching(CommandSlot pending) {
-        pending.clusterIndependent = clusterPipelineAdmission;
-        if (pendingMatching.size() >= pendingMatching.capacity()) {
-            throw new IllegalStateException("matching pending capacity is exhausted");
-        }
-        try {
-            if (clusterPipelineAdmission && preparedRouteUserLaneBit != 0
-                    && preparedRouteMatcherShard >= 0) {
-                pending.partitionLaneMask = preparedRouteUserLaneBit;
-                // The route was already resolved at ingress. Reuse its shard instead
-                // of probing the symbol registry again while registering the ring slot.
-                pending.cachedMatcherShard(preparedRouteMatcherShard);
-            } else {
-                pending.partitionLaneMask = 0;
-            }
-            pendingMatching.put(pending);
-            CoreMessageType type = pending.command().header().messageType();
-            if (type != CoreMessageType.PLACE_ORDER_BATCH
-                    && type != CoreMessageType.CANCEL_ORDER_BATCH
-                    && type != CoreMessageType.AMEND_ORDER_BATCH) {
-                pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
-            }
-        } catch (RuntimeException failure) {
-            if (pendingMatching.remove(pending.sequence()) == null) {
-                pendingMatching.discardPrepared(pending.sequence());
-            }
-            throw failure;
-        }
-    }
-
-    int matcherShard(CommandSlot pending) {
-        int cached = pending.cachedMatcherShard();
-        if (cached >= 0) return cached;
-        String symbol = pending.operation() == CommandSlot.Operation.LIQUIDATION
-                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
-                || pending.operation() == CommandSlot.Operation.SETTLEMENT
-                ? admissions.pendingLifecycleSymbol(pending)
-                : admissions.matchingSymbol(pending.command(), pending.operation(), pending.decodedCommand());
-        int shard = symbol == null || symbol.isBlank() ? 0 : matchingAdapter.matcherShardId(symbol);
-        pending.cachedMatcherShard(shard);
-        return shard;
-    }
+    CommandSlot removePendingMatching(long sequence) { return matchingFlow.removePendingMatching(sequence); }
+    void refreshCommittedCoreSequence() { matchingFlow.refreshCommittedCoreSequence(); }
+    void commitMatchingSequence(long sequence) { matchingFlow.commitMatchingSequence(sequence); }
+    void putPendingMatching(CommandSlot pending) { matchingFlow.putPendingMatching(pending); }
+    int matcherShard(CommandSlot pending) { return matchingFlow.matcherShard(pending); }
 
     LifecycleOrderChunk lifecycleOrders(long userId, String symbol, long cursorOrderId, int maxOrders) {
-        var page = activeOrderIndex.page(userId, symbol, cursorOrderId, maxOrders);
-        List<CoreOrderState> selected = page.orderIds().stream()
-                .map(runtimeState::order)
-                .filter(order -> order != null
-                        && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN)
-                .map(order -> RuntimeStateMaterializer.orderSnapshot(order, identities))
-                .toList();
-        return new LifecycleOrderChunk(selected, page.nextCursorOrderId());
+        return matchingFlow.lifecycleOrders(userId, symbol, cursorOrderId, maxOrders);
     }
 
     List<CoreOrderState> batchCancellationOrders(CommandSlot pending) {
-        var command = pending.decodedCommand().liquidationBatch();
-        List<CoreOrderState> orders = new ArrayList<>();
-        int remaining = command.maxCancelOrders();
-        for (var action : command.actions()) {
-            if (remaining == 0) break;
-            var liquidation = runtimeState.liquidation(action.liquidationId());
-            if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
-                    && liquidation.status() != CoreLiquidationState.Status.ORDERED)) continue;
-            LifecycleOrderChunk chunk = lifecycleOrders(liquidation.userId(), runtimeLiquidationSymbol(liquidation),
-                    action.cursorOrderId(), remaining);
-            orders.addAll(chunk.orders());
-            remaining -= chunk.orders().size();
-        }
-        return List.copyOf(orders);
+        return matchingFlow.batchCancellationOrders(pending);
     }
 
     record LifecycleOrderChunk(List<CoreOrderState> orders, long nextCursorOrderId) {
-        boolean more() {
-            return nextCursorOrderId != 0;
-        }
+        boolean more() { return nextCursorOrderId != 0; }
     }
 
-    void submitMatching(CommandSlot pending) {
-        if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
-        // Bind the fixed response target before any Matcher/Lane handoff. The target is reused
-        // by this CommandSlot and contains no per-command collection or map.
-        pending.prepareLaneResultTarget(responseArena);
-        // Standalone mode executes the admission inline and retains its historical synchronous
-        // owner-visible publication contract. Cluster mode uses the Lane→Matcher receipt path
-        // below and never enters this branch.
-        if (pending.placeAdmission() != null && !runtimeState.asynchronousCommands()) {
-            if (!collectPlaceAdmissionIfReady(pending)
-                    || hasPendingMatchingRejection(pending.sequence())) return;
-        }
-        if (pending.orderBatch != null) {
-            batches.submitOrderBatchMatching(pending);
-            if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
-            return;
-        }
-        if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
-                && matchingAdapter.topology().matchingEngineCount() > 1) {
-            List<CoreOrderState> orders = batchCancellationOrders(pending);
-            int shardId = singleMatcherShard(orders);
-            if (shardId == -2) {
-                crossShardCancellations.start(pending, orders);
-                return;
-            }
-            matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), matcherCommands.prepareMatchingCommand(pending));
-            pending.matchingSubmitted();
-            matchingSubmissionCompleted(pending);
-            return;
-        }
-        var command = matcherCommands.prepareMatchingCommand(pending);
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct =
-                directMatcherSettlements.prepareForMatching(pending);
-        java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> matcherSubmission =
-                command;
-        if (direct != null && pending.placeAdmission() != null) {
-            int admissionLaneId = pending.placeAdmission().laneId();
-            // The Matcher consumes the fixed primitive receipt directly. The reusable slot gate
-            // avoids an Owner-side capturing lambda and retains the original submission only
-            // until this Matcher invocation completes.
-            matcherSubmission = pending.gateAdmission(this, admissionLaneId, matcherShard(pending),
-                    direct, matcherSubmission);
-        }
-        matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
-        pending.matchingSubmitted();
-        // Keep the per-shard submission head occupied until the Account Lane admission is
-        // resolved. This preserves the existing command submission ordering while the Matcher
-        // itself waits on the primitive receipt off the Owner thread.
-        if (pending.placeAdmission() == null) matchingSubmissionCompleted(pending);
-        // Do not queue an unpublished event. A Lane worker is strictly ordered; putting the
-        // direct settlement behind the admission would make it wait for Matcher publication and
-        // block later admissions on the same Lane. The completion pump queues it after Matcher
-        // publication, together with any maker-Lane extensions.
-        if (direct != null && !direct.matcherOwnedPublication()) predispatchDirectSettlement(pending, direct);
-    }
-
-    /** Enqueue the initial taker-Lane route once its partition dependency allows it. */
+    void submitMatching(CommandSlot pending) { matchingFlow.submitMatching(pending); }
     boolean predispatchDirectSettlement(CommandSlot pending,
-                                     com.surprising.aeron.service.state.MatcherSettlementEvent event) {
-        if (pending == null || event == null || !event.direct() || event.dispatched()) return false;
-        // A direct event prepared outside a cluster callback must wait for the real
-        // publication fence; never freeze a placeholder fence into the Lane command.
-        if (!pending.commitFenceEstablished()) return false;
-        int shard = pendingSubmissionShard(pending);
-        pendingMatching.readyPartitionMask(pending.sequence());
-        if (pendingMatching.readyPartitionHead(shard) != pending) {
-            return false;
-        }
-        pending.establishCommitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-        runtimeState.dispatchOwnerControlledSettlement(event);
-        pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-        pendingMatching.progressChanged();
-        pending.countPipelinedSettlement();
-        commits.dispatchedSettlementInFlight++;
-        commits.dispatchedSettlementHighWaterMark = Math.max(
-                commits.dispatchedSettlementHighWaterMark, commits.dispatchedSettlementInFlight);
-        return true;
+            com.surprising.aeron.service.state.MatcherSettlementEvent event) {
+        return matchingFlow.predispatchDirectSettlement(pending, event);
+    }
+    int singleMatcherShard(List<CoreOrderState> orders) { return matchingFlow.singleMatcherShard(orders); }
+    void progressPlaceBatchAdmissions() { matchingFlow.progressPlaceBatchAdmissions(); }
+    void drainPlaceAdmissionNotifications() { matchingFlow.drainPlaceAdmissionNotifications(); }
+    boolean matchingSubmissionDeferred(long sequence) { return matchingFlow.matchingSubmissionDeferred(sequence); }
+    void matchingSubmissionCompleted(CommandSlot pending) { matchingFlow.matchingSubmissionCompleted(pending); }
+    int pendingSubmissionShard(CommandSlot pending) { return matchingFlow.pendingSubmissionShard(pending); }
+    void submitDeferredMatchingAfterBatch() { matchingFlow.submitDeferredMatchingAfterBatch(); }
+    void publishMatchingCompletion(long sequence, com.surprising.aeron.service.matching.CoreMatchingResult result) {
+        matchingFlow.publishMatchingCompletion(sequence, result);
     }
 
-    int singleMatcherShard(List<CoreOrderState> orders) {
-        int shardId = -1;
-        for (CoreOrderState order : orders) {
-            int orderShard = matchingAdapter.matcherShardId(order.symbol());
-            if (shardId == -1) shardId = orderShard;
-            else if (shardId != orderShard) return -2;
-        }
-        return shardId;
+    com.surprising.aeron.protocol.PlaceOrderCommand replacementFor(CoreMessage message, OrderRuntime order) {
+        return matchingFlow.replacementFor(message, order);
     }
-
-    /** Owner compatibility boundary for advancing Lane admissions and Matcher submissions. */
-    void progressPlaceBatchAdmissions() { matchingProgress.progressPlaceBatchAdmissions(); }
-
-    /** Owner compatibility boundary for consuming admission wake-up cursors. */
-    void drainPlaceAdmissionNotifications() { matchingProgress.drainPlaceAdmissionNotifications(); }
-
-    boolean matchingSubmissionDeferred(long sequence) {
-        return matchingProgress.submissionDeferred(sequence);
-    }
-
-    void matchingSubmissionCompleted(CommandSlot pending) {
-        matchingProgress.submissionCompleted(pending);
-    }
-
-    int pendingSubmissionShard(CommandSlot pending) {
-        OrderBatchPending batch = pending.orderBatch;
-        return batch == null ? matcherShard(pending) : batches.orderBatchMatcherShard(batch);
-    }
-
-    void submitDeferredMatchingAfterBatch() { matchingProgress.submitDeferredMatchingAfterBatch(); }
-
-    void publishMatchingCompletion(
-            long sequence,
-            com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        if (result == null || result.nativeCoreSequence() != sequence) {
-            throw new IllegalStateException("synchronous matcher returned an invalid result");
-        }
-        CommandSlot context = laneCommandContexts.required(sequence);
-        context.publishMatchingCompletion(result);
-        pendingMatching.progressChanged();
-    }
-
-    com.surprising.aeron.protocol.PlaceOrderCommand replacementFor(CoreMessage message,
-                                                                            OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        String symbol = runtimeOrderSymbol(order);
-        var instrument = runtimeState.instrument(symbol);
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        if (message.header().messageType() == CoreMessageType.REPLACE_ORDER) {
-            return TradingCommandCodec.decodeReplaceOrder(message.payloadUnsafe()).replacement();
-        }
-        var command = TradingCommandCodec.decodeAmendOrder(message.payloadUnsafe());
-        long priceTicks = command.priceTicks() == null ? order.priceTicks() : command.priceTicks();
-        long quantitySteps = command.quantitySteps() == null ? order.remainingQuantitySteps() : command.quantitySteps();
-        var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
-        boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
-        String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
-        return new com.surprising.aeron.protocol.PlaceOrderCommand(command.replacementOrderId(), symbol,
-                order.instrumentChangeId(), order.side(), priceTicks, quantitySteps,
-                order.reduceOnly(), order.marginMode(), order.positionSide(),
-                order.orderType(), timeInForce, postOnly, clientOrderId);
-    }
-
     PlaceOrderCommand replacementFor(DecodedMatchingCommand decodedCommand,
-                                             CommandSlot.Operation operation,
-                                             OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        if (runtimeState.instrument(runtimeOrderSymbol(order)) == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        }
-        return operation == CommandSlot.Operation.REPLACE
-                ? decodedCommand.replaceOrder().replacement()
-                : replacementForAmend(decodedCommand.amendOrder(), order);
+            CommandSlot.Operation operation, OrderRuntime order) {
+        return matchingFlow.replacementFor(decodedCommand, operation, order);
     }
-
     PlaceOrderCommand replacementFor(CommandSlot pending, OrderRuntime order) {
-        if (pending.operation() == CommandSlot.Operation.REPLACE) {
-            if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-            if (runtimeState.instrument(runtimeOrderSymbol(order)) == null) {
-                throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-            }
-            return pending.decodedCommand().replaceOrder().replacement();
-        }
-        return replacementForAmend(pending.decodedCommand().amendOrder(), order);
+        return matchingFlow.replacementFor(pending, order);
     }
-
     PlaceOrderCommand replacementForAmend(AmendOrderCommand command, OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        String symbol = runtimeOrderSymbol(order);
-        var instrument = runtimeState.instrument(symbol);
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        long priceTicks = command.priceTicks() == null ? order.priceTicks() : command.priceTicks();
-        long quantitySteps = command.quantitySteps() == null ? order.remainingQuantitySteps() : command.quantitySteps();
-        var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
-        boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
-        String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
-        return new PlaceOrderCommand(command.replacementOrderId(), symbol, order.instrumentChangeId(),
-                order.side(), priceTicks, quantitySteps, order.reduceOnly(), order.marginMode(),
-                order.positionSide(), order.orderType(), timeInForce, postOnly, clientOrderId);
+        return matchingFlow.replacementForAmend(command, order);
     }
-
     com.surprising.aeron.protocol.PlaceOrderCommand triggerPlacement(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long triggeredPriceTicks) {
-        var instrument = runtimeState.instrument(trigger.symbol());
-        Long clientKey = identities.findClientKey(
-                trigger.userId(), "TRIGGER:" + trigger.triggerOrderId());
-        Long orderId = clientKey == null ? null : runtimeState.orderIdByClient(trigger.userId(), clientKey);
-        var order = orderId == null ? null : runtimeState.order(orderId);
-        return triggerPlacement(trigger, triggeredPriceTicks, order);
+        return matchingFlow.triggerPlacement(trigger, triggeredPriceTicks);
     }
-
     com.surprising.aeron.protocol.PlaceOrderCommand triggerPlacement(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long triggeredPriceTicks,
             OrderRuntime order) {
-        var instrument = runtimeState.instrument(trigger.symbol());
-        if (order == null) {
-            throw new CoreStateRejectedException("ORDER_NOT_FOUND",
-                        "trigger child order not found");
-        }
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        long limitPriceTicks = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
-                ? (order.priceTicks() > 0 ? order.priceTicks() : triggeredPriceTicks) : 0;
-        return new com.surprising.aeron.protocol.PlaceOrderCommand(order.orderId(), trigger.symbol(),
-                trigger.instrumentChangeId(), trigger.side(), limitPriceTicks, order.quantitySteps(),
-                order.reduceOnly(), trigger.marginMode(), trigger.positionSide(),
-                trigger.orderType(), trigger.timeInForce(), false, order.clientOrderId());
+        return matchingFlow.triggerPlacement(trigger, triggeredPriceTicks, order);
     }
-
     long currentMarkPriceTicks(String symbol, long referencePriceTicks) {
-        Integer symbolId = identities.findSymbolId(symbol);
-        var markPrice = symbolId == null ? null : runtimeState.markPrice(symbolId);
-        long value = markPrice == null ? referencePriceTicks : markPrice.markPriceTicks();
-        if (value <= 0) throw new CoreStateRejectedException("MARK_PRICE_MISSING", "mark price is required");
-        return value;
+        return matchingFlow.currentMarkPriceTicks(symbol, referencePriceTicks);
     }
-
     public com.surprising.aeron.service.matching.CoreMatchingResult takeMatchingResult(long sequence) {
-        if (fatalFailure != null) return null;
-        if (!pendingMatching.contains(sequence)) return null;
-        CommandSlot pending = pendingMatching.get(sequence);
-        if (pending == null) return null;
-        CommandSlot context = laneCommandContexts.required(sequence);
-        if (context.matchingResult() != null) return context.matchingResult();
-        var direct = pending.settlementEvent();
-        if (direct == null && pending.orderBatch != null)
-            direct = pending.orderBatch.itemSettlementEvent != null
-                    ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
-        if (direct != null && direct.direct()) return direct.ready() ? direct.firstDirectResult() : null;
-        return context.takeMatchingCompletion();
+        return matchingFlow.takeMatchingResult(sequence);
     }
-
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
-        CommandSlot pending = pendingMatching.get(sequence);
-        if (pending == null) return false;
-        pending.establishCommitFence(clusterTimestamp, clusterPosition);
-        return true;
+        return matchingFlow.establishMatchingCommitFence(sequence, clusterTimestamp, clusterPosition);
     }
-
-    boolean placeAdmissionOutstanding(CommandSlot pending) {
-        OrderBatchPending batch = pending.orderBatch;
-        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
-    }
-
-    /** Consume a completed ordinary admission notification without gating Matcher submission. */
-    boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
-        if (pending == null || pending.placeAdmission() == null) return true;
-        // In cluster mode the Matcher must consume the Lane receipt for this command. Keep the
-        // pooled admission event attached until its Matcher submission exists; otherwise a fast
-        // Owner notification can switch to the already-admitted path and leave an orphan receipt
-        // at the head of the Lane×Matcher SPSC ring.
-        var admission = pending.placeAdmission();
-        if (!admission.complete()) return false;
-        identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
-        RuntimeException rejection = admission.rejection();
-        var direct = pending.settlementEvent();
-        if (rejection != null) {
-            CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
-                    ? CoreResultCode.fromRejectionCode(rejected.code())
-                    : rejection instanceof ArithmeticException
-                    ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-            pending.rejectMatching(resultCode);
-            completePlaceAdmissionSubmission(pending);
-            runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
-            return true;
-        }
-        ResolvedPlaceOrder admitted = runtimeState.collectPlaceAdmission(admission);
-        pending.admissionCompleted(admitted);
-        // Realtime publication still needs the authoritative mutable taker.  The direct event
-        // was prepared before admission and therefore could not capture it at submission time.
-        if (realtimeCapture != null && admitted != null)
-            pending.realtimeTakerOrder = runtimeOrder(admitted.orderId());
-        completePlaceAdmissionSubmission(pending);
-        runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
-        return true;
-    }
-
-    private void completePlaceAdmissionSubmission(CommandSlot pending) {
-        if (pending != null && pending.isMatchingSubmitted()
-                && pendingMatching.submissionShard(pending.sequence()) >= 0)
-            matchingSubmissionCompleted(pending);
-    }
-
-    boolean hasPendingMatchingRejection(long sequence) {
-        return laneCommandContexts.claimed(sequence)
-                && laneCommandContexts.required(sequence).hasMatchingRejection();
-    }
-
-    CompletableFuture<Integer> matchingStateHashAsync() {
-        assertOwner();
-        try {
-            return matchingAdapter.topology().matchingEngineCount() == 1
-                    ? matcherPipeline.readAtSubmissionFence(0, () -> matchingAdapter.orderBooksStateHashAsync().join())
-                    : matcherPipeline.readEachAsync(matchingAdapter::stateHashShard)
-                    .thenApply(matchingAdapter::aggregateBookHash);
-        } catch (RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
-        }
-    }
-
+    boolean placeAdmissionOutstanding(CommandSlot pending) { return matchingFlow.placeAdmissionOutstanding(pending); }
+    boolean collectPlaceAdmissionIfReady(CommandSlot pending) { return matchingFlow.collectPlaceAdmissionIfReady(pending); }
+    boolean hasPendingMatchingRejection(long sequence) { return matchingFlow.hasPendingMatchingRejection(sequence); }
+    CompletableFuture<Integer> matchingStateHashAsync() { return matchingFlow.matchingStateHashAsync(); }
     static boolean isCommitCursorSafeWhileMatching(CoreMessage message) {
         return isNonFencingQuery(message) || (message.header().kind() == WireMessageKind.COMMAND
                 && isMatchingCommand(message.header().messageType()));
@@ -1802,24 +1045,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void activate() {
-        if (activated) return;
-        if (closed) throw new IllegalStateException("cannot activate closed core state");
-        try {
-            matcherPipeline.start(matchingAdapter::activateShard);
-            bindOwner();
-            runtimeState.startAccountLanes();
-            matchingAdapter.activate();
-            runtimeProjectionJournal.activate();
-            exportState.activate();
-            activated = true;
-        } catch (RuntimeException failure) {
-            try {
-                close();
-            } catch (RuntimeException closeFailure) {
-                failure.addSuppressed(closeFailure);
-            }
-            throw failure;
-        }
+        lifecycle.activate();
     }
 
     boolean activated() { return activated; }
@@ -1895,38 +1121,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
             CommandSlot pending,
             String detail,
             Throwable cause) {
-        try {
-            matchingAdapter.poisonFromOwner("deterministic matcher settlement failed sequence="
-                    + pending.sequence() + " operation=" + pending.operation());
-        } catch (RuntimeException poisonFailure) {
-            if (cause != null) cause.addSuppressed(poisonFailure);
-            else cause = poisonFailure;
-        }
-        fatalFailure = cause == null
-                ? new FatalMatchingDivergenceException(
-                        pending.operation().name(), pending.sequence(), 0, detail)
-                : new FatalMatchingDivergenceException(
-                        pending.operation().name(), pending.sequence(), 0, detail, cause);
-        return fatalFailure;
+        return lifecycle.failMatching(pending, detail, cause);
     }
 
     void assertClusterCallbackComplete() {
-        if (!activated) activate();
-        assertOwner();
-        assertHealthy();
-        if (directCommand.active() || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
-            throw new IllegalStateException("unfinished business work outside cluster log callback");
-        }
+        lifecycle.assertClusterCallbackComplete();
     }
 
     void assertHealthy() {
-        if (fatalFailure != null) throw fatalFailure;
-        if (commitPublicationFailure != null) throw commitPublicationFailure;
-        if (runtimeState != null) runtimeState.assertAccountLanesHealthy();
-        runtimeProjectionJournal.assertHealthy();
-        exportState.assertHealthy();
-        RuntimeException auditFailure = snapshots.snapshotAuditFailure.get();
-        if (auditFailure != null) throw auditFailure;
+        lifecycle.assertHealthy();
     }
 
     public static TradingCoreRuntime fromSnapshot(ProductLine productLine, byte[] snapshot) {
@@ -1965,141 +1168,43 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return probeValue;
     }
 
-    public TradingCoreState tradingState() {
-        return materializedTradingState();
-    }
+    public TradingCoreState tradingState() { return stateView.tradingState(); }
 
-    // Scalar observations of the committed owner view; no Lane reads or snapshot materialization.
-    int incompleteRiskScanCount() { return runtimeState.incompleteRiskScanCount(); }
-    int incompleteFundingCount() { return runtimeState.treasury().incompleteFundingCount(); }
-    int activeOrderCount() { return activeOrderIndex.count(); }
-    int positionCount() { return runtimeState.publishedPositionCount(); }
-    int triggerOrderCount() { return triggerOrderIndex.ids().size(); }
+    int incompleteRiskScanCount() { return stateView.incompleteRiskScanCount(); }
+    int incompleteFundingCount() { return stateView.incompleteFundingCount(); }
+    int activeOrderCount() { return stateView.activeOrderCount(); }
+    int positionCount() { return stateView.positionCount(); }
+    int triggerOrderCount() { return stateView.triggerOrderCount(); }
 
-    TradingCoreState snapshotTradingState() {
-        CoreSnapshotLifecycle.SnapshotFence fence = snapshots.snapshotFence;
-        if (fence != null && fence.snapshotState != null) return fence.snapshotState;
-        return materializedTradingState();
-    }
-
-    /**
-     * Materialize the immutable read model once per committed runtime version.  This keeps the
-     * expensive sorting and state-record construction at an actual read/snapshot boundary while
-     * avoiding duplicate materialization when one boundary performs several reads.
-     */
-    private TradingCoreState materializedTradingState() {
-        runtimeState.requireSnapshotFenceReady();
-        long revision = runtimeState.revision();
-        long marketRevision = runtimeState.marketRevision();
-        long sequence = runtimeProjectionJournal.publishedSequence();
-        if (materializedStateCache != null
-                && materializedStateCacheRevision == revision
-                && materializedStateCacheMarketRevision == marketRevision
-                && materializedStateCacheSequence == sequence
-                && materializedStateCacheBusinessHash == cachedBusinessStateHash) {
-            return materializedStateCache;
-        }
-        TradingCoreState materialized = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
-                runtimeState, identities);
-        materializedStateCache = materialized;
-        materializedStateCacheRevision = revision;
-        materializedStateCacheMarketRevision = marketRevision;
-        materializedStateCacheSequence = sequence;
-        materializedStateCacheBusinessHash = cachedBusinessStateHash;
-        return materialized;
-    }
-
-    long snapshotBusinessStateHash() {
-        return currentBusinessStateHash();
-    }
-
-    long snapshotBusinessAuditBaseHash() {
-        return auditBusinessStateHash;
-    }
-
-    long snapshotFundsStateHash() {
-        return auditFundsStateHash;
-    }
-
-    long snapshotProjectionSequence() {
-        return runtimeProjectionJournal.publishedSequence();
-    }
-
-    long snapshotProjectionFreezeCount() {
-        return runtimeProjectionJournal.projectionFreezeCount();
-    }
-
-    boolean runtimeRiskScanComplete() {
-        return runtimeState.firstIncompleteRiskScan() == null;
-    }
-
-    boolean runtimeRiskScanComplete(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
-        RiskScanRuntime scan = symbolId == null ? null : runtimeState.riskScan(symbolId);
-        return scan == null || scan.complete();
-    }
-
-    RiskScanRuntime runtimeRiskScan(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
-        return symbolId == null ? null : runtimeState.riskScan(symbolId);
-    }
-
-    MarkPriceRuntime runtimeMarkPrice(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
-        return symbolId == null ? null : runtimeState.markPrice(symbolId);
-    }
-
-    long runtimeFundingSettlement(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
-        return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
-    }
-
-    long runtimeInsurance(String asset) {
-        Integer assetId = identities.findAssetId(asset);
-        return assetId == null ? 0 : runtimeState.treasury().insurance(assetId);
-    }
-
-    LiquidationRuntime runtimeLiquidation(long liquidationId) {
-        return runtimeState.liquidation(liquidationId);
-    }
-
+    TradingCoreState snapshotTradingState() { return stateView.snapshotTradingState(); }
+    long snapshotBusinessStateHash() { return stateView.snapshotBusinessStateHash(); }
+    long snapshotBusinessAuditBaseHash() { return stateView.snapshotBusinessAuditBaseHash(); }
+    long snapshotFundsStateHash() { return stateView.snapshotFundsStateHash(); }
+    long snapshotProjectionSequence() { return stateView.snapshotProjectionSequence(); }
+    long snapshotProjectionFreezeCount() { return stateView.snapshotProjectionFreezeCount(); }
+    boolean runtimeRiskScanComplete() { return stateView.runtimeRiskScanComplete(); }
+    boolean runtimeRiskScanComplete(String symbol) { return stateView.runtimeRiskScanComplete(symbol); }
+    RiskScanRuntime runtimeRiskScan(String symbol) { return stateView.runtimeRiskScan(symbol); }
+    MarkPriceRuntime runtimeMarkPrice(String symbol) { return stateView.runtimeMarkPrice(symbol); }
+    long runtimeFundingSettlement(String symbol) { return stateView.runtimeFundingSettlement(symbol); }
+    long runtimeInsurance(String asset) { return stateView.runtimeInsurance(asset); }
+    LiquidationRuntime runtimeLiquidation(long liquidationId) { return stateView.runtimeLiquidation(liquidationId); }
     PositionRuntime runtimePosition(long userId, String positionKey) {
-        Long key = identities.findPositionKey(userId, positionKey);
-        return key == null ? null : runtimeState.position(key);
+        return stateView.runtimePosition(userId, positionKey);
     }
-
-    boolean snapshotHasPendingCommands() {
-        return factContextActive || directCommand.active() || laneCommandContexts.inFlight() != 0;
-    }
-
+    boolean snapshotHasPendingCommands() { return stateView.snapshotHasPendingCommands(); }
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
-        return runtimeState.feePoliciesSnapshot();
+        return stateView.feePolicies();
     }
-
     void restoreFeePolicies(Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies) {
-        long beforeBusinessStateHash = cachedBusinessStateHash;
-        runtimeState.restoreFeePolicies(policies);
-        cachedFeePolicyHash = computeFeePolicyHash(policies);
-        cachedBusinessStateHash = currentBusinessStateHash();
-
-        runtimeProjectionJournal.rebaseInitialBusinessStateHash(
-                beforeBusinessStateHash, cachedBusinessStateHash);
+        stateView.restoreFeePolicies(policies);
     }
-
     Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers() {
-        return runtimeState.pendingTransfersSnapshot();
+        return stateView.pendingTransfers();
     }
-
     void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
-        long beforeBusinessStateHash = cachedBusinessStateHash;
-        runtimeState.restorePendingTransfers(transfers);
-        cachedTransferHash = computeTransferHash(transfers);
-        cachedBusinessStateHash = currentBusinessStateHash();
-
-        runtimeProjectionJournal.rebaseInitialBusinessStateHash(
-                beforeBusinessStateHash, cachedBusinessStateHash);
+        stateView.restorePendingTransfers(transfers);
     }
-
     CoreExportState exportState() {
         return exportState;
     }
@@ -2146,18 +1251,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void bindOwner() {
-        Thread current = Thread.currentThread();
-        if (owner != null && owner != current)
-            throw new IllegalStateException("trading runtime is bound to another thread");
-        owner = current;
-        runtimeState.bindOwner();
-        identities.assertOwner();
+        lifecycle.bindOwner();
     }
 
     void assertOwner() {
-        if (owner == null) bindOwner();
-        else if (owner != Thread.currentThread())
-            throw new IllegalStateException("trading runtime is bound to another thread");
+        lifecycle.assertOwner();
     }
 
     void deferProvisionalSnapshotProjection() {
@@ -2431,25 +1529,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     @Override
     public void close() {
-        if (closed) return;
-        if (activated) assertOwner();
-        closed = true;
-        snapshots.releaseSnapshotFence();
-        snapshots.inFlightMatcherSnapshot.set(null);
-        matcherPipeline.closeShards(matchingAdapter::closeShard);
-        bookQueries.completedBookQueries.clear();
-        bookQueries.failedQueries.clear();
-        bookQueries.queryIds.clear();
-        runtimeState.endOrderBatchMutationScope();
-        clearFactContext();
-        directCommand.clear();
-        batches.clearPendingBatches();
-        pendingMatching.clear();
-        crossShardCancellations.clear();
-        admissions.pendingLifecycleScopes.clear();
-        exportState.close();
-        runtimeProjectionJournal.close();
-        runtimeState.close();
+        lifecycle.close();
     }
 
     CoreResponse userStateResponse(long userId) {

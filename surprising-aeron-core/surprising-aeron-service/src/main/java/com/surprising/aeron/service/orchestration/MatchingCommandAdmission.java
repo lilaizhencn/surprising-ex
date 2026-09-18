@@ -128,7 +128,7 @@ final class MatchingCommandAdmission {
     CoreResponse beginMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint) {
         CommandSlot.Operation operation = matchingOperation(message.header().messageType());
-        if (owner.batches.hasPendingBatches() && !owner.clusterPipelineAdmission) {
+        if (owner.batches.hasPendingBatches() && !owner.commandIngress.clusterPipelineAdmission()) {
             return deferMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint);
         }
         return prepareMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint, null);
