@@ -81,7 +81,6 @@ import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
@@ -182,6 +181,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
     /** 查询协议路由；只读权威状态，不参与命令准入或资金变更。 */
     final TradingCoreQueryRouter queryRouter = new TradingCoreQueryRouter(this);
+    /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
+    final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
@@ -270,11 +271,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final SourceSequenceIndex lastSourceSequences;
     /** 在途命令环；保存日志顺序及准入、撮合、结算的关联。 */
     final PendingMatchingRing pendingMatching;
-    /** 待处理准入通知的撮合分片位图；仅调度提示，不是复制状态。 */
-    long placeAdmissionReadyShardMask;
-    /** 下一次空轮询健康检查时间；纳秒单调时钟。 */
-    long nextMatchingHealthCheckNs = System.nanoTime();
-
     /** 每个在途序号的 Lane 提交上下文，与 pendingMatching 同生命周期。 */
     final CommandSlotRing laneCommandContexts;
     /** 撮合派发和完成通知通道；只在完成边界交接数据。 */
@@ -1271,7 +1267,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         CommandSlot removed = pendingMatching.remove(sequence);
         // A wholly rejected batch can finish without submitting anything to the matcher.
         // Its successor's Lane notification may already have been consumed while blocked.
-        if (releasesSubmissionHead) placeAdmissionReadyShardMask |= 1L << shard;
+        if (releasesSubmissionHead) matchingProgress.submissionHeadReleased(shard);
         refreshCommittedCoreSequence();
         return removed;
     }
@@ -1526,155 +1522,18 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return shardId;
     }
 
-    /**
-     * Advances only pipelined batch admissions.  A normal PLACE is submitted to the Matcher as
-     * soon as its immutable admission input is prepared; its Lane completion is resolved by the
-     * ordered commit head and never drives an Owner-side submission poll.
-     */
-    void progressPlaceBatchAdmissions() {
-        drainPlaceAdmissionNotifications();
-        if (placeAdmissionReadyShardMask == 0 && hasDeferredMatchingSubmission()) {
-            CommandSlot head = pendingMatching.get(pendingMatching.firstSequence());
-            placeAdmissionReadyShardMask |= 1L << pendingSubmissionShard(head);
-        }
-        long readyShards = placeAdmissionReadyShardMask;
-        while (readyShards != 0) {
-            int shard = Long.numberOfTrailingZeros(readyShards);
-            long shardBit = 1L << shard;
-            readyShards &= ~shardBit;
-            while ((placeAdmissionReadyShardMask & shardBit) != 0) {
-                CommandSlot pending = pendingMatching.submissionHead(shard);
-                if (pending == null) {
-                    placeAdmissionReadyShardMask &= ~shardBit;
-                    break;
-                }
-                var admission = pending.placeAdmission();
-                OrderBatchPending orderBatch = pending.orderBatch;
-                PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
-                        ? null : orderBatch.placeBatchAdmissionEvent;
-                if (ownerHasPendingMatchingRejection(pending)) {
-                    // A synchronous Lane admission may have rejected the PLACE before a
-                    // submission head was registered. Its ordered rejection is consumed by the
-                    // commit coordinator; never try to rebuild a Matcher order for it.
-                    placeAdmissionReadyShardMask &= ~shardBit;
-                    break;
-                }
-                if (admission == null && batchAdmission == null) {
-                    if (orderBatch != null && pending.clusterIndependent
-                            && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.activated()) {
-                        submitMatching(pending);
-                        if (pending.isMatchingSubmitted()) continue;
-                    }
-                    // A control or matching command may have been held behind an earlier
-                    // submission head.  Sequential order batches own their own item cursor and
-                    // are resumed by OrderBatchExecutor; submitting them here would route the
-                    // same matcher token twice.
-                    if (orderBatch == null && !pending.isMatchingSubmitted() && !pending.deferredMatching()) {
-                        submitMatching(pending);
-                        if (pending.isMatchingSubmitted()) continue;
-                    }
-                    placeAdmissionReadyShardMask &= ~shardBit;
-                    break;
-                }
-                if (batchAdmission != null) {
-                    if (!batchAdmission.complete()) {
-                        // The shard bit is only a wake-up hint. Keep it until the submission
-                        // head's event is complete; a later batch on the same shard may have
-                        // already coalesced into this bit.
-                        break;
-                    }
-                    identities.recordLaneClientAllocations(batchAdmission.takeIdentityAllocations());
-                    RuntimeException rejection = batchAdmission.rejection();
-                    if (rejection != null) {
-                        runtimeState.discardPlaceBatchAdmission(batchAdmission);
-                        runtimeState.releasePlaceBatchAdmission(batchAdmission);
-                        orderBatch.placeBatchAdmissionEvent = null;
-                        batches.unregisterPipelinedBatchSymbols(orderBatch);
-                        orderBatch.rollbackPreparedClientKeys(identities);
-                        orderBatch.pipelined = false;
-                        orderBatch.sequentialAdmission = true;
-                        // The Lane already checked and rolled back the only item. There is no
-                        // partial batch to re-evaluate, so retain its rejection at ordered commit.
-                        if (orderBatch.items.size() == 1
-                                && (rejection instanceof CoreStateRejectedException
-                                || rejection instanceof ArithmeticException
-                                || rejection instanceof IllegalArgumentException)) {
-                            CoreResultCode code = rejection instanceof CoreStateRejectedException stateRejection
-                                    ? CoreResultCode.fromRejectionCode(stateRejection.code())
-                                    : rejection instanceof ArithmeticException
-                                    ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-                            batches.appendOrderBatchResult(orderBatch, orderBatch.items.getFirst(),
-                                    ResponseStatus.REJECTED, code);
-                            orderBatch.nextIndex = 1;
-                        }
-                        if (orderBatch.admissionOrderIndex != null)
-                            orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
-                        placeAdmissionReadyShardMask &= ~shardBit;
-                        if (orderBatch.commitStarted()) {
-                            restoreMatchingCommitContext(pending);
-                            try {
-                                batches.startOrderBatchItem(orderBatch, pending,
-                                        orderBatch.clusterTimestamp, orderBatch.clusterPosition, true);
-                            } finally {
-                                clearFactContext();
-                            }
-                        } else {
-                            orderBatch.activated(false);
-                            submitDeferredMatchingAfterBatch();
-                        }
-                        break;
-                    }
-                    if (!orderBatch.admissionCollected()) {
-                        runtimeState.stagePlaceBatchAdmission(batchAdmission);
-                        orderBatch.admissionCollected(true);
-                    }
-                    if (!pending.isMatchingSubmitted()) {
-                        batches.submitPipelinedPlaceBatch(pending, orderBatch);
-                        pending.matchingSubmitted();
-                        matchingSubmissionCompleted(pending);
-                    }
-                    continue;
-                }
-                // A normal PLACE that was held behind an earlier submission can now enter the
-                // Matcher even while its Account Lane admission is still running.  This is a
-                // submission-head transition, not an admission poll.
-                if (admission != null && !pending.isMatchingSubmitted()) {
-                    submitMatching(pending);
-                    if (pending.isMatchingSubmitted()) continue;
-                }
-                placeAdmissionReadyShardMask &= ~shardBit;
-                break;
-            }
-        }
-    }
+    /** Owner compatibility boundary for advancing Lane admissions and Matcher submissions. */
+    void progressPlaceBatchAdmissions() { matchingProgress.progressPlaceBatchAdmissions(); }
 
-    /** Drain completion cursors only to wake the batch dispatcher or ordered commit head. */
-    void drainPlaceAdmissionNotifications() {
-        placeAdmissionReadyShardMask |= runtimeState.takePlaceBatchAdmissionReadyShardMask();
-    }
+    /** Owner compatibility boundary for consuming admission wake-up cursors. */
+    void drainPlaceAdmissionNotifications() { matchingProgress.drainPlaceAdmissionNotifications(); }
 
     boolean matchingSubmissionDeferred(long sequence) {
-        CommandSlot pending = pendingMatching.get(sequence);
-        if (pending != null) {
-            int shardId = pendingSubmissionShard(pending);
-            if (!pendingMatching.isSubmissionHead(sequence, shardId)) return true;
-        }
-        if (pending != null && pending.clusterIndependent || !batches.hasPendingBatches()) return false;
-        return sequence > batches.firstBatch().sequence;
+        return matchingProgress.submissionDeferred(sequence);
     }
 
     void matchingSubmissionCompleted(CommandSlot pending) {
-        pendingMatching.progressChanged();
-        int shard = pendingSubmissionShard(pending);
-        pendingMatching.completeSubmission(pending.sequence());
-        // Wake the next command on this shard as soon as the submission head is released.  A
-        // normal PLACE may have been followed by a cancel/control command whose submission was
-        // deferred while the PLACE admission was in flight; without this bit the next command
-        // would remain parked until another Lane notification arrived.
-        if (pending.orderBatch != null || pendingMatching.submissionHead(shard) != null
-                || pendingMatching.hasDeferred()) {
-            placeAdmissionReadyShardMask |= 1L << shard;
-        }
+        matchingProgress.submissionCompleted(pending);
     }
 
     int pendingSubmissionShard(CommandSlot pending) {
@@ -1682,36 +1541,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return batch == null ? matcherShard(pending) : batches.orderBatchMatcherShard(batch);
     }
 
-    void submitDeferredMatchingAfterBatch() {
-        while (!pendingMatching.isEmpty()) {
-            // Both orderings append increasing Core sequences. Only their heads can advance.
-            OrderBatchPending batch = batches.firstBatch();
-            CommandSlot deferredPending = pendingMatching.firstDeferred();
-            Long deferredSequence = deferredPending == null ? null : deferredPending.sequence();
-            CommandSlot pending;
-            if (deferredSequence != null && (batch == null || deferredSequence < batch.sequence)) {
-                pending = pendingMatching.get(deferredSequence);
-                batch = null;
-            } else if (batch != null && !batch.activated()) {
-                pending = pendingMatching.get(batch.sequence);
-            } else {
-                return;
-            }
-            if (batch != null && !batch.activated()) {
-                if (batches.tryActivatePipelinedOrderBatch(batch, pending)) continue;
-                batches.activateOrderBatch(batch, pending, true);
-                return;
-            }
-            if (pending != null && pending.deferredMatching()) {
-                CoreResponse response = admissions.prepareMatching(pending.command(), pending.deferredClusterTimestamp(),
-                        pending.deferredClusterPosition(), pending.deferredSourceKey(), pending.operation(),
-                        pending.fingerprint(), pending);
-                if (response == null) return;
-                if (response.status() == ResponseStatus.REJECTED) continue;
-                continue;
-            }
-        }
-    }
+    void submitDeferredMatchingAfterBatch() { matchingProgress.submitDeferredMatchingAfterBatch(); }
 
     void publishMatchingCompletion(
             long sequence,
@@ -2122,105 +1952,22 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return pending == null ? 0 : pending.sequence();
     }
 
-    /**
-     * Fast owner-side gate for the completion pump.  The ordered commit loop is called for
-     * every command prefix, including prefixes that are still waiting for an external matcher or
-     * Lane notification.  In that state there is no queue to drain; checking the same producer
-     * cursors once avoids entering the full drain routine and its shard/notification probes.
-     *
-     * <p>This is only a hint for the owner thread.  Producers publish to the SPSC queues before
-     * setting their ready bits, so a false result can at worst defer work to the next pump; it
-     * cannot make a completion invisible or bypass the ordered commit fence.</p>
-     */
-    boolean hasMatchingDrainWork() {
-        return crossShardCancellations.hasPending()
-                || placeAdmissionReadyShardMask != 0
-                || runtimeState.hasMatchingNotifications()
-                || matcherPipeline.hasMatchingCompletions()
-                || hasLocalMatchingWork();
-    }
+    /** Fast Owner-side gate for the matching completion pump. */
+    boolean hasMatchingDrainWork() { return matchingProgress.hasDrainWork(); }
 
-    void drainMatchingCompletions() {
-        if (crossShardCancellations.hasPending()) crossShardCancellations.poll();
-        drainAdmissionReceiptCompletions();
-        if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications()
-                || hasDeferredMatchingSubmission())
-            progressPlaceBatchAdmissions();
-        if (matcherPipeline.hasMatchingCompletions()) {
-            matcherPipeline.drainMatchingCompletions();
-            pendingMatching.progressChanged();
-        }
-        if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
-    }
-
-    /**
-     * Consume Lane admission completion notifications. Ordinary PLACE does not wait here before
-     * Matcher submission; the completed publication is made visible early for existing query and
-     * ordering contracts, while the Matcher consumes its primitive receipt independently.
-     */
-    private void drainAdmissionReceiptCompletions() {
-        long readyLanes = runtimeState.takeAdmissionReceiptReadyLaneMask();
-        while (readyLanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(readyLanes);
-            readyLanes &= readyLanes - 1;
-            long sequence;
-            while ((sequence = runtimeState.pollAdmissionReceiptReady(laneId)) != 0) {
-                CommandSlot pending = pendingMatching.get(sequence);
-                if (pending != null && pending.placeAdmission() != null) {
-                    if (!pending.isMatchingSubmitted()) {
-                        placeAdmissionReadyShardMask |= 1L << pendingSubmissionShard(pending);
-                    } else if (collectPlaceAdmissionIfReady(pending)) {
-                        pendingMatching.progressChanged();
-                    }
-                }
-            }
-        }
-    }
+    /** Consumes Lane/Matcher notifications and advances the ordered matching pipeline. */
+    void drainMatchingCompletions() { matchingProgress.drainMatchingCompletions(); }
 
     long matchingProgressSequence() {
         return pendingMatching.dispatchRevision();
     }
 
-    /** 尚未消费的本地准入/队首结果必须继续推进，不能只等待新的跨线程通知。 */
-    boolean hasLocalMatchingWork() {
-        if (placeAdmissionReadyShardMask != 0) return true;
-        CommandSlot head = pendingMatching.get(pendingMatching.firstSequence());
-        OrderBatchPending batch = head == null ? null : head.orderBatch;
-        // Handoff and the final metadata commit have no matcher-settlement cursor.
-        // Keep polling these bounded Owner continuations even after consuming the last notification.
-        return batch != null && (!batch.activated() || batch.laneCommitEvent != null || batch.itemAdmission != null)
-                || head != null && !head.isMatchingSubmitted() && head.placeAdmission() == null
-                && !head.deferredMatching()
-                || head != null && commits.matchingCommitReady(head);
-    }
-
-    /** A deferred command without a Lane admission can resume once the ordered head advances. */
-    private boolean hasDeferredMatchingSubmission() {
-        CommandSlot head = pendingMatching.get(pendingMatching.firstSequence());
-        return head != null && !ownerHasPendingMatchingRejection(head)
-                && !head.isMatchingSubmitted() && !head.deferredMatching()
-                && head.orderBatch == null;
-    }
-
-    private boolean ownerHasPendingMatchingRejection(CommandSlot pending) {
-        return pending != null && laneCommandContexts.claimed(pending.sequence())
-                && laneCommandContexts.required(pending.sequence()).hasMatchingRejection();
-    }
+    boolean hasLocalMatchingWork() { return matchingProgress.hasLocalMatchingWork(); }
 
     /** Only external completion cursors; the caller must first exhaust owner-local progress. */
-    boolean hasMatchingNotifications() {
-        return hasMatchingNotifications(System.nanoTime());
-    }
+    boolean hasMatchingNotifications() { return matchingProgress.hasNotifications(); }
 
-    boolean hasMatchingNotifications(long now) {
-        // A failed Lane need not publish a completion. Keep a bounded empty-path health
-        // check; apply/commit still check on every invocation, including ready notifications.
-        if (now - nextMatchingHealthCheckNs >= 0) {
-            assertHealthy();
-            nextMatchingHealthCheckNs = now + 1_000_000L;
-        }
-        return runtimeState.hasMatchingNotifications() || matcherPipeline.hasMatchingCompletions();
-    }
+    boolean hasMatchingNotifications(long now) { return matchingProgress.hasNotifications(now); }
 
     void beginDownstreamPublicationBatch() {
         runtimeProjectionJournal.beginPublicationBatch();
