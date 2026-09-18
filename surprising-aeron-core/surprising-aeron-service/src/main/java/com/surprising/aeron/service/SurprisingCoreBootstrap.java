@@ -27,9 +27,14 @@ public final class SurprisingCoreBootstrap {
     private SurprisingCoreBootstrap() {
     }
 
-    @SuppressWarnings("try")
     public static void main(String[] args) {
-        ClusterTopology topology = ClusterTopology.fromSystemProperties();
+        SurprisingCoreApplication.main(args);
+    }
+
+    /** Runs the existing Aeron lifecycle with topology and shutdown ownership supplied by the node bean. */
+    @SuppressWarnings("try")
+    public static void run(ClusterTopology topology, ShutdownSignalBarrier barrier) {
+        if (topology == null || barrier == null) throw new IllegalArgumentException("core bootstrap inputs are required");
         Supplier<IdleStrategy> serviceIdleStrategy = serviceIdleStrategySupplier();
         File nodeDirectory = topology.nodeDirectory().toFile();
         String aeronDirectoryName = topology.aeronDirectoryName();
@@ -78,7 +83,6 @@ public final class SurprisingCoreBootstrap {
                 .archiveContext(localArchiveClient.clone())
                 .errorHandler(errorHandler("consensus-module"));
 
-        ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
         try (ClusteredMediaDriver ignored = ClusteredMediaDriver.launch(
                     mediaDriverContext.terminationHook(barrier::signalAll),
                     archiveContext,
@@ -99,8 +103,6 @@ public final class SurprisingCoreBootstrap {
                         topology.productLine(), topology.nodeId(), topology.clusterId(), topology.hostname());
                 barrier.await();
             }
-        } finally {
-            barrier.close();
         }
     }
 
