@@ -2,6 +2,8 @@ package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.orchestration.CommandSlot;
+import com.surprising.aeron.service.state.MatcherSettlementEvent;
+
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -85,7 +87,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     public void submit(long coreSequence, Supplier<CoreMatchingResult> command,
-                com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
+                MatcherSettlementEvent settlement) {
         if (coreSequence <= 0 || command == null) {
             throw new IllegalArgumentException("matcher pipeline command is invalid");
         }
@@ -93,7 +95,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     void submit(long coreSequence, Supplier<CoreMatchingResult> command,
-                com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
+                MatcherSettlementEvent settlement,
                 CommandSlot resultTarget) {
         if (coreSequence <= 0 || resultTarget == null || settlement != null && settlement.direct())
             throw new IllegalArgumentException("invalid command result target");
@@ -130,12 +132,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     private void submitInternal(long token, Supplier<?> command,
-                                com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
+                                MatcherSettlementEvent settlement) {
         submitInternal(token, command, settlement, null);
     }
 
     private void submitInternal(long token, Supplier<?> command,
-                                com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
+                                MatcherSettlementEvent settlement,
                                 CommandSlot resultTarget) {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
         rethrowPublicationFailure();
@@ -312,7 +314,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             if (command == null || slot.token == 0) {
                 slot.failure = new IllegalStateException("matcher command publication gap");
             } else {
-                com.surprising.aeron.service.state.MatcherSettlementEvent settlement = slot.settlement;
+                MatcherSettlementEvent settlement = slot.settlement;
                 try {
                     if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
                     Object result = command.get();
