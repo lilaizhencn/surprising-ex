@@ -26,6 +26,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;

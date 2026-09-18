@@ -3,6 +3,7 @@ package com.surprising.aeron.service.orchestration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 

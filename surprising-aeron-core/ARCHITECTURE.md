@@ -85,7 +85,10 @@ CoreMessage / PlaceOrderCommand
 - `surprising-aeron-service/.../orchestration/TradingCoreOwner.java`
 - `surprising-aeron-service/.../orchestration/TradingCoreQueryRouter.java`
 - `surprising-aeron-protocol/.../protocol`
-- `surprising-aeron-service/.../orchestration/*Snapshot*`
+- `surprising-aeron-service/.../orchestration/snapshot/CoreSnapshotManifest.java`
+- `surprising-aeron-service/.../orchestration/ingress/CoreMessageFlyweightDecoder.java`
+- `surprising-aeron-service/.../orchestration/cluster/OwnerIdleStrategy.java`
+- `surprising-aeron-service/.../orchestration/metrics/CoreLaneMetrics.java`
 
 ### 3.2 运行时流程
 
@@ -256,3 +259,14 @@ ADL 对手方持仓变更。
 5. `CoreRuntimeLifecycle` 负责 owner 线程绑定、Matcher/Lane/投影日志/快照资源的启停、健康检查和关闭顺序；`TradingCoreRuntime` 仍唯一持有 `TradingRuntimeState`、身份字典、结果账本、索引和在途槽。
 
 主流程现在可以按业务顺序阅读：入口闸门 → 命令分流 → 撮合或直接命令执行 → Lane/Matcher 交接 → 有序提交 → 结果/快照读视图。该拆分没有新增状态副本、产品线策略框架、协议字段或并发阶段。
+
+## 9. 已完成的第五处代码边界
+
+`orchestration` 下已先拆出四类不持有交易状态的职责包：
+
+1. `orchestration.ingress.CoreMessageFlyweightDecoder` 只负责从 Aeron `DirectBuffer` 校验固定协议头并物化自有 `CoreMessage`；它不做产品业务校验，也不写运行时状态。
+2. `orchestration.cluster.OwnerIdleStrategy` 只负责 Owner 线程的自旋、让步、限时休眠和完成通知唤醒；队列和完成标记仍是工作事实的唯一来源。
+3. `orchestration.metrics.CoreLaneMetrics` 是 `TradingCoreRuntime.laneMetrics()` 返回的不可变观测视图；数组在构造和访问时复制，不拥有 Account Lane 状态。
+4. `orchestration.snapshot.CoreSnapshotManifest` 只定义恢复/检查使用的快照元数据；快照编码、分段恢复和在线 fence 仍由 `orchestration` 内部实现持有，避免为了包结构公开 `TradingCoreRuntime` 的资金状态和结果账本。
+
+这次迁移只改变 Java 包和调用方 import，不改变协议字段、快照格式、topic、产品线路由、账户 Lane 所有权或线程交接。剩余大量类仍在 `orchestration`，因为它们直接共享 Owner/Runtime 的 package-private 状态；下一轮应先为一个完整边界定义不可变输入/输出，再移动实现，不能按文件名机械分包。

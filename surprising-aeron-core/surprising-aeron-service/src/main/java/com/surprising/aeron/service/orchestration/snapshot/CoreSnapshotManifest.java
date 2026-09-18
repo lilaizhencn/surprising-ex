@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.orchestration.snapshot;
 
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.product.api.ProductLine;

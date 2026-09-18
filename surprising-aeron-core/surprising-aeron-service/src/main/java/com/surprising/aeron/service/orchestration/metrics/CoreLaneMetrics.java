@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.orchestration.metrics;
 
 public record CoreLaneMetrics(
         int matchingEngineCount,

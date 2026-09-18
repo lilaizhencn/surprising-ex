@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;

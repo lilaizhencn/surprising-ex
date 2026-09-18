@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.OwnerIdleStrategy;
+import com.surprising.aeron.service.orchestration.cluster.OwnerIdleStrategy;
 import static org.assertj.core.api.Assertions.assertThat;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;

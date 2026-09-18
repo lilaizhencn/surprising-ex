@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.orchestration.SectionedCoreSnapshotValidation.HeaderManifest;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;

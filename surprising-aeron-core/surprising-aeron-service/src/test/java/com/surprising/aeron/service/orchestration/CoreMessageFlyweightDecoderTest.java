@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
+import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.agrona.concurrent.UnsafeBuffer;

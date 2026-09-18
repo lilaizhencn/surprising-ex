@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.orchestration.ingress;
 
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -13,12 +13,12 @@ import java.nio.ByteOrder;
 import java.util.UUID;
 import org.agrona.DirectBuffer;
 
-final class CoreMessageFlyweightDecoder {
+public final class CoreMessageFlyweightDecoder {
 
     private CoreMessageFlyweightDecoder() {
     }
 
-    static CoreMessage decode(DirectBuffer buffer, int offset, int length) {
+    public static CoreMessage decode(DirectBuffer buffer, int offset, int length) {
         if (buffer == null || offset < 0 || length < CoreProtocol.HEADER_LENGTH
                 || offset > buffer.capacity() - length) {
             throw new ProtocolException("message shorter than fixed header");

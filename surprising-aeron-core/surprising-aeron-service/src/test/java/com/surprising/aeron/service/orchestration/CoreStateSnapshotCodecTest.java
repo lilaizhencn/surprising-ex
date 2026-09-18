@@ -22,6 +22,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;

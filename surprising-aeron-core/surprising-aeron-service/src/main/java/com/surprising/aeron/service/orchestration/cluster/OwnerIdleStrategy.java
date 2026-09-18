@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.orchestration;
+package com.surprising.aeron.service.orchestration.cluster;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;

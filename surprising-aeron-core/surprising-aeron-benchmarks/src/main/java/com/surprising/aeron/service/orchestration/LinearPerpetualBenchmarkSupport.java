@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;

@@ -2,6 +2,7 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
