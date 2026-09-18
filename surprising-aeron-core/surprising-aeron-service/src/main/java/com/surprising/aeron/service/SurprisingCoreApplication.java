@@ -1,8 +1,7 @@
 package com.surprising.aeron.service;
 
-import com.surprising.aeron.service.bootstrap.CoreSpringConfiguration;
-import com.surprising.aeron.service.bootstrap.SurprisingCoreNode;
 import com.surprising.aeron.service.cluster.ClusterTopology;
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
@@ -27,10 +26,11 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.event.ContextClosedEvent;
 
 /** Spring Boot composition root for the Aeron node; it is intentionally non-web. */
 @SpringBootConfiguration
-@Import(CoreSpringConfiguration.class)
+@Import(CoreConfiguration.class)
 public class SurprisingCoreApplication {
 
     private SurprisingCoreApplication() {
@@ -40,11 +40,21 @@ public class SurprisingCoreApplication {
         SpringApplication application = new SpringApplication(SurprisingCoreApplication.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         try (ConfigurableApplicationContext context = application.run(args)) {
-            context.getBean(SurprisingCoreNode.class).run();
+            ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
+            context.addApplicationListener(event -> {
+                if (event instanceof ContextClosedEvent) {
+                    barrier.signalAll();
+                }
+            });
+            try {
+                run(context.getBean(ClusterTopology.class), barrier);
+            } finally {
+                barrier.close();
+            }
         }
     }
 
-    /** Runs the Aeron lifecycle with topology and shutdown ownership supplied by the node bean. */
+    /** Runs the Aeron lifecycle with topology and shutdown ownership supplied by the application. */
     @SuppressWarnings("try")
     public static void run(ClusterTopology topology, ShutdownSignalBarrier barrier) {
         if (topology == null || barrier == null) {
