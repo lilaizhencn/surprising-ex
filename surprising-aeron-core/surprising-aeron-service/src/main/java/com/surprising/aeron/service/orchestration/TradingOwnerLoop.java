@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.service.cluster.ClusterTopology;
 import com.surprising.aeron.service.orchestration.cluster.OwnerIdleStrategy;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
@@ -12,9 +13,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
-final class TradingOwnerLoop implements Runnable {
+@Component
+public final class TradingOwnerLoop implements Runnable {
     private static final long DEADLINE_NS = 30_000_000_000L;
     private static final long INPUT_BYTES = 64L * 1024 * 1024;
 
@@ -36,6 +40,11 @@ final class TradingOwnerLoop implements Runnable {
     private long ownerNoProgressPolls;
     private long ownerNoProgressNanos;
     private long ownerGateSkippedPending;
+
+    @Autowired
+    public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress) {
+        this(topology.productLine(), egress);
+    }
 
     TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
         this.egress = egress;

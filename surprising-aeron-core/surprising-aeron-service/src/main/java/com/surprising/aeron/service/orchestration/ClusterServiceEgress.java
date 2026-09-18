@@ -9,8 +9,10 @@ import java.util.Objects;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.springframework.stereotype.Component;
 
 /** Owns Cluster-session state and the Owner-to-Aeron response handoff. */
+@Component
 public final class ClusterServiceEgress {
     private static final byte[] EMPTY = new byte[0];
     private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
@@ -38,6 +40,10 @@ public final class ClusterServiceEgress {
     public interface SessionEgress {
         long offer(long leadershipTermId, long timestamp, DirectBuffer source, int offset, int length);
         void close();
+    }
+
+    public ClusterServiceEgress() {
+        this(SessionResponsePublication::new);
     }
 
     public ClusterServiceEgress(EgressFactory egressFactory) {

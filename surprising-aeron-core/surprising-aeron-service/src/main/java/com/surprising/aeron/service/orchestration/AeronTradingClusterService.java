@@ -16,14 +16,23 @@ import java.io.ByteArrayOutputStream;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /** Aeron Cluster callback adapter for the trading Owner and its session egress. */
+@Component
 public final class AeronTradingClusterService implements ClusteredService {
     private static final long DEADLINE_NS = 30_000_000_000L;
 
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
     private Cluster cluster;
+
+    @Autowired
+    public AeronTradingClusterService(TradingOwnerLoop owner, ClusterServiceEgress egress) {
+        this.egress = java.util.Objects.requireNonNull(egress);
+        this.owner = java.util.Objects.requireNonNull(owner);
+    }
 
     public AeronTradingClusterService(ProductLine productLine) {
         this(productLine, SessionResponsePublication::new);
