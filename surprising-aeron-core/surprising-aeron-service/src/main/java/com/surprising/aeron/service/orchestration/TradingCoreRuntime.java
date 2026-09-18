@@ -809,6 +809,34 @@ public final class TradingCoreRuntime implements AutoCloseable,
     private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
                 ? preparedIngressFingerprint : CommandFingerprint.of(message);
+        CoreResponse replayResponse = checkCommandReplay(message, fingerprint);
+        if (replayResponse != null) return replayResponse;
+
+        long lastSourceSequence = lastSourceSequences.lookupOrDefault(
+                message.header().source(), message.header().sourceId(), -1);
+        SourceKey sourceKey = lastSourceSequences.lastLookupKey();
+        if (sourceKey == null) sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
+        CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
+        if (sourceSequenceResponse != null) return sourceSequenceResponse;
+
+        if (isMatchingCommand(message.header().messageType())) {
+            if (pendingMatching.size() >= pendingMatching.capacity()) {
+                throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
+            }
+            if (isOrderBatchCommand(message.header().messageType())) {
+                return batches.beginOrderBatchMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+            }
+            return admissions.beginMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+        }
+        return applyDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+    }
+
+    /**
+     * Checks terminal, in-flight and funds-specific replay before a command mutates state.
+     * The response is returned here so the command path cannot accidentally route a duplicate
+     * into either the matcher or a direct business handler.
+     */
+    private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
         StoredResult terminalDuplicate = resultLedger.get(message.header().commandId());
         if (terminalDuplicate != null) {
             return resultLedger.duplicateResponse(terminalDuplicate, fingerprint, appliedCommandCount, stateHash());
@@ -837,10 +865,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 return rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);
             }
         }
-        long lastSourceSequence = lastSourceSequences.lookupOrDefault(
-                message.header().source(), message.header().sourceId(), -1);
-        SourceKey sourceKey = lastSourceSequences.lastLookupKey();
-        if (sourceKey == null) sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
+        return null;
+    }
+
+    /** Checks monotonicity and bounded capacity of the external source sequence index. */
+    private CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
         if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
             return new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.DUPLICATE,
                     CoreResultCode.STALE_SOURCE_SEQUENCE, appliedCommandCount, stateHash());
@@ -848,17 +877,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (lastSourceSequence < 0 && lastSourceSequences.size() >= MAX_SOURCE_SEQUENCES) {
             return rejected(CoreResultCode.SOURCE_SEQUENCE_TRACKING_FULL);
         }
+        return null;
+    }
+
+    /** Applies a direct command and keeps its continuation/finalization lifecycle in one place. */
+    private CoreResponse applyDirectCommand(
+            CoreMessage message, long clusterTimestamp, long clusterPosition,
+            SourceKey sourceKey, CommandFingerprint fingerprint) {
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
-        if (isMatchingCommand(message.header().messageType())) {
-            if (pendingMatching.size() >= pendingMatching.capacity()) {
-                throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
-            }
-            if (isOrderBatchCommand(message.header().messageType())) {
-                return batches.beginOrderBatchMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-            }
-            return admissions.beginMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-        }
         activateFactContext(message, fingerprint);
         RuntimeProjectionPoint beforeProjection = currentProjectionPoint;
         long beforeRuntimeRevision = runtimeState.revision();
