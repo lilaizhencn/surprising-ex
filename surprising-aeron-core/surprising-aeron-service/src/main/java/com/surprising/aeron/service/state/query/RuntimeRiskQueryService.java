@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state.query;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 

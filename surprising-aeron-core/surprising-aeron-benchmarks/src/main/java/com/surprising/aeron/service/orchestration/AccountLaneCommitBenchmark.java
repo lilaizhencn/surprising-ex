@@ -1,9 +1,10 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
 
 import com.surprising.aeron.service.state.LaneCommitEvent;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.aeron.service.state.TradingRuntimeState;
-import com.surprising.aeron.service.state.UserRuntime;
+import com.surprising.aeron.service.state.account.UserRuntime;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -78,7 +79,7 @@ public class AccountLaneCommitBenchmark {
             var orderList = new java.util.ArrayList<Long>(accountLanes);
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];
-                runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(user, 3, 1000, 0));
+                runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(user, 3, 1000, 0));
                 runtime.reserveOrder(10000 + laneId, user, 20000 + laneId, 5, 1, 3, 100);
                 userList.add(user);
                 orderList.add(10000L + laneId);

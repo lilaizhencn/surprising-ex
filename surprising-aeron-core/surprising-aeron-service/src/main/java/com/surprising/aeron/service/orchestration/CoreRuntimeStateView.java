@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.PositionRuntime;
@@ -127,11 +128,11 @@ final class CoreRuntimeStateView {
                 beforeBusinessStateHash, owner.cachedBusinessStateHash);
     }
 
-    Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers() {
+    Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
         return owner.runtimeState.pendingTransfersSnapshot();
     }
 
-    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         long beforeBusinessStateHash = owner.cachedBusinessStateHash;
         owner.runtimeState.restorePendingTransfers(transfers);
         owner.cachedTransferHash = TradingCoreRuntime.computeTransferHash(transfers);

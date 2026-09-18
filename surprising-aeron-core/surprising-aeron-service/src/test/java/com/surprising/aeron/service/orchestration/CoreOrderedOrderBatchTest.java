@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
@@ -163,7 +164,7 @@ class CoreOrderedOrderBatchTest {
             // Crediting this buyer's fill must overflow in the real settlement worker.
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
-            runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(
+            runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(
                     1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
             // Deliberate corruption, not a business adjustment. The next command starts
             // with clean tracking and must fail on the actual checked arithmetic in Lane.

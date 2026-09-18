@@ -7,7 +7,7 @@ import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ReservationRuntime;
 import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.UserRuntime;
+import com.surprising.aeron.service.state.account.UserRuntime;
 
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;

@@ -20,6 +20,9 @@
  * <p>{@code state.instrument} 只包含版本化的 instrument 配置值；instrument 生命周期写入仍由
  * 状态运行时负责。{@code state.market} 只包含标记价等行情运行值，不拥有行情来源或风险扫描。</p>
  *
+ * <p>{@code state.account} 只包含 Account Lane 使用的账户值/运行对象；账户 Lane 的可变映射和生命周期
+ * 仍由 {@code AccountLaneState} 唯一拥有。</p>
+ *
  * <p>{@code OrderStateTransitions} 是持久化订单生命周期的状态所有者：它原子更新订单、余额、
  * 预留和客户端订单索引；{@code TradingCoreReducer} 只保留兼容入口及其他风险、成交、结算流程。</p>
  *

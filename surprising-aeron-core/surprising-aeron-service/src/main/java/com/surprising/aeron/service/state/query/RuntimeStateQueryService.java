@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state.query;
+import com.surprising.aeron.service.state.account.UserRuntime;
 
 import com.surprising.aeron.service.state.*;
 

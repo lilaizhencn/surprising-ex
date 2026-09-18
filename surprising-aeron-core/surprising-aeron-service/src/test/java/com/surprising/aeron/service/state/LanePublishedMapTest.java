@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.state.account.UserRuntime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;

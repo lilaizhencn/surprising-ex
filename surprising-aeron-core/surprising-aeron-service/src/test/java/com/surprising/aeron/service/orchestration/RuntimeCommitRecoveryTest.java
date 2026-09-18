@@ -39,7 +39,7 @@ import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.TransferRuntime;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;

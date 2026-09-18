@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
@@ -101,7 +102,7 @@ final class SectionedCoreSnapshotValidation {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers) {
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.routeVersion() == matcherSnapshot.routeVersion(), "route");

@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
 import com.surprising.aeron.service.state.TradingRuntimeState;
-import com.surprising.aeron.service.state.TransferRuntime;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.TradingCommandCodec;

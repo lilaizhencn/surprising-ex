@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.state;
+package com.surprising.aeron.service.state.account;
 
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import java.util.Objects;

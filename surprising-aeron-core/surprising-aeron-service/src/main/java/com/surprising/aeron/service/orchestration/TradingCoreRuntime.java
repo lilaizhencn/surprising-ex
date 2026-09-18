@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
@@ -469,7 +470,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> restoredFeePolicies,
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> restoredPendingTransfers,
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> restoredPendingTransfers,
             long restoredAuditBusinessStateHash,
             long restoredAuditFundsStateHash,
             MatcherSnapshotCapture matcherSnapshotCapture,
@@ -562,7 +563,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers,
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers,
             long auditBusinessStateHash,
             long auditFundsStateHash) {
         if (projectionSequence < 0 || appliedCommandCount < 0 || commandResults == null
@@ -1201,10 +1202,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
     void restoreFeePolicies(Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies) {
         stateView.restoreFeePolicies(policies);
     }
-    Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers() {
+    Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
         return stateView.pendingTransfers();
     }
-    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         stateView.restorePendingTransfers(transfers);
     }
     CoreExportState exportState() {
@@ -1612,7 +1613,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     static long canonicalBusinessStateHash(
             long base,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies,
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         long feePolicyHash = computeFeePolicyHash(policies);
         if (feePolicyHash != 0) base = mix(base, feePolicyHash);
         long transferHash = computeTransferHash(transfers);
@@ -1620,7 +1621,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     static long computeTransferHash(
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         if (transfers.isEmpty()) return 0;
         long digest = HASH_OFFSET_BASIS;
         for (var transfer : transfers.values()) {
