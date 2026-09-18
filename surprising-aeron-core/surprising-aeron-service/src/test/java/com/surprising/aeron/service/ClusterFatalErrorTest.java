@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.cluster;
+package com.surprising.aeron.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import io.aeron.exceptions.AeronException;

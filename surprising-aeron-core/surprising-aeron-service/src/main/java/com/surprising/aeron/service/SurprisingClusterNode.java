@@ -1,5 +1,6 @@
-package com.surprising.aeron.service.cluster;
+package com.surprising.aeron.service;
 
+import com.surprising.aeron.service.cluster.ClusterTopology;
 import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 
 import io.aeron.archive.Archive;
