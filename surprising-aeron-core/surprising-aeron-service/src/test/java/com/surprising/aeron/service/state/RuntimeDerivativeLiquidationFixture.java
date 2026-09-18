@@ -56,6 +56,6 @@ final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid ADL simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyAdlRuntime(command, runtime, identities);
+        return RuntimeAdlExecution.applyRuntime(command, runtime, identities);
     }
 }

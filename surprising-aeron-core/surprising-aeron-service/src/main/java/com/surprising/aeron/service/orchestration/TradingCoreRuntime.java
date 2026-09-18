@@ -1047,11 +1047,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     @Override public void deferAdlControl(
-            com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+            com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork work) {
         directCommand.deferAdlControl(this, work);
     }
 
-    @Override public com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.AdlWork
+    @Override public com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork
             reusableAdlWork() {
         return directCommand.reusableAdlWork();
     }

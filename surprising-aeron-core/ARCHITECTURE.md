@@ -187,6 +187,8 @@ Lane 分组、账户状态变更和 treasury 合并，并通过 `lifecycleSettle
 ADL 对手方持仓变更。
 `AdlExecution` 只负责 ADL 目标持仓校验、对手方减仓、余额/亏空/清算损益变更和强平状态推进；
 `AdlCandidateQueries` 负责只读 ADL 候选视图和确定性排序，`adlCandidates` 仍是 Reducer 的兼容查询入口。
+运行时的 `RuntimeAdlExecution` 独立拥有 ADL 的双账户 Lane 交接和目标账户变更；
+`RuntimeDerivativeLiquidationProcessor` 只保留清算撤单/执行及保险覆盖决议，不再同时承载 ADL。
 `InsuranceFundStateTransitions` 只负责直接调整 treasury 保险基金余额；清算覆盖仍由
 `LiquidationResolution` 按清算状态和确定性分配规则推进。
 

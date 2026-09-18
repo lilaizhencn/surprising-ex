@@ -213,7 +213,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(beforeAdl, identities);
         runtime.startAccountLanes();
         try {
-            var work = RuntimeDerivativeLiquidationProcessor.beginAdl(command, runtime, identities);
+            var work = RuntimeAdlExecution.begin(command, runtime, identities);
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!work.getAsBoolean()) {
                 assertThat(System.nanoTime()).isLessThan(deadline);
@@ -760,7 +760,7 @@ class CorePerpetualFinancialMatrixTest {
                 TradingStateSnapshotCodec.encode(beforeAdl), variant.productLine());
         assertThat(restoredBeforeAdl).isEqualTo(beforeAdl);
         TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyAdl(
+        assertThat(RuntimeAdlExecution.apply(
                 restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.executeAdl(beforeAdl, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);

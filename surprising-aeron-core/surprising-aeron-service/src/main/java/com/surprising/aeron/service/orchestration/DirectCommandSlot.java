@@ -20,6 +20,7 @@ import com.surprising.aeron.service.state.AccountTransferOut;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.RuntimeAdlExecution;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 
@@ -63,7 +64,7 @@ final class DirectCommandSlot {
     private static final BooleanSupplier COMPLETE_CONTROL = () -> true;
 
     private RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork;
-    private RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork;
+    private RuntimeAdlExecution.AdlWork reusableAdlWork;
     private RuntimeDerivativeLiquidationProcessor.ResolutionWork reusableResolutionWork;
     private RiskScanCoordinator reusableRiskCoordinator;
     private AccountBalanceAdjustment reusableBalanceAdjustment;
@@ -134,14 +135,14 @@ final class DirectCommandSlot {
     }
 
     void deferAdlControl(CommandResultContext owner,
-            RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+            RuntimeAdlExecution.AdlWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         adlControl.prepare(owner, work);
         reusableAdlWork = work;
         controlWork = adlControl;
     }
 
-    RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork() { return reusableAdlWork; }
+    RuntimeAdlExecution.AdlWork reusableAdlWork() { return reusableAdlWork; }
 
     void deferLiquidationResolutionControl(CommandResultContext owner,
             RuntimeDerivativeLiquidationProcessor.ResolutionWork work) {
@@ -370,8 +371,8 @@ final class DirectCommandSlot {
 
     private final class AdlControlContinuation implements BooleanSupplier {
         private CommandResultContext owner;
-        private RuntimeDerivativeLiquidationProcessor.AdlWork work;
-        void prepare(CommandResultContext owner, RuntimeDerivativeLiquidationProcessor.AdlWork work) {
+        private RuntimeAdlExecution.AdlWork work;
+        void prepare(CommandResultContext owner, RuntimeAdlExecution.AdlWork work) {
             this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
         }
         void clear() { owner = null; work = null; }

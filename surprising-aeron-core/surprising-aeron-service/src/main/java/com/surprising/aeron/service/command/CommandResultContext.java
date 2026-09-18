@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.RuntimeAdlExecution;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
@@ -36,9 +37,9 @@ public interface CommandResultContext extends CommandOwnerContext {
     void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String symbol, int maxUsers,
                               int pendingBefore, long startedAt, long beforeRevision);
 
-    void deferAdlControl(RuntimeDerivativeLiquidationProcessor.AdlWork work);
+    void deferAdlControl(RuntimeAdlExecution.AdlWork work);
 
-    RuntimeDerivativeLiquidationProcessor.AdlWork reusableAdlWork();
+    RuntimeAdlExecution.AdlWork reusableAdlWork();
 
     void deferLiquidationResolutionControl(RuntimeDerivativeLiquidationProcessor.ResolutionWork work);
 
