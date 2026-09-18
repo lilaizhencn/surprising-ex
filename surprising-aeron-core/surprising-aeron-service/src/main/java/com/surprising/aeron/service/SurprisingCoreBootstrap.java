@@ -22,9 +22,9 @@ import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.YieldingIdleStrategy;
 
-public final class SurprisingClusterNode {
+public final class SurprisingCoreBootstrap {
 
-    private SurprisingClusterNode() {
+    private SurprisingCoreBootstrap() {
     }
 
     @SuppressWarnings("try")

@@ -17,7 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class SurprisingClusterNodeThreadingModeTest {
+class SurprisingCoreBootstrapThreadingModeTest {
 
     private static final String PROPERTY = "surprising.aeron.core.threading-mode";
     @TempDir
@@ -32,20 +32,20 @@ class SurprisingClusterNodeThreadingModeTest {
     void acceptsConfiguredThreadingMode() {
         System.setProperty(PROPERTY, "DEDICATED");
 
-        assertThat(SurprisingClusterNode.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
+        assertThat(SurprisingCoreBootstrap.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
     }
 
     @Test
     void rejectsUnknownThreadingMode() {
         System.setProperty(PROPERTY, "invalid");
 
-        assertThatIllegalArgumentException().isThrownBy(SurprisingClusterNode::coreThreadingMode)
+        assertThatIllegalArgumentException().isThrownBy(SurprisingCoreBootstrap::coreThreadingMode)
                 .withMessageContaining("valid Aeron ThreadingMode");
     }
 
     @Test
     void defaultsClientLivenessAboveTheObservedDiagnosticFreeze() throws Exception {
-        Method method = SurprisingClusterNode.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
+        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("coreClientLivenessTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null)).isEqualTo(TimeUnit.SECONDS.toNanos(30));
@@ -53,16 +53,16 @@ class SurprisingClusterNodeThreadingModeTest {
 
     @Test
     void keepsPublicationUnblockingAboveClientLiveness() throws Exception {
-        Method method = SurprisingClusterNode.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
+        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("corePublicationUnblockTimeoutNs");
         method.setAccessible(true);
 
         assertThat((long) method.invoke(null))
-                .isGreaterThan(SurprisingClusterNode.coreClientLivenessTimeoutNs());
+                .isGreaterThan(SurprisingCoreBootstrap.coreClientLivenessTimeoutNs());
     }
 
     @Test
     void doesNotLabelAeronWarningEventsAsFailures() throws Exception {
-        Method method = SurprisingClusterNode.class.getDeclaredMethod("errorHandler", String.class);
+        Method method = SurprisingCoreBootstrap.class.getDeclaredMethod("errorHandler", String.class);
         method.setAccessible(true);
         ErrorHandler handler = (ErrorHandler) method.invoke(null, "consensus-module");
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
@@ -105,7 +105,7 @@ class SurprisingClusterNodeThreadingModeTest {
                     "-Dsurprising.aeron.hostnames=127.0.0.1,127.0.0.1,127.0.0.1",
                     "-Dsurprising.aeron.data-dir=" + tempDirectory.resolve("cluster-data"),
                     "-cp", testClasspath,
-                    SurprisingClusterNode.class.getName())
+                    SurprisingCoreBootstrap.class.getName())
                     .redirectErrorStream(true)
                     .redirectOutput(childOutput.toFile())
                     .start();

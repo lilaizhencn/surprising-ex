@@ -7,7 +7,7 @@
 当前生产节点的调用关系是：
 
 ```text
-SurprisingClusterNode.main
+SurprisingCoreBootstrap.main
     -> ContinuousTradingClusterService
         -> Aeron Cluster service thread
         -> input queue
@@ -22,7 +22,7 @@ SurprisingClusterNode.main
 
 关键边界：
 
-- `SurprisingClusterNode` 只负责节点启动、Aeron/Archive/Consensus 配置和进程级错误处理。
+- `SurprisingCoreBootstrap` 只负责节点启动、Aeron/Archive/Consensus 配置和进程级错误处理。
 - `ContinuousTradingClusterService` 负责 Aeron 回调、输入输出队列、会话出口和 owner 线程生命周期。
 - `TradingCoreOwner` 负责已复制命令的准入、撮合推进、有序提交、实时读取和快照状态边界；不实现 `ClusteredService`，不访问真实 Aeron 会话。
 - `SurprisingClusteredService` 只保留旧的 `ClusteredService` 回调适配，供兼容测试和独立回放使用，生产入口不再依赖它。
@@ -78,7 +78,7 @@ CoreMessage / PlaceOrderCommand
 
 主要位置：
 
-- `surprising-aeron-service/.../SurprisingClusterNode.java`
+- `surprising-aeron-service/.../SurprisingCoreBootstrap.java`
 - `surprising-aeron-service/.../cluster/ClusterTopology.java`
 - `surprising-aeron-service/.../orchestration/ContinuousTradingClusterService.java`
 - `surprising-aeron-service/.../orchestration/TradingCoreOwner.java`

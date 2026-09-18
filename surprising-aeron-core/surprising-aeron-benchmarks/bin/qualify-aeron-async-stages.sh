@@ -103,7 +103,7 @@ start_node() {
   if [[ "${ENABLE_JFR}" == true ]]; then
     args+=(-Dcore.settlementLatencyDiagnostics=true "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
   fi
-  args+=(-cp "${SERVICE_JAR}" com.surprising.aeron.service.SurprisingClusterNode)
+  args+=(-cp "${SERVICE_JAR}" com.surprising.aeron.service.SurprisingCoreBootstrap)
   printf '%q ' "${JAVA}" "${args[@]}" > "${dir}/node.command"; printf '\n' >> "${dir}/node.command"
   (cd "${dir}" && exec "${JAVA}" "${args[@]}") > "${dir}/node.log" 2>&1 & NODE_PID=$!
   for _ in {1..40}; do
