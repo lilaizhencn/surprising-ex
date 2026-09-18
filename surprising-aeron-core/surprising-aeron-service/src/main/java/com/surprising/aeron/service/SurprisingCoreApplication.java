@@ -20,6 +20,8 @@ import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.YieldingIdleStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.WebApplicationType;
@@ -32,10 +34,12 @@ import org.springframework.context.event.ContextClosedEvent;
 @ComponentScan
 public class SurprisingCoreApplication {
 
+    private static final Logger log = LoggerFactory.getLogger(SurprisingCoreApplication.class);
+
     private SurprisingCoreApplication() {
     }
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         SpringApplication application = new SpringApplication(SurprisingCoreApplication.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         try (ConfigurableApplicationContext context = application.run(args)) {
@@ -140,11 +144,11 @@ public class SurprisingCoreApplication {
         return throwable -> {
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.WARN) {
-                System.err.println("Aeron " + component + " warning");
-                System.err.println(aeronException);
+                log.error("Aeron {} warning", component);
+                log.error("e: ", aeronException);
                 return;
             }
-            System.err.println("Aeron " + component + " failure");
+            log.error("Aeron {} failure", component);
             throwable.printStackTrace(System.err);
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.FATAL
