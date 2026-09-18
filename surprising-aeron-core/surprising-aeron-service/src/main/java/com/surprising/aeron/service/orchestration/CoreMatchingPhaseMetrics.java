@@ -5,6 +5,32 @@ import java.util.concurrent.atomic.LongAdder;
 
 final class CoreMatchingPhaseMetrics {
 
+    /** Owner 本地非空 FIFO 调度轮次的稀疏样本，不持有业务命令或状态副本。 */
+    @jdk.jfr.Name("surprising.OwnerTurn")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class OwnerTurn extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(OwnerTurn.class);
+        public int retired;
+        public int admitted;
+        public int windowAtStart;
+        public int windowAtEnd;
+        public boolean headWait;
+        public boolean budgetExhausted;
+    }
+
+    private long nonemptyOwnerTurns;
+
+    OwnerTurn sampleOwnerTurn(int windowSize) {
+        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS
+                || windowSize == 0 || (++nonemptyOwnerTurns & 63) != 0
+                || !OwnerTurn.TYPE.isEnabled()) return null;
+        var event = new OwnerTurn();
+        event.windowAtStart = windowSize;
+        event.begin();
+        return event;
+    }
+
     @jdk.jfr.Name("surprising.SettlementLatency")
     @jdk.jfr.Label("Matcher publication through ordered commit")
     @jdk.jfr.Category("Surprising Core")

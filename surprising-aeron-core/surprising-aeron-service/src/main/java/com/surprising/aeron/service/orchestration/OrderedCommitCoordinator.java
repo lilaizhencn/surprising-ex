@@ -510,7 +510,11 @@ final class OrderedCommitCoordinator {
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
                 owner.resultBuilder.materializeCommandOrderViews(pending);
             }
-            completeCommitPublicationBatch();
+        var timingHeader = pending.command().header();
+        long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
+        completeCommitPublicationBatch();
+        CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
+        long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.validateFundsConservation(pending.command());
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
@@ -527,6 +531,7 @@ final class OrderedCommitCoordinator {
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
             owner.submitDeferredMatchingAfterBatch();
         }
+        CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
         return owner.finishFactContext(response);
     }
 

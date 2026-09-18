@@ -27,6 +27,11 @@ Surprising 是一个正在开发和验证中的多产品线交易系统。本仓
 资金校验、发布与响应边界。`OwnerCommandPipelineState` 直接引用窗口队首及实际依赖末项，
 不复制命令序号、不维护单元素“批量前缀”；依赖项退休时清除引用，再复用槽位。
 
+诊断时通过 `core.settlementLatencyDiagnostics=true` 和 `owner-commit-profile.jfc` 启用稀疏 JFR：
+`CoreMatchingPhaseMetrics` 区分提交尝试（等待/终态）、事实发布、终态记账、实时发布和回复退休；
+事实发布/记账包含在提交尝试内，不可重复相加。`OwnerTurn` 每 64 个非空 FIFO 轮次采样退休数、
+队首等待和预算耗尽，不代表全部轮次精确计数。Lane 完成到 Owner 提交的延迟包含排队，不能当作尾部执行时间。
+
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 
 ```mermaid

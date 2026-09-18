@@ -981,7 +981,11 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
         captureCommittedBatchTrades(batch);
+        var timingHeader = pending.command().header();
+        long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.commits.completeCommitPublicationBatch();
+        CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
+        long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (batch.preparedResponse == null) for (OrderBatchItem item : batch.items) {
             if (item.laneResultPrepared) continue;
             OrderRuntime order = owner.runtimeOrder(item.orderId());
@@ -1021,6 +1025,7 @@ final class OrderBatchExecutor {
                 CoreResultCode.NONE, batch.sequence, requiredExportSequence, stateHash,
                 responseData, 0, responseLength);
         releaseOrderBatchPending(batch);
+        CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
         return owner.finishFactContext(response);
     }
 

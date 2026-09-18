@@ -80,6 +80,8 @@ class ClusterCommandPipelineTest {
         var path = java.nio.file.Files.createTempFile("settlement-latency-test-", ".jfr");
         try (var recording = new jdk.jfr.Recording()) {
             recording.enable(CoreMatchingPhaseMetrics.SettlementLatency.class);
+            recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
+            recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
             recording.start();
             for (boolean batch : new boolean[]{false, true}) {
                 try (Fixture live = new Fixture(ProductLine.LINEAR_PERPETUAL)) {
@@ -93,6 +95,22 @@ class ClusterCommandPipelineTest {
                 }
             }
             recording.stop(); recording.dump(path);
+            var boundaries = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
+            assertThat(boundaries).extracting(e -> e.getString("stage")).contains(
+                    "ownerCommitAttemptTerminal", "ownerFactPublication", "ownerTerminalBookkeeping",
+                    "ownerRealtimePublication", "ownerResponseAndRetirement");
+            for (var event : boundaries) {
+                assertThat(event.getLong("elapsedNanos")).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
+                assertThat(event.getString("commandType")).isNotBlank();
+            }
+            var turns = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerTurn")).toList();
+            assertThat(turns).isNotEmpty();
+            for (var turn : turns) {
+                assertThat(turn.getInt("retired") + turn.getInt("admitted")).isBetween(0, 64);
+                assertThat(turn.getInt("windowAtStart")).isPositive();
+            }
             var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.SettlementLatency")).toList();
             assertThat(events).extracting(e -> e.getString("commandType"))

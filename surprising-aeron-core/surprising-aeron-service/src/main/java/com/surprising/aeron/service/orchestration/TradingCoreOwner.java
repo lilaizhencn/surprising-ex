@@ -170,71 +170,84 @@ public final class TradingCoreOwner {
         // 每轮先推进异步工作；随后连续 ready 的队首直接退休，不重复收集整个窗口。
         boolean advanceMatching = true;
         ClusterCommandWindow window = commandPipeline.commandWindow();
-        for (int work = 0; work < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE; work++) {
-            // 当前命令的提交边界不变；未完成时仍可准入与在途命令无依赖的后续订单。
-            if (!commandPipeline.hasCommittingHead() && window.size() != 0) beginCommandCommit();
-            // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
-            if (commandPipeline.hasCommittingHead() && !awaitingCompletion) {
-                // 先提交已经就绪的结果；本轮预算限制单次 Owner 调度时间。
-                if (pollCommandCommit(advanceMatching)) {
-                    advanceMatching = false;
+        var turn = state.matchingPhaseMetrics.sampleOwnerTurn(window.size());
+        try {
+            for (int work = 0; work < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE; work++) {
+                // 当前命令的提交边界不变；未完成时仍可准入与在途命令无依赖的后续订单。
+                if (!commandPipeline.hasCommittingHead() && window.size() != 0) beginCommandCommit();
+                // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
+                if (commandPipeline.hasCommittingHead() && !awaitingCompletion) {
+                    // 先提交已经就绪的结果；本轮预算限制单次 Owner 调度时间。
+                    if (pollCommandCommit(advanceMatching)) {
+                        if (turn != null) turn.retired++;
+                        advanceMatching = false;
+                        continue;
+                    }
+                    awaitingCompletion = true;
+                    if (turn != null) turn.headWait = true;
+                }
+                if (window.size() == window.capacity()) return;
+                if (commandPipeline.hasActiveControl()) {
+                    if (!pollControl()) return;
                     continue;
                 }
-                awaitingCompletion = true;
+                var next = commandPipeline.pendingIngress().first();
+                if (next == null) return;
+                if (commandPipeline.isIngressBlocked(next.command)) return;
+                commandPipeline.clearBlockedIngress();
+                boolean eligible = state.prepareClusterPipelineScope(next.command, window);
+                boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
+                int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
+                if (prefix != 0) {
+                    commandPipeline.rememberBlockedIngress(next.command, prefix);
+                    // 记录等待决定，否则最繁忙的依赖等待会从诊断中消失。
+                    if (!eligible) commandPipeline.recordControlFence();
+                    else commandPipeline.recordDependencyFence(retry);
+                    if (commandPipeline.hasCommittingHead()) return;
+                    beginCommandCommit();
+                    continue;
+                }
+                if (!eligible) {
+                    if (state.requiresOwnerLaneAccessForPreparation(next.command)
+                            && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
+                    CoreMatchingPhaseMetrics.recordBoundary("ingressToControl", next.command.header(), next.queuedNanos);
+                    commandPipeline.beginControl(next);
+                    state.assertClusterCallbackComplete();
+                    beginCapture(next.position, next.timestamp);
+                    commandPipeline.startProgressDeadline();
+                    commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp, next.position,
+                            window.decodedIfPresent(next.command), false, next.fingerprint));
+                    commandPipeline.recordControlProgress();
+                    commandPipeline.rememberMatchingResponseSequence(
+                            state.matchingSequence(next.command.header().commandId()));
+                    continue;
+                }
+                if (window.size() == 0) state.assertClusterCallbackComplete();
+                CoreMatchingPhaseMetrics.recordBoundary("ingressToAdmission", next.command.header(), next.queuedNanos);
+                long admissionStart = CoreMatchingPhaseMetrics.sampleStart(next.command.header());
+                var entry = window.add(next.session, next.command, next.timestamp, next.position);
+                CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
+                        window.decoded(next.command), true, next.fingerprint);
+                window.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
+                if (entry.sequence != 0) {
+                    var pending = state.pendingMatching(entry.sequence);
+                    pending.establishCommitFence(next.timestamp, next.position);
+                    state.pendingMatching.partitionDependenciesChanged();
+                }
+                CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
+                entry.response = entry.sequence == 0 ? result : null;
+                commandPipeline.pendingIngress().remove();
+                commandPipeline.recordAdmission();
+                if (turn != null) turn.admitted++;
+                advanceMatching = true;
             }
-            if (window.size() == window.capacity()) return;
-            if (commandPipeline.hasActiveControl()) {
-                if (!pollControl()) return;
-                continue;
+            if (turn != null) turn.budgetExhausted = true;
+        } finally {
+            if (turn != null) {
+                turn.windowAtEnd = window.size();
+                turn.end();
+                turn.commit();
             }
-            var next = commandPipeline.pendingIngress().first();
-            if (next == null) return;
-            if (commandPipeline.isIngressBlocked(next.command)) return;
-            commandPipeline.clearBlockedIngress();
-            boolean eligible = state.prepareClusterPipelineScope(next.command, window);
-            boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
-            int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
-            if (prefix != 0) {
-                commandPipeline.rememberBlockedIngress(next.command, prefix);
-                // 记录等待决定，否则最繁忙的依赖等待会从诊断中消失。
-                if (!eligible) commandPipeline.recordControlFence();
-                else commandPipeline.recordDependencyFence(retry);
-                if (commandPipeline.hasCommittingHead()) return;
-                beginCommandCommit();
-                continue;
-            }
-            if (!eligible) {
-                if (state.requiresOwnerLaneAccessForPreparation(next.command)
-                        && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
-                CoreMatchingPhaseMetrics.recordBoundary("ingressToControl", next.command.header(), next.queuedNanos);
-                commandPipeline.beginControl(next);
-                state.assertClusterCallbackComplete();
-                beginCapture(next.position, next.timestamp);
-                commandPipeline.startProgressDeadline();
-                commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp, next.position,
-                        window.decodedIfPresent(next.command), false, next.fingerprint));
-                commandPipeline.recordControlProgress();
-                commandPipeline.rememberMatchingResponseSequence(
-                        state.matchingSequence(next.command.header().commandId()));
-                continue;
-            }
-            if (window.size() == 0) state.assertClusterCallbackComplete();
-            CoreMatchingPhaseMetrics.recordBoundary("ingressToAdmission", next.command.header(), next.queuedNanos);
-            long admissionStart = CoreMatchingPhaseMetrics.sampleStart(next.command.header());
-            var entry = window.add(next.session, next.command, next.timestamp, next.position);
-            CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
-                    window.decoded(next.command), true, next.fingerprint);
-            window.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
-            if (entry.sequence != 0) {
-                var pending = state.pendingMatching(entry.sequence);
-                pending.establishCommitFence(next.timestamp, next.position);
-                state.pendingMatching.partitionDependenciesChanged();
-            }
-            CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
-            entry.response = entry.sequence == 0 ? result : null;
-            commandPipeline.pendingIngress().remove();
-            commandPipeline.recordAdmission();
-            advanceMatching = true;
         }
     }
 
@@ -264,6 +277,9 @@ public final class TradingCoreOwner {
             return false;
         }
         commandPipeline.beginMatchingPoll();
+        // 保存不可变 header；退休会复用窗口槽位，不能随后再从 last 取命令。
+        var timingHeader = last.request.header();
+        long commitStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         // 新队首可能需要激活批量、派发结算或收取队列通知；不能因本轮已收集过而饿死续接。
         if (!advanceMatching && last.sequence != 0) {
             advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching(last.sequence));
@@ -275,16 +291,22 @@ public final class TradingCoreOwner {
                 && state.firstPendingMatchingSequence() <= last.sequence) {
             commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
                     progressBefore, state.hasLocalMatchingWork());
+            CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptWaiting", timingHeader, commitStart);
             checkProgressDeadline();
             return false;
         }
+        CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptTerminal", timingHeader, commitStart);
+        long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (window.size() == 1) state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, last.position);
+        CoreMatchingPhaseMetrics.recordBoundary("ownerRealtimePublication", timingHeader, publicationStart);
+        long retirementStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
         if (last.session != null) offerResponse(last.session, last.request, last.response);
         commandPipeline.finishHeadCommit();
         state.runtimeState.releaseCompletedSequentialLaneStage();
         if (window.size() == 0) progressRealtimeReads(System.nanoTime());
+        CoreMatchingPhaseMetrics.recordBoundary("ownerResponseAndRetirement", timingHeader, retirementStart);
         return true;
     }
 
