@@ -22,7 +22,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 /**
  * 兼容用的 Aeron Cluster 回调适配器。
  *
- * <p>生产节点使用 {@link ContinuousTradingClusterService} 直接连接
+ * <p>生产节点使用 {@link AeronTradingClusterService} 直接连接
  * {@link TradingCoreOwner}。这个类只保留旧的 ClusteredService 入口，供现有测试和
  * 独立回放工具使用，不拥有交易状态或命令推进逻辑。</p>
  */

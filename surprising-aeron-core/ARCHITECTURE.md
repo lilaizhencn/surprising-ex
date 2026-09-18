@@ -7,11 +7,12 @@
 当前生产节点的调用关系是：
 
 ```text
-SurprisingCoreBootstrap.main
-    -> ContinuousTradingClusterService
+SurprisingCoreApplication.main
+    -> AeronCoreLifecycle
+        -> AeronTradingClusterService
         -> Aeron Cluster service thread
         -> input queue
-        -> trading owner thread
+        -> TradingOwnerLoop
             -> TradingCoreOwner
                 -> TradingCoreRuntime
                     -> TradingCoreQueryRouter (read-only query protocol)
@@ -22,8 +23,8 @@ SurprisingCoreBootstrap.main
 
 关键边界：
 
-- `SurprisingCoreBootstrap` 只负责节点启动、Aeron/Archive/Consensus 配置和进程级错误处理。
-- `ContinuousTradingClusterService` 负责 Aeron 回调、输入输出队列、会话出口和 owner 线程生命周期。
+- `SurprisingCoreApplication` 负责 Spring 上下文启动，`AeronCoreLifecycle` 负责 Aeron/Archive/Consensus 生命周期和进程级错误处理。
+- `AeronTradingClusterService` 只负责 Aeron `ClusteredService` 回调和生命周期边界；`TradingOwnerLoop` 负责交易 Owner 线程和输入队列；`ClusterServiceEgress` 负责会话出口和响应交接。
 - `TradingCoreOwner` 负责已复制命令的准入、撮合推进、有序提交、实时读取和快照状态边界；不实现 `ClusteredService`，不访问真实 Aeron 会话。
 - `SurprisingClusteredService` 只保留旧的 `ClusteredService` 回调适配，供兼容测试和独立回放使用，生产入口不再依赖它。
 - `TradingCoreRuntime` 是状态所有权和组件组合根；`CoreCommandIngress`、`CoreDirectCommandFlow`、`CoreMatchingFlow`、`CoreRuntimeStateView` 和 `CoreRuntimeLifecycle` 分别拥有入口、直接命令、撮合在途、提交状态读视图和生命周期边界。`TradingCoreQueryRouter` 负责只读查询协议路由，不拥有业务状态。
@@ -34,7 +35,7 @@ SurprisingCoreBootstrap.main
 
 ```text
 CoreMessage / PlaceOrderCommand
-    -> ContinuousTradingClusterService.onSessionMessage
+    -> AeronTradingClusterService.onSessionMessage
     -> owner queue
     -> TradingCoreOwner.enqueueCommittedCommand
     -> TradingCoreRuntime.apply
@@ -79,9 +80,12 @@ CoreMessage / PlaceOrderCommand
 
 主要位置：
 
-- `surprising-aeron-service/.../SurprisingCoreBootstrap.java`
+- `surprising-aeron-service/.../SurprisingCoreApplication.java`
+- `surprising-aeron-service/.../config/AeronCoreLifecycle.java`
 - `surprising-aeron-service/.../cluster/ClusterTopology.java`
-- `surprising-aeron-service/.../orchestration/ContinuousTradingClusterService.java`
+- `surprising-aeron-service/.../orchestration/AeronTradingClusterService.java`
+- `surprising-aeron-service/.../orchestration/TradingOwnerLoop.java`
+- `surprising-aeron-service/.../orchestration/ClusterServiceEgress.java`
 - `surprising-aeron-service/.../orchestration/TradingCoreOwner.java`
 - `surprising-aeron-service/.../orchestration/TradingCoreQueryRouter.java`
 - `surprising-aeron-protocol/.../protocol`
@@ -215,13 +219,14 @@ ADL 对手方持仓变更。
 
 ## 5. 已完成的第一处代码边界
 
-`ContinuousTradingClusterService` 与交易 Owner 已按线程边界分开：
+`AeronTradingClusterService`、交易 Owner 线程和会话出口已按线程边界分开：
 
-1. `ContinuousTradingClusterService` 保留 Aeron `ClusteredService` 回调、会话、输入输出队列、快照发布和 owner 线程生命周期。
-2. `TradingCoreOwner` 只接收已复制的不可变命令，负责日志顺序、准入、撮合完成、提交、实时读取和权威状态快照边界。
-3. `TradingCoreRuntime` 继续作为交易 Owner 的组合根，不承担 Aeron 会话职责。
-4. `SurprisingClusteredService` 仅作为兼容适配器保留；它不拥有业务状态，不复制命令窗口或实时队列。
-5. 现货下单、成交、余额冻结、提交恢复和快照恢复均沿用原有逻辑，并由服务模块定向/全量测试覆盖。
+1. `AeronTradingClusterService` 保留 Aeron `ClusteredService` 回调、快照发布和生命周期入口。
+2. `TradingOwnerLoop` 独占 Owner 线程、输入队列和生命周期边界；`TradingCoreOwner` 只接收已复制的不可变命令，负责日志顺序、准入、撮合完成、提交、实时读取和权威状态快照边界。
+3. `ClusterServiceEgress` 独占会话包装、响应队列、编码和背压关闭策略。
+4. `TradingCoreRuntime` 继续作为交易 Owner 的组合根，不承担 Aeron 会话职责。
+5. `SurprisingClusteredService` 仅作为兼容适配器保留；它不拥有业务状态，不复制命令窗口或实时队列。
+6. 现货下单、成交、余额冻结、提交恢复和快照恢复均沿用原有逻辑，并由服务模块定向/全量测试覆盖。
 
 这次拆分的理由是存在真实的线程和协议边界，不是为了缩短文件或增加抽象层。下一处边界应在本轮测试和性能验证完成后再单独选择。
 

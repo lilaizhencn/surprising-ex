@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.config;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
-import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
+import com.surprising.aeron.service.orchestration.AeronTradingClusterService;
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
 import io.aeron.archive.client.AeronArchive;
@@ -34,10 +34,10 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
     private static final Logger log = LoggerFactory.getLogger(AeronCoreLifecycle.class);
 
     private final ClusterTopology topology;
-    private final ContinuousTradingClusterService clusteredService;
+    private final AeronTradingClusterService clusteredService;
     private final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
-    public AeronCoreLifecycle(ClusterTopology topology, ContinuousTradingClusterService clusteredService) {
+    public AeronCoreLifecycle(ClusterTopology topology, AeronTradingClusterService clusteredService) {
         this.topology = topology;
         this.clusteredService = clusteredService;
     }

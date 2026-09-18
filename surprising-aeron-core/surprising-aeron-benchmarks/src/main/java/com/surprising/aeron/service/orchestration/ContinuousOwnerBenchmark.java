@@ -28,7 +28,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     private String previousLaneWaitStrategy;
     private static final long TIME = 1_700_000_000_000L;
     /** 单一负载线程持有发送计数和响应计数；实际Owner运行于生产服务创建的线程。 */
-    private ContinuousTradingClusterService service;
+    private AeronTradingClusterService service;
     private ClientSession session;
     private long sequence, terminal, orderId = 1;
     private final long[] orders = new long[256];
@@ -91,8 +91,8 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                     if (method.getName().equals("id")) return 1L;
                     return zero(method.getReturnType());
                 });
-        service = new ContinuousTradingClusterService(productLine, (clusterContext, target) ->
-                new ContinuousTradingClusterService.SessionEgress() {
+        service = new AeronTradingClusterService(productLine, (clusterContext, target) ->
+                new ClusterServiceEgress.SessionEgress() {
                     public long offer(long term, long timestamp, org.agrona.DirectBuffer source, int offset, int length) {
                         return target.offer(source, offset, length);
                     }

@@ -13,7 +13,7 @@ import org.agrona.concurrent.UnsafeBuffer;
  * 已提交结果的独立Aeron出口，使用SDK的标准Cluster会话消息头。
  * 不调用限制在状态机回调中的ClientSession.offer，不写集群日志；仅Aeron服务线程使用。
  */
-final class SessionResponsePublication implements ContinuousTradingClusterService.SessionEgress {
+final class SessionResponsePublication implements ClusterServiceEgress.SessionEgress {
     /** 该会话拥有的发布器句柄，在关闭或卸任leader时释放。 */
     private final Publication publication;
     /** 每会话复用的SDK头部编码器与固定大小缓冲区。 */
