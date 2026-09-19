@@ -229,6 +229,9 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         closed = true;
         try {
             drain();
+            // Outside measured iterations: unchanged admitted orders must still enter Core
+            // Fact and snapshot before cancellation. Terminal-only checks could miss that loss.
+            verifyPendingSnapshotBoundary();
             byte[] snapshot = service.captureSnapshot();
             try (var restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
                 // 覆盖整批终态发布/缓冲复用，不能只核对每批首项是否已删除。

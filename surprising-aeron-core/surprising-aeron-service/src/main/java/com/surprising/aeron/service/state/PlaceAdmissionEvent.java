@@ -115,8 +115,9 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 runtime.placeOrderInLane(lane, userId, order, commandId,
                         requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedUser = lane.users.get(userId);
-                admittedOrder = lane.orders.get(order.orderId());
-                admittedReservation = lane.reservations.get(order.orderId());
+                // Cross-thread admission receipts must not alias Lane-owned mutable state.
+                admittedOrder = lane.orders.get(order.orderId()).publicationValue();
+                admittedReservation = lane.reservations.get(order.orderId()).publicationValue();
                 if (publicationBuffer == null) publicationBuffer = new LanePublication();
                 publication = publicationBuffer;
                 runtime.publishedUsers.stage(publication, userId, admittedUser);

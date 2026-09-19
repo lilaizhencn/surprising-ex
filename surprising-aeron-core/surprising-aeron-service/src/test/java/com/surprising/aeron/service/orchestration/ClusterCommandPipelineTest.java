@@ -233,11 +233,21 @@ class ClusterCommandPipelineTest {
                 var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                 assertThat(event.direct()).isTrue();
                 assertThat(event.ready()).isFalse();
+                // Freeze the Owner-visible admission while Matcher/Lanes advance independently.
+                live.progressUntil(() -> state.runtimeState.order(1000) != null);
+                var admittedOrder = state.runtimeState.order(1000);
+                var admittedReservation = state.runtimeState.reservation(1000);
+                var orderBeforeSettlement = admittedOrder.snapshot();
+                var reservationBeforeSettlement = admittedReservation.snapshot();
                 release.countDown();
                 // Do not call Owner progress/drain here: the Matcher and Lanes must finish on their own.
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
+                assertThat(admittedOrder).isEqualTo(orderBeforeSettlement);
+                assertThat(admittedReservation).isEqualTo(reservationBeforeSettlement);
+                assertThat(state.runtimeState.order(1000)).isSameAs(admittedOrder);
+                assertThat(state.runtimeState.reservation(1000)).isSameAs(admittedReservation);
                 if (batch) {
                     assertThat(pending.orderBatch.nextIndex).as("submission cursor belongs to Owner").isZero();
                     assertThat(state.batches.orderBatchMatcherShard(pending.orderBatch))

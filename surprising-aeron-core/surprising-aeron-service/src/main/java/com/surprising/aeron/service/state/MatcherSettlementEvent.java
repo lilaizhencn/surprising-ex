@@ -685,7 +685,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
             OrderRuntime admitted = lane.orders.get(plan.takerOrderId());
             if (admitted == null) throw new IllegalStateException("place admission order is missing from Lane");
-            batchStorage.admittedOrders[0] = admitted;
+            batchStorage.admittedOrders[0] = admitted.publicationValue();
         }
         if (changes == null) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);
@@ -694,7 +694,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
             if (batchPlans == null) {
                 applyPlan(lane, laneId, plan, instrument,
-                        baseAssetId, quoteAssetId, settleAssetId, delta);
+                        baseAssetId, quoteAssetId, settleAssetId, delta, null);
                 if (commitSequence != 0 || cancellation) {
                     runtime.stampMatcherOrders(lane, plan, commitTimestamp, commitClusterPosition);
                 }
@@ -704,7 +704,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 if ((batchPlan.requiredLaneMask() & laneMask) == 0) continue;
                 applyPlan(lane, laneId, batchPlan, batchInstruments[index],
                         batchBaseAssetIds[index], batchQuoteAssetIds[index],
-                        batchSettleAssetIds[index], delta);
+                        batchSettleAssetIds[index], delta,
+                        batchStorage == null ? null : batchStorage.admittedOrders[index]);
                 if (commitSequence != 0 || cancellation) {
                     runtime.stampMatcherOrders(
                             lane, batchPlan, commitTimestamp, commitClusterPosition);
@@ -754,7 +755,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     private void applyPlan(AccountLaneState lane, int laneId, MatcherSettlementPlan value,
                            CoreInstrumentState valueInstrument, int valueBaseAssetId,
-                           int valueQuoteAssetId, int valueSettleAssetId, RuntimeTreasuryDelta delta) {
+                           int valueQuoteAssetId, int valueSettleAssetId, RuntimeTreasuryDelta delta,
+                           OrderRuntime admissionVersion) {
         if (cancellation) {
             if (!value.rejectedTaker())
                 runtime.cancelOrderInLane(value.activeUserId(), value.takerOrderId(),
@@ -783,7 +785,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
                     runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
         }
-        runtime.completeMatcherPendingReservations(lane, value);
+        runtime.completeMatcherPendingReservations(lane, value, admissionVersion);
         var trigger = value.completedTrigger();
         if (trigger != null && runtime.currentLaneOwns(trigger.userId())) runtime.putTriggerOrder(trigger);
     }

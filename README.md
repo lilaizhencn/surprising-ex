@@ -47,6 +47,12 @@ publication 包含各发布表，不能重复相加；按 sequence 与 Settlemen
 “相等after-image”不能直接解释为“业务未变”：还需排除准入阶段可变引用共享，
 并保留提交元数据、命令完成、资金核对和恢复边界。相关验证见PERFORMANCE_VALIDATION.md。
 
+普通和批量准入分别在 `PlaceAdmissionEvent` / `PlaceBatchAdmissionEvent` 内冻结订单、冻结收据，
+Lane 后续原地成交不能修改 Owner 已接收的版本。`MatcherSettlementEvent` 交给实时输出的准入订单
+也必须是不可变版本。`completeMatcherPendingReservations` 保留完成计数和变更 ID，已有变更不重复覆盖，
+未变化时复用不可变准入版本；完整字段比较保留提交时间和位置语义，不能仅比较 revision。
+暂不取消 Owner 临时订单发布：非直连结算取单及实时成交事件仍依赖它，直接删除已被六产品线回归证伪。
+
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 
 ```mermaid

@@ -143,8 +143,9 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     runtime.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
                             coreSequence, null, timestamp, position);
-                    admittedOrders[index] = lane.orders.get(order.orderId());
-                    admittedReservations[index] = lane.reservations.get(order.orderId());
+                    // Matcher/Owner receive admission versions, never mutable Lane aliases.
+                    admittedOrders[index] = lane.orders.get(order.orderId()).publicationValue();
+                    admittedReservations[index] = lane.reservations.get(order.orderId()).publicationValue();
                     admittedCount++;
                 }
                 admittedUser = lane.users.get(userId);

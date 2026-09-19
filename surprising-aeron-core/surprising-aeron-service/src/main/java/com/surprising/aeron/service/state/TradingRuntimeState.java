@@ -2607,7 +2607,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         return matcherSettlementOrderScratch;
     }
 
-    void completeMatcherPendingReservations(AccountLaneState lane, MatcherSettlementPlan plan) {
+    void completeMatcherPendingReservations(AccountLaneState lane, MatcherSettlementPlan plan,
+                                            OrderRuntime admissionVersion) {
         for (int index = 0; index < plan.orderCount(); index++) {
             long orderId = plan.orderId(index);
             if (lane.pendingReservationSequences.getIfAbsent(orderId, 0) != plan.coreSequence()) continue;
@@ -2624,9 +2625,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.completePendingReservation(orderId, plan.coreSequence());
             MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
             if (changes != null) changes.completedPending[lane.laneId()]++;
-            // 新订单即使未成交也必须进入终态发布；不再靠复制一份时间戳版本触发变更。
+            // Completion still contributes a changed ID, but an unchanged admission already
+            // has an immutable version. Reuse it instead of freezing the Lane value again.
+            // Compare all fields: commit metadata may change without incrementing revision.
             OrderRuntime admitted = lane.orders.get(orderId);
-            publishOrder(orderId, admitted);
+            if (changes == null || !changes.laneDeltas[lane.laneId()].orders.containsKey(orderId)) {
+                publishOrder(orderId, admissionVersion != null && admissionVersion.equals(admitted)
+                        ? admissionVersion : admitted);
+            }
             if (changes == null) {
                 changedOrder(orderId, admitted);
                 changedUsers.add(reservation.userId());
