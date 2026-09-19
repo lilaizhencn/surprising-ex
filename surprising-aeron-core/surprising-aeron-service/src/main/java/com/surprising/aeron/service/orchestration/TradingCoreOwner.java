@@ -284,16 +284,18 @@ public final class TradingCoreOwner {
         if (!advanceMatching && last.sequence != 0) {
             advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching(last.sequence));
         }
-        state.commits.commitReadyMatching(1,
-                last.timestamp, last.position, false, last.sequence,
-                dispatchThrough, advanceMatching, matchingCommitHandler);
-        if (state.firstPendingMatchingSequence() != 0
-                && state.firstPendingMatchingSequence() <= last.sequence) {
-            commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
-                    progressBefore, state.hasLocalMatchingWork());
-            CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptWaiting", timingHeader, commitStart);
-            checkProgressDeadline();
-            return false;
+        if (last.sequence != 0) {
+            CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
+                    last.timestamp, last.position, last.sequence, dispatchThrough, advanceMatching);
+            if (terminalResponse == null) {
+                commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
+                        progressBefore, state.hasLocalMatchingWork());
+                CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptWaiting", timingHeader, commitStart);
+                checkProgressDeadline();
+                return false;
+            }
+            if (last.response != null) throw new IllegalStateException("duplicate pipeline terminal response");
+            last.response = terminalResponse;
         }
         CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptTerminal", timingHeader, commitStart);
         long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);

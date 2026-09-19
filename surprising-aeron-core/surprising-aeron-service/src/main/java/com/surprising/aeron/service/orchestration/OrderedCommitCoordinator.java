@@ -1188,32 +1188,7 @@ final class OrderedCommitCoordinator {
                 }
                 if (pending == null) break;
                 long sequence = pending.sequence();
-                pending.establishCommitFence(clusterTimestamp, clusterPosition);
-                CoreResponse response;
-                if (owner.hasPendingMatchingRejection(sequence)) {
-                    if (pending.isMatchingSubmitted()
-                            && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
-                        if (!pending.settlementEvent().complete()) break;
-                    } else if (pending.isMatchingSubmitted()) {
-                        CommandSlot context = owner.laneCommandContexts.required(sequence);
-                        if (context.matchingResult() == null && context.takeMatchingCompletion() == null) {
-                            // The Matcher was intentionally allowed to run ahead of the Lane. Do
-                            // not retire the command slot until its result has been consumed.
-                            break;
-                        }
-                    }
-                    response = completeRejectedMatching(sequence);
-                } else {
-                    CommandSlot context = owner.laneCommandContexts.required(sequence);
-                    com.surprising.aeron.service.matching.CoreMatchingResult matching = matchingResult(pending, context);
-                    if (matching == null) {
-                        // The completion queue can be observed before the immutable Lane fact
-                        // is visible (or while a retryable continuation is still outstanding).
-                        // Keep the ordered head for the next Owner turn.
-                        break;
-                    }
-                    response = tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
-                }
+                CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
                 attempts++;
                 owner.pendingMatching.progressChanged();
                 // A Matcher or Lane notification may arrive later.  Leave the pending head in
@@ -1228,6 +1203,53 @@ final class OrderedCommitCoordinator {
         } finally {
             owner.endDownstreamPublicationBatch();
         }
+    }
+
+    /**
+     * Commits one ordered Matcher head and returns its response directly to the command window
+     * owner. Sequence-zero commands never enter this method because they already completed during
+     * admission and have no pending Matcher slot.
+     */
+    CoreResponse commitReadyMatchingHead(long clusterTimestamp, long clusterPosition,
+                                         long throughSequence, long dispatchThroughSequence,
+                                         boolean advanceProgress) {
+        owner.assertOwner();
+        owner.assertHealthy();
+        if (throughSequence <= 0) throw new IllegalArgumentException("matching head sequence must be positive");
+        owner.beginDownstreamPublicationBatch();
+        try {
+            if (advanceProgress) {
+                advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+            }
+            if (owner.pendingMatching.firstSequence() > throughSequence) return null;
+            CommandSlot pending = pollReadyPending();
+            if (pending == null || pending.sequence() > throughSequence) return null;
+            CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
+            owner.pendingMatching.progressChanged();
+            return response;
+        } finally {
+            owner.endDownstreamPublicationBatch();
+        }
+    }
+
+    /** Applies one ready slot while preserving the existing response-routing boundary. */
+    private CoreResponse commitReadyPending(CommandSlot pending, long clusterTimestamp, long clusterPosition) {
+        long sequence = pending.sequence();
+        pending.establishCommitFence(clusterTimestamp, clusterPosition);
+        if (owner.hasPendingMatchingRejection(sequence)) {
+            if (pending.isMatchingSubmitted()
+                    && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
+                if (!pending.settlementEvent().complete()) return null;
+            } else if (pending.isMatchingSubmitted()) {
+                CommandSlot context = owner.laneCommandContexts.required(sequence);
+                if (context.matchingResult() == null && context.takeMatchingCompletion() == null) return null;
+            }
+            return completeRejectedMatching(sequence);
+        }
+        CommandSlot context = owner.laneCommandContexts.required(sequence);
+        com.surprising.aeron.service.matching.CoreMatchingResult matching = matchingResult(pending, context);
+        return matching == null ? null
+                : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
     }
 
     void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition, long throughSequence) {

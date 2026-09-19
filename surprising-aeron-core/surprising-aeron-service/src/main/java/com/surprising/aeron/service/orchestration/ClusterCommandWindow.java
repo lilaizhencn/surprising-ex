@@ -33,8 +33,6 @@ public final class ClusterCommandWindow {
     /** Order ID to newest physical slot + 1. */
     private final org.agrona.collections.Long2LongHashMap orderSlots =
             new org.agrona.collections.Long2LongHashMap(0);
-    /** Core sequence to physical slot + 1 for completion callbacks. */
-    private final org.agrona.collections.Long2LongHashMap completionSlots;
     private long lastMatchingSequence;
     private int lastMatchingPhysical = -1;
 
@@ -57,7 +55,6 @@ public final class ClusterCommandWindow {
             throw new IllegalArgumentException("owner command window must be a power of two in [64,1024]");
         entries = new Entry[capacity];
         indexMask = capacity - 1;
-        completionSlots = new org.agrona.collections.Long2LongHashMap(capacity, 0.65f, 0);
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
@@ -217,36 +214,21 @@ public final class ClusterCommandWindow {
         return count + 1;
     }
 
-    /** Bind the assigned core sequence and index the response callback. */
+    /** Bind the assigned core sequence. Ordered heads receive their response directly. */
     public void bindSequence(Entry entry, long sequence) {
         if (entry == null || entry.physicalSlot < 0 || sequence < 0)
             throw new IllegalArgumentException("invalid command window sequence binding");
-        if (entry.sequence != 0) completionSlots.remove(entry.sequence);
         entry.sequence = sequence;
         if (sequence == 0) return;
-        long slot = entry.physicalSlot + 1L;
-        long existing = completionSlots.get(sequence);
-        if (existing == 0) completionSlots.put(sequence, slot);
         lastMatchingSequence = sequence;
         lastMatchingPhysical = entry.physicalSlot;
     }
 
+    /** Compatibility callback for control/replay paths; normal ordered heads bypass this scan. */
     public void complete(long sequence, CoreResponse response) {
-        long slot = completionSlots.get(sequence);
-        if (slot != 0) {
-            Entry entry = entries[(int) slot - 1];
-            if (entry.physicalSlot == (int) slot - 1 && entry.sequence == sequence) {
-                if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
-                entry.response = response;
-                return;
-            }
-            completionSlots.remove(sequence);
-        }
         for (int i = 0; i < size; i++) {
             Entry entry = get(i);
             if (entry.sequence != sequence) continue;
-            if (completionSlots.get(sequence) == 0)
-                completionSlots.put(sequence, entry.physicalSlot + 1L);
             if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
             entry.response = response;
             return;
@@ -277,9 +259,6 @@ public final class ClusterCommandWindow {
                 entry.orders[k] = 0;
             }
             if (entry.sequence != 0) {
-                long removedSlot = completionSlots.remove(entry.sequence);
-                if (removedSlot != 0 && removedSlot != physical + 1L)
-                    completionSlots.put(entry.sequence, removedSlot);
                 removedLastMatching |= physical == lastMatchingPhysical;
             }
             entry.orderCount = 0;
