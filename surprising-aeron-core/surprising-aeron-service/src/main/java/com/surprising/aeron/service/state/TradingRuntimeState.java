@@ -3890,11 +3890,21 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public long orderIdByClientValue(long userId, long clientKey) {
         assertOwner();
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) {
+            if (scoped.laneId() != topology.accountLaneId(userId)) {
+                throw new IllegalStateException("client-order lookup crossed its owner Lane");
+            }
+            return orderIdByClientValue(scoped, userId, clientKey);
+        }
         return onLane(userId, lane -> {
-            LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-            return userClientOrders == null || !userClientOrders.containsKey(clientKey)
-                    ? 0L : userClientOrders.get(clientKey);
+            return orderIdByClientValue(lane, userId, clientKey);
         });
+    }
+
+    private static long orderIdByClientValue(AccountLaneState lane, long userId, long clientKey) {
+        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        return userClientOrders == null ? 0L : userClientOrders.get(clientKey);
     }
 
     public void putUser(UserRuntime user) {
@@ -4443,41 +4453,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         captureUserBefore(userId);
         captureOrderBefore(orderId);
         captureReservationBefore(orderId);
-        CanceledOrder canceled = onLane(userId, lane -> {
-            OrderRuntime order = preparedOrder == null ? lane.orders.get(orderId) : preparedOrder;
-            ReservationRuntime reservation = preparedReservation == null
-                    ? lane.reservations.get(orderId) : preparedReservation;
-            if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
-                throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
-            }
-            if (releaseUnits != reservation.reservedUnits()) {
-                throw new IllegalArgumentException("runtime cancellation release mismatch: " + orderId);
-            }
-            IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
-            BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
-            if (balance == null) {
-                throw new IllegalArgumentException("runtime cancellation balance is missing: " + orderId);
-            }
-            captureBalanceBefore(userId, reservation.assetId());
-            balance.release(releaseUnits);
-            if (matcherSettlementChangesScope.get() != null && laneCommandScope.get() == lane) {
-                long previousReserved = reservation.reservedUnits();
-                reservation.releaseInPlace(releaseUnits);
-                lane.updatePendingReservationInPlace(reservation, previousReserved);
-                OrderRuntime terminalOrder = lane.updateOrderStatusInPlace(orderId, terminalStatus,
-                        Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
-                captureBalanceAfter(lane, userId, reservation.assetId());
-                return new CanceledOrder(terminalOrder, reservation);
-            }
-            OrderRuntime terminalOrder = order.withStatus(terminalStatus,
-                    Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
-            ReservationRuntime released = reservation.release(releaseUnits);
-            lane.replacePendingReservation(reservation, released);
-            lane.putOrder(terminalOrder);
-            lane.reservations.put(orderId, released.laneValue());
-            captureBalanceAfter(lane, userId, reservation.assetId());
-            return new CanceledOrder(terminalOrder, released);
-        });
+        AccountLaneState scoped = laneCommandScope.get();
+        CanceledOrder canceled = scoped == null
+                ? onLane(userId, lane -> releaseOrderToTerminalInLane(lane, orderId, userId, releaseUnits,
+                        commitTimestamp, commitPosition, terminalStatus, preparedOrder, preparedReservation))
+                : releaseOrderToTerminalInLane(scoped, orderId, userId, releaseUnits,
+                        commitTimestamp, commitPosition, terminalStatus, preparedOrder, preparedReservation);
         publishOrder(orderId, canceled.order());
         publishReservation(orderId, canceled.reservation());
         if (matcherSettlementChangesScope.get() == null) {
@@ -4487,6 +4468,48 @@ public final class TradingRuntimeState implements AutoCloseable {
             markBalancesChanged();
         }
         advanceUserRevision(userId);
+    }
+
+    private CanceledOrder releaseOrderToTerminalInLane(
+            AccountLaneState lane, long orderId, long userId, long releaseUnits,
+            long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus,
+            OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
+        if (lane.laneId() != topology.accountLaneId(userId)) {
+            throw new IllegalStateException("terminal order release crossed its owner Lane");
+        }
+        OrderRuntime order = preparedOrder == null ? lane.orders.get(orderId) : preparedOrder;
+        ReservationRuntime reservation = preparedReservation == null
+                ? lane.reservations.get(orderId) : preparedReservation;
+        if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
+            throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
+        }
+        if (releaseUnits != reservation.reservedUnits()) {
+            throw new IllegalArgumentException("runtime cancellation release mismatch: " + orderId);
+        }
+        IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
+        BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
+        if (balance == null) {
+            throw new IllegalArgumentException("runtime cancellation balance is missing: " + orderId);
+        }
+        captureBalanceBefore(userId, reservation.assetId());
+        balance.release(releaseUnits);
+        if (matcherSettlementChangesScope.get() != null && laneCommandScope.get() == lane) {
+            long previousReserved = reservation.reservedUnits();
+            reservation.releaseInPlace(releaseUnits);
+            lane.updatePendingReservationInPlace(reservation, previousReserved);
+            OrderRuntime terminalOrder = lane.updateOrderStatusInPlace(orderId, terminalStatus,
+                    Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
+            captureBalanceAfter(lane, userId, reservation.assetId());
+            return new CanceledOrder(terminalOrder, reservation);
+        }
+        OrderRuntime terminalOrder = order.withStatus(terminalStatus,
+                Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
+        ReservationRuntime released = reservation.release(releaseUnits);
+        lane.replacePendingReservation(reservation, released);
+        lane.putOrder(terminalOrder);
+        lane.reservations.put(orderId, released.laneValue());
+        captureBalanceAfter(lane, userId, reservation.assetId());
+        return new CanceledOrder(terminalOrder, released);
     }
 
     void cancelOrderInLane(long userId, long orderId) {
@@ -4520,7 +4543,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("rejected order reservation is missing: " + orderId);
         }
         releaseOrderToTerminal(orderId, userId, reservation.reservedUnits(), commitTimestamp, commitPosition,
-                CoreOrderStatus.REJECTED);
+                CoreOrderStatus.REJECTED, order, reservation);
     }
 
     /** Matcher/Lane hot path: release a terminal order's remaining reservation in place. */
