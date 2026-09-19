@@ -27,6 +27,11 @@ Surprising 是一个正在开发和验证中的多产品线交易系统。本仓
 资金校验、发布与响应边界。`OwnerCommandPipelineState` 直接引用窗口队首及实际依赖末项，
 不复制命令序号、不维护单元素“批量前缀”；依赖项退休时清除引用，再复用槽位。
 
+Lane 终态合并时，`LanePublication.publish` 对路由删除 ID 只在删除集合遍历中应用一次，
+包括没有 after-image 的订单/冻结删除；变更 ID 的首次出现顺序不变。
+`TradingRuntimeState.LaneDelta` 的终态收据只按 count 读取，复用时保留原语数组、重置 count，
+清空客户号和订单对象引用；终态保留索引的幂等查找仍保留。
+
 诊断时通过 `core.settlementLatencyDiagnostics=true` 和 `owner-commit-profile.jfc` 启用稀疏 JFR：
 `CoreMatchingPhaseMetrics` 区分提交尝试（等待/终态）、事实发布、终态记账、实时发布和回复退休；
 事实发布/记账包含在提交尝试内，不可重复相加。`OwnerTurn` 每 64 个非空 FIFO 轮次采样退休数、

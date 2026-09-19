@@ -1375,7 +1375,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             publication.bind(state, this);
         }
 
-        /** Returns terminal identity data already collected by the Lane. */
+        /** Returns terminal identity data already collected by the Lane; only indices below count are valid. */
         public int terminalOrderCount() { return terminalOrderCount; }
         public long terminalOrderId(int index) { return terminalOrderIds[index]; }
         public long terminalOrderUser(int index) { return terminalOrderUsers[index]; }
@@ -1629,8 +1629,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             publication = null;
             java.util.Arrays.fill(terminalOrderClients, 0, terminalOrderCount, null);
             java.util.Arrays.fill(terminalOrderValues, 0, terminalOrderCount, null);
-            java.util.Arrays.fill(terminalOrderIds, 0, terminalOrderCount, 0);
-            java.util.Arrays.fill(terminalOrderUsers, 0, terminalOrderCount, 0);
+            // 原语列不持有引用；count 是唯一有效边界，recordTerminalOrder 先完整覆盖再递增。
             terminalOrderCount = 0;
             users.clear();
             orders.clear();

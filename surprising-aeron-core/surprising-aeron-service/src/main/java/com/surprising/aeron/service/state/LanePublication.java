@@ -57,13 +57,14 @@ final class LanePublication {
             });
             changes.orders.forEach((id, value) -> {
                 if (changedOrders != null) changedOrders.add(id);
-                owner.publishedOrders.applyPublished(id, changes.removedOrderRoutes.contains(id) ? null : value);
+                // 删除由下面的路由集合统一应用，不先删除一次再重复探测发布表。
+                if (!changes.removedOrderRoutes.contains(id)) owner.publishedOrders.applyPublished(id, value);
             });
             changes.reservations.drainTo((id, value) -> {
                 if (changedOrders != null) changedOrders.add(id);
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
-                owner.publishedReservations.applyPublished(
-                        id, changes.removedReservationRoutes.contains(id) ? null : value);
+                if (!changes.removedReservationRoutes.contains(id))
+                    owner.publishedReservations.applyPublished(id, value);
                 owner.changedReservations.add(id);
             });
             changes.positions.forEach((id, value) -> {
@@ -73,11 +74,11 @@ final class LanePublication {
             // Terminal cleanup may intentionally omit a zero-reservation after-image.  Apply
             // route removals independently so the Owner cannot retain a stale reservation/order
             // merely because the Lane had no value record to drain.
-            changes.removedOrderRoutes.forEach(id -> owner.publishedOrders.remove(id));
+            changes.removedOrderRoutes.forEach(id -> {
+                owner.publishedOrders.remove(id);
+                if (changedOrders != null) changedOrders.add(id);
+            });
             changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.remove(id));
-            if (changedOrders != null) {
-                changes.removedOrderRoutes.forEach(changedOrders::add);
-            }
             changes.removedOrderRoutes.clear();
             changes.removedReservationRoutes.clear();
             delta = null;

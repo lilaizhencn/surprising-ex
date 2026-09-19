@@ -5,6 +5,83 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class LanePublishedMapTest {
+    @Test void terminalRoutesDeleteEachPublishedKeyOnceIncludingMissingAfterImages() throws Exception {
+        for (boolean collectChangedIds : new boolean[]{false, true}) {
+            try (var runtime = new TradingRuntimeState()) {
+                var orderRemovals = recordRemovals(runtime.publishedOrders);
+                var reservationRemovals = recordRemovals(runtime.publishedReservations);
+                for (long id = 1; id <= 5; id++) {
+                    runtime.publishedOrders.put(id, new OrderRuntime(id, 7, 0, 1).snapshot());
+                    runtime.publishedReservations.put(id, new ReservationRuntime(id, 7, 0, 1).snapshot());
+                }
+                var resting = runtime.publishedOrders.get(4);
+                var delta = new TradingRuntimeState.LaneDelta();
+                // 1: deleted with an after-image; 2: explicit null plus a route deletion;
+                // 3: route only; 4: unchanged live value; 5: null only; 6: already absent.
+                delta.orders.put(1, new OrderRuntime(1, 7, 0, 1, true).snapshot());
+                delta.reservations.put(1, new ReservationRuntime(1, 7, 0, 1).snapshot());
+                for (long id : new long[]{2, 5, 6}) {
+                    delta.orders.put(id, null);
+                    delta.reservations.put(id, null);
+                }
+                delta.orders.put(4, resting.snapshot());
+                delta.reservations.put(4, runtime.publishedReservations.get(4).snapshot());
+                for (long id : new long[]{1, 2, 3, 6}) {
+                    delta.removeOrderRoute(id);
+                    delta.removeReservationRoute(id);
+                }
+                var expectedChanged = new java.util.LinkedHashSet<Long>();
+                delta.orders.forEach((id, value) -> expectedChanged.add(id));
+                delta.reservations.forEach((id, value) -> expectedChanged.add(id));
+                delta.removedOrderRoutes.forEach(expectedChanged::add);
+                var changedOrders = collectChangedIds
+                        ? new com.surprising.aeron.service.command.support.PrimitiveLongChangeSet() : null;
+                var changedUsers = collectChangedIds
+                        ? new com.surprising.aeron.service.command.support.PrimitiveLongChangeSet() : null;
+                delta.preparePublication(runtime);
+                var publication = delta.publication;
+                publication.publish(changedUsers, changedOrders);
+                for (long id : new long[]{1, 2, 3, 5, 6}) {
+                    assertThat(runtime.publishedOrders.get(id)).isNull();
+                    assertThat(runtime.publishedReservations.get(id)).isNull();
+                    assertThat(orderRemovals.removals).containsEntry(id, 1);
+                    assertThat(reservationRemovals.removals).containsEntry(id, 1);
+                }
+                assertThat(orderRemovals.removals).hasSize(5);
+                assertThat(reservationRemovals.removals).hasSize(5);
+                assertThat(runtime.publishedOrders.get(4)).isSameAs(resting);
+                assertThat(runtime.publishedReservations.get(4)).isNotNull();
+                if (collectChangedIds) {
+                    assertThat(changedOrders).containsExactlyElementsOf(expectedChanged);
+                    assertThat(changedUsers).containsExactly(7L);
+                }
+                assertThat(delta.removedOrderRoutes.isEmpty()).isTrue();
+                assertThat(delta.removedReservationRoutes.isEmpty()).isTrue();
+                publication.publish(changedUsers, changedOrders);
+                assertThat(orderRemovals.removals.values()).containsOnly(1);
+                assertThat(reservationRemovals.removals.values()).containsOnly(1);
+            }
+        }
+    }
+
+    /** Test-only operation counts: no counters or injection hooks in the production map. */
+    private static <V> RemovalCounts<V> recordRemovals(LanePublishedMap<V> map) throws Exception {
+        var counts = new RemovalCounts<V>();
+        var field = LanePublishedMap.class.getDeclaredField("values");
+        field.setAccessible(true);
+        field.set(map, counts);
+        return counts;
+    }
+
+    private static final class RemovalCounts<V> extends org.agrona.collections.Long2ObjectHashMap<V> {
+        final java.util.Map<Long, Integer> removals = new java.util.HashMap<>();
+
+        @Override public V remove(long key) {
+            removals.merge(key, 1, Integer::sum);
+            return super.remove(key);
+        }
+    }
+
     @Test void recycledBatchAdmissionDiscardsUnpublishedValuesAndRetainsCapacity() throws Exception {
         var event = new PlaceBatchAdmissionEvent();
         var publication = new LanePublication();
@@ -36,6 +113,10 @@ class LanePublishedMapTest {
     @Test void settlementReusesPublicationAndDiscardsUnpublishedReferences() {
         var runtime = new TradingRuntimeState();
         var delta = new TradingRuntimeState.LaneDelta();
+        runtime.publishedOrders.put(99, new OrderRuntime(99, 7, 0, 1));
+        runtime.publishedReservations.put(99, new ReservationRuntime(99, 7, 0, 1));
+        delta.removeOrderRoute(99);
+        delta.removeReservationRoute(99);
         delta.users.put(7, new UserRuntime(7));
         delta.preparePublication(runtime);
         var buffer = delta.publication;
@@ -49,6 +130,8 @@ class LanePublishedMapTest {
         assertThat(delta.reservations.isEmpty()).isTrue();
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(7)).isNull();
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(8)).isNotNull();
+        assertThat(runtime.publishedOrders.get(99)).isNotNull();
+        assertThat(runtime.publishedReservations.get(99)).isNotNull();
         delta.clear();
         for (int i = 10; i < 50; i++) delta.users.put(i, new UserRuntime(i));
         delta.preparePublication(runtime);

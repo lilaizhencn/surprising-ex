@@ -231,12 +231,17 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             drain();
             byte[] snapshot = service.captureSnapshot();
             try (var restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+                // 覆盖整批终态发布/缓冲复用，不能只核对每批首项是否已删除。
+                var restoredState = restored.tradingState();
+                if (!restoredState.orders().isEmpty())
+                    throw new IllegalStateException("canceled batch items remained in restored active orders");
                 for (int i = 0; i < 256; i++) {
-                    var balance = restored.tradingState().user(1000 + i).balances().get(asset);
+                    var user = restoredState.user(1000 + i);
+                    var balance = user.balances().get(asset);
                     if (balance.availableUnits() != 20000 || balance.lockedUnits() != 0)
                         throw new IllegalStateException("funds or reservations differ after snapshot restore");
-                    if (orders[i] != 0 && restored.tradingState().order(orders[i]) != null)
-                        throw new IllegalStateException("canceled order remained in restored active orders");
+                    if (!user.reservations().isEmpty())
+                        throw new IllegalStateException("terminal reservation remained after snapshot restore");
                 }
             }
             if (timerCalls != 0 || apiCalls == 0 || terminal != sequence)
