@@ -39,4 +39,22 @@ class OwnerIndexedChangesTest {
         assertThat(owner.get(9)).isEqualTo("after-control");
         owner.forEachIndexed((id, value, flag, index) -> { assertThat(flag).isTrue(); assertThat(index).isEqualTo("last-index"); });
     }
+
+    @Test void drainConsumesDirectAndLaneValuesAndClearsRetainedReferences() {
+        var owner = new OwnerIndexedChanges<String, Void>();
+        var lane = new RuntimeIndexedChangeBuffer<String, Void>();
+        var otherLane = new RuntimeIndexedChangeBuffer<String, Void>();
+        lane.put(1, "lane");
+        otherLane.put(2, "other-lane");
+        owner.adopt(2, lane);
+        owner.adopt(4, otherLane);
+        var values = new HashMap<Long, String>();
+
+        owner.drainTo(values::put);
+
+        assertThat(values).containsEntry(1L, "lane").containsEntry(2L, "other-lane");
+        assertThat(owner.isEmpty()).isTrue();
+        owner.put(3, "reused");
+        assertThat(owner.get(3)).isEqualTo("reused");
+    }
 }

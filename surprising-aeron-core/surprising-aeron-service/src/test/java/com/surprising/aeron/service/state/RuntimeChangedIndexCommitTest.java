@@ -92,10 +92,11 @@ class RuntimeChangedIndexCommitTest {
         });
         runtime.removePosition(positionKey, userId);
         indexes.coordinator.applyCurrent(runtime, identities);
-        runtime.releaseRetiredPositionIdentities(identities);
+        runtime.clearCommittedChanges(identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isNull();
         assertThat(identities.findPositionKey(userId, "BTC-USDT:NET")).isNull();
+        assertThat(runtime.snapshotProjectionStateDirty()).isFalse();
         runtime.close();
     }
 

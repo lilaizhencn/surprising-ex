@@ -96,8 +96,7 @@ final class CommitPublication {
                 owner.currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
                 owner.currentProjectionPoint.completeSequence();
                 runtimePatchRevision = owner.runtimeState.committedRevision();
-                owner.runtimeState.releaseRetiredPositionIdentities(owner.identities);
-                owner.runtimeState.clearChangedKeys();
+                owner.runtimeState.clearCommittedChanges(owner.identities);
             } catch (RuntimeException failure) {
                 owner.commitPublicationFailure = new IllegalStateException(
                         "owner commit failed after deterministic mutation; restart from snapshot and log is required",

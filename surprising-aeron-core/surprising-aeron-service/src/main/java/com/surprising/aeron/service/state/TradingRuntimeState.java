@@ -4842,6 +4842,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
+    /**
+     * Release identities only after journal publication and clear the two traversed buffers at
+     * the same time. Other changed keys still follow the normal commit cleanup below.
+     */
+    public void clearCommittedChanges(RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (identities == null) throw new IllegalArgumentException("runtime identities are required");
+        changedPositions.drainTo((positionKey, value) -> {
+            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
+        });
+        changedRiskSnapshots.drainTo((positionKey, value) -> {
+            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
+        });
+        clearChangedKeys();
+    }
+
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
         if (publishedPositions.get(positionKey) == null && publishedRiskSnapshots.get(positionKey) == null) {
             identities.releasePositionKey(positionKey);

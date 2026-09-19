@@ -72,6 +72,16 @@ final class OwnerIndexedChanges<V, I> {
             lanes[lane].forEach(consumer);
         }
     }
+    /** Consume changed values and clear their retained references in the same traversal. */
+    void drainTo(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
+        direct.drainTo(consumer);
+        long remaining = laneMask;
+        while (remaining != 0) {
+            int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
+            lanes[lane].drainTo(consumer);
+        }
+        laneMask = 0;
+    }
     org.eclipse.collections.api.iterator.LongIterator longIterator() {
         return new org.eclipse.collections.api.iterator.LongIterator() {
             long remaining = laneMask;
