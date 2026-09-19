@@ -66,7 +66,10 @@ final class LanePublication {
             changes.orders.forEach((id, value) -> {
                 if (changedOrders != null) changedOrders.add(id);
                 // 删除由下面的路由集合统一应用，不先删除一次再重复探测发布表。
-                if (!changes.removedOrderRoutes.contains(id)) owner.publishedOrders.applyPublished(id, value);
+                if (timing != null && timing.mapTiming) timing.ordersVisited++;
+                if (!changes.removedOrderRoutes.contains(id))
+                    owner.publishedOrders.applyPublished(id, value, timing != null && timing.mapTiming ? timing : null);
+                else if (timing != null && timing.mapTiming) timing.ordersSkipped++;
             });
             if (timing != null) { timing.ordersNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.reservations.drainTo((id, value) -> {
@@ -86,10 +89,10 @@ final class LanePublication {
             // route removals independently so the Owner cannot retain a stale reservation/order
             // merely because the Lane had no value record to drain.
             changes.removedOrderRoutes.forEach(id -> {
-                owner.publishedOrders.remove(id);
+                owner.publishedOrders.removePublished(id, timing);
                 if (changedOrders != null) changedOrders.add(id);
             });
-            changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.remove(id));
+            changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.removePublished(id, timing));
             changes.removedOrderRoutes.clear();
             changes.removedReservationRoutes.clear();
             if (timing != null) timing.removalsNanos = System.nanoTime() - started;

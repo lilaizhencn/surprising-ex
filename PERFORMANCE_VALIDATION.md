@@ -545,3 +545,129 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 三份JFR分别136s/133s/132s，均DataLoss0；本轮node、client、JMH fork和分析进程已全部退出。
 - 只将本轮两个Cluster/Archive/JFR目录、JMH输出、日志和分析脚本约6.2GiB移至 `/Users/atomex/.Trash/surprising-ex-merge-detail-20260919/`，可恢复；原target/tmp路径仅作历史定位，没有删除或改写其他轮次及用户产物。
 - 提交范围仅本轮诊断事件、TradingRuntimeState/LanePublication采样、ClusterCommandPipelineTest断言、profile新增事件、README和本节记录。既有AGENTS.md、Owner/Matcher/Lane等未提交修改及历史文档追加段保留原样，不纳入本次提交。
+
+## 2026-09-19 发布表操作与删除链验证（map-detail-20260919）
+
+### 采集前计划
+
+- 用户要求验证具体耗时与彻底消除工作的方案；当前master a4935954+既有工作区，旧版本对照不适用，不检出历史代码。本轮先诊断，不改变资金/终态/顺序，不先更换哈希表或取消校验。
+- 假设A：删除存在长探测/后移链；用实际表的只读稀疏观察检验，搜索/扫描各最多128槽，超限计censored，不做全表扫描。假设B：订单发布主要耗在相等对象的比较或重复get+put；记录get/equals/put耗时和次数、相等/同引用命中、删除路由跳过数。若链短或比较占比低，否定该方向的“大幅收益”预期。
+- 使用现有OwnerSettlementMerge事件，1/2048计时、另一不相交1/2048观察删除链；结构检查会预热缓存，禁止把其删除时间混入计时。仅diagnostic调用以反射只读访问Agrona keys/values，模拟compactChain槽位移动数量但不修改数组；无副本/新业务状态，默认关闭不执行该检查。先测试碰撞、环绕、删除缺失、对象身份保留及原有单次删除边界。
+- 用户此前已明确本机，本轮沿用该授权；不修改AGENTS全局政策。HotSpot Corretto27+33-FR/Maven3.9.16/macOS26.7 x86_64/16逻辑CPU/16GiB，磁盘344GiB可用。CodeGraph工具不可用，按源码和依赖定位；Agrona删除算法核对本地sources.jar及运行时回归。
+- 真实单节点Aeron网络/Archive保留，LINEAR_PERPETUAL MIXED、maker运行，1matcher/4Lane、global/session in-flight256、batch20、128symbols、1000retail/1385total、seed25620、BUSY_SPIN、Owner input64；节点512m–1536m/client128m–512m/G1，不绑核。预热30s/稳定60s/独立排空，无profiler和JFR各1轮。JFR沿用profile，分进程max256m，20ms执行采样、NMT/GC/CPU；中部epoch两端2s保护仍非完整跨进程校准。
+- 正确性门槛：零错误/超时/未完成，accepted=terminal business/Core，资金差额0、冻结/持仓/终态/恢复通过；无业务容量SLO，结论只作探索诊断。DataLoss/显著swap或窗口异常使对应性能证据无效。长稳、生产独占CPU、全六产品线真实集群、网关/WebSocket/Archive重启不覆盖。
+- 命令：`mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=LanePublishedMapTest,ClusterCommandPipelineTest -Dsurefire.failIfNoSpecifiedTests=false -Dcore.settlementLatencyDiagnostics=true test`；再 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package`。压测 `ASYNC_RUN_ID=map-detail-20260919-main ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`，JFR轮改runID为map-detail-20260919-jfr与ENABLE_JFR=true。不与历史轮绝对吞吐作收益对照。
+- 局部JMH沿用覆盖真实合并及资金/快照断言的ContinuousOwnerBenchmark：六产品线×batch1/20×DISTINCT/PAIRED、BUSY_SPIN、1matcher/4Lane/window256、fork1/thread1、wi1×1s/i2×1s，分别无profiler与-prof gc；只验证路径/分配，不作稳定容量证明。新单测覆盖本轮观测逻辑，不新建重复业务基准。
+- 源码审查追加验证（不并行干扰压测）：`PlaceBatchAdmissionEvent.execute` 直接stage `lane.orders`引用，`LanePublication`本身不冻结。压测后用 `/tmp/PublicationAliasProbe.java` 调用同一stage/publish/applyPublished链，修改Lane原对象提交元数据，核对Owner引用是否随之变化及相等after-image是否保留别名；以调用者传入snapshot作为隔离对照。仅证明机制，不冒充真实并发资金错误或端到端隔离验收，不擅自实施新业务修复。
+
+### 实测结果与定位
+
+- 采集版本为a4935954+工作区，采集前tracked diff SHA256=`7e0f3bde1258391468968b64d756710bc33bb2ab7e2e38c769d77ef55cd5c350`；随后仅追加文档/临时分析脚本。diagnostic=true的目标回归261项无失败；新增128槽截断测试后完整package2:20成功，1461项、0失败/错误、3条件跳过（service933、benchmarks295）。LanePublishedMapTest12项覆盖操作计数、对象身份、碰撞/环绕/缺失/长链截断及原有单次删除、复用边界。
+
+| 轮次 | 窗口s | terminal business/s | terminal Core/s | fills/s | 窗口背压占比 |
+|---|---:|---:|---:|---:|---:|
+| 无profiler | 60.002604 | 368861.109 | 35245.720 | 87804.189 | 83.512% |
+| JFR | 60.031365 | 354356.560 | 33864.897 | 84350.572 | 83.495% |
+
+- 主轮测量窗口22132627business/2114835Core/5268480fills；独立排空5.339305ms另完成2688/256/0，最终offered=terminal22135315business/2115091Core、unfinished0。JFR窗口21272508/2032956/5063680，排空5.890690ms另2680/248/0，最终21275188/2033204对齐、unfinished0。peak256，windowBlockedCount477153/581805；负载受256窗口背压，不宣称无限到达率容量，延迟未做coordinated-omission修正。
+- 两轮mixedVerify均PASS/fundsDiff0/population/hftPositions/reservations/loss=true，测量/总cycles分别2058/3012、1978/2921，hash8f4f260c04c9d000/4df2907c4a829b5f。JFR吞吐较同轮无profiler低3.93%，采样开销与单轮波动混合，不是性能修复收益。后面发现的引用隔离风险没有被这些资金终态检查覆盖，不能宣称整体隔离正确性通过。
+
+主轮各业务入口→终态延迟（µs，请求计数含排空；入口→accepted和accepted→terminal未分拆，仍有缺口）：
+
+| 业务 | requests/items | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| PLACE_ORDER | 526848/526848 | 5074 | 9215 | 9961 | 14540 | 27099 | 46891 |
+| CANCEL_ORDER | 526848/526848 | 5218 | 8171 | 8855 | 13582 | 25313 | 43057 |
+| APPLY_MARK_PRICE | 7699/7699 | 4804 | 8626 | 10199 | 17006 | 27361 | 32309 |
+| PLACE_ORDER_BATCH | 790272/15805440 | 7118 | 11976 | 13066 | 18219 | 32292 | 54329 |
+| CANCEL_ORDER_BATCH | 263424/5268480 | 11665 | 13156 | 14163 | 25427 | 46530 | 58130 |
+
+#### 1. 删除不是病态长链，不能凭remove热点就更换容器
+
+- 中部窗口epoch [1789815898652,1789815954684]，56.032s，两端各2s保护，不是完整跨进程时钟校准。全录制99645个OwnerSettlementMerge。仅对lane scope分别汇总timing/shape，结构观察样本不参与操作耗时；计时含读时钟和分支，不是扣净后的纯CPU耗时。
+
+| 关联业务 | 计时Lane事件n | 实际删除次数/未命中 | 平均ns/删除 | 结构样本删除数 | 平均搜索槽/后续扫描槽/移动元素 | 最大搜索/扫描 | 截断 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| CANCEL_ORDER | 238 | 476/0 | 137.5 | 470 | 1.549/0.460/0.004 | 9/5 | 0 |
+| PLACE_ORDER_BATCH | 460 | 9080/0 | 101.3 | 9120 | 1.540/0.749/0.117 | 12/19 | 0 |
+| UNJOINED | 121 | 4840/0 | 110.6 | 4120 | 1.543/0.906/0.172 | 11/16 | 0 |
+
+- 总计结构观察13710次删除，未命中0、截断0。批量下单最大搜索12槽、后续扫描19槽，平均只移动0.117个元素；Owner表观测最大size7643/capacity16384（两个最大值不用于构造精确负载率）。否定“这轮吞吐主要被病态删除长链拖住”的假设；不能由稀疏样本证明所有输入都无长链。
+- 批量下单计时样本删除阶段1742289ns，其中实际map.remove累计919723ns（52.8%）；其余含集合遍历、变更标记、集合清理及诊断开销，不能全归给HashMap。每批最多40次订单/冻结删除，正常的单次开销乘以大量实体仍会形成热点。无删除未命中证据，不以containsKey预检再删除，避免再加一次查表。
+
+#### 2. 相等after-image很多，但必须先区分未变与可变别名
+
+| 关联业务 | 计时Lane事件n | 订单遍历/路由跳过 | get/equals | equals命中/同引用 | put | get/equals/put平均ns |
+|---|---:|---:|---:|---:|---:|---:|
+| PLACE_ORDER | 223 | 223/0 | 223/223 | 223/0 | 0 | 89.0/147.2/未执行 |
+| PLACE_ORDER_BATCH | 460 | 7034/4540 | 2494/2494 | 2473/0 | 21 | 83.0/86.6/89.9 |
+
+- 批量下单2473/2494=99.16%的比较内容相等，但同引用0；普通下单223/223相等、同引用0。批量下单7034条订单遍历中4540条（64.54%）已有删除路由，直接跳过发布；真正put仅21次。它不是大量昂贵put；有大量“交接一份对象→查旧值→全字段比较→保留旧对象”的工作。21次put样本太少，不给其稳定尾延迟结论。
+- `TradingRuntimeState.completeMatcherPendingReservations` 明确在新订单未成交时也调用publishOrder，承担“完成标记”；随后 `MatcherSettlementChanges.prepareLaneTerminal → orders.freezeValues(OrderRuntime::publicationValue)` 生成交接值，`LanePublishedMap.applyPublished` 再比较。可变Lane对象的publicationValue会snapshot，完成标记与实体变更复用同一缓冲，是可减少工作的一处设计耦合。
+- **不能把99.16%直接当可删比例**：当前准入阶段可能发布Lane可变引用，旧Owner引用可能已随Lane变更；此时equals为true并不代表业务没变。应先校正引用隔离，再统计真正未变的发布量。
+- 不能用revision相等代替equals：`OrderRuntime.applyCommitMetadataInPlace/withCommitMetadata` 改变时间和clusterPosition但不改变revision，直接跳过会丢提交元数据。
+
+#### 3. 发布边界的机制风险已复现，但未证明真实并发资金异常
+
+- 源码链：`PlaceBatchAdmissionEvent.execute` 将`lane.orders.get`放入admittedOrders并stage；`stagePlaceBatchAdmission → applyLanePublication → LanePublication.publish` 直接应用该引用。LanePublication不负责冻结。Lane订单由AccountLaneState.putOrder/laneValue保证可变；Owner注释所述的不可变发布边界不能仅由容器保证。
+- 最小复现编译/执行：`javac -cp surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar -d /tmp/map-detail-20260919-probe /tmp/PublicationAliasProbe.java`；`java -cp /tmp/map-detail-20260919-probe:surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar com.surprising.aeron.service.state.PublicationAliasProbe`。
+- 输出：`sameReference=true ownerPositionBefore=0 ownerPositionAfterLaneOnlyMutation=456`；`equalAfterImageRetainsAlias=true`；不可变snapshot收据对照`immutableReceiptControl=PASS`。即没有再次发布时，修改Lane原对象也会改变Owner引用；随后相等不可变after-image被拒绝替换，旧别名仍保留。
+- 此探针是机制复现，不是Aeron真实并发资金失败复现。真实调度/依赖fence能否使问题外显、查询与回滚是否受影响还需集成验证；没有据此声称已经发生资金错误。但这是优化前必须处理/证明安全的状态所有权风险，不能用本轮资金终态检查掩盖，也不能直接把复制全部删掉。
+
+#### 4. 更彻底的候选方案与边界
+
+- **第一优先：一份业务版本对应一份不可变交接值。** 在准入交接边界冻结订单/冻结信息，Lane继续持有私有可变状态，Owner仅接收不可变版本；审计普通下单、批量下单、准入回滚、后续成交对旧引用的影响。不可变版本可复用，不能复用正在被Lane修改的对象。先补“Lane继续变化不影响已交接版本”的集成断言。
+- **第二优先：分开完成事实和实体更新。** 继续使用现有command/pending序号推进完成、资金核对、响应和Core Fact；只有成交数量/状态/费用/提交元数据等实际变化才物化并发布新实体。不能简单删掉completeMatcherPendingReservations里的publishOrder：还要保留现有changed-index、响应、终态与恢复依赖。优先利用现有命令订单ID/准入收据，不加第二套Map、dirty set或通用提交框架。
+- **更大范围候选：消除Owner临时实体插入→删除。** Matcher直接消费现有准入收据，准入状态留在既有Lane/pending权威来源，Owner在有序完成点发布最终版本；即时终态订单不必先进入Owner活动表再删除。这可以从源头减少哈希操作，但需审计Owner查询/风控/依赖、准入前镜像、资金核对、Core Fact与恢复读取，尚不能判定可直接删除当前准入发布。它不是把同一份额外工作搬到另一线程。
+- 验证顺序：共享引用隔离→保持资金/快照/顺序的完成标记分离→统计不可变实体创建/发布/删除次数是否下降→同配置无profiler终态吞吐改善。六产品线覆盖GTC未成交、部分/全部成交、IOC/市价、撤单/拒单、相同revision但元数据变化、Owner阻塞而后续Lane已完成、异常回滚与恢复。每步独立验证，禁止同时改调度、容器和生命周期后用一个总分归因。
+- 结论：定位进展是**排除病态删除链，发现发布版本/完成标记耦合及引用隔离风险**，不是“已彻底解决性能”。不建议先换HashMap、删幂等检查或改busy-spin；这轮没有实施业务修复，不能承诺达到某吞吐。相关方案待集成验证，整体为部分验证。
+
+#### 资源、等待与覆盖限制
+
+- JFR保护窗口内Owner1720个执行样本，pollCommandCommit1103、completeMatching810、collectMatcherSettlement356；父子样本不可相加，合并不是Owner全部工作。Owner约98.43%单核、matcher98.42%、Lane98.42%均含busy-spin；Lane有效执行平均37.02%，不能从98%直接宣称计算满载。JFR matcher/completion/context高水位218/208/255、Lane[63,45,41,45]；主轮217/202/255、Lane[45,38,42,46]，期末无未完成。
+- Lane完成→Owner观察 p50/p99（µs）普通下单1.634/273.554、撤单335.175/2817.030、批量下单359.618/2063.649，来自同JVM nanoTime，包含FIFO等待；不是单次map操作耗时。OwnerTurn19699样本、headWait19533、budgetExhausted734，计数可重叠。
+- 中部Owner file/socket事件0；GC108次、pause总579.171ms/56.032s=1.03%，p50/p95/p99/max5.177/6.447/6.772/7.039ms。主轮无JFR，不把JFR轮GC直接归因到主轮尾样本；未作逐请求GC相关性。
+- ThreadAllocationStatistics保护窗口首末样本差：Owner5479637496B、matcher7743652960B、Lane0..3为4207872624/4209723856/4205969696/4209383272B、cluster-service2037526800B；采样覆盖略短于保护窗口，不当精确bytes/op。NMT主轮committed722959KB(+9755KB)、JFR737911KB(+1469KB)，短轮不能证明无泄漏。
+- 构建后主轮前Swapins511411/Swapouts867081，JFR后观察Swapins511603/Swapouts867081，既有swap1413.5MiB未增长，磁盘最低约337GiB可用。真实压测期间没有并行JMH/Java探针；发压fork JFR期CPU抽查345.7%、节点946.4%，均为进程口径，未证明发压端、共享CPU、网络全部不限制容量。生产独占CPU/长稳/Direct-Mapped与FD增长、真实Archive重启、网关/WebSocket仍未覆盖。
+
+- 补充heap：保护窗口216条GCHeapSummary，used172288080–480348176B，committed512MiB；首末afterGC174601392→175214608B，不能据此声称长期稳定。全录制AllocationSample109180/InNewTLAB109152/OutsideTLAB1659，allocation-by-site的OrderRuntime.snapshot10.62%、preparedOrder8.19%、CoreMatchingResult7.92%是含启动预热的采样压力，不是精确对象总数或中部专属比例。全录制Compilation8972/Deoptimization712/SafepointBegin189，保留views，不与测量窗口计数混用。
+
+### 局部JMH：功能完成，性能分数不作稳态证据
+
+- `/tmp/map-detail-20260919-jmh.sh` 执行24主fork+24 GC fork，进程退出0，全部accepted/terminal business/Core对齐，trial teardown资金/冻结/活动订单/持仓和恢复断言无失败。每次invocation=512Core、512×batchSize business；短测量2次，误差/CI为NaN，不能给稳定容量置信区间。
+- 每个fork出现一次Chronicle ClassUtil模块访问ERROR级提示（主轮24、GC轮24），但未出现JMH业务断言/fork失败。本地chronicle-core2026.5 sources显示privateLookupIn(AccessibleObject)失败被捕获后返回null；本轮脚本未开放java.lang.reflect。此为明确环境/预热缺口，不标记微基准性能验收通过，也不把它删出证据；真实Aeron主轮/JFR轮与该微基准分别报告。下一次正式微基准应补相应模块访问参数并延长预热至越过初始化/JIT，再收稳定分数。
+
+| 产品 | 账户模式 | batch | 主inv/s（非容量） | GC轮inv/s | GC B/inv | 换算B/business | 分配MiB/s | GC次数/ms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| SPOT | DISTINCT | 1 | 108.572 | 79.764 | 2615442 | 5108.3 | 142.70 | 5/31 |
+| LINEAR_PERPETUAL | DISTINCT | 1 | 114.705 | 116.608 | 2454479 | 4793.9 | 191.42 | 6/29 |
+| INVERSE_PERPETUAL | DISTINCT | 1 | 114.855 | 96.780 | 2525447 | 4932.5 | 156.08 | 5/29 |
+| LINEAR_DELIVERY | DISTINCT | 1 | 114.356 | 87.986 | 2552215 | 4984.8 | 152.78 | 5/27 |
+| INVERSE_DELIVERY | DISTINCT | 1 | 104.655 | 104.716 | 2499651 | 4882.1 | 173.70 | 5/26 |
+| OPTION | DISTINCT | 1 | 90.741 | 107.931 | 2517631 | 4917.2 | 179.18 | 5/31 |
+| SPOT | DISTINCT | 20 | 36.876 | 39.156 | 23539822 | 2298.8 | 626.85 | 9/45 |
+| LINEAR_PERPETUAL | DISTINCT | 20 | 45.377 | 47.742 | 23067314 | 2252.7 | 718.75 | 11/50 |
+| INVERSE_PERPETUAL | DISTINCT | 20 | 40.850 | 41.429 | 23371487 | 2282.4 | 674.61 | 10/46 |
+| LINEAR_DELIVERY | DISTINCT | 20 | 42.334 | 37.320 | 23466676 | 2291.7 | 577.18 | 9/45 |
+| INVERSE_DELIVERY | DISTINCT | 20 | 44.185 | 44.061 | 23062021 | 2252.2 | 696.21 | 10/43 |
+| OPTION | DISTINCT | 20 | 34.548 | 48.102 | 23031942 | 2249.2 | 745.30 | 11/49 |
+| SPOT | PAIRED | 1 | 114.325 | 114.577 | 2381103 | 4650.6 | 185.77 | 5/22 |
+| LINEAR_PERPETUAL | PAIRED | 1 | 114.334 | 119.279 | 2380797 | 4650.0 | 179.63 | 5/24 |
+| INVERSE_PERPETUAL | PAIRED | 1 | 119.151 | 110.859 | 2395302 | 4678.3 | 162.30 | 5/24 |
+| LINEAR_DELIVERY | PAIRED | 1 | 116.202 | 112.629 | 2421445 | 4729.4 | 183.37 | 5/25 |
+| INVERSE_DELIVERY | PAIRED | 1 | 101.896 | 116.839 | 2380773 | 4649.9 | 183.86 | 5/25 |
+| OPTION | PAIRED | 1 | 117.056 | 85.414 | 2482029 | 4847.7 | 137.22 | 5/23 |
+| SPOT | PAIRED | 20 | 32.460 | 33.237 | 23428916 | 2288.0 | 526.43 | 9/37 |
+| LINEAR_PERPETUAL | PAIRED | 20 | 28.041 | 32.370 | 23647189 | 2309.3 | 525.60 | 8/34 |
+| INVERSE_PERPETUAL | PAIRED | 20 | 30.583 | 31.991 | 23651135 | 2309.7 | 494.75 | 8/33 |
+| LINEAR_DELIVERY | PAIRED | 20 | 33.023 | 31.396 | 23744290 | 2318.8 | 504.96 | 9/49 |
+| INVERSE_DELIVERY | PAIRED | 20 | 32.349 | 32.611 | 23863266 | 2330.4 | 529.20 | 8/34 |
+| OPTION | PAIRED | 20 | 30.113 | 32.161 | 23718334 | 2316.2 | 517.36 | 8/36 |
+
+### 证据归档与交付范围
+
+- 原始目录 `surprising-aeron-core/surprising-aeron-benchmarks/target/aeron-async-stages/map-detail-20260919-{main,jfr}/`；主轮node46546，JFRnode47475/runner47486/fork47489，含完整命令、NMT、日志、summary/views、metrics。node146s/130785957B/SHA256=d411863f8898de1ae243e26cd273f3944da6f7a8bd5670ac0e11b609524f1631；runner143s/11236112B/c2a9fb9ae81ac0bf467daf6d1214e6ed416e7681e132d3b81be64a3c1124be6f；fork142s/128400866B/0eed4e773828b74eafc5e5ce76e080716732a22e2371a4a97c968d1d8b6c1e50，三者DataLoss0。
+- `/tmp/map-detail-20260919-{analysis,outer,heap}.json` 保存全部分段分位/计数/归因；`MapDetailEvents.java`、`map-detail-20260919-analyze.py` 为有界流式分析；`PublicationAliasProbe.java`及probe.log记录机制复现；JMH脚本/rawData/log单独保存。未重新检出历史代码、未改写上一轮原始记录。
+- 本轮代码仅增加现有事件上的互斥稀疏计数/计时与只读删除链观察、对应回归，不改变交易算法和状态所有权。Reflection字段仅因Agrona公开API不暴露探测链而用于诊断，默认关闭时不加载该探针；没有新增业务Map/快照缓存/队列/线程。已发现的准入引用隔离风险未在本轮修复，交付不称问题已解决。
+- 清理完成：本轮全部node/client/JMH/分析与探针进程已退出；仅将本轮约6.6GiB的Cluster/Archive/JFR、日志、JMH、分析和探针文件移至 `/Users/atomex/.Trash/surprising-ex-map-detail-20260919/`，可恢复。上方原target/tmp路径仅为历史定位，未清空Trash或动其他轮次产物。
+- 提交仅含本轮LanePublishedMap/LanePublication/OwnerSettlementMergeEvent、LanePublishedMapTest、README及本节追加记录；既有AGENTS、Owner/Matcher/Lane与压测配置、历史文档未提交内容保持原样。

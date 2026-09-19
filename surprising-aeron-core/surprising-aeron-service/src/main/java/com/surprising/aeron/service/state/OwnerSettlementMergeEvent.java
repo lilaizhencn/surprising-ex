@@ -26,6 +26,15 @@ final class OwnerSettlementMergeEvent extends Event {
     public long trimNanos;
     public long releaseNanos;
     public long changedIndexNanos;
+    // Disjoint 1/2048 streams: shape inspection must not warm timed map operations.
+    public boolean mapTiming;
+    public boolean mapShape;
+    public int ordersVisited, ordersSkipped, orderGets, orderEquals, orderEqualHits, orderSameReference, orderPuts;
+    public long orderGetNanos, orderEqualsNanos, orderPutNanos;
+    public int removals, removalMisses;
+    public long removalNanos;
+    public int shapeRemovals, shapeMisses, shapeCensored, shapeSearchSlots, shapeScanSlots, shapeMoves;
+    public int shapeMaxSearch, shapeMaxScan, shapeMaxSize, shapeMaxCapacity;
     private long started;
 
     static OwnerSettlementMergeEvent sample(long sequence, String scope, int laneId) {
@@ -35,6 +44,9 @@ final class OwnerSettlementMergeEvent extends Event {
         event.sequence = sequence;
         event.scope = scope;
         event.laneId = laneId;
+        int bucket = Long.hashCode(sequence * 0x9e3779b97f4a7c15L) & 2047;
+        event.mapTiming = bucket == 0;
+        event.mapShape = bucket == 1024;
         event.started = System.nanoTime();
         event.begin();
         return event;

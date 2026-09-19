@@ -5,6 +5,77 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class LanePublishedMapTest {
+    @Test void sampledOrderOperationsPreserveIdentityAndCountOnlyExecutedWork() {
+        var map = new LanePublishedMap<String>();
+        var event = new OwnerSettlementMergeEvent();
+        event.mapTiming = true;
+        String value = new String("resting");
+        map.applyPublished(1, value, event);
+        map.applyPublished(1, value, event);
+        map.applyPublished(1, new String("resting"), event);
+        assertThat(map.get(1)).isSameAs(value);
+        map.applyPublished(1, "changed", event);
+        assertThat(map.get(1)).isEqualTo("changed");
+        map.removePublished(1, event);
+        map.removePublished(1, event);
+        assertThat(event.orderGets).isEqualTo(4);
+        assertThat(event.orderEquals).isEqualTo(3);
+        assertThat(event.orderEqualHits).isEqualTo(2);
+        assertThat(event.orderSameReference).isEqualTo(1);
+        assertThat(event.orderPuts).isEqualTo(2);
+        assertThat(event.removals).isEqualTo(2);
+        assertThat(event.removalMisses).isEqualTo(1);
+        assertThat(event.orderGetNanos + event.orderEqualsNanos + event.orderPutNanos + event.removalNanos).isPositive();
+    }
+
+    @Test void boundedShapeInspectionMatchesWrappedDeletionAndDoesNotMutateTheTable() throws Exception {
+        var map = new LanePublishedMap<String>();
+        var values = recordRemovals(map);
+        int mask = values.capacity() - 1;
+        long[] collisions = new long[4];
+        int count = 0;
+        for (long key = 1; count < collisions.length; key++)
+            if (org.agrona.collections.Hashing.hash(key, mask) == mask) collisions[count++] = key;
+        for (int i = 0; i < 3; i++) map.put(collisions[i], "value" + i);
+        var event = new OwnerSettlementMergeEvent();
+        event.mapShape = true;
+        map.removePublished(collisions[0], event);
+        assertThat(event.shapeSearchSlots).isEqualTo(1);
+        assertThat(event.shapeScanSlots).isEqualTo(2);
+        assertThat(event.shapeMoves).isEqualTo(2);
+        assertThat(map.size()).isEqualTo(2);
+        assertThat(map.get(collisions[1])).isEqualTo("value1");
+        assertThat(map.get(collisions[2])).isEqualTo("value2");
+        map.removePublished(collisions[3], event);
+        assertThat(event.shapeSearchSlots).isEqualTo(4);
+        assertThat(event.shapeMisses).isEqualTo(1);
+        assertThat(event.shapeCensored).isZero();
+        assertThat(event.shapeMaxSearch).isEqualTo(3);
+        assertThat(event.shapeMaxScan).isEqualTo(2);
+        assertThat(event.shapeRemovals).isEqualTo(2);
+        assertThat(values.removals).containsEntry(collisions[0], 1).containsEntry(collisions[3], 1);
+    }
+
+    @Test void shapeInspectionCapsPathologicalChainsWithoutChangingDeletion() throws Exception {
+        var map = new LanePublishedMap<String>();
+        var values = recordRemovals(map);
+        for (long key = 1; key <= 512; key++) map.put(key, "warm capacity");
+        map.clear();
+        int mask = values.capacity() - 1;
+        long[] collisions = new long[130];
+        int count = 0;
+        for (long key = 1; count < collisions.length; key++)
+            if (org.agrona.collections.Hashing.hash(key, mask) == mask) collisions[count++] = key;
+        for (long key : collisions) map.put(key, "retained");
+        var event = new OwnerSettlementMergeEvent();
+        event.mapShape = true;
+        map.removePublished(collisions[0], event);
+        assertThat(event.shapeCensored).isEqualTo(1);
+        assertThat(event.shapeScanSlots).isEqualTo(128);
+        assertThat(map.size()).isEqualTo(129);
+        for (int i = 1; i < collisions.length; i++) assertThat(map.get(collisions[i])).isEqualTo("retained");
+    }
+
     @Test void terminalRoutesDeleteEachPublishedKeyOnceIncludingMissingAfterImages() throws Exception {
         for (boolean collectChangedIds : new boolean[]{false, true}) {
             try (var runtime = new TradingRuntimeState()) {
