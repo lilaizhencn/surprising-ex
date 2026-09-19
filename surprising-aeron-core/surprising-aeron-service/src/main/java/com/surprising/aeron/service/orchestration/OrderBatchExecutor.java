@@ -266,7 +266,7 @@ final class OrderBatchExecutor {
                 batch.preparedLifecycleSettled, batch.preparedFundingInProgress,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
-                batch.preparedAdmittedReservations, batch.items.size(), shard, owner.identities, batch,
+                batch.items.size(), shard, owner.identities, batch,
                 batch.clusterTimestamp, batch.clusterPosition);
     }
 
@@ -317,7 +317,8 @@ final class OrderBatchExecutor {
                 for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
                     var result = batch.pipelinedMatchingResults[index];
                     var item = batch.items.get(index);
-                    item.realtimeTakerOrder = batch.preparedAdmittedOrders[index];
+                    item.admittedOrder = batch.preparedAdmittedOrders[index];
+                    item.realtimeTakerOrder = item.admittedOrder;
                     item.executionEvents = result.matcherEvents();
                     item.executionTakerUserId = userId;
                     for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
@@ -533,6 +534,7 @@ final class OrderBatchExecutor {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             OrderRuntime admitted = owner.runtimeOrder(item.orderId());
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
+            item.admittedOrder = admitted;
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
             direct = owner.directMatcherSettlements.prepareBatchPlaceItem(pending, batch, admitted, shard);
             batch.itemSettlementEvent = direct;
@@ -766,6 +768,7 @@ final class OrderBatchExecutor {
                     ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
             try {
                 applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
+                owner.runtimeState.publishObservedAdmission(item.admittedOrder);
                 batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 appendOrderBatchResult(batch, item, status, resultCode);
                 batch.nextIndex++;
@@ -834,10 +837,12 @@ final class OrderBatchExecutor {
             OrderBatchPending batch, OrderBatchItem item, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
         item.matchingResult = matchingResult;
-        if (item.realtimeTakerOrder == null && owner.realtimeCapture != null
-                && owner.realtimeCapture.active() && matchingResult.accepted()) {
-            item.realtimeTakerOrder = owner.runtimeOrder(item.orderId());
+        if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE && batch.pipelined) {
+            item.admittedOrder = batch.preparedAdmittedOrders[batch.nextIndex];
         }
+        if (item.admittedOrder == null) item.admittedOrder = owner.runtimeOrder(item.orderId());
+        if (item.realtimeTakerOrder == null && owner.realtimeCapture != null
+                && owner.realtimeCapture.active()) item.realtimeTakerOrder = item.admittedOrder;
 
         if (batch.kind != OrderBatchKind.CANCEL) {
             item.executionEvents = matchingResult.matcherEvents();

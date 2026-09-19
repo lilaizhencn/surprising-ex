@@ -1394,7 +1394,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
-            if (realtimeCapture != null && realtimeCapture.active())
+            if (realtimeCapture != null && realtimeCapture.active() && pending.realtimeTakerOrder == null)
                 pending.realtimeTakerOrder = runtimeOrder(settlementPlan.takerOrderId());
             event = runtimeState.dispatchMatcherSettlement(
                     coreSequence, laneContext.expectedLaneMask(), coreSequence,

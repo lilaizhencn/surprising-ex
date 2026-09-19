@@ -85,6 +85,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
 
     public int settlementCount() { return deferredSettlementCount; }
     public long settlementOrderId(int index) { return items.get(deferredSettlementItemIndexes[index]).orderId; }
+    public OrderRuntime settlementOrder(int index) {
+        return items.get(deferredSettlementItemIndexes[index]).admittedOrder;
+    }
     public long settlementLaneMask(int index) { return items.get(deferredSettlementItemIndexes[index]).settlementLaneMask; }
     public CoreMatchingResult settlementResult(int index) {
         return items.get(deferredSettlementItemIndexes[index]).matchingResult;
@@ -249,8 +252,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final CoreMatchingOrder[] preparedMatchingOrders;
     /** 本批预备的 AdmittedOrders 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final OrderRuntime[] preparedAdmittedOrders;
-    /** 本批预备的 AdmittedReservations 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final com.surprising.aeron.service.state.ReservationRuntime[] preparedAdmittedReservations;
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
     /** 与 preparedSymbols 对齐的批内准入上下文；批次最多几十项，线性查找避免 Map 节点。 */
@@ -339,8 +340,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedAssetIds = new int[capacity];
         preparedMatchingOrders = new CoreMatchingOrder[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
-        preparedAdmittedReservations =
-                new com.surprising.aeron.service.state.ReservationRuntime[capacity];
         preparedSymbols = new ArrayList<>(capacity);
         preparedContextDecisions =
                 new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
@@ -413,7 +412,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, null);
         java.util.Arrays.fill(preparedMatchingOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
-        java.util.Arrays.fill(preparedAdmittedReservations, 0, preparedCount, null);
         java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
         preparedSymbols.clear();
         lifecycleFlags = 0;

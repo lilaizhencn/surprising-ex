@@ -38,6 +38,8 @@ final class OrderBatchItem {
     boolean laneResultPrepared;
     /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
+    /** Lane admission receipt retained until every deferred settlement has consumed the batch. */
+    com.surprising.aeron.service.state.OrderRuntime admittedOrder;
     /** Owner 一次解析的撤单身份；同分片批次任务读取，完成后清空。 */
     String cancelSymbol;
     long cancelInstrumentChangeId;
@@ -69,6 +71,7 @@ final class OrderBatchItem {
         resultOrderSymbol = null;
         laneResultPrepared = false;
         realtimeTakerOrder = null;
+        admittedOrder = null;
         cancelSymbol = null;
         cancelInstrumentChangeId = 0;
     }

@@ -191,34 +191,6 @@ class LanePublishedMapTest {
         }
     }
 
-    @Test void recycledBatchAdmissionDiscardsUnpublishedValuesAndRetainsCapacity() throws Exception {
-        var event = new PlaceBatchAdmissionEvent();
-        var publication = new LanePublication();
-        var map = new LanePublishedMap<String>();
-        for (int i = 0; i < 41; i++) map.stage(publication, i, "discarded");
-        var field = PlaceBatchAdmissionEvent.class.getDeclaredField("publication");
-        field.setAccessible(true);
-        field.set(event, publication);
-        var completed = PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
-        completed.setAccessible(true);
-        completed.setBoolean(event, true);
-        var values = LanePublication.class.getDeclaredField("values");
-        values.setAccessible(true);
-        Object[] capacity = (Object[]) values.get(publication);
-        event.clear();
-        assertThat(event.publication()).isSameAs(publication);
-        assertThat(values.get(publication)).isSameAs(capacity);
-        assertThat(capacity).containsOnlyNulls();
-        publication.publish();
-        assertThat(map.size()).isZero();
-        map.stage(publication, 99, "next");
-        publication.publish();
-        assertThat(map.size()).isOne();
-        assertThat(map.get(99)).isEqualTo("next");
-        event.clear();
-        assertThat(map.get(99)).isEqualTo("next");
-    }
-
     @Test void settlementReusesPublicationAndDiscardsUnpublishedReferences() {
         var runtime = new TradingRuntimeState();
         var delta = new TradingRuntimeState.LaneDelta();

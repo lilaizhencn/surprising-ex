@@ -739,9 +739,14 @@ final class OrderedCommitCoordinator {
         return switch (pending.operation()) {
             case PLACE -> {
                 long orderId = pending.decodedCommand().placeOrder().orderId();
-                var plan = com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
-                        pending.settlementPlanBuffer(), pending.sequence(), orderId, userId, orderId, 0, result,
-                        owner.runtimeState, owner.identities);
+                OrderRuntime admitted = pending.realtimeTakerOrder;
+                var plan = admitted == null
+                        ? com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
+                                pending.settlementPlanBuffer(), pending.sequence(), orderId, userId,
+                                orderId, 0, result, owner.runtimeState, owner.identities)
+                        : com.surprising.aeron.service.state.MatcherSettlementPlan.buildAdmittedInto(
+                                pending.settlementPlanBuffer(), pending.sequence(), admitted,
+                                orderId, 0, result, owner.runtimeState, owner.identities);
                 plan.preCancellationsFromExpected(pending.preMatchingCancellationOrderIds(), result.cancellations());
                 yield plan.rejectTaker(!result.accepted());
             }

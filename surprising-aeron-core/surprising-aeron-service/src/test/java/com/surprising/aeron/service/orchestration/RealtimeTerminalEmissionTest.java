@@ -95,7 +95,9 @@ class RealtimeTerminalEmissionTest {
         org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.ORDER, 0))
                 .as(line + " " + label + " ORDER count").isEqualTo(expectedOrders);
         int fills = label.equals("batch-fill") ? 20 : label.startsWith("fill-") ? 1 : 0;
-        org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.TRADE, 0)).isEqualTo(fills);
+        org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.TRADE, 0))
+                .as(line + " " + label + " TRADE kinds=" + kinds + " captureFailures=" + capture.failures())
+                .isEqualTo(fills);
         org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.EXECUTION, 0)).isEqualTo(fills * 2);
     }
 }

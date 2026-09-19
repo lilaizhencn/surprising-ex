@@ -231,7 +231,8 @@ final class MatcherSettlementDispatcher {
             throw new IllegalArgumentException("invalid matcher settlement lane command");
         }
         long takerOrderId = plan.takerOrderId();
-        OrderRuntime taker = owner.order(takerOrderId);
+        OrderRuntime taker = plan.admittedTaker();
+        if (taker == null) taker = owner.order(takerOrderId);
         if (taker == null) throw new IllegalStateException("taker order is missing");
         CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
         if (instrument == null) throw new IllegalStateException("match instrument is missing");
@@ -366,7 +367,8 @@ final class MatcherSettlementDispatcher {
                         || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");
                 }
-                OrderRuntime taker = owner.order(takerOrderId);
+                OrderRuntime taker = batch.settlementOrder(index);
+                if (taker == null) taker = owner.order(takerOrderId);
                 if (taker == null) throw new IllegalStateException("taker order is missing");
                 int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
                 if (slot < 0) {

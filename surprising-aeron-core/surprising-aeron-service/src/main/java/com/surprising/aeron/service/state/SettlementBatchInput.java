@@ -6,6 +6,7 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 public interface SettlementBatchInput {
     int settlementCount();
     long settlementOrderId(int index);
+    default OrderRuntime settlementOrder(int index) { return null; }
     long settlementLaneMask(int index);
     CoreMatchingResult settlementResult(int index);
 }

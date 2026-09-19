@@ -79,7 +79,10 @@ final class DirectMatcherSettlementPreparation {
 
     private MatcherSettlementEvent preparePlace(CommandSlot pending) {
         OrderRuntime directTaker = pending.placeAdmission() == null
-                ? owner.runtimeOrder(pending.decodedCommand().placeOrder().orderId()) : null;
+                ? pending.realtimeTakerOrder != null
+                        ? pending.realtimeTakerOrder
+                        : owner.runtimeOrder(pending.decodedCommand().placeOrder().orderId())
+                : null;
         MatcherSettlementEvent direct = null;
         if (pending.placeAdmission() != null) {
             direct = owner.runtimeState.prepareDirectMatcherSettlement(
@@ -95,7 +98,9 @@ final class DirectMatcherSettlementPreparation {
                     pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         }
         reserveMatcherPublication(pending, direct);
-        if (owner.realtimeCapture != null) pending.realtimeTakerOrder = directTaker;
+        // A completed admission already placed its immutable receipt in the command slot.
+        // Do not erase it merely because the final Owner projection is intentionally deferred.
+        if (directTaker != null) pending.realtimeTakerOrder = directTaker;
         return direct;
     }
 

@@ -2061,7 +2061,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
-            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount,
+            OrderRuntime[] admittedOrders, int itemCount,
             int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
             long timestamp, long position) {
         assertOwner();
@@ -2077,7 +2077,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, lifecycleSettled, fundingInProgress,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, laneId, matcherShard, this, changes, identities, source,
+                itemCount, laneId, matcherShard, this, changes, identities, source,
                 timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
@@ -2099,13 +2099,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         long userId = event.userId();
         int laneId = topology.accountLaneId(userId);
-        // Capture the owner-visible state before publishing the newly admitted batch.  A fatal
-        // pipelined batch must roll back to the pre-admission null order/reservation, rather than
-        // accidentally treating the provisional admission as its own before-image.
+        // Capture the owner-visible state before exposing any irreversible Matcher observation.
+        // A fatal pipelined batch must roll back to the pre-admission null order/reservation,
+        // rather than treating the Lane-owned admission as its own before-image.
         captureBatchAdmissionBefore(userId, event.admittedOrders(), event.itemCount(), laneId);
         event.copyBalanceBeforeTo(patchBalancesBeforeByLane[laneId]);
         admissionCapturePrelude = true;
-        applyLanePublication(event.publication());
         pendingReservations.registerBatch(event.coreSequence(), userId, event.admittedOrders(), event.itemCount());
         revision = Math.addExact(revision, event.itemCount());
     }
@@ -2119,11 +2118,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = topology.accountLaneId(event.userId());
         MatcherSettlementChanges changes = event.takeChanges();
         try {
-            // The batch admission publication was already applied by stagePlaceBatchAdmission
-            // before the matcher was submitted. Replaying the normal terminal drain here would
-            // walk and write the same user/order/reservation buffers a second time. The
-            // admission delta only needs primitive change markers and funds/available-balance
-            // handoff at the ordered commit boundary.
+            // Admission values remain Lane-owned until terminal settlement.  This boundary only
+            // commits primitive admission markers and the funds/available-balance handoff; it
+            // must not replay user/order/reservation publication buffers.
             changes.laneDeltas[laneId].commitBatchAdmissionToOwner(this, laneId);
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
@@ -2153,11 +2150,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     void rollbackPlaceBatchAdmissionInLane(
             AccountLaneState lane, long userId, long coreSequence, ResolvedPlaceOrder[] orders,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
-            ReservationRuntime[] reservations, int admittedCount, UserRuntime userBefore) {
+            int admittedCount, UserRuntime userBefore) {
         lane.assertOwner();
         for (int index = admittedCount - 1; index >= 0; index--) {
             long orderId = orders[index].orderId();
-            ReservationRuntime reservation = reservations[index];
+            ReservationRuntime reservation = lane.reservations.get(orderId);
+            if (reservation == null) {
+                throw new IllegalStateException("batch admission rollback reservation is missing");
+            }
             lane.completePendingReservation(orderId, coreSequence);
             if (clientKeys[index].key() != 0) {
                 removeClientOrderIndex(lane, userId, clientKeys[index].key());
@@ -2358,11 +2358,21 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("place admission was collected twice");
         }
         int laneId = topology.accountLaneId(userId);
-        applyLanePublication(event.publication());
         pendingReservations.indexPendingReservation(userId, orderId, event.coreSequence(),
                 Math.incrementExact(pendingReservations.totalPendingReservations));
         revision = Math.incrementExact(revision);
         return event.resolvedOrder();
+    }
+
+    /**
+     * A batch matcher fact is irreversible before its deferred Lane settlement is collected.
+     * Expose the already immutable admission receipt for recovery inspection without publishing
+     * provisional user/reservation state or allocating another publication batch.
+     */
+    public void publishObservedAdmission(OrderRuntime order) {
+        assertOwner();
+        if (order == null) throw new IllegalArgumentException("observed admission order is required");
+        publishedOrders.applyPublished(order.orderId(), order);
     }
 
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
@@ -6059,10 +6069,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /**
-     * Prepares the direct settlement slot before a normal PLACE admission has published its
-     * mutable OrderRuntime.  The dispatcher builds a detached order value for Matcher proof;
-     * the Account Lane binds its authoritative order from the admission mailbox before applying
-     * the result.
+     * Prepares the direct settlement slot before a normal PLACE admission has completed.  The
+     * dispatcher carries immutable command fields for Matcher proof; the Account Lane binds its
+     * authoritative order from the admission receipt before applying the result.
      */
     public MatcherSettlementEvent prepareDirectMatcherSettlement(
             long sequence, long laneMask, PlaceAdmissionEvent admission,

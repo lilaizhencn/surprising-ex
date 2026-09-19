@@ -786,8 +786,24 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
         }
         runtime.completeMatcherPendingReservations(lane, value, admissionVersion);
+        publishAdmittedState(lane, value, admissionVersion);
         var trigger = value.completedTrigger();
         if (trigger != null && runtime.currentLaneOwns(trigger.userId())) runtime.putTriggerOrder(trigger);
+    }
+
+    /**
+     * Admission is provisional until this matcher fact retires. Publish its final Lane values in
+     * the same terminal delta, including the no-fill resting-order case that has no other state
+     * mutation. Existing changed keys are coalesced by the Lane buffers.
+     */
+    private void publishAdmittedState(
+            AccountLaneState lane, MatcherSettlementPlan value, OrderRuntime admissionVersion) {
+        OrderRuntime admitted = admissionVersion == null ? value.admittedTaker() : admissionVersion;
+        if (admitted == null || !runtime.currentLaneOwns(admitted.userId())) return;
+        long orderId = admitted.orderId();
+        runtime.publishUser(admitted.userId(), lane.users.get(admitted.userId()));
+        runtime.publishOrder(orderId, lane.orders.get(orderId));
+        runtime.publishReservation(orderId, lane.reservations.get(orderId));
     }
 
     private void applyReplacement(AccountLaneState lane, MatcherSettlementPlan value) {

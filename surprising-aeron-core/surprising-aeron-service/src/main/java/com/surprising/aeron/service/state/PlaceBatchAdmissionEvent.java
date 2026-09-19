@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
@@ -24,7 +23,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private int[] assetIds;
     private CoreMatchingOrder[] matchingOrders;
     private OrderRuntime[] admittedOrders;
-    private ReservationRuntime[] admittedReservations;
     private int itemCount;
     private int admittedCount;
     private int laneId;
@@ -33,9 +31,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private TradingRuntimeState.MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
     private long identityAllocations;
-    private UserRuntime admittedUser;
-    /** Retained with this pooled event; cleared by Owner before reuse by the Lane. */
-    private LanePublication publication;
     private RuntimeException rejection;
     /** Volatile publication is sufficient: all payload fields are written before completion. */
     private volatile boolean completed;
@@ -46,18 +41,17 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
-            ReservationRuntime[] admittedReservations, int itemCount, int laneId, int matcherShard,
+            int itemCount, int laneId, int matcherShard,
             TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
                 || clientKeys == null || symbolIds == null
-                || assetIds == null || matchingOrders == null || admittedOrders == null
-                || admittedReservations == null || itemCount <= 0
+                || assetIds == null || matchingOrders == null || admittedOrders == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > openInterestSteps.length
                 || itemCount > lifecycleSettled.length || itemCount > fundingInProgress.length
                 || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
                 || itemCount > matchingOrders.length || itemCount > admittedOrders.length
-                || itemCount > admittedReservations.length || laneId < 0 || matcherShard < 0
+                || laneId < 0 || matcherShard < 0
                 || runtime == null || matcherShard >= runtime.topology().matchingEngineCount() || changes == null) {
             throw new IllegalArgumentException("invalid place batch admission event");
         }
@@ -76,7 +70,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.assetIds = assetIds;
         this.matchingOrders = matchingOrders;
         this.admittedOrders = admittedOrders;
-        this.admittedReservations = admittedReservations;
         this.itemCount = itemCount;
         this.laneId = laneId;
         this.matcherShard = matcherShard;
@@ -85,8 +78,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.identities = identities;
         identityAllocations = 0;
         admittedCount = 0;
-        admittedUser = null;
-        if (publication != null) publication.clear();
         rejection = null;
         completed = false;
         return this;
@@ -145,24 +136,16 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                             coreSequence, null, timestamp, position);
                     // Matcher/Owner receive admission versions, never mutable Lane aliases.
                     admittedOrders[index] = lane.orders.get(order.orderId()).publicationValue();
-                    admittedReservations[index] = lane.reservations.get(order.orderId()).publicationValue();
                     admittedCount++;
                 }
-                admittedUser = lane.users.get(userId);
                 changes.prepareAdmissionLane(laneId, runtime);
-                if (publication == null) publication = new LanePublication();
-                runtime.publishedUsers.stage(publication, userId, admittedUser);
-                for (int i = 0; i < itemCount; i++) {
-                    runtime.publishedOrders.stage(publication, admittedOrders[i].orderId(), admittedOrders[i]);
-                    runtime.publishedReservations.stage(publication, admittedReservations[i].orderId(), admittedReservations[i]);
-                }
             } finally {
                 lane.admissionIndexCapacity = 2;
                 runtime.exitMatcherSettlementScope(lane, changes);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
-            runtime.rollbackPlaceBatchAdmissionInLane(lane, userId, coreSequence, orders, clientKeys,
-                    admittedReservations, admittedCount, userBefore);
+            runtime.rollbackPlaceBatchAdmissionInLane(
+                    lane, userId, coreSequence, orders, clientKeys, admittedCount, userBefore);
             for (int i = 0; i < itemCount; i++) {
                 if (orders[i] != null) identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
                 clientKeys[i] = null;
@@ -191,11 +174,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         assetIds = null;
         matchingOrders = null;
         admittedOrders = null;
-        admittedReservations = null;
         runtime = null;
         identities = null;
-        admittedUser = null;
-        if (publication != null) publication.clear();
         rejection = null;
         itemCount = 0;
         admittedCount = 0;
@@ -208,14 +188,11 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
         return rejection;
     }
-    LanePublication publication() { return publication; }
     public long coreSequence() { return coreSequence; }
     long userId() { return userId; }
     OrderRuntime[] admittedOrders() { return admittedOrders; }
     int itemCount() { return itemCount; }
-    UserRuntime admittedUser() { return admittedUser; }
     OrderRuntime admittedOrder(int index) { return admittedOrders[index]; }
-    ReservationRuntime admittedReservation(int index) { return admittedReservations[index]; }
     ResolvedPlaceOrder order(int index) { return orders[index]; }
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) {

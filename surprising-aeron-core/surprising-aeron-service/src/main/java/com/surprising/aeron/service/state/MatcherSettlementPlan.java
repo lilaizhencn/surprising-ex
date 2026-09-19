@@ -51,6 +51,8 @@ public final class MatcherSettlementPlan {
     private long[] initialOrderScratch;
     private static final long[] NO_ORDERS = new long[0];
     private OrderRuntime directTaker;
+    /** Immutable admission receipt used by Owner-side plan/dispatcher preparation. */
+    private OrderRuntime admittedTaker;
     /**
      * Direct PLACE facts are built by the Matcher before the Account Lane has exposed its
      * mutable OrderRuntime.  Keep the immutable order fields needed for proof and Lane-side
@@ -70,7 +72,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
-        directTaker = null; takerLaneId = -1;
+        directTaker = null; admittedTaker = null; takerLaneId = -1;
         directTakerSide = null;
         directTakerSymbolId = 0;
         directTakerInstrumentChangeId = 0;
@@ -106,7 +108,7 @@ public final class MatcherSettlementPlan {
                              CoreInstrumentState instrument, CoreMatchingResult result,
                              TradingRuntimeState runtime) {
         clearReferences();
-        coreSequence = sequence; directTaker = taker;
+        coreSequence = sequence; directTaker = taker; admittedTaker = taker;
         directTakerSide = side;
         directTakerSymbolId = symbolId;
         directTakerInstrumentChangeId = instrumentChangeId;
@@ -313,6 +315,18 @@ public final class MatcherSettlementPlan {
                 null, null, null, target);
     }
 
+    /** Build from the immutable Lane admission receipt before the final Owner view is published. */
+    public static MatcherSettlementPlan buildAdmittedInto(MatcherSettlementPlan target,
+            long sequence, OrderRuntime taker, long firstOrderId, long secondOrderId,
+            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (target == null || taker == null) throw new IllegalArgumentException("admitted taker is required");
+        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
+        target.initialOrderScratch[0] = firstOrderId;
+        target.initialOrderScratch[1] = secondOrderId;
+        return build(sequence, taker.orderId(), taker.userId(), target.initialOrderScratch, result,
+                runtime, identities, taker, null, null, target);
+    }
+
     /**
      * Single-item batch variant.  The previous call site created a one-element
      * {@code long[]} solely to pass the taker identity through the generic
@@ -452,6 +466,11 @@ public final class MatcherSettlementPlan {
                 ? new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask, orders, orderCount, result.matcherEvents(), tradeCount)
                 : target;
         plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
+        plan.admittedTaker = taker;
+        plan.directTaker = null;
+        plan.directTakerSide = null;
+        plan.directTakerSymbolId = 0;
+        plan.directTakerInstrumentChangeId = 0;
         plan.takerLaneId = builtTakerLaneId;
         plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
         plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
@@ -526,6 +545,7 @@ public final class MatcherSettlementPlan {
     public long coreSequence() { return coreSequence; }
     public long takerOrderId() { return takerOrderId; }
     public long activeUserId() { return activeUserId; }
+    OrderRuntime admittedTaker() { return admittedTaker; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public int orderCount() { return orderCount; }
 
