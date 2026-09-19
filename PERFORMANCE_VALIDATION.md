@@ -412,3 +412,136 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 
 - 全部本轮节点/client/JMH fork/分析进程已退出；仅将本轮临时Cluster/Archive/JFR、局部JMH、日志和分析文件约6.4GiB移入 `/Users/atomex/.Trash/surprising-ex-lane-merge-20260919/`，可恢复；上方原始target/tmp路径仅作历史定位。未清空Trash、未改动上一轮分析脚本或其他用户文件。
 - `git diff --check` 通过，只提交 LanePublication/TradingRuntimeState 的局部减法、相关回归/JMH恢复断言、README及本节记录；既有其他未提交改动（含AGENTS.md）保持原样。本轮用户允许本机验证不等于修改全局环境政策。
+
+## 2026-09-19 Owner 结算合并内部分段定位（merge-detail-20260919）
+
+### 采集前计划
+
+- 当前 master `ef63cf8e`，对照 commit 不适用（仅验证当前 master）；保留既有未提交修改，本轮只增加 Owner-local、按 sequence 哈希 1/64 的 JFR 分段计时，不改变业务状态/顺序。现有命令事件以相同 sequence 关联。collection 包含 lane，publication 包含各发布表，禁止重复累加嵌套时间；异常 collection 标记 completed=false。Lane 异常不产生完成事件。
+- 假设：Owner 合并时间主要消耗在发布表、终态索引或回收之一；若分段不集中，不宣称单点根因。拆分 users/orders/reservations/positions/removals、terminalIndex、changedIndex，以及 collection 的 trim/release。Lane 事件覆盖调用 commitTerminalToOwner 的撤单等路径，collection 只覆盖 collectMatcherSettlement，不将未覆盖路径算零。
+- 本轮为探索诊断，没有预设吞吐增幅或容量验收线。要求错误/超时/未完成均为零、accepted=terminal（business/Core）、资金差额零且冻结/持仓/终态/恢复检查通过；环境异常、DataLoss 或窗口错位对应证据无效。不得靠 busy-spin CPU 宣称计算满载。
+- 用户已明确允许本机。本机 macOS26.7 x86_64 / MacBookPro16,1 / 16逻辑CPU /16GiB，JDK HotSpot Corretto27+33-FR、Maven3.9.16；磁盘297GiB可用，既存swap1797.5MiB，运行中检查swap增量与空间。CodeGraph 工具不可用，按源码与Maven依赖确认影响范围。
+- 业务/资源配置沿用当前 baseline.env：真实单成员Aeron（网络、Archive保留）、LINEAR_PERPETUAL MIXED、做市开启、1matcher/4Account Lane、全局/session in-flight256、128symbols、1000retail/1385total users、batch20、seed25620、全部BUSY_SPIN、Owner input64。节点512m–1536m、client128m–512m、G1、不绑核，不能外推生产独占CPU。
+- 预热30s、测量60s、独立排空；先无profiler，再同配置JFR各一轮，记录波动而不声称稳定收益。诊断开关仅JFR轮开启；录制每进程独立、上限256m，使用现有 owner-commit-profile.jfc（20ms execution sample），NMT/GC/CPU随脚本采集。只用流式JFR分析，禁止展开全量FileWrite JSON。业务窗口客户端epoch对JFR仅取两端2s保护区，跨进程未完整校准，不相减计算延迟。
+- 命令：先 `mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=ClusterCommandPipelineTest -Dsurefire.failIfNoSpecifiedTests=false -Dcore.settlementLatencyDiagnostics=true test`，再 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package`。压测：`ASYNC_RUN_ID=merge-detail-20260919-main ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`；JFR轮runID改为merge-detail-20260919-jfr、ENABLE_JFR=true。本轮不改业务算法，先验证诊断覆盖与归因；不拿历史代码或局部JMH冒充当前Core容量。
+- 缺口预先声明：真实六产品线全链路、网关/WebSocket、真实Archive重启、独占CPU、长稳和完整跨进程时钟校准不在本次定位覆盖内；最终仅给部分验证。
+- 补充局部回归采集：沿用已覆盖合并路径及全账户恢复断言的 ContinuousOwnerBenchmark.placeCancelWithoutTimers，六产品线×batch1/20×DISTINCT/PAIRED，无profiler/-prof gc 各24fork；wi1×1s/i2×1s/f1/t1，512MiB/G1、1matcher/4Lane/window256、BUSY_SPIN。命令 `bash /tmp/merge-detail-20260919-jmh.sh`；本轮新增的是真实集群内部分段JFR，不新增重复JMH模型。短微基准只检查诊断关闭路径、分配和恢复，不证明稳态容量。
+
+### 实测结果与归因
+
+- 本轮构建前工作区 tracked diff SHA256=`cb671ef50476b4f1c6ccf5696d0a287383dc5f42995000dba29445ac33d7065b`（含既有修改及计划，README结果段随后追加）；新事件源文件SHA256=`b4ea5c2565c4997366a3401ce7c55ff8d9eb809997f72c57f1a946098659e01c`。默认关闭时不读取时钟、不分配逐命令事件；唯一新增类承担JFR观测边界，无业务副本/索引/线程。
+- 诊断开启的 ClusterCommandPipelineTest 250项全通过；完整 benchmarks -am package 2:08成功，1458项、0失败/错误、3条件跳过，包含六产品线连续交易及快照恢复断言。新增断言验证事件完成标记、scope、合法序号、非负耗时与子段≤父段。未用测试替代真实集群性能。
+
+| 当前代码轮次 | 稳定窗口s | terminal business/s | terminal Core/s | fills/s | 窗口背压占比 |
+|---|---:|---:|---:|---:|---:|
+| 无profiler主轮 | 60.021243 | 347966.718 | 33255.742 | 82829.341 | 83.874% |
+| JFR归因轮 | 60.019794 | 342779.767 | 32761.509 | 81594.415 | 83.448% |
+
+- 主轮窗口内20885395 business/1996051 Core/4971520 fills；排空5.791597ms另完成2686 business/254 Core/0fill，期末offered=terminal20888081 business/1996305 Core、unfinished=0。JFR窗口内20573571 business/1966339 Core/4897280 fills；排空6.138650ms另完成2685/253/0，期末20576256 business/1966592 Core均对齐、unfinished=0。两轮peak256，windowBlockedCount458228/607153；背压50.342102120s/50.085274965s，非持续无背压open-loop、延迟未做coordinated-omission校正，不能宣称无限到达率下容量。
+- 两轮mixedVerify=PASS、fundsDiff0、population/hftPositions/reservations/loss均true，无错误/超时退出；主轮1942测量cycles/2724总cycles/hash4d36eab35275e5fe，JFR1913/2719/hasha660dba419ff9299。真实网关API、WebSocket和真实Archive重启未验证。主轮与JFR仅差−1.49%，这是采样开销与单轮波动混合，不是优化收益。
+
+主轮入口到终态延迟（µs；requests/items计数包括独立排空，非稳定窗口吞吐分子；入口→accepted、accepted→terminal未分别输出，属缺口）：
+
+| 业务 | requests/items | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| PLACE_ORDER | 497152/497152 | 5390 | 9846 | 10928 | 16236 | 25608 | 80347 |
+| CANCEL_ORDER | 497152/497152 | 5459 | 8609 | 9469 | 15507 | 30916 | 81723 |
+| APPLY_MARK_PRICE | 7697/7697 | 5324 | 9822 | 12558 | 25477 | 166330 | 168427 |
+| PLACE_ORDER_BATCH | 745728/14914560 | 7843 | 12500 | 13811 | 20348 | 34373 | 168427 |
+| CANCEL_ORDER_BATCH | 248576/4971520 | 11788 | 13705 | 15507 | 25821 | 38305 | 167247 |
+
+批量平均/最大20items，请勿把Core消息与business items作同一口径。主轮最后尾样本最高168ms，主轮无JFR，不能事后拿另一轮GC替它归因。
+
+#### 合并内部：可定位到具体操作，但没有证据证明一个调用是全部吞吐差距的根因
+
+- 中部窗口epoch `[1789781952371,1789782008391]`，56.020s（两端各2s保护，不是完整跨进程时钟校准）。全部录制92716条OwnerSettlementMerge；中部60452条按下面实际n统计：PLACE_ORDER7121 collection/7121 lane，CANCEL_ORDER7115/7115，PLACE_ORDER_BATCH10656/14210，UNJOINED3557/3557。每组按sequence先汇总Lane，不把每Lane均值误作每命令均值。UNJOINED不得推定成批量撤单；类型关联存在缺口。
+
+每命令分段均值/p99（µs）；publication包含五个发布子段，collection包含lane、trim、release。它们不可重复求和：
+
+| 分段 | 普通下单 n7121 | 普通撤单 n7115 | 批量下单 n10656 | 未关联 n3557 |
+|---|---:|---:|---:|---:|
+| 收集合计 | 5.325/13.474 | 5.641/15.118 | 14.029/39.916 | 14.667/35.606 |
+| 发布表合计 | 1.326/2.731 | 2.058/4.907 | 5.677/17.753 | 6.277/17.296 |
+| 其中账户 | 0.083/0.183 | 0.365/1.028 | 0.377/1.595 | 0.391/1.042 |
+| 其中订单 | 0.355/0.732 | 0.280/0.873 | 1.601/5.308 | 1.084/3.128 |
+| 其中冻结 | 0.066/0.149 | 0.278/0.920 | 0.479/1.896 | 0.957/3.149 |
+| 其中持仓 | 0.064/0.142 | 0.065/0.154 | 0.303/1.453 | 0.067/0.155 |
+| 其中删除路由/集合清理 | 0.322/0.698 | 0.638/1.612 | 2.238/6.889 | 3.225/7.162 |
+| 终态索引 acceptBatch | 0.064/0.147 | 0.390/1.115 | 2.156/7.472 | 3.213/9.006 |
+| 变更索引 adopt | 0.178/0.326 | 0.168/0.470 | 0.261/0.760 | 0.194/0.512 |
+| 保留窗口淘汰 | 0.108/0.165 | 0.180/0.464 | 0.556/2.310 | 0.786/2.449 |
+| 结算缓冲回收 | 0.272/0.509 | 0.303/0.741 | 1.237/3.712 | 0.403/0.954 |
+
+- 批量下单：发布表5.677µs，占采样collection14.029µs的40.5%；终态索引2.156µs占15.4%；回收1.237µs占8.8%；adopt0.261µs占1.9%。发布内删除路由2.238µs、订单1.601µs最重，两者合占发布约67.6%。因此优先继续删清零或adopt不能解释主体成本。**这些是带诊断的墙钟分段，不是无采样纯CPU成本；父段包含内部JFR事件提交，余差不能直接全算成未定位业务工作。** 亚微秒子段也包含读时钟成本。
+- 方法证据：`LanePublication.publish → LanePublishedMap.remove → Long2ObjectHashMap.remove/compactChain` 为实际删除及后移探测链；`LanePublishedMap.applyPublished → OrderRuntime.equals` 是现存订单全字段比较；`TerminalStateRetention.acceptBatch → TerminalTombstoneStore.putIfAbsent → entitySlot` 是终态幂等探测。indexEntity/trim仍有成本，但本轮不能仅凭热点说哈希发生病态冲突，也未证明可安全删掉幂等查找。之前已消除的是重复删除，不等于实际删除变免费。
+- Owner中部1936 execution samples，inclusive pollCommandCommit1236(63.8%)、completeMatching850(43.9%)、collectMatcherSettlement377(19.5%)、LanePublication217(11.2%)、CommitPublication159(8.2%)；这些有父子/其他调用覆盖，不能相加。完整入口/准入还有276样本、完成推进/ready检查也有成本。合并不是Owner的全部工作，不能把某一局部节点等同全系统唯一瓶颈。
+- 排队放大证据：Lane完成→Owner观察 p50/p99 下单1.707/302.329µs、撤单349.421/2910.327µs、批量下单355.833/2235.203µs；同一JVM nanoTime有效。它包含FIFO前序等待，不能读作当前命令执行耗时。OwnerTurn中部18110样本，退休0/1/多条=10435/7078/597，64条135次，headWait17969、budgetExhausted652（可重叠，不代表时长）。存在连续退休能力，但大多数抽样轮次没形成长ready前缀。
+
+外层独立抽样（与内层采样器不同，不逐均值相减）：
+
+| 阶段/业务 | n | meanµs | p99µs |
+|---|---:|---:|---:|
+| ownerCommitAttemptTerminal / CANCEL_ORDER | 7112 | 6.164 | 20.423 |
+| ownerCommitAttemptTerminal / CANCEL_ORDER_BATCH | 3556 | 30.529 | 73.969 |
+| ownerCommitAttemptTerminal / PLACE_ORDER | 7175 | 8.877 | 24.952 |
+| ownerCommitAttemptTerminal / PLACE_ORDER_BATCH | 10672 | 25.428 | 111.144 |
+| ownerResponseAndRetirement / CANCEL_ORDER | 7112 | 0.416 | 0.757 |
+| ownerResponseAndRetirement / CANCEL_ORDER_BATCH | 3556 | 0.968 | 2.576 |
+| ownerResponseAndRetirement / PLACE_ORDER | 7175 | 0.484 | 0.954 |
+| ownerResponseAndRetirement / PLACE_ORDER_BATCH | 10672 | 1.077 | 3.081 |
+
+#### 资源与证据有效性
+
+- JFR中部Owner单核98.23%、matcher98.19%、各Lane约98.18%，全部busy-spin，不能当作有用工作100%；Lane有效执行全测量窗口平均38.00%（主轮37.16%）。主轮matcher/completion/context高水位218/201/255，Lane[66,63,39,77]；JFR224/197/256，Lane[58,43,37,40]，无期末积压。发压fork主轮进程CPU抽查73.5%，不是完整排除发压端/网络瓶颈的证明。
+- 中部Owner同步file/socket事件0，仅限保护窗口。GC102次，总pause569.996ms/56.020s=1.02%，p50/p95/p99/max5.397/6.828/7.250/9.959ms。能影响毫秒尾延迟，但不能解释全部吞吐；未做逐请求GC相关性。heapUsed171202448–478854720 bytes，committed512MiB，首末afterGC171629808→171624000 bytes，仅短时稳定，不能证明无泄漏。
+- 中部ThreadAllocationStatistics区间差：Owner5114145352B、matcher7365938400B、Lane0..3分别3996523456/3997542960/3991400872/3996436720B、cluster-service1937802232B；线程首次/末次采样覆盖略短于保护窗口，不直接冒充精确bytes/op。整段录制allocation-by-site最大OrderRuntime.snapshot10.72%、preparedOrder8.23%、CoreMatchingResult.fromNativeWithEvidence8.01%；不是中部专属分配比例。TLAB101164/OutsideTLAB1574/AllocationSample101173均有事件，不等于精确对象数。NMT主轮committed721915KB(+3641KB)，JFR736622KB(−5530KB)，末次独立summary739139KB，采样时点不同。缺Direct/Mapped长期斜率、FD趋势和真实恢复长稳。
+- 全录制136s含启动/预热：Compilation8844、Deoptimization672、SafepointBegin176，不归作60s窗口计数；相关view保留，未把全录制统计冒充中部停顿归因。主轮/本轮JFR前后swap1797.5→1765.5→1701.5MiB，Swapouts持续867081未增；Swapins425647→426543→437730，有背景换入（JFR约44MiB），本机非独占/已有VM与桌面进程，存在干扰，不能证明生产独占CPU容量。磁盘最低约290GiB可用，无空间问题。
+
+#### 局部JMH及恢复检查
+
+- 24主fork+24 GC fork均完成，accepted/terminal business/Core均相等，trial teardown全账户冻结/持仓/订单及快照恢复检查无失败。JMH主分数单位invocations/s，每次512Core、512×batchSize business；不是API请求吞吐。两次短measurement的误差/CI为NaN且有明显预热波动，**此微基准仅部分验证路径与分配，不作为稳态性能通过**。GC轮主分数单列，不代替无profiler分数。
+
+| 产品 | 账户模式 | batch | 主inv/s | GC轮inv/s | GC B/inv | 换算B/business | 分配MiB/s | GC次数/ms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| SPOT | DISTINCT | 1 | 99.797 | 79.063 | 2636842 | 5150.1 | 137.76 | 5/29 |
+| LINEAR_PERPETUAL | DISTINCT | 1 | 98.465 | 76.071 | 2621189 | 5119.5 | 135.68 | 5/26 |
+| INVERSE_PERPETUAL | DISTINCT | 1 | 84.471 | 79.835 | 2616569 | 5110.5 | 142.52 | 5/27 |
+| LINEAR_DELIVERY | DISTINCT | 1 | 86.539 | 86.819 | 2573503 | 5026.4 | 152.09 | 5/28 |
+| INVERSE_DELIVERY | DISTINCT | 1 | 89.750 | 80.352 | 2606064 | 5090.0 | 142.67 | 5/29 |
+| OPTION | DISTINCT | 1 | 96.949 | 72.288 | 2630241 | 5137.2 | 124.31 | 5/28 |
+| SPOT | DISTINCT | 20 | 54.595 | 20.860 | 25057525 | 2447.0 | 354.93 | 7/44 |
+| LINEAR_PERPETUAL | DISTINCT | 20 | 44.577 | 27.034 | 24108555 | 2354.4 | 445.15 | 8/50 |
+| INVERSE_PERPETUAL | DISTINCT | 20 | 44.950 | 21.748 | 24716570 | 2413.7 | 354.82 | 8/51 |
+| LINEAR_DELIVERY | DISTINCT | 20 | 45.447 | 31.004 | 23932795 | 2337.2 | 515.12 | 9/49 |
+| INVERSE_DELIVERY | DISTINCT | 20 | 45.984 | 32.171 | 23549088 | 2299.7 | 519.94 | 8/38 |
+| OPTION | DISTINCT | 20 | 44.104 | 40.057 | 23307113 | 2276.1 | 630.53 | 9/48 |
+| SPOT | PAIRED | 1 | 121.981 | 108.239 | 2387037 | 4662.2 | 164.70 | 5/21 |
+| LINEAR_PERPETUAL | PAIRED | 1 | 102.481 | 92.371 | 2408951 | 4705.0 | 136.26 | 5/22 |
+| INVERSE_PERPETUAL | PAIRED | 1 | 108.781 | 99.611 | 2420863 | 4728.2 | 153.95 | 5/22 |
+| LINEAR_DELIVERY | PAIRED | 1 | 105.223 | 111.105 | 2392521 | 4672.9 | 173.77 | 5/22 |
+| INVERSE_DELIVERY | PAIRED | 1 | 115.752 | 108.626 | 2404833 | 4696.9 | 164.74 | 5/23 |
+| OPTION | PAIRED | 1 | 111.852 | 66.709 | 2576928 | 5033.1 | 110.92 | 5/22 |
+| SPOT | PAIRED | 20 | 32.760 | 17.861 | 24772246 | 2419.2 | 287.58 | 7/39 |
+| LINEAR_PERPETUAL | PAIRED | 20 | 32.751 | 29.482 | 23741103 | 2318.5 | 461.36 | 8/35 |
+| INVERSE_PERPETUAL | PAIRED | 20 | 32.332 | 23.537 | 24368713 | 2379.8 | 389.70 | 8/45 |
+| LINEAR_DELIVERY | PAIRED | 20 | 28.802 | 24.549 | 24385070 | 2381.4 | 402.20 | 8/49 |
+| INVERSE_DELIVERY | PAIRED | 20 | 28.911 | 23.542 | 24383322 | 2381.2 | 384.64 | 8/43 |
+| OPTION | PAIRED | 20 | 32.374 | 26.941 | 24034324 | 2347.1 | 430.69 | 8/44 |
+
+### 定位结论与最小后续方案
+
+- **部分验证，不是“性能问题已解决”。** 已定位到合并内的具体重成本：Owner上的发布表实际删除/订单比较与更新，加上终态保留索引；再与其他串行准入、事实发布、ready推进共同影响FIFO推进。已排除“主要只差多余清零”这一优先级判断；还不能证明某个单独操作决定3.3万Core/s，也不能把业务操作41.5万与Core消息3.3万直接比较。
+- 优先方案：先验证发布表的删除探测/后移链长度与orders相等比较命中率，再做一个局部变化（例如在已有Lane变化事实能证明未变时保留原对象，减少无效发布；或在实测长探测链时调整现有表容量/负载率）。不先改Owner调度、加barrier或换整体并发模型；不能直接跳过删除、把Owner发布表交给Lane并发写，或删除资金/终态校验。
+- 第二优先：明确新终态收据的唯一性/重复交付边界后，才评估终态索引能否减少探测；未证明前保留putIfAbsent。回收与changed-index只做低风险附带减法，不承诺靠它们大幅提升。
+- 收益验收需下一轮单因素当前代码对照诊断：对应分段下降、无采样持续终态吞吐同步改善、资金/完成性/恢复不变。此次没有实施性能修复，不给收益百分比；也没有证据支持生产必须放弃busy-spin或只能达到本机这档容量。
+
+### 原始证据
+
+- 原始目录 `surprising-aeron-core/surprising-aeron-benchmarks/target/aeron-async-stages/merge-detail-20260919-{main,jfr}/`，包含命令、日志、metrics、NMT、录制summary/views。主轮node86843；JFRnode87659/runner87675/fork87686。node.jfr136s/119835965B/SHA256=0047fccddda9bb288d8befc06bd8f719c5cbe1d9f907f36d687572dd1049c28b；client-87675.jfr10349672B/bcb3589fc70240b7ac321c3eeccff65637732362143978e804ea7a556161c542；client-87686.jfr122100439B/ac6dd37dbffea0004141fce18f60ce1f9c17eb4d85ca35d46e914a357a8f18f8。各进程独立录制，DataLoss需以各自summary核对。
+- `/tmp/merge-detail-20260919-{analysis,outer,heap}.json` 与 `/tmp/MergeDetailEvents.java`、`/tmp/merge-detail-20260919-analyze.py` 保存分段全部分位、样本数和top stacks；流式分析没有全量FileWrite JSON展开。JMH完整命令 `/tmp/merge-detail-20260919-jmh.sh`，rawData/CI与日志在 `/tmp/merge-detail-20260919-jmh/`。上一轮分析程序只读复用，未修改历史文件。
+
+### 清理与交付核对
+
+- 三份JFR分别136s/133s/132s，均DataLoss0；本轮node、client、JMH fork和分析进程已全部退出。
+- 只将本轮两个Cluster/Archive/JFR目录、JMH输出、日志和分析脚本约6.2GiB移至 `/Users/atomex/.Trash/surprising-ex-merge-detail-20260919/`，可恢复；原target/tmp路径仅作历史定位，没有删除或改写其他轮次及用户产物。
+- 提交范围仅本轮诊断事件、TradingRuntimeState/LanePublication采样、ClusterCommandPipelineTest断言、profile新增事件、README和本节记录。既有AGENTS.md、Owner/Matcher/Lane等未提交修改及历史文档追加段保留原样，不纳入本次提交。

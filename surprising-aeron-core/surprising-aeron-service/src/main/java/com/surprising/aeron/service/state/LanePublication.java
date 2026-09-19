@@ -47,19 +47,28 @@ final class LanePublication {
      */
     void publish(com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+        publish(changedUsers, changedOrders, null);
+    }
+
+    void publish(com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders,
+                 OwnerSettlementMergeEvent timing) {
         if (delta != null) {
             TradingRuntimeState.LaneDelta changes = delta;
             TradingRuntimeState owner = runtime;
+            long started = timing == null ? 0 : System.nanoTime();
             changes.users.drainTo((id, value) -> {
                 if (changedUsers != null) changedUsers.add(id);
                 owner.publishedUsers.applyPublished(id, value);
                 owner.changedUsers.add(id);
             });
+            if (timing != null) { timing.usersNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.orders.forEach((id, value) -> {
                 if (changedOrders != null) changedOrders.add(id);
                 // 删除由下面的路由集合统一应用，不先删除一次再重复探测发布表。
                 if (!changes.removedOrderRoutes.contains(id)) owner.publishedOrders.applyPublished(id, value);
             });
+            if (timing != null) { timing.ordersNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.reservations.drainTo((id, value) -> {
                 if (changedOrders != null) changedOrders.add(id);
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
@@ -67,10 +76,12 @@ final class LanePublication {
                     owner.publishedReservations.applyPublished(id, value);
                 owner.changedReservations.add(id);
             });
+            if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.positions.forEach((id, value) -> {
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
                 owner.publishedPositions.applyPublished(id, value);
             });
+            if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             // Terminal cleanup may intentionally omit a zero-reservation after-image.  Apply
             // route removals independently so the Owner cannot retain a stale reservation/order
             // merely because the Lane had no value record to drain.
@@ -81,6 +92,7 @@ final class LanePublication {
             changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.remove(id));
             changes.removedOrderRoutes.clear();
             changes.removedReservationRoutes.clear();
+            if (timing != null) timing.removalsNanos = System.nanoTime() - started;
             delta = null;
             runtime = null;
             return;

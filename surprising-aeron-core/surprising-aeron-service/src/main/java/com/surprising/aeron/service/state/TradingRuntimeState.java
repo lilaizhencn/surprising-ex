@@ -1505,6 +1505,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                            TerminalOrderSink terminalOrderSink, long coreSequence,
                                            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                                            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+            OwnerSettlementMergeEvent timing = OwnerSettlementMergeEvent.sample(coreSequence, "lane", laneId);
             publishTriggersToOwner(state);
             if (closedTriggerCount != 0) {
                 state.revision = Math.addExact(state.revision, closedTriggerCount);
@@ -1520,7 +1521,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                 });
             }
             // 发布时同遍消费账户/冻结缓冲；订单/持仓缓冲保留到下方直接交给Owner。
-            state.applyLanePublication(publication, changedUsers, changedOrders);
+            long started = timing == null ? 0 : System.nanoTime();
+            if (publication != null) publication.publish(changedUsers, changedOrders, timing);
+            if (timing != null) timing.publicationNanos = System.nanoTime() - started;
             if (publication == null) {
                 users.drainTo((userId, user) -> {
                     if (changedUsers != null) changedUsers.add(userId);
@@ -1535,8 +1538,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                     putOrRemove(state.publishedOrders, orderId, order);
                 });
             }
+            if (timing != null) { timing.terminalOrders = terminalOrderCount; started = System.nanoTime(); }
             if (terminalOrderSink != null && terminalOrderCount != 0)
                 terminalOrderSink.acceptBatch(this, coreSequence);
+            if (timing != null) timing.terminalIndexNanos = System.nanoTime() - started;
             if (publication == null) {
                 reservations.drainTo((orderId, reservation) -> {
                     if (changedOrders != null) changedOrders.add(orderId);
@@ -1571,8 +1576,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
             if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
+            if (timing != null) started = System.nanoTime();
             state.changedOrders.adopt(laneId, orders);
             state.changedPositions.adopt(laneId, positions);
+            if (timing != null) {
+                timing.changedIndexNanos = System.nanoTime() - started;
+                timing.completed = true;
+                timing.finish();
+            }
         }
 
         /**
@@ -2382,6 +2393,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
+        OwnerSettlementMergeEvent timing = OwnerSettlementMergeEvent.sample(event.plan().coreSequence(), "collection", -1);
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
         if (event.replacementIdentityAllocations() != 0)
             event.identities().recordLaneClientAllocations(event.replacementIdentityAllocations());
@@ -2420,14 +2432,22 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                 }
             }
+            long trimStarted = timing == null ? 0 : System.nanoTime();
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
+            if (timing != null) timing.trimNanos = System.nanoTime() - trimStarted;
             if (changes != null) {
                 pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
                 if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
             }
+            if (timing != null) timing.completed = true;
             return aggregate;
         } finally {
+            long releaseStarted = timing == null ? 0 : System.nanoTime();
             if (changes != null) releaseMatcherSettlementChanges(changes);
+            if (timing != null) {
+                timing.releaseNanos = System.nanoTime() - releaseStarted;
+                timing.finish();
+            }
         }
     }
 

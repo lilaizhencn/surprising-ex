@@ -36,6 +36,11 @@ Lane 终态合并时，`LanePublication.publish` 对路由删除 ID 只在删除
 `CoreMatchingPhaseMetrics` 区分提交尝试（等待/终态）、事实发布、终态记账、实时发布和回复退休；
 事实发布/记账包含在提交尝试内，不可重复相加。`OwnerTurn` 每 64 个非空 FIFO 轮次采样退休数、
 队首等待和预算耗尽，不代表全部轮次精确计数。Lane 完成到 Owner 提交的延迟包含排队，不能当作尾部执行时间。
+`OwnerSettlementMergeEvent` 按 sequence 哈希抽样 1/64，只在 Owner 当前调用栈内保存计时：
+`collection` 覆盖 `collectMatcherSettlement`（含淘汰和回收），`lane` 覆盖单 Lane 终态合并，
+拆分发布账户/订单/冻结/持仓/删除路由、终态索引和变更索引。collection 包含 lane，
+publication 包含各发布表，不能重复相加；按 sequence 与 SettlementLatency 关联业务类型，
+未关联样本单列，未覆盖路径不填零。默认关闭诊断，不新增业务状态、队列或线程交接。
 
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 

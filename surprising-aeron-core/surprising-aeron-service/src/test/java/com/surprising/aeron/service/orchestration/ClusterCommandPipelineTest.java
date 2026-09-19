@@ -82,6 +82,7 @@ class ClusterCommandPipelineTest {
             recording.enable(CoreMatchingPhaseMetrics.SettlementLatency.class);
             recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
             recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
+            recording.enable("surprising.OwnerSettlementMerge");
             recording.start();
             for (boolean batch : new boolean[]{false, true}) {
                 try (Fixture live = new Fixture(ProductLine.LINEAR_PERPETUAL)) {
@@ -95,6 +96,29 @@ class ClusterCommandPipelineTest {
                 }
             }
             recording.stop(); recording.dump(path);
+            var merges = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerSettlementMerge")).toList();
+            assertThat(merges).extracting(e -> e.getString("scope")).contains("lane", "collection");
+            for (var merge : merges) {
+                assertThat(merge.getBoolean("completed")).isTrue();
+                assertThat(merge.getLong("sequence")).isPositive();
+                long total = merge.getLong("totalNanos");
+                assertThat(total).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
+                long stages = 0;
+                for (String field : List.of("publicationNanos", "terminalIndexNanos", "trimNanos",
+                        "releaseNanos", "changedIndexNanos")) {
+                    long value = merge.getLong(field);
+                    assertThat(value).as(field).isBetween(0L, total);
+                    stages += value;
+                }
+                assertThat(stages).isLessThanOrEqualTo(total);
+                long publication = 0;
+                for (String field : List.of("usersNanos", "ordersNanos", "reservationsNanos", "positionsNanos", "removalsNanos")) {
+                    assertThat(merge.getLong(field)).as(field).isNotNegative();
+                    publication += merge.getLong(field);
+                }
+                assertThat(publication).isLessThanOrEqualTo(merge.getLong("publicationNanos"));
+            }
             var boundaries = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
             assertThat(boundaries).extracting(e -> e.getString("stage")).contains(

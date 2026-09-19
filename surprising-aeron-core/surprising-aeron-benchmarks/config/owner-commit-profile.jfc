@@ -67,4 +67,5 @@
   <event name="com.surprising.LinearPerpetualSaturation"><setting name="enabled">true</setting></event>
   <event name="com.surprising.LinearPerpetualBusinessLatency"><setting name="enabled">true</setting></event>
   <event name="surprising.OwnerTurn"><setting name="enabled">true</setting></event>
+  <event name="surprising.OwnerSettlementMerge"><setting name="enabled">true</setting></event>
 </configuration>
