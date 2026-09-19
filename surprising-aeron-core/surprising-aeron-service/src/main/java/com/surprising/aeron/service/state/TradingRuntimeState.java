@@ -2060,7 +2060,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             ResolvedPlaceOrder[] orders, long[] openInterestSteps,
             boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
-            CoreMatchingOrder[] matchingOrders,
             OrderRuntime[] admittedOrders, int itemCount,
             int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
             long timestamp, long position) {
@@ -2076,7 +2075,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, lifecycleSettled, fundingInProgress,
-                clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
+                clientKeys, symbolIds, assetIds, admittedOrders,
                 itemCount, laneId, matcherShard, this, changes, identities, source,
                 timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(

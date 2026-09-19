@@ -16,7 +16,6 @@ import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.aeron.service.matching.CoreCancellationResult;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -248,8 +247,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final int[] preparedSymbolIds;
     /** 本批预备的 AssetIds 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final int[] preparedAssetIds;
-    /** 本批预备的 MatchingOrders 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final CoreMatchingOrder[] preparedMatchingOrders;
     /** 本批预备的 AdmittedOrders 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final OrderRuntime[] preparedAdmittedOrders;
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
@@ -338,7 +335,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedFundingInProgress = new boolean[capacity];
         preparedSymbolIds = new int[capacity];
         preparedAssetIds = new int[capacity];
-        preparedMatchingOrders = new CoreMatchingOrder[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
         preparedSymbols = new ArrayList<>(capacity);
         preparedContextDecisions =
@@ -410,7 +406,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedLifecycleSettled, 0, preparedCount, false);
         java.util.Arrays.fill(preparedFundingInProgress, 0, preparedCount, false);
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, null);
-        java.util.Arrays.fill(preparedMatchingOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
         preparedSymbols.clear();

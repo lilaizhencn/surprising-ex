@@ -3,7 +3,6 @@ import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.UUID;
 
 /** One-way admission for one user's PLACE batch, owned by exactly one Account Lane. */
@@ -21,7 +20,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private RuntimeIdentityRegistry.PreparedClientKey[] clientKeys;
     private int[] symbolIds;
     private int[] assetIds;
-    private CoreMatchingOrder[] matchingOrders;
     private OrderRuntime[] admittedOrders;
     private int itemCount;
     private int admittedCount;
@@ -40,17 +38,17 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             long[] openInterestSteps, boolean[] lifecycleSettled, boolean[] fundingInProgress,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
             int[] symbolIds, int[] assetIds,
-            CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
+            OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
             TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
                 || clientKeys == null || symbolIds == null
-                || assetIds == null || matchingOrders == null || admittedOrders == null || itemCount <= 0
+                || assetIds == null || admittedOrders == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > openInterestSteps.length
                 || itemCount > lifecycleSettled.length || itemCount > fundingInProgress.length
                 || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
-                || itemCount > matchingOrders.length || itemCount > admittedOrders.length
+                || itemCount > admittedOrders.length
                 || laneId < 0 || matcherShard < 0
                 || runtime == null || matcherShard >= runtime.topology().matchingEngineCount() || changes == null) {
             throw new IllegalArgumentException("invalid place batch admission event");
@@ -68,7 +66,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.clientKeys = clientKeys;
         this.symbolIds = symbolIds;
         this.assetIds = assetIds;
-        this.matchingOrders = matchingOrders;
         this.admittedOrders = admittedOrders;
         this.itemCount = itemCount;
         this.laneId = laneId;
@@ -107,8 +104,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         lifecycleSettled[index] = decision.context().lifecycleSettled();
                         fundingInProgress[index] = decision.context().fundingInProgress();
                         openInterestSteps[index] = decision.openInterestSteps();
-                        matchingOrders[index] = new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
-                                resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
                     }
                     ResolvedPlaceOrder order = orders[index];
                     var key = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
@@ -172,7 +167,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         clientKeys = null;
         symbolIds = null;
         assetIds = null;
-        matchingOrders = null;
         admittedOrders = null;
         runtime = null;
         identities = null;

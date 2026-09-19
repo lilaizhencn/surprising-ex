@@ -39,10 +39,12 @@ final class MatcherCommandSubmission {
                 // Ordinary PLACE admissions run on the Account Lane and Matcher concurrently.
                 // Until the Lane publishes its mutable runtime object, use the immutable input
                 // captured by the admission event.
-                var order = pending.placeAdmission() == null
-                        ? owner.matchingOrder(command.orderId()) : pending.placeAdmission().matchingOrder();
+                if (pending.placeAdmission() != null) {
+                    return pending.preparePlaceMatching(owner, shard, command.instrumentChangeId(), userId,
+                            pending.placeAdmission().matchingOrder(), null);
+                }
                 return pending.preparePlaceMatching(owner, shard, command.instrumentChangeId(), userId,
-                        null, order);
+                        null, owner.matchingOrder(command.orderId()));
             }
             if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
                 var command = pending.decodedCommand().cancelOrder();
@@ -74,8 +76,12 @@ final class MatcherCommandSubmission {
                         yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
                                 () -> owner.matchingAdapter.place(userId, admittedOrder));
                     }
-                    var order = pending.placeAdmission() == null
-                            ? owner.matchingOrder(command.orderId()) : pending.placeAdmission().matchingOrder();
+                    if (pending.placeAdmission() != null) {
+                        var order = pending.placeAdmission().matchingOrder();
+                        yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
+                                () -> owner.matchingAdapter.place(userId, order));
+                    }
+                    var order = owner.matchingOrder(command.orderId());
                     yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
                             () -> owner.matchingAdapter.place(userId, order));
                 }

@@ -175,14 +175,23 @@ class ClusterCommandPipelineTest {
                     live.progressUntil(() -> {
                         var pending = state.pendingMatching(sequence);
                         var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
-                        return event != null && event.dispatched() && state.runtimeState.order(1000) != null;
+                        var receipt = batch
+                                ? pending.orderBatch.preparedAdmittedOrders[0]
+                                : pending.realtimeTakerOrder;
+                        return event != null && event.dispatched() && receipt != null;
                     });
-                    var admitted = state.runtimeState.order(1000);
+                    var pending = state.pendingMatching(sequence);
+                    var admitted = batch
+                            ? pending.orderBatch.preparedAdmittedOrders[0]
+                            : pending.realtimeTakerOrder;
+                    assertThat(admitted).isNotNull();
                     assertThat(admitted.createdAtEpochMillis()).isEqualTo(command.header().submittedAtEpochMillis());
+                    assertThat(state.runtimeState.order(1000))
+                            .as("admission stays Lane-owned until ordered settlement").isNull();
                     release.countDown();
                     live.tick();
                     assertThat(gate.join()).isTrue();
-                    assertThat(state.runtimeState.order(1000)).isSameAs(admitted);
+                    assertThat(state.runtimeState.order(1000)).isEqualTo(admitted);
                     serial.apply(command);
                     assertThat(live.responses).hasSize(1);
                     assertThat(live.hash()).isEqualTo(serial.hash());
@@ -227,18 +236,23 @@ class ClusterCommandPipelineTest {
                 live.progressUntil(() -> {
                     var pending = state.pendingMatching(sequence);
                     var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
-                    return event != null && event.dispatched();
+                    var receipt = batch
+                            ? pending.orderBatch.preparedAdmittedOrders[0]
+                            : pending.realtimeTakerOrder;
+                    return event != null && event.dispatched() && receipt != null;
                 });
                 var pending = state.pendingMatching(sequence);
                 var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                 assertThat(event.direct()).isTrue();
                 assertThat(event.ready()).isFalse();
-                // Freeze the Owner-visible admission while Matcher/Lanes advance independently.
-                live.progressUntil(() -> state.runtimeState.order(1000) != null);
-                var admittedOrder = state.runtimeState.order(1000);
-                var admittedReservation = state.runtimeState.reservation(1000);
+                // Keep only the immutable receipt visible while Matcher/Lanes advance independently.
+                var admittedOrder = batch
+                        ? pending.orderBatch.preparedAdmittedOrders[0]
+                        : pending.realtimeTakerOrder;
+                assertThat(admittedOrder).isNotNull();
                 var orderBeforeSettlement = admittedOrder.snapshot();
-                var reservationBeforeSettlement = admittedReservation.snapshot();
+                assertThat(state.runtimeState.order(1000)).isNull();
+                assertThat(state.runtimeState.reservation(1000)).isNull();
                 release.countDown();
                 // Do not call Owner progress/drain here: the Matcher and Lanes must finish on their own.
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -248,9 +262,8 @@ class ClusterCommandPipelineTest {
                         .as("settlement retains the immutable receipt after Owner recycled admission")
                         .isSameAs(admittedOrder);
                 assertThat(admittedOrder).isEqualTo(orderBeforeSettlement);
-                assertThat(admittedReservation).isEqualTo(reservationBeforeSettlement);
-                assertThat(state.runtimeState.order(1000)).isSameAs(admittedOrder);
-                assertThat(state.runtimeState.reservation(1000)).isSameAs(admittedReservation);
+                assertThat(state.runtimeState.order(1000)).isNull();
+                assertThat(state.runtimeState.reservation(1000)).isNull();
                 if (batch) {
                     assertThat(pending.orderBatch.nextIndex).as("submission cursor belongs to Owner").isZero();
                     assertThat(state.batches.orderBatchMatcherShard(pending.orderBatch))

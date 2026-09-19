@@ -265,7 +265,7 @@ final class OrderBatchExecutor {
                 batch.preparedOrders, batch.preparedOpenInterestSteps,
                 batch.preparedLifecycleSettled, batch.preparedFundingInProgress,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
-                batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
+                batch.preparedAdmittedOrders,
                 batch.items.size(), shard, owner.identities, batch,
                 batch.clusterTimestamp, batch.clusterPosition);
     }
@@ -303,8 +303,7 @@ final class OrderBatchExecutor {
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                com.surprising.aeron.service.matching.CoreMatchingOrder matchingOrder =
-                        batch.preparedMatchingOrders[index];
+                ResolvedPlaceOrder matchingOrder = batch.preparedOrders[index];
                 if (batch.pipelinedMatchingResultCount == batch.pipelinedMatchingResults.length)
                     throw new IllegalStateException("place batch result buffer is full");
                 batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount++] =

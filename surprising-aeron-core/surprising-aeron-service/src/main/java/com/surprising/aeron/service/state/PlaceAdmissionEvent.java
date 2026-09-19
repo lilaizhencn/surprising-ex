@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.protocol.CoreResultCode;
 import java.util.UUID;
 
@@ -181,12 +180,10 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
      * matcher can therefore run in parallel with the account Lane; it must not wait for the Lane
      * to publish the mutable runtime order just to reconstruct these command fields.
      */
-    public CoreMatchingOrder matchingOrder() {
+    public ResolvedPlaceOrder matchingOrder() {
         ResolvedPlaceOrder resolved = order;
         if (resolved == null) throw new IllegalStateException("place admission is not prepared");
-        return new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
-                resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(),
-                resolved.quantitySteps());
+        return resolved;
     }
 
     /** Owner-only immutable input used to preconstruct a direct settlement before Lane admission. */
