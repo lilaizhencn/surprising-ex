@@ -320,9 +320,11 @@ final class OrderBatchExecutor {
                     item.realtimeTakerOrder = batch.preparedAdmittedOrders[index];
                     item.executionEvents = result.matcherEvents();
                     item.executionTakerUserId = userId;
-                    for (MatcherEvent event : item.executionEvents) if (event.eventType() == MatcherEventType.TRADE) {
-                        item.executionCount++;
-                        batch.tradeCount = Math.incrementExact(batch.tradeCount);
+                    for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
+                        if (item.executionEvents.get(eventIndex).eventType() == MatcherEventType.TRADE) {
+                            item.executionCount++;
+                            batch.tradeCount = Math.incrementExact(batch.tradeCount);
+                        }
                     }
                     item.status = result.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
                     item.resultCode = result.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -840,7 +842,8 @@ final class OrderBatchExecutor {
         if (batch.kind != OrderBatchKind.CANCEL) {
             item.executionEvents = matchingResult.matcherEvents();
             item.executionTakerUserId = pending.command().header().userId();
-            for (MatcherEvent event : item.executionEvents) {
+            for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
+                MatcherEvent event = item.executionEvents.get(eventIndex);
                 if (event.eventType() == MatcherEventType.TRADE) {
                     item.executionCount++;
                     batch.tradeCount = Math.incrementExact(batch.tradeCount);
@@ -1122,13 +1125,15 @@ final class OrderBatchExecutor {
     /** 每批仅在有序提交点发布成交，不能写入前一条命令的实时捕获范围。 */
     private void captureCommittedBatchTrades(OrderBatchPending batch) {
         if (owner.realtimeCapture == null) return;
-        for (OrderBatchItem item : batch.items) {
+        for (int itemIndex = 0; itemIndex < batch.items.size(); itemIndex++) {
+            OrderBatchItem item = batch.items.get(itemIndex);
             var taker = item.realtimeTakerOrder;
             item.realtimeTakerOrder = null;
             if (taker == null || owner.realtimeCapture == null || !owner.realtimeCapture.active()) continue;
             try {
                 int fill = 0;
-                for (MatcherEvent event : item.executionEvents) {
+                for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
+                    MatcherEvent event = item.executionEvents.get(eventIndex);
                     if (event.eventType() == MatcherEventType.TRADE)
                         owner.realtimeCapture.trade(taker, batch.sequence, fill++, event.price(), event.size(),
                                 event.matchedOrderId(), event.matchedOrderUid());

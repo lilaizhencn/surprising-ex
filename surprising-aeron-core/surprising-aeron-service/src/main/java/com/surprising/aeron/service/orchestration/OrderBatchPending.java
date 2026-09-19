@@ -143,7 +143,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public int executionCount(int index) { return items.get(index).executionCount; }
     public void writeExecutions(int index, java.nio.ByteBuffer output) {
         OrderBatchItem item = items.get(index);
-        for (MatcherEvent event : item.executionEvents) {
+        for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
+            MatcherEvent event = item.executionEvents.get(eventIndex);
             if (event.eventType() != MatcherEventType.TRADE) continue;
             output.putLong(item.orderId).putLong(event.matchedOrderId())
                     .putLong(item.executionTakerUserId).putLong(event.matchedOrderUid())
