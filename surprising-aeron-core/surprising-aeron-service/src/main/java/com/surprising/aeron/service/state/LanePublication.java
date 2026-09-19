@@ -82,6 +82,11 @@ final class LanePublication {
             if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.positions.forEach((id, value) -> {
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
+                // Capture the old value before deletion, in the same publication traversal.
+                if (value == null && owner.realtimeCapture != null) {
+                    try { owner.realtimeCapture.removedPosition(owner.publishedPositions.get(id)); }
+                    catch (RuntimeException failure) { owner.realtimeCapture.failed(); }
+                }
                 owner.publishedPositions.applyPublished(id, value);
             });
             if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }

@@ -244,6 +244,9 @@ class ClusterCommandPipelineTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
+                if (!batch) assertThat(event.admittedOrder())
+                        .as("settlement retains the immutable receipt after Owner recycled admission")
+                        .isSameAs(admittedOrder);
                 assertThat(admittedOrder).isEqualTo(orderBeforeSettlement);
                 assertThat(admittedReservation).isEqualTo(reservationBeforeSettlement);
                 assertThat(state.runtimeState.order(1000)).isSameAs(admittedOrder);

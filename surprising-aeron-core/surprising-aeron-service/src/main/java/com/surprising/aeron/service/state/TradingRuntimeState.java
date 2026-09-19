@@ -1205,10 +1205,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             // publication handoff so the Owner never has to walk changed orders again merely
             // to update the bounded tombstone window.
             changes.orders.forEach((orderId, order) -> {
-                if (order != null && order.status().terminal()) changes.recordTerminalOrder(order);
-            });
-            changes.orders.forEach((orderId, order) -> {
                 if (order == null || !order.status().terminal()) return;
+                changes.recordTerminalOrder(order);
                 ReservationRuntime reservation = lane.reservations.get(orderId);
                 if (reservation != null && reservation.reservedUnits() != 0) return;
                 if (reservation != null) {
@@ -1510,15 +1508,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (closedTriggerCount != 0) {
                 state.revision = Math.addExact(state.revision, closedTriggerCount);
                 closedTriggerCount = 0;
-            }
-            // Capture removed positions before the publication replaces the Owner view.
-            if (publication != null && state.realtimeCapture != null) {
-                positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
-                    if (position == null) {
-                        try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
-                        catch (RuntimeException failure) { state.realtimeCapture.failed(); }
-                    }
-                });
             }
             // 发布时同遍消费账户/冻结缓冲；订单/持仓缓冲保留到下方直接交给Owner。
             long started = timing == null ? 0 : System.nanoTime();
@@ -2214,14 +2203,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /**
-     * Publish a primitive admission result to the Matcher.  Ordinary PLACE
-     * commands no longer enter an Owner-consumed completion queue.
+     * Publish admission metadata and its immutable order version to the Matcher.
+     * Owner scheduling remains separate from this Matcher-consumed payload.
      */
     void publishAdmissionReceipt(int laneId, int matcherShard, long coreSequence, long reservationId,
                                  long accountVersion, long reservedAmount,
-                                 boolean accepted, int resultCode) {
+                                 boolean accepted, int resultCode, OrderRuntime admittedOrder) {
         admissionReceiptRing(laneId, matcherShard).publish(coreSequence, reservationId, accountVersion,
-                reservedAmount, accepted, resultCode);
+                reservedAmount, accepted, resultCode, admittedOrder);
         admissionReceiptReadyQueues[laneId].publish(coreSequence);
         admissionReceiptReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
         signalOwnerCompletion();
@@ -2628,14 +2617,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             // Completion still contributes a changed ID, but an unchanged admission already
             // has an immutable version. Reuse it instead of freezing the Lane value again.
             // Compare all fields: commit metadata may change without incrementing revision.
-            OrderRuntime admitted = lane.orders.get(orderId);
             if (changes == null || !changes.laneDeltas[lane.laneId()].orders.containsKey(orderId)) {
+                OrderRuntime admitted = lane.orders.get(orderId);
                 publishOrder(orderId, admissionVersion != null && admissionVersion.equals(admitted)
                         ? admissionVersion : admitted);
-            }
-            if (changes == null) {
-                changedOrder(orderId, admitted);
-                changedUsers.add(reservation.userId());
+                if (changes == null) {
+                    changedOrder(orderId, admitted);
+                    changedUsers.add(reservation.userId());
+                }
             }
             captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
         }

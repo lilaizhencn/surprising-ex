@@ -296,9 +296,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     /** Matcher copies a receipt slot into this already pooled event. */
     void admissionReceipt(long reservationId, long accountVersion, long reservedAmount,
-                          boolean accepted, int resultCode) {
+                          boolean accepted, int resultCode, OrderRuntime admittedOrder) {
         if (!direct || !admissionRequired || admissionResolved || reservationId <= 0
-                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0) {
+                || reservationId != admissionOrderId
+                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0
+                || accepted != (admittedOrder != null)
+                || admittedOrder != null && (admittedOrder.orderId() != reservationId
+                        || admittedOrder.userId() != admissionUserId)) {
             throw new IllegalStateException("invalid place admission receipt");
         }
         admissionReservationId = reservationId;
@@ -306,6 +310,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         admissionReservedAmount = reservedAmount;
         admissionAccepted = accepted;
         admissionResultCode = resultCode;
+        // The receipt owns an immutable value, not a borrowed pooled admission event.
+        batchStorage.admittedOrders[0] = admittedOrder;
         admissionResolved = true;
     }
 
@@ -680,12 +686,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             publishCompletion(lane, startedNanos);
             return;
-        }
-        if (admissionRequired
-                && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
-            OrderRuntime admitted = lane.orders.get(plan.takerOrderId());
-            if (admitted == null) throw new IllegalStateException("place admission order is missing from Lane");
-            batchStorage.admittedOrders[0] = admitted.publicationValue();
         }
         if (changes == null) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);

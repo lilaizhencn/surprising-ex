@@ -146,7 +146,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         completionRuntime.publishAdmissionReceipt(completionLaneId, matcherShard,
                 completionSequence, order.orderId(),
                 admittedUser == null ? 0 : admittedUser.revision(), reservedAmount,
-                rejection == null, resultCode.wireCode());
+                rejection == null, resultCode.wireCode(), rejection == null ? admittedOrder : null);
         completed = true;
         completionRuntime.signalOwnerCompletion();
     }

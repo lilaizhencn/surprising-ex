@@ -818,3 +818,101 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 
 - 全部本轮Java/集群/分析进程退出，jps仅检查命令本身；约6.2GiB的本轮Cluster/Archive/JFR、系统监测、构建日志及分析脚本/结果移至 `/Users/atomex/.Trash/surprising-ex-owner-reboot-20260919/`，可恢复。上方target/tmp路径仅作历史定位，未删除其他轮次或清空Trash。
 - git diff --check通过，仅提交本节追加报告；AGENTS.md要求的限制行已从工作区删除（该行原本不在HEAD，无该行可提交差异），该文件既有统一压测标准移出等改动不代为提交。其他既有Owner/Matcher/Lane、脚本/配置及368行历史报告改动保持原样。
+
+## 2026-09-19 Owner/Lane 局部减法（owner-simplify-20260919）
+
+### 采集前计划
+
+- 用户授权实现上一轮列出的减法并本机复测。当前master=40810e08；对照commit不适用，只测当前工作区，不检出/重跑旧版本，不以历史数字计算优化百分比。既有未提交Owner/Matcher/Lane与脚本配置不改动、不代为提交。
+- 业务路径：Lane校验和冻结准入后，Owner发布与Matcher收据共享同一不可变订单；Matcher把引用转入既有结算槽，消费后清空ring槽，结算完成后按既有FIFO提交/回收。拒单、资金校验和实时输出失败处理不变。不删除临时Owner订单发布。终态记录/清理合并遍历；pending已有订单变更不再查表；删除持仓捕获并入发布遍历；Eclipse Map drain不重复清零。唯一新增存储是既有SPSC收据的固定容量引用列，不新建缓存/事实副本/每命令收据对象。
+- JDK已核对Corretto27+33-FR HotSpot、Maven3.9.16；macOS26.7/x86_64/16逻辑CPU/16GiB，开始磁盘326GiB、swap0。无独占绑核，记录同机干扰，不终止用户其他应用。
+- 正确性先行：`JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package`，运行依赖链全量模块测试，覆盖六产品线资金、冻结/持仓、拒单、实时成交/持仓、终态和快照恢复；新增收据同引用/槽位回收及Map删除/复用断言。未涉及网关/Kafka/wallet，不启动外围服务。
+- 正式诊断配置：1真实Aeron成员、网络/Archive保留，LINEAR_PERPETUAL/MIXED/batch20，1matcher/4Lane，全局/session窗口256，Owner/Matcher/Lane BUSY_SPIN，seed25620，1385用户/128symbol，保留做市和风险初始化。G1，node512m–1536m/client128m–512m。预热30s、稳定测量60s、排空单列；无profiler重复3轮，随后独立同配置JFR1轮。同配置主轮极差/均值超过10%则标记明显波动，不挑最大值当稳定能力。
+- 命令：`ASYNC_RUN_ID=owner-simplify-20260919-main{1,2,3} ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`（三个run ID顺序展开执行，不传字面花括号）；JFR后缀jfr且ENABLE_JFR=true。采集脚本/tmp/owner-simplify-20260919-run.sh每10秒记录UTC/swap/vm_stat/磁盘/进程CPU；swap发生或磁盘低于20GiB停止本轮。
+- JFR沿用owner-commit-profile.jfc，独立进程文件max256MiB，NMT baseline/final，20ms执行采样、1sCPU/分配；保留稀疏Owner/合并/交接/命令阶段事件。以client epoch测量窗两端各剔2s分析，不跨未校准JVM相减计算延迟，检查DataLoss。各线程分配与类采样权重分开，采样不是精确对象数。
+- JMH：现有ContinuousOwnerBenchmark.placeCancelWithoutTimers，六产品线×batch1/20、DISTINCT/BUSY_SPIN、1matcher/4Lane/window256，1fork/1thread、warmup3×3s/measurement3×3s，主轮及独立-prof gc各12fork；只作实际交接路径/资金恢复与分配诊断，不冒充真实网络吞吐。更新OwnerPublicationBenchmark.drainChangesToMap覆盖本次清零修改，单独主/GC各1fork、3×1s预热/测量。脚本/tmp/owner-simplify-20260919-jmh.sh记录完整JVM参数。
+- 诊断无业务吞吐/尾延迟SLA，不预设改善幅度；正确性要求零错误/超时、accepted=terminal business/Core、unfinished/backlog0、资金差0与状态恢复一致。swap/DataLoss/磁盘不足/错窗判相关性能证据无效，业务错误判失败。满256后的背压比例与coordinated omission缺口明确报告，不把已达负载称容量上限。不改变长期业务存储，固定收据引用做反复回收测试；本轮短测不宣称无泄漏或长稳通过。
+
+### 实现与正确性结果
+
+- 完成五项局部修改，未新增类/接口/处理阶段：`TradingRuntimeState.prepareLaneTerminal` 合并终态记录与清理遍历；`completeMatcherPendingReservations` 将Lane订单查表移入需要发布的分支；`LanePublication.publish` 在删除持仓前捕获旧值，删除Owner预扫描并保留失败处理；`RuntimeChangeBuffer.drainToEclipseMap` 同遍清引用后只重置索引；`PlaceAdmissionEvent`→`AdmissionReceiptRing`→`MatcherSettlementEvent` 复用既有不可变订单。收据订单ID/用户ID校验保留，拒单无订单引用，先清引用再release槽位；不引用会被Owner提前回收的准入事件。
+- 全依赖链package成功（2分06秒）：1465项，0 failure/0 error/3既有skip，覆盖六产品线；新增收据64次交替接受/拒绝及槽位复用/满队列/错误ID测试、Map drain覆盖/删除/引用释放测试。六产品线跨线程测试确认：Owner收回准入事件后，Lane完成结算，settlement.admittedOrder仍与Owner准入版本同引用且原值未被修改，资金、实时成交、终态及快照恢复一致。
+- 另补`LanePublishedMapTest.terminalPublicationCapturesDeletedPositionOnceBeforeReplacingOwnerView`，prepared与非prepared路径均断言删除持仓只推送一次、归零且保留realizedPnl；对应13项测试0失败。共有1466个测试条目（其中13项局部复跑），3既有skip。构建后的新增变更仅此测试，无运行时代码变化。CodeGraph工具本会话不可用，影响面按源码调用、模块依赖与事件边界检查。
+- 采集前tracked diff SHA256=5fd273821661a105d0d6dc64ca36a0f2352f35a4d63e291fe3110a34d35b30cb（包括既有用户diff和本轮计划，未跟踪的新测试另随提交保存）；全程使用JDK27。没有改公共协议/topic/产品资金模型，没有启动wallet/外围网关、Kafka或真实WebSocket服务，不能将本轮Core实时帧测试等同外围端到端验收。
+
+### 真实单成员集群结果
+
+| 轮次 | 稳定窗s | 稳定business/Core/fills计数 | business/s | Core/s | fills/s | 排空ms；business/Core |
+| --- | ---: | --- | ---: | ---: | ---: | --- |
+| main1 | 60.005367 | 20982192 / 2005296 / 4994560 | 349671.920 | 33418.611 | 83235.221 | 5.118845；2680 / 248 |
+| main2 | 60.021045 | 19358616 / 1850648 / 4608000 | 322530.470 | 30833.318 | 76773.071 | 6.064436；2676 / 244 |
+| main3 | 60.011919 | 19466121 / 1860873 / 4633600 | 324370.915 | 31008.390 | 77211.329 | 6.625354；2682 / 250 |
+| JFR（独立归因） | 60.015470 | 18165134 / 1736974 / 4323840 | 302674.196 | 28942.105 | 72045.425 | 6.750075；2688 / 256 |
+
+- 三个无profiler轮算术均值332191.102business/s、31753.440Core/s、79073.207fills/s；business极差/均值8.17%，未超预锁10%但仍有明显波动。main1的10秒区间394423→383088→328375→337567→336582→318091business/s，不能声称预热后已完全稳定。没有旧版本对照，不报告性能提升百分比；局部减法已生效，不代表吞吐瓶颈消失。
+- 最终offered=terminal business/Core分别为main1 20984872/2005544、main2 19361292/1850892、main3 19468803/1861123、JFR18167822/1737230；四轮unfinished0、期末backlog0、fundsDiff0，population/hftPositions/reservations/loss全部true，排空fill均0。hash依次4d7528a8f4537db8、9be11f73a98aa3cd、3c25b59f45e442fb、f900caae98e65b34；持续时间负载完成量不同，不要求跨轮hash相等。初始化adminActionRetries=120不计作稳定交易错误；稳定交易检查没有拒绝/超时失败。
+- 主轮窗口峰值均256；blocked次数456566/437502/434599，时长49.4960/49.4653/49.1223s（约82.49%/82.41%/81.85%）。matcher/completion/context峰值220/198/256、221/195/255、216/194/255；Lane峰值[68,68,63,70]、[51,47,43,62]、[55,43,55,59]。Lane有效执行墙钟均值41.80%/41.19%/42.92%，不是CPU利用率。
+- 这是尽力异步、单session有序响应的受限负载，不是不受限open-loop；未校正coordinated omission。client worker同窗2429样本、send2169，egress466样本、pollSession209，仍未单独验证多连接/计划到达率，不能排除客户端有序队首等待影响，不能宣称Core容量上限。
+- 主轮客户端请求→响应延迟（µs；包含排空的直方图，不冒充稳定窗内部分段）。各类请求/批次及item可由下面样本核对，batch平均/最大20；分类稳定速率未导出，不以含排空计数冒充。
+
+| 轮次/业务 | 请求数 | p50 | p90 | p95 | p99 | p99.9 | max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| main1 PLACE | 499456 | 5468 | 10182 | 11304 | 14475 | 26427 | 39419 |
+| main1 CANCEL | 499456 | 5439 | 8196 | 8904 | 11976 | 21037 | 31014 |
+| main1 MARK | 7720 | 5574 | 10059 | 11894 | 16326 | 26509 | 32948 |
+| main1 PLACE_BATCH | 749184 | 6885 | 12967 | 14327 | 16809 | 32309 | 45711 |
+| main1 CANCEL_BATCH | 249728 | 13246 | 15048 | 15884 | 30523 | 38076 | 45023 |
+| main2 PLACE | 460800 | 5877 | 10878 | 11780 | 15065 | 27344 | 42041 |
+| main2 CANCEL | 460800 | 6340 | 8970 | 9748 | 13901 | 24100 | 29687 |
+| main2 MARK | 7692 | 5791 | 10362 | 12148 | 19857 | 33521 | 39550 |
+| main2 PLACE_BATCH | 691200 | 7454 | 14049 | 15237 | 19070 | 32882 | 57311 |
+| main2 CANCEL_BATCH | 230400 | 14131 | 15540 | 16498 | 29851 | 40337 | 56033 |
+| main3 PLACE | 463360 | 5943 | 11419 | 12451 | 15663 | 28246 | 51380 |
+| main3 CANCEL | 463360 | 6344 | 8224 | 8986 | 12877 | 25264 | 31621 |
+| main3 MARK | 7683 | 5918 | 11018 | 12754 | 28557 | 35717 | 50200 |
+| main3 PLACE_BATCH | 695040 | 7008 | 14147 | 15376 | 19202 | 37191 | 91357 |
+| main3 CANCEL_BATCH | 231680 | 14639 | 15974 | 17334 | 31653 | 42467 | 96206 |
+
+### JFR 同窗证据与归因
+
+- 保护窗epoch1789822494025–1789822550042，56.017s；三个JFR文件DataLoss均0。普通单deep timing样本183次get/equals，183次same-reference、无不同版本put；批量406个Lane样本，same-reference/equals=94.81%。结合六产品线同引用回归，证明普通单第二次准入快照已消除；不是把所有OrderRuntime分配都消除了，也不能从抽样命中率外推全部业务。
+- Owner1995个execution samples：pollCommandCommit1244（62.36%）、completeMatching884、collectMatcherSettlement369、LaneDelta.commitTerminalToOwner252、LanePublication.publish219；调用嵌套不能相加。Owner/Matcher/Lane单核CPU均约98.3–98.4%，其中含busy-spin，不能当作全部有效计算。
+- 匹配到的Owner终态提交尝试+实时发布+回复退休，普通6305样本均值10.839µs/p99 34.219µs；撤单6310样本7.758/22.121；批量下单9453样本32.678/214.079；批量撤单3156样本35.227/81.057。是含探针/调度/GC的墙钟，不是无采样CPU成本。批量fact publication均值4.868/7.408µs、terminal bookkeeping3.325/2.767µs已在终态尝试内部，不能重复相加。
+- 批量collectMatcherSettlement均值17.145µs，包含Lane诊断事件提交和回收，不是纯Map合并。每sequence各Lane发布合计6.722µs，其中orders1.617、removals3.065；terminal index2.193和changed index0.363在发布之外。批量删除深采128.8ns/次含计时时钟开销，现有证据不支持把单个Map删除当唯一病态瓶颈。
+- Lane完成→Owner观察p50/p99µs：普通2.047/277.501、撤单353.736/2262.186、批量343.108/1529.535，包含FIFO等待。保护窗Owner/Matcher/Lane未观测到park/monitor或Owner文件/网络事件；Archive后台924116次FileWrite、累计14.350s不能加到Owner耗时。没有生产外部实时消费者，不能外推实际WebSocket/Kafka发布成本。
+- GC100次，总暂停551.783ms（保护窗0.985%），p50/p95/p99/max=5.467/5.897/6.037/9.294ms。heap used170401152–478234672B，GC后首尾172466088→172708504B，committed512MiB。GC可能贡献尾延迟，但没有逐命令暂停区间join，不能把所有长尾归因GC。
+- ThreadAllocationStatistics保护窗增量：Owner4659885880B、Matcher6546394072B、Lane0–3依次4162251856/4164793672/4161060552/4161501816B、cluster1722611128B；采样首尾不精确覆盖整窗。ObjectAllocationSample权重30336147512B，OrderRuntime22.43%、ReservationRuntime8.76%、byte[]7.59%、CoreMatchingResult7.51%、long[]6.58%、nativeMatcherResult5.59%、ResolvedPlaceOrder4.63%；是采样估计，不是精确对象数/可删除分配比例。四类TLAB/非TLAB/采样/线程分配事件均启用，完整类/站点/线程view保存。
+- 同窗Compilation44次/406.128ms/最长150.239ms（编译线程工作非STW）、Deoptimization2、SafepointBegin104、VMOperation106次/554.492ms，仍有编译，不能宣称完全越过JIT。NMT committed主轮721697KB(+2586)/722379KB(+11426)/719767KB(+6170)，JFR743317KB(+569)，均相对各自baseline。
+- 四轮58个10秒系统样本，swap占用始终0，累计Swapins/Swapouts也核对；无CPU独占/绑核，桌面进程仍存在。node PID16364/17284/18229/19122；JFR runner19145/fork19149。node138s/110738536B/SHA256=2d61b9ffdc4ce891e0ce357d9492a1448685cf28c1e6f90dd9848125ecd3a926；runner135s/8382162B/00cee8500162577de2b177137b1c3962db42cf6970148a05179add9aacdea5fc；fork134s/110995292B/b2760cca1b6901f222a1406e35e32bead2d4d1f298e223f558c8c74ccf8323ef。
+- 复用有界MapDetailEvents与WindowEvidence流式解析及owner-tail/map-detail/merge-detail脚本；聚合按事件开始时间选窗，长事件可能跨窗。原始summary/view/命令/NMT与client日志在`target/aeron-async-stages/owner-simplify-20260919-{main1,main2,main3,jfr}`；同窗JSON/TSV/heap摘要在/tmp同run ID，清理后路径只作历史定位。
+- 当前结论：**局部减法及正确性已验证，整体性能仍为部分验证**。剩余最明确热点仍是Owner有序提交的多个串行成本；未证明唯一因果瓶颈、显著吞吐提升或生产容量。完整入口→accepted→terminal分类延迟、独立客户端容量、长期FD/native池/old/live-set斜率等仍缺，不宣称长稳或无泄漏。下一步若继续优化，应针对批量提交发布/终态索引/fact的具体成本做单因素验证，不能继续把希望押在普通单重复快照或唤醒上。
+
+### 六产品线 JMH 与分配结果
+
+- ContinuousOwner主轮/独立GC轮各12fork全部完成，每fork三次测量的accepted/terminal business/Core原始计数逐项相等，teardown资金/冻结/订单终态/在途快照恢复与角色切换检查通过。没有ERROR/Exception/failure；新增drain主轮/GC轮也完成。主/GC的12组顺序均为batch1六产品线，再batch20六产品线；每个fork独立，日志、JSON保存原始测量和完整参数。
+- 每次基准调用512Core消息，业务数512×batch；不含真实网络/Archive，以下数值不能当实际集群容量。主分数为cycles/s，error为JMH 99.9% CI误差；只有1fork/3个样本，OPTION普通单CI甚至宽于均值，不能宣称充分稳定。GC轮B/business=gc.alloc.rate.norm÷(512×batch)，含负载端/框架分配；不是纯Owner分配或精确对象数，不与主轮吞吐拼成同一轮资源效率。
+
+| 产品线 | batch | 主分数 cycles/s ± error | 换算 Core/s | 换算 business/s | GC轮 B/business | GC轮 MB/s（JMH原单位） | GC count/time(ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SPOT | 1 | 196.388 ± 8.043 | 100550.4 | 100550.4 | 4221.71 | 345.76 | 14/26 |
+| LINEAR_PERPETUAL | 1 | 195.529 ± 34.271 | 100110.9 | 100110.9 | 4253.57 | 316.62 | 13/27 |
+| INVERSE_PERPETUAL | 1 | 190.684 ± 39.030 | 97630.3 | 97630.3 | 4334.70 | 306.65 | 13/26 |
+| LINEAR_DELIVERY | 1 | 187.176 ± 61.001 | 95834.1 | 95834.1 | 4288.91 | 315.80 | 13/25 |
+| INVERSE_DELIVERY | 1 | 174.730 ± 58.619 | 89461.9 | 89461.9 | 4314.24 | 318.98 | 13/24 |
+| OPTION | 1 | 169.212 ± 214.476 | 86636.6 | 86636.6 | 4297.24 | 317.50 | 13/25 |
+| SPOT | 20 | 90.666 ± 49.815 | 46421.2 | 928424.9 | 2221.71 | 1784.41 | 64/226 |
+| LINEAR_PERPETUAL | 20 | 91.791 ± 6.840 | 46996.9 | 939937.7 | 2230.76 | 1739.18 | 63/224 |
+| INVERSE_PERPETUAL | 20 | 94.176 ± 21.179 | 48218.0 | 964360.5 | 2223.32 | 1666.12 | 60/222 |
+| LINEAR_DELIVERY | 20 | 91.642 ± 12.406 | 46920.6 | 938412.9 | 2216.58 | 1808.14 | 65/230 |
+| INVERSE_DELIVERY | 20 | 94.065 ± 20.151 | 48161.2 | 963225.0 | 2219.03 | 1748.45 | 62/223 |
+| OPTION | 20 | 90.809 ± 13.432 | 46494.3 | 929885.7 | 2217.91 | 1739.99 | 62/225 |
+
+- 新增`OwnerPublicationBenchmark.drainChangesToMap`每调用20项写入（含一项覆盖成删除），主分数6336993±1202425次/s；独立GC轮6320410±1336468次/s、0.001001B/调用、0.006031MB/s、GC0。表明预热后的固定缓冲drain接近零分配，不代表完整交易链路零分配，也未对旧实现做性能对照。
+- JMH期间50个10秒系统样本，swap占用及累计in/out始终0；全轮磁盘最低312.96GiB。主JSON SHA256=d34cfa0acfa08f7323aa9b06ffccae1e4a20c47d85ebac3b401ee986b0bc041f，GC JSON=50b4bdbbca06819c58cf45671feb602b5b93c304beb45693d7a89fbd0e93691c。全部Java/集群/JMH/分析进程已退出，jps只剩检查进程。
+- JFR保护窗非TLAB事件636个，最大观测分配65552B的long[]；仅代表已录制的非TLAB事件，不能声称全堆最大对象。采样分配对象数/op仍不可精确计算，直接/映射/native池细分与长期斜率缺口保留。
+- 按ThreadAllocationStatistics实际首尾54.586670s计算，Owner85366736B/s、Matcher119926606B/s、cluster31557359B/s、Lane0–3约76250334/76296899/76228510/76236594B/s；是各线程累计字节差/采样时间差，不使用56.017s保护窗替代真实采样跨度。未将近似同窗业务计数强行混作精确B/business；业务归一化分配使用上表独立GC JMH结果。
+
+### 清理与交付
+
+- 已停止本轮全部进程，将约12GiB的四轮Cluster/Archive/JFR、JMH结果、系统监测、测试日志及分析结果移至`/Users/atomex/.Trash/surprising-ex-owner-simplify-20260919/`，可恢复；未清空Trash或删除其他轮次。原target/tmp路径仅作历史定位，完整命令/summary/views/校验和与本节保留复核依据。
+- 仅提交本轮六个state实现文件、四个回归测试、OwnerPublicationBenchmark、README及本节追加记录。既有AGENTS、Owner/Matcher/Lane及LaneCommitEvent、压测脚本/配置、OwnerIdleStrategyTest和368行历史报告diff保持原样，不纳入本次提交。未扩大为临时Owner发布删除或架构重写；`git diff --check`通过。

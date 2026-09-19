@@ -27,6 +27,9 @@ public class OwnerPublicationBenchmark {
     private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
     private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>();
     private final UserRuntime[] users = new UserRuntime[20];
+    private final RuntimeChangeBuffer<UserRuntime> mapChanges = new RuntimeChangeBuffer<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserRuntime> map =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
 
     @Setup public void setup() {
         for (int i = 0; i < users.length; i++) users[i] = new UserRuntime(i + 1);
@@ -45,6 +48,14 @@ public class OwnerPublicationBenchmark {
         delta.clear();
         runtime.changedUsers.clear();
         return runtime.publishedUsers.get(20);
+    }
+
+    /** Exercises the actual one-pass clearing drain, including explicit deletions. */
+    @Benchmark public Object drainChangesToMap() {
+        for (int i = 0; i < users.length; i++) mapChanges.put(i + 1, users[i]);
+        mapChanges.put(1, null);
+        mapChanges.drainToEclipseMap(map);
+        return map.get(20);
     }
 
     @Benchmark public Object handoffAndQueryPreparedChanges() {

@@ -8,8 +8,9 @@ import java.util.concurrent.locks.LockSupport;
 /**
  * One Lane to Matcher admission mailbox.  A lane is the only producer and the
  * matcher shard is the only consumer, so the mailbox needs no CAS or node
- * allocation.  The sequence array is the publication fence; all other fields
- * are plain primitive storage in the same reusable slot.
+ * allocation. The sequence array publishes both primitive metadata and the
+ * immutable admission order. The consumer transfers that reference into the
+ * settlement event and clears the slot before allowing producer reuse.
  */
 final class AdmissionReceiptRing {
     private static final int SPIN_LIMIT = 1_024;
@@ -23,6 +24,7 @@ final class AdmissionReceiptRing {
     private final long[] reservedAmounts;
     private final int[] resultCodes;
     private final byte[] accepted;
+    private final OrderRuntime[] admittedOrders;
     private final int mask;
     private volatile long producerPosition;
     private volatile long consumerPosition;
@@ -36,6 +38,7 @@ final class AdmissionReceiptRing {
         reservedAmounts = new long[capacity];
         resultCodes = new int[capacity];
         accepted = new byte[capacity];
+        admittedOrders = new OrderRuntime[capacity];
         mask = capacity - 1;
     }
 
@@ -44,9 +47,11 @@ final class AdmissionReceiptRing {
     }
 
     void publish(long coreSequence, long reservationId, long accountVersion,
-                 long reservedAmount, boolean accepted, int resultCode) {
+                 long reservedAmount, boolean accepted, int resultCode, OrderRuntime admittedOrder) {
         if (coreSequence <= 0 || reservationId <= 0 || accountVersion < 0
-                || reservedAmount < 0 || resultCode < 0) {
+                || reservedAmount < 0 || resultCode < 0
+                || accepted != (admittedOrder != null)
+                || admittedOrder != null && admittedOrder.orderId() != reservationId) {
             throw new IllegalArgumentException("invalid admission receipt");
         }
         long position = producerPosition;
@@ -62,6 +67,7 @@ final class AdmissionReceiptRing {
         reservedAmounts[index] = reservedAmount;
         this.accepted[index] = (byte) (accepted ? 1 : 0);
         resultCodes[index] = resultCode;
+        admittedOrders[index] = admittedOrder;
         SEQUENCES.setRelease(sequences, index, coreSequence);
         producerPosition = position + 1;
     }
@@ -86,7 +92,8 @@ final class AdmissionReceiptRing {
                 if (published == expectedCoreSequence) {
                     target.admissionReceipt(
                             reservationIds[index], accountVersions[index], reservedAmounts[index],
-                            accepted[index] != 0, resultCodes[index]);
+                            accepted[index] != 0, resultCodes[index], admittedOrders[index]);
+                    admittedOrders[index] = null;
                     SEQUENCES.setRelease(sequences, index, 0L);
                     consumerPosition = position + 1;
                     return;

@@ -5,6 +5,28 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeChangeBufferTest {
     @Test
+    void eclipseDrainDeletesOverwritesAndReleasesSlotsAcrossReuse() throws Exception {
+        var buffer = new RuntimeChangeBuffer<String>();
+        var target = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<String>();
+        var values = RuntimeChangeBuffer.class.getDeclaredField("values");
+        values.setAccessible(true);
+        for (int round = 0; round < 64; round++) {
+            for (long key = -64; key < 64; key++) buffer.put(key, "value" + round);
+            buffer.put(0, "updated");
+            buffer.put(1, null);
+            buffer.drainToEclipseMap(target);
+            assertThat(target.size()).isEqualTo(127);
+            assertThat(target.get(0)).isEqualTo("updated");
+            assertThat(target.containsKey(1)).isFalse();
+            assertThat(buffer.isEmpty()).isTrue();
+            assertThat(buffer.containsKey(0)).isFalse();
+            assertThat((Object[]) values.get(buffer)).containsOnlyNulls();
+            buffer.drainToEclipseMap(target);
+            assertThat(target.size()).isEqualTo(127);
+        }
+    }
+
+    @Test
     void drainPreservesNullDeletesAndOverwritesAndReleasesReferencesAcrossReuse() throws Exception {
         var buffer = new RuntimeChangeBuffer<String>();
         var published = new java.util.HashMap<Long, String>();

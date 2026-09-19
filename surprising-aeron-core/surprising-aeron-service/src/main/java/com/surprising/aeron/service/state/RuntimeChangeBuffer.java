@@ -94,7 +94,7 @@ class RuntimeChangeBuffer<V> {
                 target.put(key, value);
             }
         }
-        clear();
+        resetIndex();
     }
 
     void drainToPublishedMap(LanePublishedMap<V> target) {

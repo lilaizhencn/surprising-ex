@@ -5,6 +5,44 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class LanePublishedMapTest {
+    @Test void terminalPublicationCapturesDeletedPositionOnceBeforeReplacingOwnerView() {
+        for (boolean prepared : new boolean[]{false, true}) {
+            try (var runtime = new TradingRuntimeState()) {
+                var identities = new RuntimeIdentityRegistry();
+                int symbol = identities.symbolId("BTC-USDT");
+                int asset = identities.assetId("USDT");
+                var outbox = new com.surprising.aeron.client.RealtimeOutbox(32, 65536);
+                var capture = new com.surprising.aeron.service.state.realtime.RealtimeStateCapture(
+                        outbox, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, identities);
+                runtime.realtimeCapture(capture);
+                var position = new PositionRuntime(7, symbol, asset,
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.NET, 1, 2, 100, 200, 17, 20);
+                runtime.publishedPositions.put(1, position.snapshot());
+                var delta = new TradingRuntimeState.LaneDelta();
+                delta.positions.put(1, null);
+                if (prepared) delta.preparePublication(runtime);
+                capture.begin(1, 100, 0);
+                delta.commitTerminalToOwner(runtime, 0, null, 1);
+                capture.commit();
+                assertThat(runtime.publishedPositions.get(1)).isNull();
+                int removals = 0;
+                byte[] bytes;
+                while ((bytes = outbox.poll()) != null) {
+                    var frame = com.surprising.aeron.protocol.RealtimeFrameCodec.decode(bytes);
+                    if (frame.kind() != com.surprising.aeron.protocol.RealtimeFrame.Kind.POSITION) continue;
+                    removals++;
+                    var closed = com.surprising.aeron.protocol.CoreStateQueryCodec
+                            .decodeUserState(frame.payload()).positions().getFirst();
+                    assertThat(closed.signedQuantitySteps()).isZero();
+                    assertThat(closed.realizedPnlUnits()).isEqualTo(17);
+                }
+                assertThat(removals).isOne();
+                assertThat(capture.failures()).isZero();
+            }
+        }
+    }
+
     @Test void sampledOrderOperationsPreserveIdentityAndCountOnlyExecutedWork() {
         var map = new LanePublishedMap<String>();
         var event = new OwnerSettlementMergeEvent();
