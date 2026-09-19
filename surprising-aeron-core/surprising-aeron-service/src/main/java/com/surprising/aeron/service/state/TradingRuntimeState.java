@@ -992,7 +992,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     static LongObjectHashMap<LongLongHashMap> copyClientOrderIndex(
             LongObjectHashMap<LongLongHashMap> index) {
         LongObjectHashMap<LongLongHashMap> copy = new LongObjectHashMap<>(index.size());
-        index.forEachKeyValue((userId, values) -> copy.put(userId, new LongLongHashMap(values)));
+        // Empty per-user maps are an internal allocation cache, not published state.
+        index.forEachKeyValue((userId, values) -> {
+            if (!values.isEmpty()) copy.put(userId, new LongLongHashMap(values));
+        });
         return copy;
     }
 
@@ -1211,7 +1214,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (reservation != null && reservation.reservedUnits() != 0) return;
                 if (reservation != null) {
                     lane.reservations.remove(orderId);
-                    removeUserEntity(lane.reservationIdsByUser, order.userId(), orderId);
+                    removeUserEntityKeepingContainer(lane.reservationIdsByUser, order.userId(), orderId);
                     changes.removeReservationRoute(orderId);
                 }
                 // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
@@ -2160,7 +2163,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 removeClientOrderIndex(lane, userId, clientKeys[index].key());
             }
             lane.reservations.remove(orderId);
-            removeUserEntity(lane.reservationIdsByUser, userId, orderId);
+            removeUserEntityKeepingContainer(lane.reservationIdsByUser, userId, orderId);
             lane.removeOrder(orderId);
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
             BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
@@ -3962,6 +3965,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.balances.remove(userId);
             lane.clientOrderIndex.remove(userId);
             lane.reservationIdsByUser.remove(userId);
+            lane.activeOrderIdsByUser.remove(userId);
             lane.positionKeysByUser.remove(userId);
             lane.cold.leverageKeysByUser.remove(userId);
             return null;
@@ -4016,7 +4020,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (previous != null) {
             onLane(previous.userId(), lane -> {
                 lane.reservations.remove(previous.orderId());
-                removeUserEntity(lane.reservationIdsByUser, previous.userId(), previous.orderId());
+                removeUserEntityKeepingContainer(
+                        lane.reservationIdsByUser, previous.userId(), previous.orderId());
                 return null;
             });
         }
@@ -4111,7 +4116,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 throw new IllegalStateException("pending reservation must complete before removal");
             }
             lane.reservations.remove(orderId);
-            removeUserEntity(lane.reservationIdsByUser, userId, orderId);
+            removeUserEntityKeepingContainer(lane.reservationIdsByUser, userId, orderId);
             return null;
         });
         publishReservation(orderId, null);
@@ -4672,7 +4677,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                     reservationAssetId = reservation.assetId();
                     lane.reservations.remove(prune.orderId());
-                    removeUserEntity(lane.reservationIdsByUser, prune.userId(), prune.orderId());
+                    removeUserEntityKeepingContainer(
+                            lane.reservationIdsByUser, prune.userId(), prune.orderId());
                 }
                 lane.removeOrder(prune.orderId());
                 if (prune.clientKey() != 0) {
@@ -5424,7 +5430,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (captured.pending())
                 throw new IllegalStateException("order batch overlapped an existing pending reservation");
             ReservationRuntime current = lane.reservations.remove(orderId);
-            if (current != null) removeUserEntity(lane.reservationIdsByUser, current.userId(), orderId);
+            if (current != null) {
+                removeUserEntityKeepingContainer(
+                        lane.reservationIdsByUser, current.userId(), orderId);
+            }
             ReservationRuntime before = captured.value();
             if (before != null) {
                 lane.reservations.put(orderId, before.laneValue());
@@ -5469,6 +5478,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (before == null) {
                 lane.users.remove(userId);
                 lane.removeUser(userId);
+                lane.clientOrderIndex.remove(userId);
+                lane.reservationIdsByUser.remove(userId);
+                lane.activeOrderIdsByUser.remove(userId);
             } else {
                 lane.users.put(userId, before);
                 lane.registerUser(userId);
@@ -5653,6 +5665,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (entities.isEmpty()) index.remove(userId);
     }
 
+    static void removeUserEntityKeepingContainer(
+            LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+        LongHashSet entities = index.get(userId);
+        if (entities != null) entities.remove(entityId);
+    }
+
     static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
@@ -5676,7 +5694,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         long orderId = userClientOrders.get(clientKey);
         if (orderId == 0) return null;
         userClientOrders.remove(clientKey);
-        if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
         removeClientOrderReverse(lane, orderId, clientKey);
         return orderId;
     }
@@ -5689,7 +5706,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders != null) {
             lane.clientKeysByOrderId.forEach(orderId, userClientOrders::removeKey);
-            if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
         }
         lane.clientKeysByOrderId.remove(orderId);
     }

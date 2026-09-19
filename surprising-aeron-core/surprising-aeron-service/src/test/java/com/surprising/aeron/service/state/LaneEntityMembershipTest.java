@@ -31,8 +31,28 @@ class LaneEntityMembershipTest {
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
             state.completePendingReservations(1);
             state.removeReservation(11, 7);
-            assertThat(lane.reservationIdsByUser.get(7)).isNull();
+            assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
+            assertThat(ids.size()).isZero();
             assertThat(lane.pendingReservationCount()).isZero();
+        }
+    }
+
+    @Test
+    void clientOrderIndexReusesItsPrimitiveTableUntilUserRemoval() {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            var lane = state.onLane(7L, value -> value);
+            TradingRuntimeState.putClientOrderIndex(lane, 7, 91, 11);
+            var clients = lane.clientOrderIndex.get(7);
+
+            assertThat(TradingRuntimeState.removeClientOrderIndex(lane, 7, 91)).isEqualTo(11);
+            assertThat(lane.clientOrderIndex.get(7)).isSameAs(clients);
+            assertThat(clients.size()).isZero();
+
+            TradingRuntimeState.putClientOrderIndex(lane, 7, 92, 12);
+            assertThat(lane.clientOrderIndex.get(7)).isSameAs(clients);
+            state.removeUser(7);
+            assertThat(lane.clientOrderIndex.get(7)).isNull();
         }
     }
 

@@ -1304,7 +1304,8 @@ class TradingRuntimeStateTest {
         for (long id = 1; id <= 100; id++) {
             lane.putOrder(lane.orders.get(id).withStatus(CoreOrderStatus.CANCELED, 3));
         }
-        assertThat(lane.activeOrderIdsByUser).isEmpty();
+        assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(membership);
+        assertThat(membership.size()).isZero();
     }
 
     @Test

@@ -392,7 +392,8 @@ public final class AccountLaneState {
         if (orderIds == null || !orderIds.remove(orderId)) {
             throw new IllegalStateException("active order index is missing");
         }
-        if (orderIds.isEmpty()) activeOrderIdsByUser.remove(userId);
+        // Keep the primitive container while the user exists. Terminal-to-next-order churn is
+        // the common path; removing it here only replaces a cleared table with a new allocation.
     }
 
     private static boolean active(OrderRuntime order) {
