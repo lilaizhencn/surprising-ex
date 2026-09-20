@@ -3,6 +3,8 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.protocol.CoreResultCode;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 /** One-way place admission owned and completed by exactly one Account Lane. */
 public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
@@ -17,6 +19,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private long preparedClientKey;
     private int symbolId;
     private int matcherShard;
+    /** Queued admissions are retained until their command's Matcher continuation consumes them. */
+    private boolean matcherWaitRequired;
     private int assetId;
     private int laneId;
     private TradingRuntimeState runtime;
@@ -27,13 +31,15 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private RuntimeException rejection;
     /** Volatile publication is sufficient: all payload fields are written before completion. */
     private volatile boolean completed;
+    private volatile boolean matcherConsumed;
 
     PlaceAdmissionEvent() {
     }
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                                 long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
-                                int symbolId, int assetId, int laneId, int matcherShard, TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                int symbolId, int assetId, int laneId, int matcherShard, boolean matcherWaitRequired,
+                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
                 || symbolId < 0 || assetId < 0
@@ -56,16 +62,21 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.assetId = assetId;
         this.laneId = laneId;
         this.matcherShard = matcherShard;
+        this.matcherWaitRequired = matcherWaitRequired;
         this.runtime = runtime;
         admittedAccountVersion = 0;
         rejection = null;
         reservedAmount = 0;
         completed = false;
+        matcherConsumed = false;
         return this;
     }
 
     void clear() {
         if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
+        if (matcherWaitRequired && !matcherConsumed) {
+            throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
+        }
         order = null;
         commandId = null;
         lifecycleSettled = false;
@@ -77,6 +88,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         rejection = null;
         reservedAmount = 0;
         matcherShard = 0;
+        matcherWaitRequired = false;
+        matcherConsumed = false;
     }
 
     @Override
@@ -110,23 +123,12 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
             rejection = failure;
         }
         identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
-        // Capture every publication dependency before completed becomes visible to the owner,
-        // which is then allowed to clear and recycle this event immediately.
+        // Capture every publication dependency before completed becomes visible. The Owner
+        // retains queued events until the command's Matcher continuation consumes this payload.
         TradingRuntimeState completionRuntime = runtime;
-        int completionLaneId = laneId;
-        long completionSequence = coreSequence;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
-        CoreResultCode resultCode = rejection == null ? CoreResultCode.NONE
-                : rejection instanceof CoreStateRejectedException stateRejected
-                ? CoreResultCode.fromRejectionCode(stateRejected.code())
-                : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
-                : CoreResultCode.INVALID_COMMAND;
-        completionRuntime.publishAdmissionReceipt(completionLaneId, matcherShard,
-                completionSequence, order.orderId(),
-                admittedAccountVersion, reservedAmount,
-                rejection == null, resultCode.wireCode());
         completed = true;
-        completionRuntime.signalOwnerCompletion();
+        completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
     }
 
     public boolean complete() {
@@ -151,7 +153,55 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         userId = 0;
         laneId = 0;
         matcherShard = 0;
+        matcherWaitRequired = false;
+        matcherConsumed = false;
         completed = false;
+    }
+
+    /**
+     * Matcher waits on this command-owned event instead of a second route-wide FIFO. Commands
+     * may be admitted before their shard submission head advances, so a conditional consumer
+     * cannot safely share a strict Lane-to-Matcher receipt ring.
+     */
+    public void awaitMatcherReceipt(MatcherSettlementEvent target) {
+        if (!matcherWaitRequired || target == null) {
+            throw new IllegalStateException("place admission does not require matcher handoff");
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        int spins = 0;
+        while (!completed) {
+            if (System.nanoTime() >= deadline) {
+                throw new IllegalStateException("timed out waiting for place admission sequence="
+                        + coreSequence + " lane=" + laneId + " matcher=" + matcherShard);
+            }
+            if (spins++ < 1_024) Thread.onSpinWait();
+            else {
+                LockSupport.parkNanos(this, 1_000L);
+                spins = 0;
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IllegalStateException("place admission wait was interrupted");
+                }
+            }
+        }
+        CoreResultCode resultCode = rejection == null ? CoreResultCode.NONE
+                : rejection instanceof CoreStateRejectedException stateRejected
+                ? CoreResultCode.fromRejectionCode(stateRejected.code())
+                : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
+                : CoreResultCode.INVALID_COMMAND;
+        target.admissionReceipt(order.orderId(), admittedAccountVersion, reservedAmount,
+                rejection == null, resultCode.wireCode());
+        matcherConsumed = true;
+        runtime.signalOwnerCompletion();
+    }
+
+    public boolean matcherConsumed() { return !matcherWaitRequired || matcherConsumed; }
+
+    /** Admission rejection can retire without entering the Matcher queue. */
+    public void cancelMatcherWait() {
+        if (!complete() || !matcherWaitRequired || matcherConsumed) {
+            throw new IllegalStateException("invalid matcher admission cancellation");
+        }
+        matcherConsumed = true;
     }
 
 

@@ -201,8 +201,7 @@ final class CoreMatchingFlow {
         var command = owner.matcherCommands.prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {
-            int admissionLaneId = pending.placeAdmission().laneId();
-            matcherSubmission = pending.gateAdmission(owner, admissionLaneId, matcherShard(pending),
+            matcherSubmission = pending.gateAdmission(owner, pending.placeAdmission(), matcherShard(pending),
                     direct, matcherSubmission);
         }
         owner.matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
@@ -378,25 +377,35 @@ final class CoreMatchingFlow {
         if (pending == null || pending.placeAdmission() == null) return true;
         var admission = pending.placeAdmission();
         if (!admission.complete()) return false;
-        owner.identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
         RuntimeException rejection = admission.rejection();
-        var direct = pending.settlementEvent();
-        if (rejection != null) {
-            CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
-                    ? CoreResultCode.fromRejectionCode(rejected.code())
-                    : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
-                    : CoreResultCode.INVALID_COMMAND;
-            pending.rejectMatching(resultCode);
-            completePlaceAdmissionSubmission(pending);
-            owner.runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
-            return true;
+        if (!pending.placeAdmissionOwnerCollected()) {
+            owner.identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
+            if (rejection != null) {
+                CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
+                        ? CoreResultCode.fromRejectionCode(rejected.code())
+                        : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
+                        : CoreResultCode.INVALID_COMMAND;
+                pending.rejectMatching(resultCode);
+            } else {
+                ResolvedPlaceOrder admitted = owner.runtimeState.collectPlaceAdmission(admission);
+                pending.admissionCompleted(admitted);
+                if (owner.realtimeCapture != null) pending.realtimeResolvedTakerOrder = admitted;
+            }
+            pending.markPlaceAdmissionOwnerCollected();
         }
-        ResolvedPlaceOrder admitted = owner.runtimeState.collectPlaceAdmission(admission);
-        pending.admissionCompleted(admitted);
-        if (owner.realtimeCapture != null) pending.realtimeResolvedTakerOrder = admitted;
         completePlaceAdmissionSubmission(pending);
-        owner.runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
+        if (!pending.isMatchingSubmitted() && rejection != null && !admission.matcherConsumed()) {
+            admission.cancelMatcherWait();
+        }
+        releasePlaceAdmissionIfConsumed(pending);
         return true;
+    }
+
+    void releasePlaceAdmissionIfConsumed(CommandSlot pending) {
+        if (pending != null && pending.placeAdmissionOwnerCollected()
+                && pending.placeAdmission() != null && pending.placeAdmission().matcherConsumed()) {
+            owner.runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
+        }
     }
 
     private void completePlaceAdmissionSubmission(CommandSlot pending) {

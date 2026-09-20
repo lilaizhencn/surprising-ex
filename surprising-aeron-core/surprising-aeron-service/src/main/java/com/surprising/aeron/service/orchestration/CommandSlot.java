@@ -44,6 +44,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private LaneCancelEvent cancelContinuation;
     /** Normal PLACE admission runs alongside the settlement continuation. */
     private PlaceAdmissionEvent placeAdmission;
+    private boolean placeAdmissionOwnerCollected;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
@@ -142,10 +143,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     /** Reuses one slot-owned gate instead of allocating a capturing lambda for each PLACE. */
     java.util.function.Supplier<?> gateAdmission(TradingCoreRuntime owner,
-            int admissionLaneId, int matcherShard,
+            PlaceAdmissionEvent admission, int matcherShard,
             com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
             java.util.function.Supplier<?> original) {
-        admissionMatching.prepare(owner, admissionLaneId, matcherShard, settlement, original);
+        admissionMatching.prepare(owner, admission, matcherShard, settlement, original);
         return admissionMatching;
     }
 
@@ -299,6 +300,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementContinuation = null;
         cancelContinuation = null;
         placeAdmission = null;
+        placeAdmissionOwnerCollected = false;
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
@@ -418,6 +420,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
         admittedPlaceOrder = resolvedOrder;
     }
+    boolean placeAdmissionOwnerCollected() { return placeAdmissionOwnerCollected; }
+    void markPlaceAdmissionOwnerCollected() { placeAdmissionOwnerCollected = true; }
     ResolvedPlaceOrder admittedPlaceOrder() { return admittedPlaceOrder; }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
@@ -490,6 +494,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementContinuation = null;
         cancelContinuation = null;
         placeAdmission = null;
+        placeAdmissionOwnerCollected = false;
         settlementPlan = null;
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
@@ -827,15 +832,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     private final class AdmissionMatchingContinuation implements java.util.function.Supplier<Object> {
         private TradingCoreRuntime owner;
-        private int admissionLaneId;
+        private PlaceAdmissionEvent admission;
         private int matcherShard;
         private MatcherSettlementEvent settlement;
         private java.util.function.Supplier<?> original;
 
-        void prepare(TradingCoreRuntime owner, int admissionLaneId, int matcherShard,
+        void prepare(TradingCoreRuntime owner, PlaceAdmissionEvent admission, int matcherShard,
                      MatcherSettlementEvent settlement, java.util.function.Supplier<?> original) {
             this.owner = Objects.requireNonNull(owner);
-            this.admissionLaneId = admissionLaneId;
+            this.admission = Objects.requireNonNull(admission);
             this.matcherShard = matcherShard;
             this.settlement = Objects.requireNonNull(settlement);
             this.original = Objects.requireNonNull(original);
@@ -843,14 +848,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
         void clear() {
             owner = null;
-            admissionLaneId = matcherShard = 0;
+            admission = null;
+            matcherShard = 0;
             settlement = null;
             original = null;
         }
 
         @Override
         public Object get() {
-            owner.runtimeState.awaitAdmissionReceipt(admissionLaneId, matcherShard, coreSequence, settlement);
+            admission.awaitMatcherReceipt(settlement);
             if (!settlement.admissionAccepted()) {
                 var place = decodedCommand.placeOrder();
                 owner.matchingAdapter.rejectedPlaceDirect(

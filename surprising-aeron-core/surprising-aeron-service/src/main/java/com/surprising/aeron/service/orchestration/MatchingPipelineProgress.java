@@ -220,7 +220,7 @@ final class MatchingPipelineProgress {
 
     void drainMatchingCompletions() {
         if (owner.crossShardCancellations.hasPending()) owner.crossShardCancellations.poll();
-        drainAdmissionReceiptCompletions();
+        drainPlaceAdmissionCompletions();
         if (readyShardMask != 0 || owner.runtimeState.hasPlaceAdmissionNotifications()
                 || hasDeferredMatchingSubmission()) {
             progressPlaceBatchAdmissions();
@@ -232,25 +232,20 @@ final class MatchingPipelineProgress {
         if (owner.runtimeState.hasSettlementNotifications()) owner.commits.drainMatcherSettlementCompletions();
     }
 
-    /**
-     * Consume Lane admission completion notifications. Ordinary PLACE does not wait here before
-     * Matcher submission; the completed publication is made visible early for existing query and
-     * ordering contracts, while the Matcher consumes its primitive receipt independently.
-     */
-    private void drainAdmissionReceiptCompletions() {
-        long readyLanes = owner.runtimeState.takeAdmissionReceiptReadyLaneMask();
+    /** Drain only Owner scheduling cursors; the admission payload remains in its command event. */
+    private void drainPlaceAdmissionCompletions() {
+        long readyLanes = owner.runtimeState.takePlaceAdmissionReadyLaneMask();
         while (readyLanes != 0) {
             int laneId = Long.numberOfTrailingZeros(readyLanes);
             readyLanes &= readyLanes - 1;
             long sequence;
-            while ((sequence = owner.runtimeState.pollAdmissionReceiptReady(laneId)) != 0) {
+            while ((sequence = owner.runtimeState.pollPlaceAdmissionReady(laneId)) != 0) {
                 CommandSlot pending = owner.pendingMatching.get(sequence);
-                if (pending != null && pending.placeAdmission() != null) {
-                    if (!pending.isMatchingSubmitted()) {
-                        readyShardMask |= 1L << owner.pendingSubmissionShard(pending);
-                    } else if (owner.collectPlaceAdmissionIfReady(pending)) {
-                        owner.pendingMatching.progressChanged();
-                    }
+                if (pending == null || pending.placeAdmission() == null) continue;
+                if (!pending.isMatchingSubmitted()) {
+                    readyShardMask |= 1L << owner.pendingSubmissionShard(pending);
+                } else if (owner.collectPlaceAdmissionIfReady(pending)) {
+                    owner.pendingMatching.progressChanged();
                 }
             }
         }

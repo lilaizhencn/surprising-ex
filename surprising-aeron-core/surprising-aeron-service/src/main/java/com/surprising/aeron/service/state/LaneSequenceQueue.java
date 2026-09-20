@@ -45,6 +45,10 @@ final class LaneSequenceQueue {
         return consumerCursor < observedProducer;
     }
 
+    boolean hasCapacity() {
+        return producerSequence.value - consumerSequence.value < sequences.length;
+    }
+
     int capacity() { return sequences.length; }
 
     /** Producer and consumer write different cache lines on the hot SPSC path. */
