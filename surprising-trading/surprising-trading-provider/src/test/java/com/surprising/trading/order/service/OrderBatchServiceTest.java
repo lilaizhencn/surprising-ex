@@ -50,7 +50,7 @@ class OrderBatchServiceTest {
         when(aeron.commandOutcome(any(), any(), anyLong(), any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                         ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                        1L, 17L, new byte[0])));
+                        1L, new byte[0])));
     }
 
     @Test
@@ -66,7 +66,7 @@ class OrderBatchServiceTest {
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER_BATCH), any(UUID.class), eq(1001L),
                 any(byte[].class))).thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                 ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1L, 17L, com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResult(aggregate))));
+                1L, com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResult(aggregate))));
 
         AeronOrderCommandService.CommandExecution first = service.placeBatchCommand("place-batch", requests,
                 java.util.Collections.nCopies(20, validation));
@@ -97,7 +97,7 @@ class OrderBatchServiceTest {
         AeronOrderCommandService.CommandExecution conflict = new AeronOrderCommandService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.Terminal(new CoreResponse(
                 ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.IDEMPOTENCY_CONFLICT,
-                4L, 8L, new byte[0])), AeronOrderCommandService.CommandKind.PLACE);
+                4L, new byte[0])), AeronOrderCommandService.CommandKind.PLACE);
         OrderCommandReceipt conflictReceipt = service.receipt(conflict);
         assertThat(conflictReceipt.outcome()).isEqualTo("TERMINAL");
         assertThat(conflictReceipt.code()).isEqualTo("IDEMPOTENCY_CONFLICT");
@@ -125,7 +125,7 @@ class OrderBatchServiceTest {
     void preservesMatchingPendingForInitialReceiptAndCommandResultQuery() {
         UUID commandId = UUID.fromString("66666666-6666-6666-6666-666666666666");
         CoreResponse pendingResponse = new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
-                CoreResultCode.MATCHING_PENDING, 4L, 17L, new byte[0]);
+                CoreResultCode.MATCHING_PENDING, 4L, new byte[0]);
         AeronOrderCommandService.CommandExecution execution = new AeronOrderCommandService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.Terminal(pendingResponse),
                 AeronOrderCommandService.CommandKind.PLACE);

@@ -85,11 +85,11 @@ class ExpiringContractSettlementFanoutServiceTest {
                 InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
         long settlementId = SETTLEMENT_TIME.toEpochMilli();
         when(aeron.query(eq(CoreMessageType.SETTLEMENT_PROGRESS_QUERY), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreSettlementProgressCodec.encode(new CoreSettlementProgressView(
                                 settlementId, false, 42, 0))));
         when(aeron.command(eq(CoreMessageType.SETTLE_INSTRUMENT), any(), eq(0L), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1,
                         CoreSettlementProgressCodec.encode(new CoreSettlementProgressView(
                                 settlementId, true, 0, 1))));
 
@@ -151,7 +151,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         var aeron = mock(AccountAeronGateway.class);
         stubCompleted(aeron);
         when(aeron.command(eq(CoreMessageType.SETTLE_INSTRUMENT), any(), eq(0L), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.REJECTED, 0, 0));
+                .thenReturn(new CoreResponse(ResponseStatus.REJECTED, 0));
         var service = new ExpiringContractSettlementFanoutService(aeron, properties(ProductLine.LINEAR_DELIVERY));
         assertThatThrownBy(() -> service.fanout(event())).hasMessageContaining("command rejected");
     }
@@ -165,7 +165,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         when(aeron.query(eq(CoreMessageType.SETTLEMENT_PROGRESS_QUERY),any(),any()))
                 .thenReturn(response(new CoreSettlementProgressView(7,true,0,2)));
         when(aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
-                .thenReturn(new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                .thenReturn(new CoreResponse(ResponseStatus.OK,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                         new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
                                 new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,120),java.util.List.of(),false))));
         var service=new ExpiringContractSettlementFanoutService(aeron,properties(ProductLine.LINEAR_DELIVERY));
@@ -181,12 +181,12 @@ class ExpiringContractSettlementFanoutServiceTest {
     }
 
     private static CoreResponse response(CoreSettlementProgressView progress) {
-        return new CoreResponse(ResponseStatus.APPLIED, 1, 0, CoreSettlementProgressCodec.encode(progress));
+        return new CoreResponse(ResponseStatus.APPLIED, 1, CoreSettlementProgressCodec.encode(progress));
     }
 
     private static void stubCompleted(AccountAeronGateway aeron) {
         when(aeron.query(eq(CoreMessageType.SETTLEMENT_PROGRESS_QUERY), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreSettlementProgressCodec.encode(new CoreSettlementProgressView(0, true, 0, 0))));
         when(aeron.command(eq(CoreMessageType.SETTLE_INSTRUMENT), any(), eq(0L), any()))
                 .thenReturn(response(new CoreSettlementProgressView(id(), true, 0, 0)));

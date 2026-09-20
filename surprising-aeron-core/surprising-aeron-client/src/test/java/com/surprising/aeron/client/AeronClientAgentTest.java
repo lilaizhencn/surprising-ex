@@ -37,7 +37,7 @@ class AeronClientAgentTest {
                     }
                     public int pollEgress(int limit){return 0;}
                     public CoreResponse takeResponse(long id) {
-                        return release.get()&&accepted.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1,1):null;
+                        return release.get()&&accepted.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1):null;
                     }
                     public RuntimeException sessionFailure(){return null;}
                     public boolean keepAlive(){return true;}
@@ -71,7 +71,7 @@ class AeronClientAgentTest {
                 accepted.add(message);responses.add(message.header().correlationId());return 1;
             }
             public int pollEgress(int limit) { if(adminSeen.getCount()==0)polled.countDown();return 0; }
-            public CoreResponse takeResponse(long id) { return responses.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1,1):null; }
+            public CoreResponse takeResponse(long id) { return responses.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1):null; }
             public RuntimeException sessionFailure(){return null;}
             public boolean keepAlive(){return true;}
             public void close(){}
@@ -440,7 +440,7 @@ class AeronClientAgentTest {
                 @Override public CoreResponse takeResponse(long correlationId) {
                     Long offeredCorrelation = correlation.getAndSet(null);
                     return offeredCorrelation != null && offeredCorrelation == correlationId
-                            ? new CoreResponse(ResponseStatus.OK, 42, 99)
+                            ? new CoreResponse(ResponseStatus.OK, 42)
                             : null;
                 }
                 @Override public RuntimeException sessionFailure() { return null; }

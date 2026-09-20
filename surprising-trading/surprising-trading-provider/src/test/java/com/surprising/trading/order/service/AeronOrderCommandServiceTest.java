@@ -135,7 +135,7 @@ class AeronOrderCommandServiceTest {
                 org.mockito.ArgumentMatchers.any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                         ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                        CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 0L, 0L, new byte[0])));
+                        CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 0L, new byte[0])));
 
         AeronOrderCommandService.CommandExecution execution = service.placeCommand(request,
                 ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL));
@@ -229,7 +229,7 @@ class AeronOrderCommandServiceTest {
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(invocation.getArgument(3));
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
+                    1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
                             orderView(77, originalRequest),
                             orderView(command.replacement().orderId(), replacementRequest)), List.of()))));
         });
@@ -264,7 +264,7 @@ class AeronOrderCommandServiceTest {
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             AmendOrderCommand command = TradingCommandCodec.decodeAmendOrder(invocation.getArgument(3));
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
+                    1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
                             orderView(77, originalRequest), orderView(command.replacementOrderId(), replacementRequest)),
                             List.of()))));
         });
@@ -315,6 +315,6 @@ class AeronOrderCommandServiceTest {
     private static CoreResponse commandResponse(CoreOrderStateView order,
                                                 List<com.surprising.aeron.protocol.CoreExecutionView> executions) {
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), executions)));
+                1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), executions)));
     }
 }

@@ -54,7 +54,6 @@ class CoreCommandFingerprintTest {
         assertThat(replay.commandStatus()).isEqualTo(original.commandStatus());
         assertThat(replay.resultCode()).isEqualTo(original.resultCode());
         assertThat(replay.appliedCommandCount()).isEqualTo(original.appliedCommandCount());
-        assertThat(replay.stateHash()).isEqualTo(original.stateHash());
         assertThat(replay.data()).containsExactly(original.data());
         assertThat(restored.stateHash()).isEqualTo(stateHash);
         assertThat(restored.appliedCommandCount()).isEqualTo(appliedCommandCount);

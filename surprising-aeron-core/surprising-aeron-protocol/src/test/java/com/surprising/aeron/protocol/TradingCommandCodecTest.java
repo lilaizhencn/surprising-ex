@@ -245,7 +245,7 @@ class TradingCommandCodecTest {
     @Test
     void responseRoundTripPreservesOriginalCommandStatusAndData() {
         CoreResponse response = new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.REJECTED,
-                CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 9, 17, new byte[] {1, 2, 3});
+                CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 9, new byte[] {1, 2, 3});
 
         CoreResponse restored = CoreProtocol.decodeResponse(CoreProtocol.responsePayload(response));
 
@@ -255,7 +255,6 @@ class TradingCommandCodecTest {
         assertThat(restored.routeVersion()).isEqualTo(CoreRoute.DEFAULT.version());
         assertThat(restored.committedCoreSequence()).isEqualTo(response.appliedCommandCount());
         assertThat(restored.appliedCommandCount()).isEqualTo(response.appliedCommandCount());
-        assertThat(restored.stateHash()).isEqualTo(response.stateHash());
         assertThat(restored.data()).containsExactly(response.data());
     }
 }

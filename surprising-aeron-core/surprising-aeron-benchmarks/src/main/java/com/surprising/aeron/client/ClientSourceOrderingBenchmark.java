@@ -39,7 +39,7 @@ public class ClientSourceOrderingBenchmark {
                         @Override public int pollEgress(int limit) { return 0; }
                         @Override public CoreResponse takeResponse(long correlation) {
                             terminal.incrementAndGet();
-                            return new CoreResponse(ResponseStatus.APPLIED, 1, 1);
+                            return new CoreResponse(ResponseStatus.APPLIED, 1);
                         }
                         @Override public RuntimeException sessionFailure() { return null; }
                         @Override public boolean keepAlive() { return true; }

@@ -126,15 +126,13 @@ final class OrderBatchExecutor {
         owner.appliedCommandCount = sequence;
         owner.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-        long pendingStateHash = owner.cachedBusinessStateHash;
-        pending.withPendingStateHash(pendingStateHash);
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
                 : !pending.clusterIndependent && owner.pendingMatching.firstSequence() == sequence
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                owner.appliedCommandCount, pendingStateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                owner.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CoreResponse activateOrderBatch(OrderBatchPending batch, CommandSlot pending,
@@ -1039,13 +1037,9 @@ final class OrderBatchExecutor {
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
-        long businessStateHash = owner.publicationSequence == batch.beforePublicationSequence
-                ? owner.cachedBusinessStateHash : owner.currentBusinessStateHash();
-        owner.cachedBusinessStateHash = businessStateHash;
-        long stateHash = businessStateHash;
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                batch.sequence, stateHash, responseData, 0, responseLength);
+                batch.sequence, responseData, 0, responseLength);
         if (batch.hasPreparedResponseSlot()) batch.transferPreparedResponseOwnership();
         owner.runtimeState.endOrderBatchMutationScope();
         if (pending.takePipelinedSettlementCounted()) {
@@ -1059,7 +1053,7 @@ final class OrderBatchExecutor {
         unregisterPipelinedBatchSymbols(batch);
         owner.submitDeferredMatchingAfterBatch();
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, batch.sequence, stateHash,
+                CoreResultCode.NONE, batch.sequence,
                 responseData, 0, responseLength);
         releaseOrderBatchPending(batch);
         CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
@@ -1109,7 +1103,6 @@ final class OrderBatchExecutor {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.beginCommand();
         owner.runtimeState.beginOrderBatchMutationScope();
-        batch.beforePublicationSequence = owner.publicationSequence;
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
         batch.positionIdentityCheckpoint = owner.identities.positionCheckpoint();
         batch.beginCommit();

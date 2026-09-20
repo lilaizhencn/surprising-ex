@@ -23,7 +23,6 @@ final class CoreRuntimeStateView {
     private long materializedStateCacheRevision = Long.MIN_VALUE;
     private long materializedStateCacheMarketRevision = Long.MIN_VALUE;
     private long materializedStateCacheSequence = Long.MIN_VALUE;
-    private long materializedStateCacheBusinessHash = Long.MIN_VALUE;
 
     CoreRuntimeStateView(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
@@ -47,8 +46,7 @@ final class CoreRuntimeStateView {
         if (materializedStateCache != null
                 && materializedStateCacheRevision == revision
                 && materializedStateCacheMarketRevision == marketRevision
-                && materializedStateCacheSequence == sequence
-                && materializedStateCacheBusinessHash == owner.cachedBusinessStateHash) {
+                && materializedStateCacheSequence == sequence) {
             return materializedStateCache;
         }
         TradingCoreState materialized = RuntimeStateMaterializer.materialize(
@@ -57,7 +55,6 @@ final class CoreRuntimeStateView {
         materializedStateCacheRevision = revision;
         materializedStateCacheMarketRevision = marketRevision;
         materializedStateCacheSequence = sequence;
-        materializedStateCacheBusinessHash = owner.cachedBusinessStateHash;
         return materialized;
     }
 

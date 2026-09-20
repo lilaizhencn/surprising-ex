@@ -58,13 +58,13 @@ class CoreResultLedgerTest {
         var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(probe(first, 1, 1));
         byte[] originalBytes = {1, 2};
         ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 7, originalBytes);
+                1, originalBytes);
         var original = ledger.get(first);
         ledger.storeOwnedResult(second, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                2, 8, new byte[]{3});
+                2, new byte[]{3});
         byte[] replacementBytes = {4};
         ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                3, 9, replacementBytes);
+                3, replacementBytes);
         assertThat(original.responseDataUnsafe()).isSameAs(originalBytes);
         assertThat(original.responseData()).containsExactly(1, 2);
         assertThat(ledger.get(first).responseDataUnsafe()).isSameAs(replacementBytes);
@@ -221,7 +221,7 @@ class CoreResultLedgerTest {
         CoreMessage command = probe(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
         return new CommandResultLedger.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
-                appliedCommandCount, 0, response, retentionSequence);
+                appliedCommandCount, response, retentionSequence);
     }
 
     private static CoreMessage commandResultQuery(UUID commandId) {

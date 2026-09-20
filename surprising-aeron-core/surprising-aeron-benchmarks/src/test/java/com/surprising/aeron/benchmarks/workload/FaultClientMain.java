@@ -140,7 +140,7 @@ public final class FaultClientMain {
                     output.put("commandStatus", response.commandStatus());
                     output.put("resultCode", response.resultCode());
                     output.put("position", response.committedCoreSequence());
-                    output.put("hash", response.stateHash());
+                    output.put("hash", CoreStateQueryCodec.decodeStateHash(response.data()));
                     output.put("data", Base64.getEncoder().encodeToString(response.data()));
                     if (type == CoreMessageType.USER_STATE_QUERY && response.status() == ResponseStatus.OK)
                         output.put("user", CoreStateQueryCodec.decodeUserState(response.data()));

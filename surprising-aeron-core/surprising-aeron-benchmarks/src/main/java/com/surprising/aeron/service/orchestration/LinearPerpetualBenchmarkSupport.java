@@ -414,7 +414,7 @@ final class LinearPerpetualBenchmarkSupport {
                 if (harness.executionWork().actions().isEmpty()) {
                     throw new IllegalStateException("risk scan produced no liquidation work");
                 }
-                return response.stateHash();
+                return response.appliedCommandCount();
             }
 
             @Override
@@ -454,7 +454,7 @@ final class LinearPerpetualBenchmarkSupport {
         return new Scenario() {
             @Override
             public long run() {
-                return harness.execute(command).stateHash();
+                return harness.execute(command).appliedCommandCount();
             }
 
             @Override
@@ -502,7 +502,7 @@ final class LinearPerpetualBenchmarkSupport {
                 0, TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
                         batchActions, ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0)));
         return new Scenario() {
-            @Override public long run() { return harness.execute(command).stateHash(); }
+            @Override public long run() { return harness.execute(command).appliedCommandCount(); }
             @Override public long operations() { return actions.size(); }
             @Override public long maxBacklog() { return harness.maxMatchingBacklog(); }
             @Override public void verify() {
@@ -580,7 +580,7 @@ final class LinearPerpetualBenchmarkSupport {
         return new Scenario() {
             @Override public long run() {
                 harness.execute(resolve);
-                return harness.execute(executeAdl).stateHash();
+                return harness.execute(executeAdl).appliedCommandCount();
             }
             @Override public long operations() { return 2; }
             @Override public void verify() {
@@ -660,7 +660,7 @@ final class LinearPerpetualBenchmarkSupport {
         return new Scenario() {
             @Override
             public long run() {
-                return harness.execute(command).stateHash();
+                return harness.execute(command).appliedCommandCount();
             }
 
             @Override
@@ -692,7 +692,7 @@ final class LinearPerpetualBenchmarkSupport {
         return new Scenario() {
             @Override
             public long run() {
-                return harness.execute(command).stateHash();
+                return harness.execute(command).appliedCommandCount();
             }
 
             @Override

@@ -27,7 +27,7 @@ class CommandSlotTest {
         DirectCommandSlot slot = new DirectCommandSlot();
         CoreMessage first = command(1000);
         slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 10, 20, 0, 1, 2, 3);
+                CommandSource.OPERATIONS, 1), 10, 20, 1, 2, 3);
         slot.deferControl(() -> true);
         slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                 com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND);
@@ -36,7 +36,7 @@ class CommandSlotTest {
 
         CoreMessage second = command(1001);
         slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 30, 40, 0, 4, 5, 6);
+                CommandSource.OPERATIONS, 1), 30, 40, 4, 5, 6);
         assertThat(slot.command()).isSameAs(second);
         assertThat(slot.controlWork()).isNull();
         assertThat(slot.status()).isNull();
@@ -51,11 +51,11 @@ class CommandSlotTest {
     void batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration() {
         CoreMessage command = command(1000);
         var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command,
-                0, 0, 0, RuntimeFundsDelta.empty());
+                RuntimeFundsDelta.empty());
         var batch = new OrderBatchPending(1);
         pending.orderBatch = batch;
         pending.initialize(2000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), 0, 0, 0,
+                CommandFingerprint.of(command), List.of(),
                 RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
@@ -100,20 +100,16 @@ class CommandSlotTest {
     }
 
     @Test
-    void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
+    void preservesCommandStateAcrossDeferredMatchingUpdates() {
         CoreMessage command = command(11);
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
-        long beforePublicationSequence = 13;
         RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
         CommandSlot pending = new CommandSlot(7, CommandSlot.Operation.PLACE, command, fingerprint,
-                List.of(17L), beforePublicationSequence, 101L, 202L, fundsDelta);
+                List.of(17L), fundsDelta);
 
         var decoded = pending.decodedCommand();
         CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
-        assertThat(updatedCancellations.beforeBusinessStateHash()).isEqualTo(101L);
-        assertThat(updatedCancellations.beforeFundsStateHash()).isEqualTo(202L);
-        assertThat(updatedCancellations.beforePublicationSequence()).isEqualTo(beforePublicationSequence);
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);

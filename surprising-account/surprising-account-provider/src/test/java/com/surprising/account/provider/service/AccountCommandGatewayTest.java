@@ -30,12 +30,12 @@ class AccountCommandGatewayTest {
     void productTransferUsesDedicatedAeronCommands() {
         AccountAeronGateway sourceAeron = mock(AccountAeronGateway.class);
         when(sourceAeron.command(any(), any(), eq(7L), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 1));
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1));
         when(sourceAeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.SPOT, 7, 2,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 750, 0)), List.of(), List.of()));
         AccountAeronGateway targetAeron = mock(AccountAeronGateway.class);
         when(targetAeron.command(any(), any(), eq(7L), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 1));
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1));
         when(targetAeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 2,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 250, 0)), List.of(), List.of()));
         AccountCommandGateway source = new AccountCommandGateway(properties(ProductLine.SPOT), sourceAeron);
@@ -58,7 +58,7 @@ class AccountCommandGatewayTest {
     void balanceAdjustmentSubmitsAeronCommandAndReadsAuthoritativeState() {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         when(aeron.command(eq(CoreMessageType.ADJUST_BALANCE), any(), eq(7L), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 1));
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1));
         when(aeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 900, 100)), List.of(), List.of()));
         AccountCommandGateway gateway = new AccountCommandGateway(
@@ -77,7 +77,7 @@ class AccountCommandGatewayTest {
     void positionModeUsesStableAeronStateInsteadOfLocalReducer() {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         when(aeron.command(eq(CoreMessageType.UPDATE_POSITION_MODE), any(), anyLong(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 1));
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1));
         when(aeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 2,
                 CorePositionMode.HEDGE, List.of(), List.of(), List.of()));
         AccountCommandGateway gateway = new AccountCommandGateway(

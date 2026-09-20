@@ -146,7 +146,6 @@ final class SectionedCoreSnapshotParser {
         ResponseStatus status = ResponseStatus.fromWireCode(source.getInt());
         CoreResultCode resultCode = CoreResultCode.fromWireCode(source.getInt());
         long appliedCommandCount = source.getLong();
-        long stateHash = source.getLong();
         long retentionSequence = source.getLong();
         int responseLength = source.getInt();
         if (appliedCommandCount < 0 || retentionSequence <= 0
@@ -158,7 +157,7 @@ final class SectionedCoreSnapshotParser {
         source.limit(limit);
         return new SnapshotResult(commandId, new CommandResultLedger.StoredResult(
                 CommandFingerprint.fromBytes(fingerprint), status, resultCode, appliedCommandCount,
-                stateHash, responseData, retentionSequence));
+                responseData, retentionSequence));
     }
 
     private static int readCount(ByteBuffer buffer, int maximum, String label) {

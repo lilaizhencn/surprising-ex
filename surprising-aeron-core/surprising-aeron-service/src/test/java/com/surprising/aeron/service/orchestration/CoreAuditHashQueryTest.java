@@ -30,6 +30,6 @@ class CoreAuditHashQueryTest {
         var response = state.apply(new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(),
                 ProductLine.SPOT, CommandSource.OPERATIONS, 77, 0, 0, 2, 2), new byte[0]));
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
-        return response.stateHash();
+        return CoreStateQueryCodec.decodeStateHash(response.data());
     }
 }

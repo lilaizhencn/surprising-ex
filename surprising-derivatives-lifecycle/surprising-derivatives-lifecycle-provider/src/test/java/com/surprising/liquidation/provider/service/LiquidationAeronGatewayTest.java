@@ -20,7 +20,7 @@ class LiquidationAeronGatewayTest {
         var result=new CoreLiquidationBatchResultView(0,0,0,0,0,1);
         when(client.command(eq(CoreMessageType.EXECUTE_LIQUIDATION_BATCH),any(),eq(0L),any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK,ResponseStatus.APPLIED,CoreResultCode.NONE,
-                        1,0,CoreLiquidationBatchResultCodec.encode(result)));
+                        1,CoreLiquidationBatchResultCodec.encode(result)));
         var gateway=new LiquidationAeronGateway(properties,client);
         var risk=new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,0,true,
                 new CoreRiskScanContinuation("BTC-USDT",1,0),List.of(),List.of());

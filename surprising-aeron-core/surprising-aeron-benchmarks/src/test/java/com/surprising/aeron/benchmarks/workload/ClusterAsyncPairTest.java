@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class ClusterAsyncPairTest {
-    private static final CoreResponse OK = new CoreResponse(ResponseStatus.APPLIED, 1, 1);
+    private static final CoreResponse OK = new CoreResponse(ResponseStatus.APPLIED, 1);
 
     @Test void independentOrdersAreBothSubmittedBeforeEitherReplyAndTimedSeparately() {
         var price = new CompletableFuture<Void>();

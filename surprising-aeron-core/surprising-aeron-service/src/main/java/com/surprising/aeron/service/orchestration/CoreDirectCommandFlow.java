@@ -27,12 +27,11 @@ final class CoreDirectCommandFlow {
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
         runtime.activateFactContext(message, fingerprint);
-        long beforePublicationSequence = runtime.publicationSequence;
         long beforeRuntimeRevision = runtime.runtimeState.revision();
         long runtimeCommandCheckpoint = runtime.runtimeState.commandRevisionCheckpoint();
         long positionIdentityCheckpoint = runtime.identities.positionCheckpoint();
         runtime.directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
-                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+                beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         runtime.resultBuilder.beginCommand();
         runtime.admissions.queuedMatching.clear();
         runtime.commits.beginCommitPublicationBatch();
@@ -54,13 +53,13 @@ final class CoreDirectCommandFlow {
         }
         if (runtime.directCommand.hasControlWork() || runtime.directCommand.status() != null) return null;
         return finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
 
     CoreResponse finish(CoreMessage message, long clusterTimestamp, long clusterPosition,
                         TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint,
-                        long beforePublicationSequence, long beforeRuntimeRevision,
+                        long beforeRuntimeRevision,
                         long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
                         ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(runtime.appliedCommandCount);
@@ -141,28 +140,22 @@ final class CoreDirectCommandFlow {
         runtime.directCommand.clearFinalizationPrepared();
         runtime.commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) runtime.validateFundsConservation(message);
-        boolean tradingStateChanged = status == ResponseStatus.APPLIED
-                && runtime.publicationSequence != beforePublicationSequence;
-        long businessStateHash = tradingStateChanged
-                ? runtime.currentBusinessStateHash() : runtime.cachedBusinessStateHash;
         runtime.appliedCommandCount = nextAppliedCommandCount;
         runtime.refreshCommittedCoreSequence();
-        runtime.cachedBusinessStateHash = businessStateHash;
         runtime.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         runtime.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
             runtime.terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
         }
-        long stateHash = businessStateHash;
         byte[] responseData = runtime.resultBuilder.commandResultData();
         int responseOffset = runtime.resultBuilder.responseDataOffset();
         int responseLength = runtime.resultBuilder.responseDataLength();
         runtime.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
-                runtime.appliedCommandCount, stateHash, responseData,
+                runtime.appliedCommandCount, responseData,
                 responseOffset, responseLength);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, runtime.appliedCommandCount,
-                stateHash, responseData, responseOffset, responseLength);
+                responseData, responseOffset, responseLength);
         runtime.resultBuilder.transferResponseOwnership();
         return finishContext(response);
     }

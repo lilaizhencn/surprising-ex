@@ -591,7 +591,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             System.out.printf("ownerChurnVerify=PASS completedOrderLifecycles=%d terminalIndexEmpty=true reservationsEmpty=true%n",
                     completedOrderLifecycles);
         }
-        long hash=query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,0,new byte[0]).stateHash();
+        long hash=CoreStateQueryCodec.decodeStateHash(
+                query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,0,new byte[0]).data());
         System.out.printf("mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=%d businessHash=%s%n",totalCycles,Long.toUnsignedString(hash,16));
     }
     private void requireItems(CoreMessageType type,long expected) {

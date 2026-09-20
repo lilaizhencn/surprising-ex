@@ -422,12 +422,13 @@ class ClusterFundsReconcileTest {
         public CoreResponse query(CoreMessageType type, long userId, byte[] payload) {
             if (type == rejectType) {
                 return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                        CoreResultCode.NONE, 0, stateHash, new byte[0]);
+                        CoreResultCode.NONE, 0, new byte[0]);
             }
             return switch (type) {
                 case USER_STATE_QUERY -> userResponse(userId);
                 case RISK_STATE_QUERY -> ok(CoreRiskQueryCodec.encode(List.of()));
                 case TREASURY_STATE_QUERY -> ok(CoreStateQueryCodec.encodeTreasuryState(treasury));
+                case BUSINESS_STATE_HASH_QUERY -> ok(CoreStateQueryCodec.encodeStateHash(stateHash));
                 case LIQUIDATION_WORK_QUERY -> liquidationResponse(payload);
                 default -> throw new AssertionError("unexpected query " + type);
             };
@@ -463,7 +464,7 @@ class ClusterFundsReconcileTest {
 
         private CoreResponse ok(byte[] data) {
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
-                    CoreResultCode.NONE, 0, stateHash, data);
+                    CoreResultCode.NONE, 0, data);
         }
     }
 }

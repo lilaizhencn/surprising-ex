@@ -43,7 +43,7 @@ public class CommandResultLedgerBenchmark {
     public Object retainAndQuery() {
         UUID id = ids[(int) sequence++ & (ids.length - 1)];
         ledger.storeOwnedResult(id, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                sequence, sequence, RESPONSE);
+                sequence, RESPONSE);
         return ledger.get(id);
     }
 }

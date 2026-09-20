@@ -156,7 +156,8 @@ public class ClusterDirectSettlementBenchmark {
             if (!CoreStateQueryCodec.decodeOpenOrders(orders.data()).orders().isEmpty())
                 throw new IllegalStateException("unfinished direct order");
         }
-        long hash = client.query(CoreMessageType.BUSINESS_STATE_HASH_QUERY, UUID.randomUUID(), 0, new byte[0]).stateHash();
+        long hash = CoreStateQueryCodec.decodeStateHash(client.query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
+                UUID.randomUUID(), 0, new byte[0]).data());
         System.out.printf("directSettlementVerify=PASS product=%s symbols=128 fundsDiff=0 positions=0 reservations=0 openOrders=0 businessHash=%s%n",
                 product, Long.toUnsignedString(hash, 16));
     }

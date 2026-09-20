@@ -626,11 +626,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return commandIngress.prepareClusterPipelineScope(message, window);
     }
     CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
-            SourceKey sourceKey, CommandFingerprint fingerprint, long beforePublicationSequence,
+            SourceKey sourceKey, CommandFingerprint fingerprint,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
         return directCommandFlow.finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
@@ -1095,7 +1095,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     public long stateHash() {
-        return cachedBusinessStateHash;
+        return currentBusinessStateHash();
     }
 
     byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
@@ -1547,13 +1547,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 runtimeState, identities, userId);
         if (query.tooLarge()) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.QUERY_RESPONSE_TOO_LARGE, appliedCommandCount, cachedBusinessStateHash);
+                    CoreResultCode.QUERY_RESPONSE_TOO_LARGE, appliedCommandCount);
         }
         if (!query.found()) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, cachedBusinessStateHash);
+                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount);
         }
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, query.stateHash(),
+        return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
                 CoreStateQueryCodec.encodeUserState(query.view()));
     }
 
@@ -1602,9 +1602,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
             com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult query) {
         if (!query.found()) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, cachedBusinessStateHash);
+                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount);
         }
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, query.stateHash(),
+        return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
                 CoreStateQueryCodec.encodeOrderState(query.view()));
     }
 
@@ -1707,7 +1707,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     CoreResponse rejected(CoreResultCode resultCode) {
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                resultCode, appliedCommandCount, stateHash());
+                resultCode, appliedCommandCount);
     }
 
     static CoreResultCode matchingPendingCode() {

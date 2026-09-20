@@ -61,7 +61,7 @@ final class OrderBookQueryService {
         }
         queryIds.put(message.header().commandId(), queryId);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                owner.appliedCommandCount, owner.cachedBusinessStateHash);
+                owner.appliedCommandCount);
     }
 
     CoreResponse beginBookBootstrapQuery(CoreMessage message) {
@@ -91,7 +91,7 @@ final class OrderBookQueryService {
         }
         queryIds.put(message.header().commandId(), queryId);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                owner.appliedCommandCount, owner.cachedBusinessStateHash);
+                owner.appliedCommandCount);
     }
 
     public long querySequence(UUID queryId) {
@@ -146,7 +146,7 @@ final class OrderBookQueryService {
         if (levelCount > TradingCoreRuntime.MAX_BOOK_RESPONSE_LEVELS || encoded.length > TradingCoreRuntime.MAX_BOOK_RESPONSE_BYTES) {
             return owner.rejected(CoreResultCode.BOOK_QUERY_RESPONSE_TOO_LARGE);
         }
-        return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount, owner.cachedBusinessStateHash, encoded);
+        return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount, encoded);
     }
 
     record CompletedBookQuery(

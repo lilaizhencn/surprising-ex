@@ -252,7 +252,7 @@ final class CoreCommandIngress {
         StoredResult terminalDuplicate = runtime.resultLedger.get(message.header().commandId());
         if (terminalDuplicate != null) {
             return runtime.resultLedger.duplicateResponse(terminalDuplicate, fingerprint,
-                    runtime.appliedCommandCount, runtime.stateHash());
+                    runtime.appliedCommandCount);
         }
         CommandSlot pendingDuplicate = runtime.pendingMatching.findByCommandId(message.header().commandId());
         if (pendingDuplicate != null) {
@@ -260,11 +260,11 @@ final class CoreCommandIngress {
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                         com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                         CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
-                        runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                        TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             }
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                    pendingDuplicate.sequence(), pendingDuplicate.pendingStateHash(),
+                    pendingDuplicate.sequence(),
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
         if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
@@ -274,11 +274,11 @@ final class CoreCommandIngress {
                     return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
-                            runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                            TradingCoreRuntime.EMPTY_RESPONSE_DATA);
                 }
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                         com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
-                        runtime.appliedCommandCount, runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                        runtime.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             }
             if (!runtime.terminalRetention.hasFundsCommandCapacity(message.header().commandId())) {
                 return runtime.rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);
@@ -291,7 +291,7 @@ final class CoreCommandIngress {
         if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                    CoreResultCode.STALE_SOURCE_SEQUENCE, runtime.appliedCommandCount, runtime.stateHash());
+                    CoreResultCode.STALE_SOURCE_SEQUENCE, runtime.appliedCommandCount);
         }
         if (lastSourceSequence < 0
                 && runtime.lastSourceSequences.size() >= TradingCoreRuntime.MAX_SOURCE_SEQUENCES) {

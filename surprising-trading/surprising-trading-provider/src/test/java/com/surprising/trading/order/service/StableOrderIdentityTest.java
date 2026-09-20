@@ -114,7 +114,7 @@ class StableOrderIdentityTest {
                 UUID.randomUUID(), -10, 25, 0, 1_000, 1_000, 1,
                 "OPEN", 1);
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), List.of())));
+                1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), List.of())));
     }
 
 }

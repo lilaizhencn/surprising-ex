@@ -49,8 +49,10 @@ public final class ClusterProbeMain {
                         CoreLaneMetricsCodec.decode(response.data())));
                 return;
             }
+            long stateHash = queryOnly
+                    ? com.surprising.aeron.protocol.CoreStateQueryCodec.decodeStateHash(response.data()) : 0;
             System.out.printf("status=%s appliedCommandCount=%d stateHash=%016x commandId=%s%n",
-                    response.status(), response.appliedCommandCount(), response.stateHash(), commandId);
+                    response.status(), response.appliedCommandCount(), stateHash, commandId);
         }
     }
 }

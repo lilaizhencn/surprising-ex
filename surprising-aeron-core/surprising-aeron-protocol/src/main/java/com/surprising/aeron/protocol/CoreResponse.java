@@ -7,7 +7,6 @@ public final class CoreResponse {
     private final int routeVersion;
     private final long committedCoreSequence;
     private final long appliedCommandCount;
-    private final long stateHash;
     private final byte[] data;
     private final int dataOffset;
     private final int dataLength;
@@ -16,21 +15,21 @@ public final class CoreResponse {
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                         int routeVersion, long committedCoreSequence, long appliedCommandCount,
-                        long stateHash, byte[] data) {
+                        byte[] data) {
         this(status, commandStatus, resultCode, routeVersion, committedCoreSequence, appliedCommandCount,
-                stateHash, data, false);
+                data, false);
     }
 
     private CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                          int routeVersion, long committedCoreSequence, long appliedCommandCount,
-                         long stateHash, byte[] data, boolean ownedData) {
+                         byte[] data, boolean ownedData) {
         this(status, commandStatus, resultCode, routeVersion, committedCoreSequence, appliedCommandCount,
-                stateHash, data, 0, data == null ? 0 : data.length, ownedData);
+                data, 0, data == null ? 0 : data.length, ownedData);
     }
 
     private CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                          int routeVersion, long committedCoreSequence, long appliedCommandCount,
-                         long stateHash, byte[] data,
+                         byte[] data,
                          int dataOffset, int dataLength, boolean ownedData) {
         if (status == null || commandStatus == null || resultCode == null
                 || routeVersion != CoreRoute.DEFAULT.version() || committedCoreSequence < 0
@@ -45,7 +44,6 @@ public final class CoreResponse {
         this.routeVersion = routeVersion;
         this.committedCoreSequence = committedCoreSequence;
         this.appliedCommandCount = appliedCommandCount;
-        this.stateHash = stateHash;
         if (data == null || dataLength == 0) {
             this.data = EMPTY_DATA;
             this.dataOffset = 0;
@@ -66,43 +64,41 @@ public final class CoreResponse {
     }
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
-                        long appliedCommandCount, long stateHash, byte[] data) {
+                        long appliedCommandCount, byte[] data) {
         this(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(), appliedCommandCount,
-                appliedCommandCount, stateHash, data);
+                appliedCommandCount, data);
     }
 
-    public CoreResponse(ResponseStatus status, long appliedCommandCount, long stateHash) {
+    public CoreResponse(ResponseStatus status, long appliedCommandCount) {
         this(status, status, CoreResultCode.NONE, CoreRoute.DEFAULT.version(), appliedCommandCount,
-                appliedCommandCount, stateHash, EMPTY_DATA);
+                appliedCommandCount, EMPTY_DATA);
     }
 
-    public CoreResponse(ResponseStatus status, long appliedCommandCount, long stateHash, byte[] data) {
+    public CoreResponse(ResponseStatus status, long appliedCommandCount, byte[] data) {
         this(status, status, CoreResultCode.NONE, CoreRoute.DEFAULT.version(), appliedCommandCount,
-                appliedCommandCount, stateHash, data);
+                appliedCommandCount, data);
     }
 
     public CoreResponse(
             ResponseStatus status,
             ResponseStatus commandStatus,
-            long appliedCommandCount,
-            long stateHash) {
+            long appliedCommandCount) {
         this(status, commandStatus, CoreResultCode.NONE, CoreRoute.DEFAULT.version(), appliedCommandCount,
-                appliedCommandCount, stateHash, EMPTY_DATA);
+                appliedCommandCount, EMPTY_DATA);
     }
 
     public CoreResponse(
             ResponseStatus status,
             ResponseStatus commandStatus,
             CoreResultCode resultCode,
-            long appliedCommandCount,
-            long stateHash) {
+            long appliedCommandCount) {
         this(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(), appliedCommandCount,
-                appliedCommandCount, stateHash, EMPTY_DATA);
+                appliedCommandCount, EMPTY_DATA);
     }
 
     public CoreResponse withCommittedCoreSequence(long sequence) {
         return new CoreResponse(status, commandStatus, resultCode, routeVersion, sequence,
-                appliedCommandCount, stateHash, data, dataOffset, dataLength, true);
+                appliedCommandCount, data, dataOffset, dataLength, true);
     }
 
     /* Public reads never expose storage transferred by the encoder. */
@@ -117,26 +113,25 @@ public final class CoreResponse {
      */
     public static CoreResponse owned(ResponseStatus status, ResponseStatus commandStatus,
                                      CoreResultCode resultCode, long appliedCommandCount,
-                                     long stateHash, byte[] data) {
+                                     byte[] data) {
         return new CoreResponse(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(),
-                appliedCommandCount, appliedCommandCount, stateHash, data, true);
+                appliedCommandCount, appliedCommandCount, data, true);
     }
 
     /** Transfers a bounded slice of stable storage without copying it. */
     public static CoreResponse owned(ResponseStatus status, ResponseStatus commandStatus,
                                      CoreResultCode resultCode, long appliedCommandCount,
-                                     long stateHash,
                                      byte[] data, int offset, int length) {
         return new CoreResponse(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(),
-                appliedCommandCount, appliedCommandCount, stateHash,
+                appliedCommandCount, appliedCommandCount,
                 data, offset, length, true);
     }
 
     static CoreResponse decoded(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                                 int routeVersion, long committedCoreSequence, long appliedCommandCount,
-                                long stateHash, byte[] data) {
+                                byte[] data) {
         return new CoreResponse(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
-                appliedCommandCount, stateHash, data, true);
+                appliedCommandCount, data, true);
     }
 
     public ResponseStatus status() { return status; }
@@ -145,7 +140,6 @@ public final class CoreResponse {
     public int routeVersion() { return routeVersion; }
     public long committedCoreSequence() { return committedCoreSequence; }
     public long appliedCommandCount() { return appliedCommandCount; }
-    public long stateHash() { return stateHash; }
 
     @Override
     public boolean equals(Object other) {
@@ -157,7 +151,6 @@ public final class CoreResponse {
                 && routeVersion == value.routeVersion
                 && committedCoreSequence == value.committedCoreSequence
                 && appliedCommandCount == value.appliedCommandCount
-                && stateHash == value.stateHash
                 && data == value.data;
     }
 
@@ -170,7 +163,6 @@ public final class CoreResponse {
         hash = 31 * hash + routeVersion;
         hash = 31 * hash + Long.hashCode(committedCoreSequence);
         hash = 31 * hash + Long.hashCode(appliedCommandCount);
-        hash = 31 * hash + Long.hashCode(stateHash);
         hash = 31 * hash + data.hashCode();
         return hash;
     }
@@ -180,7 +172,6 @@ public final class CoreResponse {
         return "CoreResponse[status=" + status + ", commandStatus=" + commandStatus
                 + ", resultCode=" + resultCode + ", routeVersion=" + routeVersion
                 + ", committedCoreSequence=" + committedCoreSequence + ", appliedCommandCount=" + appliedCommandCount
-                + ", stateHash=" + stateHash
                 + ", data=" + data + "]";
     }
 

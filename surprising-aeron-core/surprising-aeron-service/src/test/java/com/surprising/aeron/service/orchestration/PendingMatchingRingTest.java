@@ -199,8 +199,7 @@ class PendingMatchingRingTest {
         CoreMessage command = command(commandId, userId);
         return ring.acquire(sequence, CommandSlot.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
-                0,
-                1, 1, RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
+                RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
     }
 
     private static CommandSlot partitionHead(PendingMatchingRing ring, int shard) {

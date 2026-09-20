@@ -561,7 +561,6 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
-            assertThat(duplicate.stateHash()).isEqualTo(deferred.stateHash());
             assertThat(state.pendingMatching()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(state.commandResults()).doesNotContainKey(laterId);
@@ -829,7 +828,6 @@ class CoreOrderedOrderBatchTest {
                     new Class<?>[]{long.class, int.class}, 1001L, quoteAssetId)).isPositive();
             assertThat(state.commandResults()).doesNotContainKey(fatalId);
             assertThat(state.pendingMatching(fatalSequence)).isNotNull();
-            assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasPendingCommands()).isTrue();

@@ -61,22 +61,19 @@ final class CoreMatchingFlow {
             owner.pendingMatching.completeSubmission(sequence);
             owner.appliedCommandCount = sequence;
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-            long stateHash = owner.cachedBusinessStateHash;
-            pending.withPendingStateHash(stateHash);
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
-                    TradingCoreRuntime.matchingPendingCode(), sequence, stateHash,
+                    TradingCoreRuntime.matchingPendingCode(), sequence,
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
         owner.appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
         owner.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        long stateHash = owner.cachedBusinessStateHash;
         owner.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint,
-                ResponseStatus.REJECTED, resultCode, sequence, stateHash,
+                ResponseStatus.REJECTED, resultCode, sequence,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CommandSlot removePendingMatching(long sequence) {

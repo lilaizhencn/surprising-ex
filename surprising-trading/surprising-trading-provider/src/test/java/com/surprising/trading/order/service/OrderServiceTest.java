@@ -369,7 +369,7 @@ class OrderServiceTest {
                     requests.stream().map(CancelOrderRequest::orderId).toList(),
                     new CoreCommandOutcome.Terminal(new CoreResponse(
                             ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                            1L, 17L, new byte[0])),
+                            1L, new byte[0])),
                     AeronOrderCommandService.CommandKind.CANCEL_BATCH);
         });
         when(aeronOrders.receipt(any(AeronOrderCommandService.CommandExecution.class)))

@@ -220,7 +220,6 @@ public final class SectionedCoreSnapshotWriter {
         buffer.putInt(result.status().wireCode());
         buffer.putInt(result.resultCode().wireCode());
         buffer.putLong(result.appliedCommandCount());
-        buffer.putLong(result.stateHash());
         buffer.putLong(result.retentionSequence());
         buffer.putInt(responseData.length);
         buffer.put(responseData);

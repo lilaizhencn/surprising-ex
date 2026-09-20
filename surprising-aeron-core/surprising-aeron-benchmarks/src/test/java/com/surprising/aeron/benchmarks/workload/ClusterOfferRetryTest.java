@@ -14,7 +14,7 @@ class ClusterOfferRetryTest {
     @Test void retriesOnlyDefinitelyUnacceptedTransientOffers() {
         AtomicInteger attempts = new AtomicInteger();
         AtomicInteger retries = new AtomicInteger();
-        CoreResponse terminal = new CoreResponse(ResponseStatus.APPLIED, 1, 1);
+        CoreResponse terminal = new CoreResponse(ResponseStatus.APPLIED, 1);
         var result = ClusterOfferRetry.submit(() -> switch (attempts.getAndIncrement()) {
             case 0 -> CompletableFuture.failedFuture(rejection(Publication.ADMIN_ACTION));
             case 1 -> CompletableFuture.failedFuture(rejection(Publication.BACK_PRESSURED));

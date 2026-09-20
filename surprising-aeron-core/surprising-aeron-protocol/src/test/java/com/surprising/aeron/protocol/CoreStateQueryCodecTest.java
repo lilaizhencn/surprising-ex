@@ -13,6 +13,15 @@ import org.junit.jupiter.api.Test;
 class CoreStateQueryCodecTest {
 
     @Test
+    void roundTripsStateHashAsExplicitQueryPayload() {
+        long stateHash = 0x8877665544332211L;
+        assertThat(CoreStateQueryCodec.decodeStateHash(CoreStateQueryCodec.encodeStateHash(stateHash)))
+                .isEqualTo(stateHash);
+        assertThatThrownBy(() -> CoreStateQueryCodec.decodeStateHash(new byte[Long.BYTES - 1]))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
     void directOrderEncodingMatchesCollectionWireFormatForUtf8AndOffsetBuffers() {
         for (String clientId : new String[] {"", "ascii", "客户é😀", "bad\uD800tail\uDC00", "x".repeat(64)}) {
             CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT",

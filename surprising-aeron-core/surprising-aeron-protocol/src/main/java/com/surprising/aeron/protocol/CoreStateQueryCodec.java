@@ -15,6 +15,19 @@ public final class CoreStateQueryCodec {
     private CoreStateQueryCodec() {
     }
 
+    public static byte[] encodeStateHash(long stateHash) {
+        Writer writer = new Writer(Long.BYTES);
+        writer.longValue(stateHash);
+        return writer.toByteArray();
+    }
+
+    public static long decodeStateHash(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        long stateHash = reader.longValue();
+        reader.requireConsumed();
+        return stateHash;
+    }
+
     public static byte[] encodeClientOrderStateQuery(String clientOrderId) {
         Writer writer = new Writer();
         writer.text(clientOrderId);

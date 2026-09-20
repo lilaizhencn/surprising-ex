@@ -63,7 +63,7 @@ class SectionedCoreSnapshotCodecTest {
                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
         });
         CommandResultLedger.StoredResult stored = new CommandResultLedger.StoredResult(
-                fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 77, response, 4);
+                fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, response, 4);
         TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1, 0,
                 Map.of(commandId, stored), Map.of(),
                 com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT));
@@ -73,7 +73,6 @@ class SectionedCoreSnapshotCodecTest {
         assertThat(restored.commandResults().get(commandId).responseData()).containsExactly(response);
         assertThat(restored.commandResults().get(commandId).fingerprint()).isEqualTo(fingerprint);
         assertThat(restored.commandResults().get(commandId).appliedCommandCount()).isEqualTo(1);
-        assertThat(restored.commandResults().get(commandId).stateHash()).isEqualTo(77);
         assertThat(restored.commandResults().get(commandId).retentionSequence()).isEqualTo(4);
     }
 

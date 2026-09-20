@@ -42,12 +42,13 @@ final class TradingCoreQueryRouter {
             // Full hashes are explicit audit queries. The hot-path cached value is a snapshot
             // audit anchor and does not track mutable account/order changes.
             return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                    runtime.canonicalBusinessStateHash(runtime.tradingState().businessStateHash()));
+                    CoreStateQueryCodec.encodeStateHash(
+                            runtime.canonicalBusinessStateHash(runtime.tradingState().businessStateHash())));
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY) {
             if (message.payloadUnsafe().length != 0) return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                     runtime.encodeLaneMetrics());
         }
         if (message.header().messageType() == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
@@ -61,7 +62,7 @@ final class TradingCoreQueryRouter {
                     if (users.size() == query.limit()) { more = true; break; }
                     users.add(userId);
                 }
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                                 new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
                                         instrument.maintenance(), users, more)));
@@ -75,7 +76,7 @@ final class TradingCoreQueryRouter {
                     runtime.runtimeState, runtime.identities, message.header().userId());
             if (query.tooLarge()) return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                    query.found() ? query.stateHash() : 0);
+                    CoreStateQueryCodec.encodeStateHash(query.found() ? query.stateHash() : 0));
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.COMMAND_RESULT_QUERY) {
@@ -85,11 +86,11 @@ final class TradingCoreQueryRouter {
                 if (result == null) {
                     return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, runtime.appliedCommandCount,
-                            runtime.cachedBusinessStateHash, runtime.EMPTY_RESPONSE_DATA);
+                            runtime.EMPTY_RESPONSE_DATA);
                 }
                 runtime.responseArena.retain(result.responseDataUnsafe());
                 return CoreResponse.owned(ResponseStatus.OK, result.status(), result.resultCode(),
-                        result.appliedCommandCount(), result.stateHash(),
+                        result.appliedCommandCount(),
                         result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
@@ -102,7 +103,7 @@ final class TradingCoreQueryRouter {
                         runtime.runtimeState, runtime.identities,
                         TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()));
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        query.found() ? query.stateHash() : 0);
+                        CoreStateQueryCodec.encodeStateHash(query.found() ? query.stateHash() : 0));
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -143,7 +144,7 @@ final class TradingCoreQueryRouter {
                         .filter(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::found)
                         .map(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::view)
                         .toList();
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreStateQueryCodec.encodeOpenOrders(
                                 new com.surprising.aeron.protocol.CoreOpenOrdersView(orders)));
             } catch (IllegalArgumentException exception) {
@@ -170,7 +171,7 @@ final class TradingCoreQueryRouter {
                         query.triggerOrderId(), before,
                         message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,
                         query.limit());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(values));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -199,7 +200,7 @@ final class TradingCoreQueryRouter {
             try {
                 var views = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.treasuryAssets(
                         runtime.runtimeState, runtime.identities);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreStateQueryCodec.encodeTreasuryState(views));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -211,7 +212,7 @@ final class TradingCoreQueryRouter {
                 String symbol = CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
                 CoreFundingProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
                         .fundingProgress(runtime.runtimeState, runtime.identities, symbol);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreFundingProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
@@ -223,7 +224,7 @@ final class TradingCoreQueryRouter {
                 String symbol = CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
                 CoreSettlementProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
                         .settlementProgress(runtime.runtimeState, runtime.identities, symbol);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreSettlementProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
@@ -233,7 +234,7 @@ final class TradingCoreQueryRouter {
                 && message.header().messageType() == CoreMessageType.ADL_CANDIDATE_QUERY) {
             try {
                 var query = com.surprising.aeron.protocol.CoreAdlQueryCodec.decodeQuery(message.payloadUnsafe());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreAdlQueryCodec.encodeCandidates(
                                 com.surprising.aeron.service.state.query.RuntimeRiskQueryService.adlCandidates(
                                         runtime.runtimeState, runtime.identities, query.asset(),
@@ -249,7 +250,7 @@ final class TradingCoreQueryRouter {
             try {
                 var views = com.surprising.aeron.service.state.query.RuntimeRiskQueryService.snapshots(
                         runtime.runtimeState, runtime.identities, message.header().userId());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -258,7 +259,7 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
             if (message.payloadUnsafe().length != 0) return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                     CoreRiskScanControlCodec.encodeView(runtime.runtimeState.riskScanControl()));
         }
         if (message.header().kind() == WireMessageKind.QUERY
@@ -271,7 +272,7 @@ final class TradingCoreQueryRouter {
                     .map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
                             entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()))
                     .toList();
-            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                     com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views));
         }
         if (message.header().kind() == WireMessageKind.QUERY
@@ -284,7 +285,7 @@ final class TradingCoreQueryRouter {
                                 query.limit(), runtime.runtimeState::algoOrder);
                 var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.algoOrders(
                         runtime.runtimeState, algoIds);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(values));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -300,7 +301,7 @@ final class TradingCoreQueryRouter {
                         query.limit(), runtime.runtimeState::cancelAllAfterTimer);
                 var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.cancelAllAfter(
                         runtime.runtimeState, keys);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -320,7 +321,7 @@ final class TradingCoreQueryRouter {
                 var work = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
                         runtime.runtimeState, runtime.identities, runtime.productLine, query, candidates,
                         runtime.liquidationIndex.activeIds());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -340,7 +341,7 @@ final class TradingCoreQueryRouter {
                         runtime.openInterestIndex.openInterestSteps(command.symbol()), runtime.activeOrderIndex);
                 var view = new com.surprising.aeron.protocol.CoreOrderPreflightView(
                         resolved.reservationAsset(), reservedUnits);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(view));
             } catch (CoreStateRejectedException exception) {
                 return runtime.rejected(CoreResultCode.fromRejectionCode(exception.code()));
@@ -359,7 +360,7 @@ final class TradingCoreQueryRouter {
                         .map(value -> new com.surprising.aeron.protocol.CorePendingTransferView(
                                 value.userId(), value.command()))
                         .toList();
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
+                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         com.surprising.aeron.protocol.CorePendingTransferCodec.encode(transfers));
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);

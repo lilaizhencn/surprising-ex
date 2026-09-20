@@ -33,7 +33,7 @@ class ClusterMixedCapacityTest {
         assertThatThrownBy(()->ClusterMixedCapacityMain.commandCapacity(0,0)).isInstanceOf(IllegalArgumentException.class);
     }
     private static CoreResponse response(CoreOrderBatchResult.Item... items) {
-        return new CoreResponse(ResponseStatus.APPLIED,ResponseStatus.APPLIED,CoreResultCode.NONE,1,0,
+        return new CoreResponse(ResponseStatus.APPLIED,ResponseStatus.APPLIED,CoreResultCode.NONE,1,
                 TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(List.of(items))));
     }
 

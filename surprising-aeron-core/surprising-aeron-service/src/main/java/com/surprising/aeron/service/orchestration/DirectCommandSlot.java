@@ -41,7 +41,6 @@ final class DirectCommandSlot {
     private CoreMessage command;
     private CommandFingerprint fingerprint;
     private TradingCoreRuntime.SourceKey sourceKey;
-    private long beforePublicationSequence;
     private long commitFenceTimestamp;
     private long commitFenceClusterPosition;
 
@@ -78,14 +77,12 @@ final class DirectCommandSlot {
 
     void initialize(CoreMessage command, CommandFingerprint fingerprint,
             TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position,
-            long beforePublicationSequence, long beforeRevision,
+            long beforeRevision,
             long checkpoint, long identityCheckpoint) {
         if (active) throw new IllegalStateException("direct command slot is occupied");
         this.command = Objects.requireNonNull(command);
         this.fingerprint = Objects.requireNonNull(fingerprint);
         this.sourceKey = Objects.requireNonNull(sourceKey);
-        if (beforePublicationSequence < 0) throw new IllegalArgumentException("invalid publication sequence");
-        this.beforePublicationSequence = beforePublicationSequence;
         this.beforeRevision = beforeRevision;
         this.checkpoint = checkpoint;
         this.identityCheckpoint = identityCheckpoint;
@@ -279,7 +276,7 @@ final class DirectCommandSlot {
             controlWork = null;
         }
         return owner.finishDirectCommand(command, commitFenceTimestamp, commitFenceClusterPosition,
-                sourceKey, fingerprint, beforePublicationSequence, beforeRevision, checkpoint,
+                sourceKey, fingerprint, beforeRevision, checkpoint,
                 identityCheckpoint, status, resultCode);
     }
 
@@ -294,7 +291,6 @@ final class DirectCommandSlot {
         command = null;
         fingerprint = null;
         sourceKey = null;
-        beforePublicationSequence = 0;
         beforeRevision = checkpoint = identityCheckpoint = 0;
         controlWork = null;
         status = null;

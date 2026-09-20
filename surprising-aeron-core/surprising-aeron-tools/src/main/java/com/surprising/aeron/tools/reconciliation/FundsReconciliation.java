@@ -245,12 +245,17 @@ final class FundsReconciliation {
             throw new IllegalStateException(type + " failed user=" + userId + " result="
                     + (response == null ? "null" : response.resultCode()));
         }
-        if (progress.coreHashSeen && progress.coreStateHash != response.stateHash()) {
+        CoreResponse hashResponse = gateway.query(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]);
+        if (hashResponse == null || hashResponse.status() != ResponseStatus.OK) {
+            throw new IllegalStateException("business state hash query failed");
+        }
+        long stateHash = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeStateHash(hashResponse.data());
+        if (progress.coreHashSeen && progress.coreStateHash != stateHash) {
             throw new IllegalStateException("Core state hash changed during checkpoint expected="
-                    + progress.coreStateHash + " actual=" + response.stateHash());
+                    + progress.coreStateHash + " actual=" + stateHash);
         }
         progress.coreHashSeen = true;
-        progress.coreStateHash = response.stateHash();
+        progress.coreStateHash = stateHash;
         return response;
     }
 

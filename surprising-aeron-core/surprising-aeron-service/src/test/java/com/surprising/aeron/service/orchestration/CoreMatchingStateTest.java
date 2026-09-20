@@ -115,7 +115,6 @@ class CoreMatchingStateTest {
             assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.OK);
             assertThat(duplicate.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(pending.appliedCommandCount());
-            assertThat(duplicate.stateHash()).isEqualTo(pending.stateHash());
             assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
 
             CoreResponse completed = drainMatching(state, pending, command);

@@ -133,16 +133,16 @@ class TradingOrderBatchCodecTest {
                 new CoreOrderBatchResult.Item(2, 3, 0, 0, ResponseStatus.APPLIED,
                         CoreResultCode.NONE, null, List.of()));
         byte[] encoded = TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(items));
-        var response = new CoreResponse(ResponseStatus.APPLIED, 1, 1, encoded);
+        var response = new CoreResponse(ResponseStatus.APPLIED, 1, encoded);
         assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 3)).isOne();
         for (int length = 0; length < encoded.length; length++) {
-            var truncated = new CoreResponse(ResponseStatus.APPLIED, 1, 1, Arrays.copyOf(encoded, length));
+            var truncated = new CoreResponse(ResponseStatus.APPLIED, 1, Arrays.copyOf(encoded, length));
             assertThatThrownBy(() -> TradingOrderBatchCodec.firstNonAppliedItem(truncated, 3))
                     .isInstanceOf(ProtocolException.class);
         }
         assertThatThrownBy(() -> TradingOrderBatchCodec.firstNonAppliedItem(response, 2))
                 .isInstanceOf(ProtocolException.class);
-        var applied = new CoreResponse(ResponseStatus.APPLIED, 1, 1,
+        var applied = new CoreResponse(ResponseStatus.APPLIED, 1,
                 TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(List.of(items.getFirst()))));
         assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
     }

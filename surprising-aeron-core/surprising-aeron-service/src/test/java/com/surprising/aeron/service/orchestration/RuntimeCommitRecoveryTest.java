@@ -189,7 +189,6 @@ class RuntimeCommitRecoveryTest {
                 CoreResponse duplicate = firstRestore.apply(duplicateCommand);
                 assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(duplicate.resultCode()).isEqualTo(restoredPartial.responses().getFirst().resultCode());
-                assertThat(duplicate.stateHash()).isEqualTo(restoredPartial.responses().getFirst().stateHash());
                 assertThat(HexFormat.of().formatHex(duplicate.data()))
                         .isEqualTo(restoredPartial.responses().getFirst().data());
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
@@ -636,7 +635,7 @@ class RuntimeCommitRecoveryTest {
 
     private static ResponseView response(CoreResponse response) {
         return new ResponseView(response.status(), response.commandStatus(), response.resultCode(),
-                response.appliedCommandCount(), response.stateHash(),
+                response.appliedCommandCount(),
                 HexFormat.of().formatHex(response.data()));
     }
 
@@ -1105,7 +1104,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private record ResponseView(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
-                                long appliedCommandCount, long stateHash, String data) {
+                                long appliedCommandCount, String data) {
     }
 
     private static byte[] mutateLongInSection(byte[] source, int sectionId, int payloadOffset, long delta) {

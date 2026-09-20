@@ -73,7 +73,6 @@ final class MatchingCommandAdmission {
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, CommandFingerprint fingerprint) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
-                owner.publicationSequence, owner.currentBusinessStateHash(), owner.auditFundsStateHash,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
                 owner.decodeMatchingCommand(command), null);
     }
@@ -82,37 +81,33 @@ final class MatchingCommandAdmission {
                                                CoreMessage command, CommandFingerprint fingerprint,
                                                DecodedMatchingCommand decodedCommand) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
-                owner.publicationSequence, owner.currentBusinessStateHash(), owner.auditFundsStateHash,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), decodedCommand, null);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
         return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
-                preMatchingCancellations, owner.publicationSequence, owner.currentBusinessStateHash(), owner.auditFundsStateHash,
+                preMatchingCancellations,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
                 owner.decodeMatchingCommand(command), null);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations,
-                                               long beforePublicationSequence, long beforeBusinessStateHash,
-                                               long beforeFundsStateHash,
                                                DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
-                preMatchingCancellations, beforePublicationSequence, beforeBusinessStateHash, beforeFundsStateHash,
+                preMatchingCancellations,
                 owner.commandFundsAccumulator.toDelta(), decodedCommand, admission);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, CommandFingerprint fingerprint,
                                                List<Long> preMatchingCancellations,
-                                               long beforePublicationSequence, long beforeBusinessStateHash,
-                                               long beforeFundsStateHash, DecodedMatchingCommand decodedCommand,
+                                               DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
-                beforePublicationSequence, beforeBusinessStateHash, beforeFundsStateHash, owner.commandFundsAccumulator.toDelta(),
+                owner.commandFundsAccumulator.toDelta(),
                 decodedCommand, admission);
     }
 
@@ -169,12 +164,6 @@ final class MatchingCommandAdmission {
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
         }
-        long beforePublicationSequence = deferredPending == null
-                ? owner.publicationSequence : deferredPending.beforePublicationSequence();
-        long beforeBusinessStateHash = deferredPending == null
-                ? owner.currentBusinessStateHash() : deferredPending.beforeBusinessStateHash();
-        long beforeFundsStateHash = deferredPending == null
-                ? owner.auditFundsStateHash : deferredPending.beforeFundsStateHash();
         long sequence = deferredPending == null
                 ? Math.incrementExact(owner.appliedCommandCount) : deferredPending.sequence();
         long runtimeCommandCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
@@ -237,11 +226,9 @@ final class MatchingCommandAdmission {
             }
         }
         owner.commits.completeCommitPublicationBatch();
-        long businessStateHash = tradingStateChanged ? owner.currentBusinessStateHash() : owner.cachedBusinessStateHash;
         CommandSlot pending = deferredPending == null
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
-                        preMatchingCancellations, beforePublicationSequence,
-                        beforeBusinessStateHash, beforeFundsStateHash, decodedCommand, admission)
+                        preMatchingCancellations, decodedCommand, admission)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
                         .withAdmission(admission);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
@@ -258,9 +245,7 @@ final class MatchingCommandAdmission {
             owner.refreshCommittedCoreSequence();
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         }
-        long stateHash = owner.cachedBusinessStateHash;
         byte[] responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
-        pending.withPendingStateHash(stateHash);
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingPhaseMetrics.recordPrepare(System.nanoTime() - matchingStartNanos);
         }
@@ -271,7 +256,7 @@ final class MatchingCommandAdmission {
         // collects the Lane admission only when both facts are ready.
         owner.submitMatching(pending);
         return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, stateHash, responseData);
+                sequence, responseData);
     }
 
     CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
@@ -293,21 +278,18 @@ final class MatchingCommandAdmission {
         owner.appliedCommandCount = sequence;
         owner.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-        long stateHash = owner.cachedBusinessStateHash;
-        pending.withPendingStateHash(stateHash);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {
         owner.commitMatchingSequence(pending.sequence());
-        long stateHash = owner.cachedBusinessStateHash;
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
-                ResponseStatus.REJECTED, resultCode, pending.sequence(), stateHash,
+                ResponseStatus.REJECTED, resultCode, pending.sequence(),
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         owner.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                pending.sequence(), stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                pending.sequence(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     void validatePendingCancel(CoreMessage message, DecodedMatchingCommand decodedCommand) {

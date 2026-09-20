@@ -72,9 +72,8 @@ final class OrderedCommitCoordinator {
         CoreResultCode resultCode = owner.laneCommandContexts.required(sequence).matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.commitMatchingSequence(sequence);
-        long stateHash = owner.cachedBusinessStateHash;
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
-                ResponseStatus.REJECTED, resultCode, sequence, stateHash,
+                ResponseStatus.REJECTED, resultCode, sequence,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         if (direct != null && direct.direct()) {
             // A rejected admission still consumed one Matcher evidence sequence.  Advance the
@@ -102,7 +101,7 @@ final class OrderedCommitCoordinator {
         }
         owner.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return owner.finishFactContext(response);
     }
 
@@ -434,13 +433,8 @@ final class OrderedCommitCoordinator {
      */
     private CoreResponse storeTerminalResponse(CommandSlot pending, MatchingResult matchingResult,
             ResponseStatus status, CoreResultCode resultCode) {
-        long beforePublicationSequence = pending.beforePublicationSequence();
         long applied = pending.sequence();
-        long businessStateHash = owner.publicationSequence == beforePublicationSequence
-                ? owner.cachedBusinessStateHash : owner.currentBusinessStateHash();
         owner.commitMatchingSequence(applied);
-        owner.cachedBusinessStateHash = businessStateHash;
-        long stateHash = businessStateHash;
         boolean builderEncoded = pending.resultData == null;
         // Control continuations may have prepared the response into resultData before the
         // terminal commit.  That byte slice still belongs to the reusable result builder until
@@ -454,10 +448,10 @@ final class OrderedCommitCoordinator {
         pending.resultData = null;
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, owner.resultBuilder.commandTradeCount);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
-                status, resultCode, applied, stateHash, responseData,
+                status, resultCode, applied, responseData,
                 responseOffset, responseLength);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, applied,
-                stateHash, responseData, responseOffset, responseLength);
+                responseData, responseOffset, responseLength);
         if (builderResponseOwned) owner.resultBuilder.transferResponseOwnership();
         if (laneResponse) pending.transferLaneResponseOwnership();
         return response;

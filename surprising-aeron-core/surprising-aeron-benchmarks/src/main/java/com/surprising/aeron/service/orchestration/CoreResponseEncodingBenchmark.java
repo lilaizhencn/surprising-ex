@@ -69,7 +69,7 @@ public class CoreResponseEncodingBenchmark {
     public int constructAndEncodeOwnedResponse(ResponseState state) {
         // Encoded bytes have the same read-only lifetime as Core's retained terminal result.
         CoreResponse response = CoreResponse.owned(ResponseStatus.OK, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, 41, 47, state.encodedData);
+                CoreResultCode.NONE, 41, state.encodedData);
         return CoreMessageCodec.encodeResponse(
                 state.header, response, state.committedCoreSequence, state.destination);
     }
@@ -128,7 +128,7 @@ public class CoreResponseEncodingBenchmark {
             for (int index = 0; index < data.length; index++) data[index] = (byte) index;
             encodedData = data;
             response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    41, 47, data);
+                    41, data);
             destination = new byte[CoreMessageCodec.encodedResponseLength(response)];
             committedCoreSequence = 53;
         }

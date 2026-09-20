@@ -780,7 +780,8 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         Set<Long> reconciliationUsers = new LinkedHashSet<>(participantUsers);
         reconciliationUsers.addAll(makerUserIds);
         for (int attempt = 1; attempt <= 100; attempt++) {
-            long hashBefore = queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).stateHash();
+            long hashBefore = CoreStateQueryCodec.decodeStateHash(
+                    queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).data());
             Map<String, Long> actual = new LinkedHashMap<>();
             Map<String, Long> users = new LinkedHashMap<>();
             Map<String, Long> fees = new LinkedHashMap<>();
@@ -810,7 +811,8 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                         Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
                         treasury.insuranceDeficitUnits()), Math::addExact);
             }
-            long hashAfter = queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).stateHash();
+            long hashAfter = CoreStateQueryCodec.decodeStateHash(
+                    queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).data());
             if (hashBefore != hashAfter) {
                 if (attempt == 100) {
                     throw new IllegalStateException("RECONCILIATION_SNAPSHOT_UNSTABLE users="

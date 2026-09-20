@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 
 /** Test-only synchronous adapter for driving the asynchronous Matcher/Lane pipeline. */
 final class CoreTestCompletion {
@@ -29,7 +29,7 @@ final class CoreTestCompletion {
                     response = owner.commits.completeRejectedMatching(sequence);
                 } else {
                     CommandSlot pending = owner.pendingMatching.get(sequence);
-                    CoreMatchingResult matching = pending != null
+                    MatchingResult matching = pending != null
                             && pending.orderBatch != null
                             && (pending.orderBatch.itemSettlementEvent != null
                             || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
@@ -61,7 +61,7 @@ final class CoreTestCompletion {
         }
     }
 
-    private static CoreMatchingResult awaitMatchingResult(TradingCoreRuntime owner, long sequence) {
+    private static MatchingResult awaitMatchingResult(TradingCoreRuntime owner, long sequence) {
         long deadline = System.nanoTime() + TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS;
         CommandSlot pending = owner.pendingMatching.get(sequence);
         while (pending != null && owner.placeAdmissionOutstanding(pending)
@@ -78,7 +78,7 @@ final class CoreTestCompletion {
             owner.drainMatchingCompletions();
             if (owner.hasPendingMatchingRejection(sequence)) return null;
             CommandSlot context = owner.laneCommandContexts.required(sequence);
-            CoreMatchingResult result = context.matchingResult();
+            MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result != null) return result;
             Thread.onSpinWait();
