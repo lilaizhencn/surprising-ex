@@ -2108,21 +2108,6 @@ INSERT INTO account_asset_scales (asset, scale_units, created_at, updated_at) VA
 ON CONFLICT (asset) DO UPDATE SET scale_units=EXCLUDED.scale_units, updated_at=EXCLUDED.updated_at;
 
 
-CREATE TABLE IF NOT EXISTS account_balances (
-    user_id             BIGINT NOT NULL,
-    asset               TEXT NOT NULL,
-    available_units     BIGINT NOT NULL DEFAULT 0,
-    locked_units        BIGINT NOT NULL DEFAULT 0,
-    updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, asset),
-    CONSTRAINT account_balances_user_positive CHECK (user_id > 0),
-    CONSTRAINT account_balances_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_balances_non_negative CHECK (available_units >= 0 AND locked_units >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS account_balances_user_idx
-    ON account_balances (user_id);
-
 CREATE TABLE IF NOT EXISTS account_product_balances (
     account_type        TEXT NOT NULL,
     user_id             BIGINT NOT NULL,

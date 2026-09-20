@@ -15,7 +15,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 账户余额、产品余额和持仓查询通过 `AccountAeronGateway.userState()` 发送 `USER_STATE_QUERY`，不能从 PostgreSQL 当前余额表读取。
 - Aeron Cluster 重启使用 Snapshot 加 Snapshot 之后的 Cluster Log Replay 恢复 Core 状态；账户数据库不是实时资金恢复源。
 - PostgreSQL 只保存 Core Export 的异步账本、审计、对账和查询投影。投影延迟或失败不能改变 Core 的余额裁决。
-- `init.sql` 中保留的 `account_balances`、`account_deficits`、`account_positions` 等表属于历史/投影/对账数据结构，不能重新作为在线资金写模型。
+- `init.sql` 中保留的 `account_deficits`、`account_positions` 等表属于历史/投影/对账数据结构，不能重新作为在线资金写模型。
 
 ## 持久化边界
 
@@ -134,7 +134,6 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 在线账户命令不得对余额、冻结资金和持仓表执行 DML：
 
 - 原生 PostgreSQL 账户 ID Sequence，覆盖异步账本投影、账户命令审计和恢复元数据
-- `account_balances`（历史/投影表，非在线余额来源）
 - `account_deficits`（历史/投影表，非在线风险裁决来源）
 - `account_ledger_entries`
 - `account_product_ledger_entries`
