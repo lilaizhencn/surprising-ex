@@ -17,7 +17,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -38,11 +38,11 @@ public final class CoreAcceptFreezeBenchmark {
             long gatewaySequence = 1;
             long operationsSequence = 1;
             long kafkaSequence = 1;
-            apply(state, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
-                    TradingCommandCodec.encodeUpsertInstrument(instrument()));
+            apply(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument()));
             apply(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, kafkaSequence++, 2,
                     TradingCommandCodec.encodeApplyMarkPrice(
-                            new ApplyMarkPriceCommand(SYMBOL, 1, 1_000, 1, 1_000)));
+                            new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));
             apply(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
@@ -88,11 +88,11 @@ public final class CoreAcceptFreezeBenchmark {
     }
 
     private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "accept-freeze-" + orderId);
+        return new PlaceOrderCommand(orderId, SYMBOL, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "accept-freeze-" + orderId);
     }
 
-    private static UpsertInstrumentCommand instrument() {
-        return new UpsertInstrumentCommand(SYMBOL, 1, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+    private static RegisterInstrumentCommand instrument() {
+        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
                 "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0);
     }
 

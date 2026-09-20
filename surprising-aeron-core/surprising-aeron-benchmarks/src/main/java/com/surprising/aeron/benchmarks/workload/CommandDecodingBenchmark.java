@@ -19,14 +19,14 @@ public class CommandDecodingBenchmark {
     private byte[] payload;
 
     @Setup public void setup() {
-        var order = new PlaceOrderCommand(72, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6,
+        var order = new PlaceOrderCommand(72, "BTC-USDT", CoreOrderSide.BUY, 101, 6,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "");
         payload = switch (command) {
             case "PLACE_EMPTY" -> TradingCommandCodec.encodePlaceOrder(order);
             case "PLACE_BATCH" -> TradingOrderBatchCodec.encodePlaceOrderBatch(
                     new PlaceOrderBatchCommand(IntStream.range(0, 20).mapToObj(i ->
-                            new PlaceOrderCommand(72 + i, order.symbol(), 9, order.side(), 101, 6,
+                            new PlaceOrderCommand(72 + i, order.symbol(), order.side(), 101, 6,
                                     false, order.marginMode(), order.positionSide(), order.orderType(),
                                     order.timeInForce(), false, "")).toList()));
             case "REPLACE" -> TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(71, order));

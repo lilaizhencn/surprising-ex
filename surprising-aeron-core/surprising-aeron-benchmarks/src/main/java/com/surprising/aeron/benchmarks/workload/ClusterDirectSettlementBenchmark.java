@@ -48,14 +48,14 @@ public class ClusterDirectSettlementBenchmark {
         String settle = type.isInverse() ? "BTC" : "USDT";
         long now = System.currentTimeMillis();
         for (int index = 0; index < SYMBOLS; index++) {
-            applied(send(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                    new UpsertInstrumentCommand(symbol(index), 1, type.ordinal(), "BTC", "USDT", settle,
+            applied(send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand(symbol(index), type.ordinal(), "BTC", "USDT", settle,
                             1, 1, 1, 100_000, 50_000, 0, 0,
                             type.isDelivery() || type.isOption() ? now + 3_600_000 : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))).join());
             applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                    ? new ApplyMarkPriceCommand(symbol(index), 1, 100, 100, 100, 1, now)
-                    : new ApplyMarkPriceCommand(symbol(index), 1, 100, 1, now))).join());
+                    ? new ApplyMarkPriceCommand(symbol(index), 100, 100, 100, 1, now)
+                    : new ApplyMarkPriceCommand(symbol(index), 100, 1, now))).join());
             for (int side = 0; side < 2; side++) {
                 applied(send(CoreMessageType.ADJUST_BALANCE, user(index, side), TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settle, CASH))).join());
@@ -77,7 +77,7 @@ public class ClusterDirectSettlementBenchmark {
         for (int item = 0; item < count; item++) {
             long id = ++orderId;
             lastOrderIds[index * 2 + who] = id;
-            orders.add(new PlaceOrderCommand(id, symbol(index), 1, side, 100, 1, false,
+            orders.add(new PlaceOrderCommand(id, symbol(index), side, 100, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "direct-" + id));
         }
@@ -100,8 +100,8 @@ public class ClusterDirectSettlementBenchmark {
                 for (int index = group; index < group + GROUP; index++) {
                     prices.add(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                             product == ProductLine.OPTION
-                                    ? new ApplyMarkPriceCommand(symbol(index), 1, 100, 100, 100, markSequence, now)
-                                    : new ApplyMarkPriceCommand(symbol(index), 1, 100, markSequence, now))));
+                                    ? new ApplyMarkPriceCommand(symbol(index), 100, 100, 100, markSequence, now)
+                                    : new ApplyMarkPriceCommand(symbol(index), 100, markSequence, now))));
                     accepted++;
                 }
                 // Market freshness is a financial prerequisite; orders themselves remain asynchronous.

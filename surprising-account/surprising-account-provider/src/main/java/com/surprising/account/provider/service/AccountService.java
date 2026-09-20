@@ -280,7 +280,7 @@ public class AccountService {
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         com.surprising.trading.api.model.PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
         return corePosition(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
-                normalizedPositionSide).orElseGet(() -> new PositionResponse(userId, normalizedSymbol, 0L,
+                normalizedPositionSide).orElseGet(() -> new PositionResponse(userId, normalizedSymbol,
                         normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
@@ -360,7 +360,7 @@ public class AccountService {
 
     private PositionResponse toCorePositionResponse(long userId,
                                                      com.surprising.aeron.protocol.CorePositionView position) {
-        return new PositionResponse(userId, position.symbol(), position.instrumentChangeId(),
+        return new PositionResponse(userId, position.symbol(),
                 MarginMode.valueOf(position.marginMode().name()),
                 com.surprising.trading.api.model.PositionSide.valueOf(position.positionSide().name()),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.realizedPnlUnits(), Instant.now());

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -45,7 +45,7 @@ final class MatchStateTransitions {
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         CoreTreasuryState treasury = state.treasuryState();
         CoreOrderState taker = requireOpenOrder(orders, takerOrderId);
-        CoreInstrumentState instrument = requireInstrument(state, taker.symbol(), taker.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, taker.symbol());
         CoreMarkPriceState riskMark = state.productLine().isDerivative()
                 ? state.riskState().markPrices().get(instrument.symbol()) : null;
         if (instrument.contractType().isOption() && (riskMark == null
@@ -124,13 +124,10 @@ final class MatchStateTransitions {
                 state.clientOrderIndex(), state.triggerOrders());
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

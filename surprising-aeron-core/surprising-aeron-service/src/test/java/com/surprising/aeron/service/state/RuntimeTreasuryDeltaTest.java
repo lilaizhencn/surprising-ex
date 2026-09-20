@@ -2,6 +2,9 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.settlement.FundsPosting;
 import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -72,8 +75,8 @@ class RuntimeTreasuryDeltaTest {
                 Map.of(),
                 Map.of("BTC-USDT", 7L),
                 Map.of("ETH-USDT", 3L),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(7, 1, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
-                Map.of("ETH-USDT", new CoreTreasuryState.LifecycleProgress(3, 1, 60_000,
+                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(7, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
+                Map.of("ETH-USDT", new CoreTreasuryState.LifecycleProgress(3, 60_000,
                         0, true, 0, 12, lifecycleCommandId)));
         TradingCoreState before = state(beforeTreasury, 1);
 
@@ -164,7 +167,17 @@ class RuntimeTreasuryDeltaTest {
     }
 
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {
+        CoreInstrument btc = instrument("BTC-USDT", "BTC");
+        CoreInstrument eth = instrument("ETH-USDT", "ETH");
         return new TradingCoreState(ProductLine.LINEAR_PERPETUAL, revision,
-                Map.of(), Map.of(), Map.of(), CoreRiskState.empty(), treasury);
+                Map.of(), Map.of(), Map.of(btc.symbol(), btc, eth.symbol(), eth),
+                CoreRiskState.empty(), treasury);
+    }
+
+    private static CoreInstrument instrument(String symbol, String baseAsset) {
+        return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        baseAsset, "USDT", "USDT", 1, 1, 1,
+                        100_000, 50_000, 0, 0, 0, -1, 0));
     }
 }

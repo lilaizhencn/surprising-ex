@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
@@ -26,7 +26,7 @@ public record TradingCoreState(
         long revision,
         Map<Long, CoreUserState> users,
         Map<Long, CoreOrderState> orders,
-        Map<String, CoreInstrumentState> instruments,
+        Map<String, CoreInstrument> instruments,
         CoreRiskState riskState,
         CoreTreasuryState treasuryState,
         Map<CoreLeverageKey, Long> leverages,
@@ -123,7 +123,7 @@ public record TradingCoreState(
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
                             Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
         this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
@@ -131,7 +131,7 @@ public record TradingCoreState(
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
                             Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
         this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
@@ -139,7 +139,7 @@ public record TradingCoreState(
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
                             Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders) {
         this(productLine, revision, users, orders, instruments, riskState, treasuryState,
@@ -148,7 +148,7 @@ public record TradingCoreState(
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
                             Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
@@ -158,7 +158,7 @@ public record TradingCoreState(
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
                             Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
@@ -275,40 +275,6 @@ public record TradingCoreState(
             if (order.status().terminal()) continue;
             hash = hashOrder(hash, order);
         }
-        for (CoreInstrumentState instrument : instruments.values()) {
-            hash = CoreStateHash.mix(hash, instrument.symbol());
-            hash = CoreStateHash.mix(hash, instrument.changeId());
-            hash = CoreStateHash.mix(hash, instrument.contractType().ordinal());
-            hash = CoreStateHash.mix(hash, instrument.baseAsset());
-            hash = CoreStateHash.mix(hash, instrument.quoteAsset());
-            hash = CoreStateHash.mix(hash, instrument.settleAsset());
-            hash = CoreStateHash.mix(hash, instrument.notionalMultiplierUnits());
-            hash = CoreStateHash.mix(hash, instrument.priceTickUnits());
-            hash = CoreStateHash.mix(hash, instrument.settleScaleUnits());
-            hash = CoreStateHash.mix(hash, instrument.initialMarginRatePpm());
-            hash = CoreStateHash.mix(hash, instrument.maintenanceMarginRatePpm());
-            hash = CoreStateHash.mix(hash, instrument.makerFeeRatePpm());
-            hash = CoreStateHash.mix(hash, instrument.takerFeeRatePpm());
-            hash = CoreStateHash.mix(hash, instrument.expiryEpochMillis());
-            hash = CoreStateHash.mix(hash, instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
-            hash = CoreStateHash.mix(hash, instrument.strikePriceTicks());
-            hash = CoreStateHash.mix(hash, instrument.maxLeveragePpm());
-            hash = CoreStateHash.mix(hash, instrument.maxPositionNotionalUnits());
-            hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitRatePpm());
-            hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitFloorUnits());
-            hash = CoreStateHash.mix(hash, instrument.maintenance().taskId());
-            hash = CoreStateHash.mix(hash, instrument.maintenance().mode().ordinal());
-            hash = CoreStateHash.mix(hash, instrument.maintenance().settlementPriceTicks());
-            for (var bracket : instrument.riskLimitBrackets()) {
-                hash = CoreStateHash.mix(hash, bracket.bracketNo());
-                hash = CoreStateHash.mix(hash, bracket.notionalFloorUnits());
-                hash = CoreStateHash.mix(hash, bracket.notionalCapUnits());
-                hash = CoreStateHash.mix(hash, bracket.maxLeveragePpm());
-                hash = CoreStateHash.mix(hash, bracket.initialMarginRatePpm());
-                hash = CoreStateHash.mix(hash, bracket.maintenanceMarginRatePpm());
-                hash = CoreStateHash.mix(hash, bracket.optionMarginFactorPpm());
-            }
-        }
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey().userId());
             hash = CoreStateHash.mix(hash, entry.getKey().symbol());
@@ -353,7 +319,6 @@ public record TradingCoreState(
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
             hash = CoreStateHash.mix(hash, mark.symbol());
-            hash = CoreStateHash.mix(hash, mark.instrumentChangeId());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
             hash = CoreStateHash.mix(hash, mark.indexPriceTicks());
             hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
@@ -378,7 +343,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.symbol());
             hash = CoreStateHash.mix(hash, liquidation.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, liquidation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
             hash = CoreStateHash.mix(hash, liquidation.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
@@ -461,7 +425,6 @@ public record TradingCoreState(
             CoreTreasuryState.FundingProgress progress = entry.getValue();
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
-            hash = CoreStateHash.mix(hash, progress.instrumentChangeId());
             hash = CoreStateHash.mix(hash, progress.fundingRatePpm());
             hash = CoreStateHash.mix(hash, progress.markPriceTicks());
             hash = CoreStateHash.mix(hash, progress.priceSequence());
@@ -479,7 +442,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.requiredInsuranceUnits());
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
-            hash = CoreStateHash.mix(hash, progress.instrumentChangeId());
             hash = CoreStateHash.mix(hash, progress.settlementPriceTicks());
             hash = CoreStateHash.mix(hash, progress.optionCashUnitsPerContract());
             hash = CoreStateHash.mix(hash, progress.ordersComplete());
@@ -651,7 +613,6 @@ public record TradingCoreState(
             if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.symbol());
-            hash = CoreStateHash.mix(hash, reservation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, reservation.kind().wireCode());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -664,7 +625,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, position.instrumentChangeId());
             hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, position.entryPriceTicks());
             hash = CoreStateHash.mix(hash, position.entryValueTicks());
@@ -679,7 +639,6 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, order.symbol());
-        hash = CoreStateHash.mix(hash, order.instrumentChangeId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());

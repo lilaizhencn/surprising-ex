@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -31,7 +31,7 @@ import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -167,7 +167,7 @@ class CorePerpetualFinancialMatrixTest {
         opening = withPosition(opening, variant, SECOND_MAKER_ID, -QUANTITY, ENTRY_PRICE,
                 DEFAULT_WALLET, POSITION_MARGIN);
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
-        ApplyFundingCommand command = new ApplyFundingCommand(701, SYMBOL, 1, 100_000);
+        ApplyFundingCommand command = new ApplyFundingCommand(701, SYMBOL, 100_000);
         TradingCoreReducer.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities);
@@ -413,8 +413,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState opening = oppositePositions(variant, DEFAULT_WALLET, DEFAULT_WALLET);
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
         TradingCoreReducer.FundingApplication application = reducer.applyFundingWithFacts(marked,
-                new ApplyFundingCommand(300 + (fundingRatePpm > 0 ? 1 : 2), SYMBOL, 1,
-                        fundingRatePpm));
+                new ApplyFundingCommand(300 + (fundingRatePpm > 0 ? 1 : 2), SYMBOL, fundingRatePpm));
         TradingCoreState ending = application.state();
 
         long userEnding = fundingRatePpm > 0 ? 900 : 1_100;
@@ -434,7 +433,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
         long hash = marked.businessStateHash();
         assertThatThrownBy(() -> reducer.applyMarkPrice(marked,
-                new ApplyMarkPriceCommand(SYMBOL, 1, ENTRY_PRICE, 1, 1_700_000_000_000L)))
+                new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, 1_700_000_000_000L)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
         assertThat(marked.businessStateHash()).isEqualTo(hash);
@@ -469,7 +468,7 @@ class CorePerpetualFinancialMatrixTest {
             opening = oppositePositions(variant, 450, 300);
             TradingCoreState markedAtEntry = mark(opening, variant, ENTRY_PRICE, 1);
             funding = reducer.applyFundingWithFacts(markedAtEntry,
-                    new ApplyFundingCommand(500, SYMBOL, 1, 100_000));
+                    new ApplyFundingCommand(500, SYMBOL, 100_000));
             marked = mark(funding.state(), variant, 70, 2);
             executionPrice = 70;
             feeRate = 100_000;
@@ -482,7 +481,7 @@ class CorePerpetualFinancialMatrixTest {
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         if (partial) {
             plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                    plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
+                    plan.positionSide(), plan.triggerPriceSequence(),
                     plan.signedQuantitySteps(), closeQuantity, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
             marked = replaceLiquidation(marked, plan);
         }
@@ -550,11 +549,11 @@ class CorePerpetualFinancialMatrixTest {
         opening = withPosition(opening, variant, MAKER_ID, QUANTITY, ENTRY_PRICE, 300, POSITION_MARGIN);
         TradingCoreState markedAtEntry = mark(opening, variant, ENTRY_PRICE, 1);
         TradingCoreReducer.FundingApplication funding = reducer.applyFundingWithFacts(markedAtEntry,
-                new ApplyFundingCommand(501, SYMBOL, 1, -100_000));
+                new ApplyFundingCommand(501, SYMBOL, -100_000));
         TradingCoreState marked = mark(funding.state(), variant, 150, 2);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 5, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -603,7 +602,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(opening, variant, markPrice, 1);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -627,10 +626,10 @@ class CorePerpetualFinancialMatrixTest {
 
     private void assertLiquidationBoundaries(Variant variant) {
         assertThatThrownBy(() -> new CoreLiquidationState(1, USER_ID, SYMBOL, variant.marginMode(),
-                CorePositionSide.NET, 1, 1, Long.MIN_VALUE, 1, 0, 0, 0, 0,
+                CorePositionSide.NET, 1, Long.MIN_VALUE, 1, 0, 0, 0, 0,
                 CoreLiquidationState.Status.PLANNED)).isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> new CoreLiquidationState(1, USER_ID, SYMBOL, variant.marginMode(),
-                CorePositionSide.NET, 1, 1, QUANTITY, QUANTITY + 1, 0, 0, 0, 0,
+                CorePositionSide.NET, 1, QUANTITY, QUANTITY + 1, 0, 0, 0, 0,
                 CoreLiquidationState.Status.PLANNED)).isInstanceOf(IllegalArgumentException.class);
 
         TradingCoreState opening = withPosition(variant, USER_ID, 3, ENTRY_PRICE, 100, 100);
@@ -638,11 +637,11 @@ class CorePerpetualFinancialMatrixTest {
         CorePositionState position = marked.user(USER_ID).positions().get(SYMBOL);
         TradingCoreState overflow = replacePosition(marked, USER_ID,
                 new CorePositionState(SYMBOL, variant.settleAsset(), variant.marginMode(), CorePositionSide.NET,
-                        1, 3, ENTRY_PRICE, Long.MAX_VALUE, position.realizedPnlUnits(),
+                        3, ENTRY_PRICE, Long.MAX_VALUE, position.realizedPnlUnits(),
                         position.positionMarginUnits()));
         CoreLiquidationState plan = overflow.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         overflow = replaceLiquidation(overflow, plan);
         TradingCoreState overflowState = overflow;
@@ -785,13 +784,13 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
         UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000301");
         TradingCoreReducer.FundingApplication first = reducer.applyFundingWithFacts(marked,
-                new ApplyFundingCommand(301, SYMBOL, 1, 100_000, 0, 1),
+                new ApplyFundingCommand(301, SYMBOL, 100_000, 0, 1),
                 List.of(USER_ID, MAKER_ID), firstId);
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
         assertThat(restored).isEqualTo(first.state());
         TradingCoreReducer.FundingApplication second = reducer.applyFundingWithFacts(restored,
-                new ApplyFundingCommand(301, SYMBOL, 1, 100_000, USER_ID, 1),
+                new ApplyFundingCommand(301, SYMBOL, 100_000, USER_ID, 1),
                 List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000302"));
         assertThat(first.progress().complete()).isFalse();
         assertThat(second.progress().complete()).isTrue();
@@ -804,14 +803,14 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState opening = fundedState(variant, USER_ID, DEFAULT_WALLET);
         ContractType otherType = variant.type() == ContractType.LINEAR_PERPETUAL
                 ? ContractType.INVERSE_PERPETUAL : ContractType.LINEAR_PERPETUAL;
-        UpsertInstrumentCommand wrongLine = new UpsertInstrumentCommand(
-                SYMBOL, 2, otherType.ordinal(), "BTC", variant.quoteAsset(), variant.settleAsset(),
+        RegisterInstrumentCommand wrongLine = new RegisterInstrumentCommand(
+                SYMBOL, otherType.ordinal(), "BTC", variant.quoteAsset(), variant.settleAsset(),
                 variant.notionalMultiplierUnits(), 1, variant.settleScaleUnits(),
                 100_000, 100_000, 0, 0, 0, -1, 0, 10_000_000,
                 1_000_000, 0, 1_000_000,
                 List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000)));
         long hash = opening.businessStateHash();
-        assertThatThrownBy(() -> reducer.upsertInstrument(opening, wrongLine))
+        assertThatThrownBy(() -> reducer.registerInstrument(opening, wrongLine))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_MISMATCH"));
         assertThat(opening.businessStateHash()).isEqualTo(hash);
@@ -821,8 +820,8 @@ class CorePerpetualFinancialMatrixTest {
 
     private Row isolatedCollateralLeakage(Variant variant) {
         TradingCoreState opening = stateWithInstrument(variant, false);
-        opening = reducer.upsertInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
-        opening = reducer.upsertInstrument(opening, instrument(variant, "SOL-USDT", "SOL", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "SOL-USDT", "SOL", false));
         opening = fundedState(opening, USER_ID, 175);
         opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
                 50, variant.marginMode());
@@ -831,11 +830,11 @@ class CorePerpetualFinancialMatrixTest {
         opening = addPosition(opening, variant, USER_ID, "SOL-USDT", 1, ENTRY_PRICE,
                 50, CoreMarginMode.ISOLATED);
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
-                new ApplyMarkPriceCommand("ETH-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("ETH-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState markedSol = reducer.applyMarkPrice(markedEth,
-                new ApplyMarkPriceCommand("SOL-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("SOL-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState marked = reducer.applyMarkPrice(markedSol,
-                new ApplyMarkPriceCommand(SYMBOL, 1, 90, 2, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand(SYMBOL, 90, 2, 1_700_000_000_000L));
         TradingCoreState ending = reducer.executeLiquidation(marked,
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
@@ -857,7 +856,7 @@ class CorePerpetualFinancialMatrixTest {
 
     private Row isolatedFreeCollateralLeakage(Variant variant) {
         TradingCoreState opening = stateWithInstrument(variant, false);
-        opening = reducer.upsertInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
         opening = fundedState(opening, USER_ID, 175);
         opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
                 50, CoreMarginMode.ISOLATED);
@@ -866,9 +865,9 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
         assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
-                new ApplyMarkPriceCommand("ETH-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("ETH-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState marked = reducer.applyMarkPrice(markedEth,
-                new ApplyMarkPriceCommand(SYMBOL, 1, 90, 2, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand(SYMBOL, 90, 2, 1_700_000_000_000L));
         TradingCoreState ending = reducer.executeLiquidation(marked,
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
@@ -939,7 +938,7 @@ class CorePerpetualFinancialMatrixTest {
     private PlaceOrderCommand pricedOrder(long orderId, Variant variant, CoreOrderSide side, long quantity,
                                           long priceTicks, boolean reduceOnly,
                                           long makerFeeRatePpm, long takerFeeRatePpm) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, side, priceTicks, quantity, reduceOnly, variant.marginMode(), CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
+        return new PlaceOrderCommand(orderId, SYMBOL, side, priceTicks, quantity, reduceOnly, variant.marginMode(), CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
     }
 
     private TradingCoreState mark(TradingCoreState state, Variant variant, long price, long sequence) {
@@ -947,7 +946,7 @@ class CorePerpetualFinancialMatrixTest {
         long nextSequence = current == null
                 ? sequence : Math.max(sequence, Math.incrementExact(current.priceSequence()));
         return reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand(SYMBOL, 1, price, nextSequence, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand(SYMBOL, price, nextSequence, 1_700_000_000_000L));
     }
 
     private static long liquidationSequence(TradingCoreState state) {
@@ -976,7 +975,7 @@ class CorePerpetualFinancialMatrixTest {
         balances.put(variant.settleAsset(), nextBalance);
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
         positions.put(symbol, new CorePositionState(symbol, variant.settleAsset(), marginMode,
-                CorePositionSide.NET, 1, quantity, entryPrice,
+                CorePositionSide.NET, quantity, entryPrice,
                 Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
                 Math.incrementExact(current.revision()), balances, current.reservations(), positions,
@@ -1003,25 +1002,25 @@ class CorePerpetualFinancialMatrixTest {
 
     private TradingCoreState stateWithInstrument(Variant variant, boolean tiered,
                                                  long makerFeeRatePpm, long takerFeeRatePpm) {
-        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(variant.productLine()),
+        TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(variant.productLine()),
                 instrument(variant, SYMBOL, "BTC", tiered, makerFeeRatePpm, takerFeeRatePpm));
         return reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand(SYMBOL, 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, 1_700_000_000_000L));
     }
 
-    private UpsertInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
+    private RegisterInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
                                                boolean tiered) {
         return instrument(variant, symbol, baseAsset, tiered, 0, 0);
     }
 
-    private UpsertInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
+    private RegisterInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
                                                boolean tiered, long makerFeeRatePpm, long takerFeeRatePpm) {
         List<CoreRiskLimitBracket> brackets = tiered
                 ? List.of(new CoreRiskLimitBracket(1, 0, 1_000, 5_000_000, 100_000, 100_000),
                 new CoreRiskLimitBracket(2, 1_000, 2_500, 5_000_000, 200_000, 200_000))
                 : List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000));
         long maxLeveragePpm = tiered ? 5_000_000 : 10_000_000;
-        return new UpsertInstrumentCommand(symbol, 1, variant.type().ordinal(), baseAsset,
+        return new RegisterInstrumentCommand(symbol, variant.type().ordinal(), baseAsset,
                 variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
                 variant.settleScaleUnits(), 100_000, 100_000, makerFeeRatePpm, takerFeeRatePpm,
                 0, -1, 0, maxLeveragePpm,
@@ -1126,7 +1125,7 @@ class CorePerpetualFinancialMatrixTest {
                 continue;
             }
             CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
-            CoreInstrumentState instrument = state.instruments().get(position.symbol());
+            CoreInstrument instrument = state.instruments().get(position.symbol());
             if (mark != null && instrument != null) {
                 value = Math.addExact(value, CoreContractMath.pnlUnits(instrument,
                         position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks()));

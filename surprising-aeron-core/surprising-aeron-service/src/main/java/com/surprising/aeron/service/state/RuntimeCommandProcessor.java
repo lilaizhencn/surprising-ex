@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.state.admission.AdmissionIdentity;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
@@ -51,9 +51,9 @@ public final class RuntimeCommandProcessor {
         RuntimeRiskStateTransitions.updateScanControl(runtime, command, updatedAtEpochMillis);
     }
 
-    public static void upsertInstrument(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                        UpsertInstrumentCommand command) {
-        RuntimeInstrumentStateTransitions.upsert(runtime, identities, command);
+    public static void registerInstrument(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                        RegisterInstrumentCommand command) {
+        RuntimeInstrumentStateTransitions.register(runtime, identities, command);
     }
 
     public static void updateInstrumentMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

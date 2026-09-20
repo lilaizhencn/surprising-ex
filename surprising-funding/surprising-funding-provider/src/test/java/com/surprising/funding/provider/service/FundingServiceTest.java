@@ -73,7 +73,7 @@ class FundingServiceTest {
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
         assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue())).isEqualTo(
-                new ApplyFundingCommand(fundingTime.toEpochMilli(), "BTC-USDT", 7, 100));
+                new ApplyFundingCommand(fundingTime.toEpochMilli(), "BTC-USDT", 100));
         verify(fixture.rateRepository).saveFinal(due);
     }
 
@@ -186,7 +186,7 @@ class FundingServiceTest {
 
     private static CoreResponse maintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance gate) {
         return new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
-                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(gate,1,List.of(),false)));
+                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(gate,List.of(),false)));
     }
 
     private static FundingRateInput rateInput() {

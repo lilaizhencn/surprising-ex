@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.query;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.math.*;
@@ -62,7 +62,7 @@ public final class RuntimeRiskQueryService {
             PositionRuntime position = runtime.position(entry.positionKey());
             if (position == null || position.signedQuantitySteps() == 0) continue;
             String symbol = identities.symbol(risk.symbolId());
-            CoreInstrumentState instrument = runtime.instrument(symbol);
+            CoreInstrument instrument = runtime.instrument(symbol);
             MarkPriceRuntime mark = runtime.markPrice(risk.symbolId());
             if (instrument == null || mark == null) throw new IllegalStateException("risk query source is missing");
             long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
@@ -70,7 +70,7 @@ public final class RuntimeRiskQueryService {
                     instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
             long wallet = crossWalletBalance(runtime, identities, risk.userId(), instrument.settleAsset());
             result.add(new CoreRiskSnapshotView(risk.userId(), symbol, position.marginMode(), risk.positionSide(),
-                    position.instrumentChangeId(), instrument.settleAsset(), position.signedQuantitySteps(),
+                    instrument.settleAsset(), position.signedQuantitySteps(),
                     position.entryPriceTicks(), mark.markPriceTicks(), notional, position.positionMarginUnits(),
                     risk.priceSequence(), wallet, risk.equityUnits(), risk.unrealizedPnlUnits(),
                     risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status().name()));
@@ -98,7 +98,7 @@ public final class RuntimeRiskQueryService {
             PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
             Integer symbolId = identities.findSymbolId(key.symbol());
             MarkPriceRuntime mark = symbolId == null ? null : runtime.markPrice(symbolId);
-            CoreInstrumentState instrument = runtime.instrument(key.symbol());
+            CoreInstrument instrument = runtime.instrument(key.symbol());
             if (position == null || position.signedQuantitySteps() == 0
                     || !identities.asset(position.assetId()).equals(normalizedAsset)
                     || mark == null || instrument == null

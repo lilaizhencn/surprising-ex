@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
@@ -46,7 +46,7 @@ public final class RuntimeLifecycleSettlement {
                 || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime settlement");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, command);
+        CoreInstrument instrument = requireInstrument(runtime, command);
         int symbolId = identities.symbolId(instrument.symbol());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
@@ -78,7 +78,7 @@ public final class RuntimeLifecycleSettlement {
                 long nextCursor = page.nextCursorOrderId();
                 runtime.treasury().setLifecycleProgress(symbolId,
                         new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                command.instrumentChangeId(), command.settlementPriceTicks(),
+                                instrument, command.settlementPriceTicks(),
                                 command.optionCashUnitsPerContract(), false, page.accountLaneId(),
                                 nextCursor, 0, chunkCommandId));
                 runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
@@ -112,7 +112,7 @@ public final class RuntimeLifecycleSettlement {
         if (requiredInsurance > runtime.treasury().insurance(assetId)) {
             UUID progressId = chunkCommandId == null ? new UUID(0, command.settlementId()) : chunkCommandId;
             runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                    command.settlementId(), command.instrumentChangeId(), command.settlementPriceTicks(),
+                    command.settlementId(), instrument, command.settlementPriceTicks(),
                     command.optionCashUnitsPerContract(), true, 0, 0, command.cursorUserId(),
                     progressId, requiredInsurance));
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
@@ -136,7 +136,7 @@ public final class RuntimeLifecycleSettlement {
         } else {
             runtime.treasury().setLifecycleProgress(symbolId,
                     new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                            command.instrumentChangeId(), command.settlementPriceTicks(),
+                            instrument, command.settlementPriceTicks(),
                             command.optionCashUnitsPerContract(), true, userPage.accountLaneId(),
                             0, nextCursorUserId, chunkCommandId));
         }
@@ -167,7 +167,7 @@ public final class RuntimeLifecycleSettlement {
         if (nextCursorOrderId <= 0 || chunkCommandId == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, command);
+        CoreInstrument instrument = requireInstrument(runtime, command);
         ProductTradingRulesRegistry.forInstrument(instrument)
                 .validateLifecycleSettlement(instrument, command);
         int symbolId = identities.symbolId(instrument.symbol());
@@ -175,7 +175,7 @@ public final class RuntimeLifecycleSettlement {
         validateProgress(progress, command, true);
         cancelOrders(runtime, orders);
         runtime.treasury().setLifecycleProgress(symbolId,
-                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.instrumentChangeId(),
+                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
                         progress == null ? 0 : progress.accountLaneId(), nextCursorOrderId, 0, chunkCommandId));
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
@@ -187,7 +187,7 @@ public final class RuntimeLifecycleSettlement {
     record UserSettlement(long userId, BalanceRuntime balance, long[] keys,
                           PositionRuntime[] positions, long clearing, long insurance) { }
 
-    static List<UserSettlement> prepareLane(TradingRuntimeState runtime, CoreInstrumentState instrument,
+    static List<UserSettlement> prepareLane(TradingRuntimeState runtime, CoreInstrument instrument,
                                             ProductTradingRules kernel, SettleInstrumentCommand command,
                                             LongArrayList users, int symbolId, int assetId) {
         ArrayList<UserSettlement> plans = new ArrayList<>();
@@ -224,7 +224,7 @@ public final class RuntimeLifecycleSettlement {
                 }
                 keys[index] = key;
                 positions[index++] = new PositionRuntime(userId, symbolId, assetId, position.marginMode(),
-                        position.positionSide(), 0, 0, 0, 0,
+                        position.positionSide(), position.instrument(), 0, 0, 0,
                         Math.addExact(position.realizedPnlUnits(), pnl), 0);
             }
             if (index == 0) continue;
@@ -343,15 +343,11 @@ public final class RuntimeLifecycleSettlement {
         return groups;
     }
 
-    static CoreInstrumentState requireInstrument(TradingRuntimeState runtime,
+    static CoreInstrument requireInstrument(TradingRuntimeState runtime,
                                                  SettleInstrumentCommand command) {
-        CoreInstrumentState instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (command.instrumentChangeId() < instrument.changeId()) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT",
-                    "instrument lifecycle version precedes execution version");
         }
         return instrument;
     }
@@ -362,7 +358,6 @@ public final class RuntimeLifecycleSettlement {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentChangeId() != command.instrumentChangeId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
                 || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() != (command.cursorOrderId() == 0)

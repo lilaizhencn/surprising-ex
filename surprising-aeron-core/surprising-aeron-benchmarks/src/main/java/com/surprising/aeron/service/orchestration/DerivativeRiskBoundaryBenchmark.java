@@ -68,13 +68,15 @@ public class DerivativeRiskBoundaryBenchmark {
             };
             asset = type.isInverse() ? "BTC" : "USDT";
             for (String symbol : new String[]{"RISK-LONG", "RISK-SHORT"}) {
-                var instrument = new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC",
+                var instrument = new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC",
                         type.isInverse() ? "USD" : "USDT", asset, type.isInverse() ? 100 : 1,
                         1, type.isInverse() ? 100 : 1, 100_000, 50_000, 0, 0,
                         2_000_000_000_000L, type.isOption() ? OptionType.CALL.ordinal() : -1,
                         type.isOption() ? 100 : 0);
-                harness.execute(harness.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS,
-                        0, TradingCommandCodec.encodeUpsertInstrument(instrument)));
+                harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS,
+                        0, TradingCommandCodec.encodeRegisterInstrument(instrument)));
+            }
+            for (String symbol : new String[]{"RISK-LONG", "RISK-SHORT"}) {
                 mark(symbol, 100);
             }
             harness.adjust(999, asset, 1_000_000_000L);
@@ -94,17 +96,16 @@ public class DerivativeRiskBoundaryBenchmark {
 
         private void order(long user, String symbol, CoreOrderSide side, long quantity, CoreTimeInForce tif) {
             harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, user,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), symbol,
-                            1, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), symbol, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, tif, false, ""))));
         }
 
         private void mark(String symbol, long price) {
             harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE,
                     0, TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand(symbol, 1, price, 100, 100,
+                            ? new ApplyMarkPriceCommand(symbol, price, 100, 100,
                             ++sequence, harness.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand(symbol, 1, price,
+                            : new ApplyMarkPriceCommand(symbol, price,
                             ++sequence, harness.nextCommandTimestamp()))));
         }
 

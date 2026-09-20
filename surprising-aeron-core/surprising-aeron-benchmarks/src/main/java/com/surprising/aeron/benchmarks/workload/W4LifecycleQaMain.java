@@ -27,7 +27,7 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import com.sun.net.httpserver.HttpExchange;
@@ -94,7 +94,6 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private final Map<String, Long> expectedFunds = new LinkedHashMap<>();
     private final List<String> rows = new ArrayList<>();
     private final List<SpotOrder> spotOrders = new ArrayList<>();
-    private final Map<String, Long> instrumentChangeIds = new LinkedHashMap<>();
     private boolean reconciliationObserved;
     private boolean makerReconciliationObserved;
     private boolean providerBoundaryObserved;
@@ -439,42 +438,17 @@ public final class W4LifecycleQaMain implements AutoCloseable {
 
     private void setupInstrument(String symbol, ContractType type, int optionCode,
                                  long strike, long expiry) {
-        long version = upsertInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
-        command(CoreMessageType.UPSERT_INSTRUMENT, 0,
-                TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
-                        symbol, version, type.ordinal(), BASE_ASSET,
+        registerInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
+        command(CoreMessageType.REGISTER_INSTRUMENT, 0,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                        symbol, type.ordinal(), BASE_ASSET,
                         type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                         expiry, optionCode, strike)));
-        awaitTradingInstrumentChangeId(symbol, version);
-        instrumentChangeIds.put(symbol, version);
     }
 
-    private void awaitTradingInstrumentChangeId(String symbol, long version) {
-        String body = "{\"userId\":" + makerUserId + ",\"clientOrderId\":"
-                + json("w4-version-probe-" + seed + '-' + symbol) + ",\"symbol\":" + json(symbol)
-                + ",\"side\":\"BUY\",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\""
-                + ",\"priceTicks\":100,\"quantitySteps\":1,\"marginMode\":\"CROSS\""
-                + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
-        Instant deadline = Instant.now().plusSeconds(15);
-        long observed = 0;
-        while (Instant.now().isBefore(deadline)) {
-            String response = request("command", "POST", "/api/v1/trading/orders/test", body, Map.of());
-            observed = jsonLong(response, "\"instrumentChangeId\":", ',');
-            if (observed == version) return;
-            try {
-                Thread.sleep(50L);
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("instrument version wait interrupted", exception);
-            }
-        }
-        throw new IllegalStateException("trading instrument snapshot timeout symbol=" + symbol
-                + " expectedVersion=" + version + " observedVersion=" + observed);
-    }
-
-    private long upsertInstrumentViaProvider(String symbol, ContractType type, int optionCode,
+    private void registerInstrumentViaProvider(String symbol, ContractType type, int optionCode,
                                              long strike, long expiry) {
         boolean spot = type == ContractType.SPOT;
         boolean perpetual = type.isPerpetual();
@@ -531,8 +505,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 + ",\"optionExerciseStyle\":" + optionStyleJson + ",\"settlementMethod\":" + settlementJson
                 + ",\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":" + brackets
                 + ",\"indexSources\":" + sources + "}";
-        String response = request("instrument", "POST", "/api/v1/instruments/admin/upsert", body, Map.of());
-        return jsonLong(response, "\"version\":", ',');
+        request("instrument", "POST", "/api/v1/instruments/admin/upsert", body, Map.of());
     }
 
     private void adjust(long userId, String asset, long units) {
@@ -684,13 +657,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private void applyFunding(String symbol, long settlementId, long fundingRatePpm) {
         command(CoreMessageType.APPLY_FUNDING, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementId, symbol, instrumentChangeId(symbol), fundingRatePpm, 0, 256)));
-    }
-
-    private long instrumentChangeId(String symbol) {
-        Long version = instrumentChangeIds.get(symbol);
-        if (version == null) throw new IllegalStateException("instrument version unavailable: " + symbol);
-        return version;
+                        settlementId, symbol, fundingRatePpm, 0, 256)));
     }
 
     private void settle(String symbol, long price, long underlyingSettlementPrice, long settlementId) {

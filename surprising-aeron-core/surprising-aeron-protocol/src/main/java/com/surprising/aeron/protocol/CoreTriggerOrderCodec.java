@@ -47,7 +47,7 @@ public final class CoreTriggerOrderCodec {
         writer.longValue(state.expiresAtEpochMillis()); writer.longValue(state.triggeredAtEpochMillis());
         writer.longValue(state.createdAtEpochMillis()); writer.longValue(state.updatedAtEpochMillis());
         writer.longValue(state.revision());
-        writer.longValue(state.instrumentChangeId()); writer.longValue(state.makerFeeRatePpm());
+        writer.longValue(state.makerFeeRatePpm());
         writer.longValue(state.takerFeeRatePpm());
     }
 
@@ -60,7 +60,7 @@ public final class CoreTriggerOrderCodec {
         length = Math.addExact(length, Integer.BYTES * 2L + Long.BYTES * 2L);
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 3L);
         length = Math.addExact(length, textLength(state.rejectReason()) + textLength(state.traceId()));
-        length = Math.addExact(length, Long.BYTES * 8L);
+        length = Math.addExact(length, Long.BYTES * 7L);
         return Math.toIntExact(length);
     }
 
@@ -88,7 +88,7 @@ public final class CoreTriggerOrderCodec {
     }
 
     public static CoreTriggerOrderStateView decodeState(byte[] encoded) {
-        Reader reader = new Reader(encoded); int version = reader.stateVersion();
+        Reader reader = new Reader(encoded); reader.stateVersion();
         CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(
                 reader.positive(), ProductLineWireCode.decode(reader.intValue()), reader.positive(),
                 reader.text(), reader.text(), reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
@@ -101,9 +101,7 @@ public final class CoreTriggerOrderCodec {
                 CoreTriggerOrderStatus.values()[reader.enumIndex(CoreTriggerOrderStatus.values().length)], reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.text(), reader.text(), reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
-                version >= STATE_VERSION ? reader.nonNegative() : 0,
-                version >= STATE_VERSION ? reader.longValue() : 0,
-                version >= STATE_VERSION ? reader.longValue() : 0);
+                reader.longValue(), reader.longValue());
         reader.consumed(); return result;
     }
 
@@ -230,7 +228,7 @@ public final class CoreTriggerOrderCodec {
         }
         int stateVersion() {
             int value = intValue();
-            if (value != VERSION && value != STATE_VERSION) {
+            if (value != STATE_VERSION) {
                 throw new ProtocolException("unsupported trigger state codec version");
             }
             return value;

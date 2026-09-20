@@ -147,12 +147,12 @@ class CoreUserStateTest {
     }
 
     private static OrderReservation reservation(long orderId, long units) {
-        return OrderReservation.create(orderId, "BTC-USDT", 1, ReservationKind.DERIVATIVE_MARGIN,
+        return OrderReservation.create(orderId, "BTC-USDT", ReservationKind.DERIVATIVE_MARGIN,
                 "USDT", units, 1);
     }
 
     private static CorePositionState position(long marginUnits) {
         return new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
-                1, 1, 100, 100, 0, marginUnits);
+                1, 100, 100, 0, marginUnits);
     }
 }

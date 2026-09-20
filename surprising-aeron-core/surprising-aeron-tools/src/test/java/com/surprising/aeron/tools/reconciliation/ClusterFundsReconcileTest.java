@@ -211,10 +211,10 @@ class ClusterFundsReconcileTest {
     void comparesReservationPositionRealizedPnlTreasuryAndFlowConservationExactly() {
         CoreUserStateView state = new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1, 9,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 80, 20)),
-                List.of(new CoreReservationView(91, "BTC-USDT", 1, ReservationKind.DERIVATIVE_MARGIN,
+                List.of(new CoreReservationView(91, "BTC-USDT", ReservationKind.DERIVATIVE_MARGIN,
                         "USDT", 20, 3, 2, 5)),
                 List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
-                        1, 5, 10, 50, 7, 15)), List.of());
+                        5, 10, 50, 7, 15)), List.of());
         List<String> lines = List.of(
                 row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 80),
                 row("SEED", "USER", 1, "USDT", "-", "LOCKED", 20),
@@ -392,8 +392,8 @@ class ClusterFundsReconcileTest {
         List<CoreLiquidationWorkView.Resolution> values = new ArrayList<>();
         for (int index = 1; index <= count; index++) {
             values.add(new CoreLiquidationWorkView.Resolution(index, 1, "BTC-USDT", "USDT",
-                    CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1, 1,
-                    purpose == CoreLiquidationWorkView.Purpose.INSURANCE ? 1 : 0, purpose));
+                    CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1,
+                    purpose == CoreLiquidationWorkView.Purpose.ADL ? 0 : 1, purpose));
         }
         return values;
     }

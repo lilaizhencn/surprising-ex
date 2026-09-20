@@ -121,12 +121,12 @@ class MatcherPipelineGroupTest {
             pipelines.submit(firstShard, 1, () -> {
                 firstStarted.countDown();
                 await(releaseFirst);
-                return adapter.executeWithEvidenceSync(1, UUID.randomUUID(), 1, 1, 1_000,
+                return adapter.executeWithEvidenceSync(1, UUID.randomUUID(), 1, 1_000,
                         () -> adapter.place(101, first));
             });
             assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
             pipelines.submit(secondShard, 2, () -> adapter.executeWithEvidenceSync(
-                    2, UUID.randomUUID(), 2, 1, 1_001, () -> adapter.place(102, second)));
+                    2, UUID.randomUUID(), 2, 1_001, () -> adapter.place(102, second)));
 
             assertThat(await(pipelines, 2, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
             assertThat(pipelines.poll(1)).isNull();

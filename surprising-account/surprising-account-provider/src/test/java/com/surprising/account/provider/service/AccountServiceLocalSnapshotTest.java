@@ -90,6 +90,6 @@ class AccountServiceLocalSnapshotTest {
         return new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1001L, 1L, CorePositionMode.ONE_WAY,
                 List.of(new CoreBalanceView("USDT", 800L, 200L)), List.of(),
                 List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.CROSS,
-                        CorePositionSide.NET, 1L, 10L, 100L, 1000L, 0L, 200L)));
+                        CorePositionSide.NET, 10L, 100L, 1000L, 0L, 200L)));
     }
 }

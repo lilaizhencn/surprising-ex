@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
@@ -20,8 +20,8 @@ class CoreContractMathTest {
 
     @Test
     void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
-        CoreInstrumentState instrument = CoreInstrumentState.from(ProductLine.OPTION,
-                new UpsertInstrumentCommand("BTC-OPTION", 1, ContractType.VANILLA_OPTION.ordinal(),
+        CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
+                new RegisterInstrumentCommand("BTC-OPTION", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 2, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100));
@@ -34,8 +34,8 @@ class CoreContractMathTest {
 
     @Test
     void maintenanceMarginUsesTheInstrumentRiskBracketForCurrentNotional() {
-        CoreInstrumentState instrument = CoreInstrumentState.from(ProductLine.LINEAR_PERPETUAL,
-                new UpsertInstrumentCommand("BTC-USDT", 1,
+        CoreInstrument instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand("BTC-USDT",
                         com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
@@ -57,8 +57,8 @@ class CoreContractMathTest {
 
     @Test
     void optionShortMarginUsesIndexForwardOtmAndCurrentPremium() {
-        CoreInstrumentState instrument = CoreInstrumentState.from(ProductLine.OPTION,
-                new UpsertInstrumentCommand("BTC-OPTION", 1, ContractType.VANILLA_OPTION.ordinal(),
+        CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
+                new RegisterInstrumentCommand("BTC-OPTION", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100, 10_000_000, 10_000, 0, 1,
@@ -76,8 +76,8 @@ class CoreContractMathTest {
 
     @Test
     void putShortMarginUsesPutOtmDirectionAndMarkBasedMaintenanceFloor() {
-        CoreInstrumentState instrument = CoreInstrumentState.from(ProductLine.OPTION,
-                new UpsertInstrumentCommand("BTC-PUT", 1, ContractType.VANILLA_OPTION.ordinal(),
+        CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
+                new RegisterInstrumentCommand("BTC-PUT", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.PUT.ordinal(), 100, 10_000_000, 10_000, 0, 1,

@@ -104,15 +104,15 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                 });
         service.onStart(cluster, null);
         service.onSessionOpen(session, TIME);
-        send(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                new UpsertInstrumentCommand("BTC-USDT", 1, type.ordinal(), "BTC", "USDT", asset,
+        send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                new RegisterInstrumentCommand("BTC-USDT", type.ordinal(), "BTC", "USDT", asset,
                         1, 1, type.isInverse() ? 1000 : 1, 100000, 50000, 0, 0,
                         type.isDelivery() || type.isOption() ? TIME + 100000 : 0,
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
         drain();
         send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 1, TIME)
-                : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, TIME)));
+                ? new ApplyMarkPriceCommand("BTC-USDT", 100, 100, 100, 1, TIME)
+                : new ApplyMarkPriceCommand("BTC-USDT", 100, 1, TIME)));
         drain();
         for (int i = 0; i < 256; i++)
             send(CoreMessageType.ADJUST_BALANCE, 1000 + i,
@@ -128,7 +128,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             orders[i] = orderId;
             var items = new java.util.ArrayList<PlaceOrderCommand>(batchSize);
             for (int item = 0; item < batchSize; item++) items.add(new PlaceOrderCommand(orderId++,
-                    "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS,
+                    "BTC-USDT", CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
             send(batchSize == 1 ? CoreMessageType.PLACE_ORDER : CoreMessageType.PLACE_ORDER_BATCH, accountUser(i),
                     batchSize == 1 ? TradingCommandCodec.encodePlaceOrder(items.getFirst())
@@ -175,7 +175,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         for (int i = 0; i < 256; i++) {
             orders[i] = orderId++;
             send(CoreMessageType.PLACE_ORDER, 1000 + i, TradingCommandCodec.encodePlaceOrder(
-                    new PlaceOrderCommand(orders[i], "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1, false,
+                    new PlaceOrderCommand(orders[i], "BTC-USDT", CoreOrderSide.BUY, 80, 1, false,
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "")));
         }

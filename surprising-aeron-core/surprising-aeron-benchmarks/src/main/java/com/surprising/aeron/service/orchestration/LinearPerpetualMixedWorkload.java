@@ -29,7 +29,7 @@ import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
@@ -119,12 +119,14 @@ final class LinearPerpetualMixedWorkload {
         Harness harness = Harness.create(accountLanes);
         try {
             for (String symbol : listedSymbols) {
-                harness.execute(harness.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeUpsertInstrument(instrument(symbol))));
+                harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(symbol))));
+            }
+            for (String symbol : listedSymbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, 1,
+                                new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, 1,
                                         harness.nextCommandTimestamp()))));
             }
 
@@ -210,7 +212,7 @@ final class LinearPerpetualMixedWorkload {
             harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                     CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbols.get(liquidationSymbolIndex), 1, LIQUIDATION_MARK, 2,
+                            symbols.get(liquidationSymbolIndex), LIQUIDATION_MARK, 2,
                             harness.nextCommandTimestamp()))));
             while (!harness.state().runtimeRiskScanComplete()) {
                 harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
@@ -313,7 +315,7 @@ final class LinearPerpetualMixedWorkload {
                             var response = harness.execute(harness.command(CoreMessageType.APPLY_FUNDING,
                                     CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeApplyFunding(
                                             new ApplyFundingCommand(fundingSettlementIds[index],
-                                                    template.symbols().get(index), 1,
+                                                    template.symbols().get(index),
                                                     (index & 1) == 0 ? 100_000 : -100_000,
                                                     fundingCursors[index], HEAVY_WORK_BATCH_SIZE))));
                             fundingCursors[index] = CoreFundingProgressCodec.decode(response.data()).nextCursorUserId();
@@ -406,7 +408,7 @@ final class LinearPerpetualMixedWorkload {
                 var action = work.actions().getFirst();
                 liquidationId = action.liquidationId();
                 var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
+                        action.symbol(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId());
                 var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
                         ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0);
@@ -707,7 +709,7 @@ final class LinearPerpetualMixedWorkload {
             var fundingResponse = harness.execute(harness.command(
                     CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            settlementId, symbol, 1, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
+                            settlementId, symbol, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
             var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
             fundingCursor = fundingProgress.nextCursorUserId();
             fundingComplete = fundingProgress.complete();
@@ -718,7 +720,7 @@ final class LinearPerpetualMixedWorkload {
         long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(symbol, 1, markPrice, priceSequence,
+                        new ApplyMarkPriceCommand(symbol, markPrice, priceSequence,
                                 harness.nextCommandTimestamp()))));
         while (completeHeavyCycles && !harness.state().runtimeRiskScanComplete()) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
@@ -738,7 +740,7 @@ final class LinearPerpetualMixedWorkload {
         var fundingResponse = harness.execute(harness.command(
                 CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementIds[index], symbol, 1, fundingRate,
+                        settlementIds[index], symbol, fundingRate,
                         fundingCursors[index], HEAVY_WORK_BATCH_SIZE))));
         var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
         fundingCursors[index] = fundingProgress.nextCursorUserId();
@@ -756,7 +758,7 @@ final class LinearPerpetualMixedWorkload {
         long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 1, markPrice, priceSequence,
+                        symbol, markPrice, priceSequence,
                         harness.nextCommandTimestamp()))));
     }
 
@@ -776,7 +778,7 @@ final class LinearPerpetualMixedWorkload {
                 CoreOrderSide.SELL, triggerType, triggerCondition, mark.markPriceTicks(),
                 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", "mixed-trace-" + triggerId, 0, 0, 0, 0, 1, 1, 0, 0);
+                0, 0, 0, "", "mixed-trace-" + triggerId, 0, 0, 0, 0, 1, 0, 0);
         harness.execute(harness.command(CoreMessageType.PLACE_TRIGGER_ORDER, CommandSource.GATEWAY, taker,
                 CoreTriggerOrderCodec.encodeState(trigger)));
         harness.execute(harness.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, CommandSource.OPERATIONS, 0,
@@ -944,15 +946,15 @@ final class LinearPerpetualMixedWorkload {
 
     private static PlaceOrderCommand orderCommand(long orderId, String symbol, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce timeInForce) {
-        return new PlaceOrderCommand(orderId, symbol, 1, side, price,
+        return new PlaceOrderCommand(orderId, symbol, side, price,
                 quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 timeInForce, false, "mixed-" + orderId);
     }
 
-    private static UpsertInstrumentCommand instrument(String symbol) {
+    private static RegisterInstrumentCommand instrument(String symbol) {
         int symbolIndex = Integer.parseInt(symbol.substring("JMH-MIX-".length(), symbol.indexOf("-USDT")));
         String baseAsset = "MIX" + symbolIndex;
-        return new UpsertInstrumentCommand(symbol, 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
                 baseAsset, SETTLE_ASSET, SETTLE_ASSET,
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }

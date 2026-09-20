@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.business.option;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
@@ -12,7 +12,7 @@ public final class OptionFillCalculator {
     private OptionFillCalculator() {
     }
 
-    public static long openingMarginForFill(CoreInstrumentState instrument,
+    public static long openingMarginForFill(CoreInstrument instrument,
                                             long projectedQuantitySteps,
                                             long signedFillSteps,
                                             long openSteps,
@@ -42,7 +42,7 @@ public final class OptionFillCalculator {
         }
     }
 
-    public static long premiumMarginFunding(CoreInstrumentState instrument, long premiumDelta,
+    public static long premiumMarginFunding(CoreInstrument instrument, long premiumDelta,
                                             long openSteps, long marginIncrease, long fillPriceTicks) {
         return premiumDelta > 0 && openSteps > 0
                 ? Math.min(marginIncrease,

@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -38,8 +38,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private MatcherSettlementPlan[] batchPlans;
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
-    private CoreInstrumentState instrument;
-    private CoreInstrumentState[] batchInstruments;
+    private CoreInstrument instrument;
+    private CoreInstrument[] batchInstruments;
     private int baseAssetId;
     private int quoteAssetId;
     private int settleAssetId;
@@ -111,7 +111,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         final org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap metadataSlots =
                 new org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap();
         final MatcherSettlementPlan[] plans;
-        final CoreInstrumentState[] instruments;
+        final CoreInstrument[] instruments;
         final OrderRuntime[] admittedOrders;
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
         /** Number of slots populated by the current preparation, not backing capacity. */
@@ -119,7 +119,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         BatchStorage(int size) {
             plans = new MatcherSettlementPlan[size];
             for (int i = 0; i < size; i++) plans[i] = new MatcherSettlementPlan();
-            instruments = new CoreInstrumentState[size];
+            instruments = new CoreInstrument[size];
             admittedOrders = new OrderRuntime[size];
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
@@ -503,7 +503,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     MatcherSettlementEvent prepare(long commitSequence, long requiredLaneMask,
                                    long commitTimestamp, long commitClusterPosition,
                                    MatcherSettlementPlan plan, TradingRuntimeState runtime,
-                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                                   RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                    int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount,
                                    boolean captureIsolatedChanges) {
         if (commitSequence < 0 || requiredLaneMask == 0
@@ -567,7 +567,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             long commitSequence, long requiredLaneMask,
             long commitTimestamp, long commitClusterPosition,
             MatcherSettlementPlan[] plans, int planCount, TradingRuntimeState runtime,
-            RuntimeIdentityRegistry identities, CoreInstrumentState[] instruments,
+            RuntimeIdentityRegistry identities, CoreInstrument[] instruments,
             int[] baseAssetIds, int[] quoteAssetIds, int[] settleAssetIds, int laneCount) {
         if (commitSequence <= 0 || commitTimestamp < 0 || commitClusterPosition < 0
                 || requiredLaneMask == 0 || plans == null || planCount <= 0 || planCount > plans.length || runtime == null
@@ -754,7 +754,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
     private void applyPlan(AccountLaneState lane, int laneId, MatcherSettlementPlan value,
-                           CoreInstrumentState valueInstrument, int valueBaseAssetId,
+                           CoreInstrument valueInstrument, int valueBaseAssetId,
                            int valueQuoteAssetId, int valueSettleAssetId, RuntimeTreasuryDelta delta,
                            OrderRuntime admissionVersion) {
         if (cancellation) {
@@ -882,7 +882,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
     RuntimeIdentityRegistry identities() { return identities; }
     boolean hasIsolatedChanges() { return isolatedChanges; }
-    CoreInstrumentState instrument() { return instrument; }
+    CoreInstrument instrument() { return instrument; }
     int baseAssetId() { return baseAssetId; }
     int quoteAssetId() { return quoteAssetId; }
     int settleAssetId() { return settleAssetId; }

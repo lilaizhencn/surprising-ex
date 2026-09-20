@@ -21,6 +21,7 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
@@ -33,6 +34,8 @@ import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -247,8 +250,6 @@ class CoreStateSnapshotCodecTest {
             assertThat(restoredMatcherManifest.bookStateHash()).isEqualTo(originalManifest.bookStateHash());
             assertThat(restoredMatcherManifest.symbolRegistryHash()).isEqualTo(originalManifest.symbolRegistryHash());
             assertThat(restoredMatcherManifest.userRegistryHash()).isEqualTo(originalManifest.userRegistryHash());
-            assertThat(restoredMatcherManifest.instrumentRegistryHash())
-                    .isEqualTo(originalManifest.instrumentRegistryHash());
             assertThat(restoredMatcherManifest.activeOrderHash()).isEqualTo(originalManifest.activeOrderHash());
             assertThat(restoredMatcherManifest.forkGitSha()).isEqualTo(originalManifest.forkGitSha());
             assertThat(restoredMatcherManifest.artifactSha256()).isEqualTo(originalManifest.artifactSha256());
@@ -379,12 +380,11 @@ class CoreStateSnapshotCodecTest {
         mismatches.put("book state hash", mutateHeaderInt(snapshot, 174));
         mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 178));
         mismatches.put("user registry hash", mutateHeaderLong(snapshot, 186));
-        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 194));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 202));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 210));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 246));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 254));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 294));
+        mismatches.put("active order hash", mutateHeaderLong(snapshot, 194));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 202));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 238));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 246));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 286));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));
@@ -435,10 +435,14 @@ class CoreStateSnapshotCodecTest {
     }
 
     private static TradingCoreState stateWithOpenBid() {
-        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT",
                 CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order), Map.of(),
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
+                Map.of("BTC-USDT", CoreInstrument.from(ProductLine.SPOT,
+                        new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                                "BTC", "USDT", "USDT", 1, 1, 1,
+                                100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 

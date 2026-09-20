@@ -3,7 +3,7 @@ package com.surprising.aeron.service.business.derivative;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.business.OrderAdmissionMath;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.PositionRuntime;
@@ -20,7 +20,7 @@ public final class FuturesOrderAdmission {
     private FuturesOrderAdmission() {
     }
 
-    public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
                                         long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
@@ -37,7 +37,7 @@ public final class FuturesOrderAdmission {
     }
 
     private static long openingMargin(
-            CoreInstrumentState instrument, long projectedQuantity, long signedFill, long openSteps,
+            CoreInstrument instrument, long projectedQuantity, long signedFill, long openSteps,
             long priceTicks, long leveragePpm, long indexPriceTicks, long forwardPriceTicks) {
         if (openSteps == 0) return 0;
         long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,
@@ -53,7 +53,7 @@ public final class FuturesOrderAdmission {
     /** Deterministic replay entry point for futures order reservation. */
     public static long reservationUnitsForState(
             TradingCoreState state,
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             CoreUserState user,
             ResolvedPlaceOrder command,
         ActiveOrderIndex activeOrderIndex) {

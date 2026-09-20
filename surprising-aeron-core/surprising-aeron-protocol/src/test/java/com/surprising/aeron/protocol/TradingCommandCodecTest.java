@@ -31,7 +31,7 @@ class TradingCommandCodecTest {
 
     @Test
     void replacementDecodesWithinItsFrameAndDoesNotRetainTheInput() {
-        var order = new PlaceOrderCommand(72, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6,
+        var order = new PlaceOrderCommand(72, "BTC-USDT", CoreOrderSide.BUY, 101, 6,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "订单-é-😀");
         var command = new ReplaceOrderCommand(71, order);
@@ -68,7 +68,7 @@ class TradingCommandCodecTest {
 
     @Test
     void roundTripsLeanPlaceOrderIntent() {
-        PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71");
+        PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", CoreOrderSide.BUY, 101, 6, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71");
 
         PlaceOrderCommand restored = TradingCommandCodec.decodePlaceOrder(
                 TradingCommandCodec.encodePlaceOrder(command));
@@ -99,7 +99,7 @@ class TradingCommandCodecTest {
 
     @Test
     void rejectsV2PlaceOrder() {
-        PlaceOrderCommand command = new PlaceOrderCommand(72, "BTC-USDT", 9, CoreOrderSide.SELL, 101, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-72");
+        PlaceOrderCommand command = new PlaceOrderCommand(72, "BTC-USDT", CoreOrderSide.SELL, 101, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-72");
         byte[] encoded = TradingCommandCodec.encodePlaceOrder(command);
         ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 2);
 
@@ -111,22 +111,22 @@ class TradingCommandCodecTest {
     @Test
     void roundTripsAllP2Commands() {
         BalanceAdjustmentCommand adjustment = new BalanceAdjustmentCommand("USDT", 10_000);
-        PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG, CoreOrderType.MARKET, CoreTimeInForce.FOK, false, "client-7");
+        PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG, CoreOrderType.MARKET, CoreTimeInForce.FOK, false, "client-7");
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);
         AmendOrderCommand amendOrder = new AmendOrderCommand(6, 8, "client-8", 61_000L,
                 4L, CoreTimeInForce.GTC, true);
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT", 1,
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
                 0, -1, 0, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
                 java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
                         10_000_000, 100_000, 50_000, 1_250_000)));
-        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500,
+        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 60_500,
                 60_000, 60_250, 9, 1_700_000_000_000L);
-        ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100, 0, 128);
-        ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "BTC-USDT", 3, -100,
+        ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 100, 0, 128);
+        ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "BTC-USDT", -100,
                 42, 128);
-        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0, 0, 128);
+        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 61_000, 0, 0, 128);
         ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 9, 59_000, 25_000);
         ExecuteLiquidationCommand chunkedLiquidation = new ExecuteLiquidationCommand(
                 14, 10, 58_000, 30_000, 91, 512);
@@ -155,8 +155,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeUpsertFeePolicy(feePolicy))).isEqualTo(feePolicy);
         assertThat(TradingCommandCodec.decodeAmendOrder(
                 TradingCommandCodec.encodeAmendOrder(amendOrder))).isEqualTo(amendOrder);
-        assertThat(TradingCommandCodec.decodeUpsertInstrument(
-                TradingCommandCodec.encodeUpsertInstrument(instrument))).isEqualTo(instrument);
+        assertThat(TradingCommandCodec.decodeRegisterInstrument(
+                TradingCommandCodec.encodeRegisterInstrument(instrument))).isEqualTo(instrument);
         assertThat(TradingCommandCodec.decodeApplyMarkPrice(
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice))).isEqualTo(markPrice);
         assertThat(TradingCommandCodec.decodeApplyFunding(
@@ -194,7 +194,7 @@ class TradingCommandCodecTest {
         byte[] liquidation = TradingCommandCodec.encodeExecuteLiquidation(
                 new ExecuteLiquidationCommand(13, 9, 59_000, 25_000));
         byte[] settlement = TradingCommandCodec.encodeSettleInstrument(
-                new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0));
+                new SettleInstrumentCommand(12, "BTC-USDT", 61_000, 0));
 
         for (int invalid : new int[] {0, 1_025}) {
             ByteBuffer.wrap(liquidation).order(ByteOrder.LITTLE_ENDIAN)
@@ -231,14 +231,14 @@ class TradingCommandCodecTest {
 
     @Test
     void rejectsInstrumentPayloadWithoutRiskPolicy() {
-        UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1, 1,
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand("BTC-USDT", 1,
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0);
-        byte[] current = TradingCommandCodec.encodeUpsertInstrument(command);
+        byte[] current = TradingCommandCodec.encodeRegisterInstrument(command);
         int appendedRiskPolicyBytes = Integer.BYTES * 3 + Long.BYTES * 9;
         byte[] withoutRiskPolicy = java.util.Arrays.copyOf(current, current.length - appendedRiskPolicyBytes);
 
-        assertThatThrownBy(() -> TradingCommandCodec.decodeUpsertInstrument(withoutRiskPolicy))
+        assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(withoutRiskPolicy))
                 .isInstanceOf(ProtocolException.class);
     }
 

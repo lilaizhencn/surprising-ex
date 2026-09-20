@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 
@@ -41,8 +41,8 @@ public final class InsuranceAllocationPolicy {
             if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
                 continue;
             }
-            CoreInstrumentState instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
-            if (instrument == null || instrument.changeId() != liquidation.instrumentChangeId()) continue;
+            CoreInstrument instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
+            if (instrument == null || instrument != liquidation.instrument()) continue;
             int assetId = identities.assetId(instrument.settleAsset());
             byAsset.computeIfAbsent(assetId, ignored -> new ArrayList<>())
                     .add(new Claim(liquidation, identities.symbol(liquidation.symbolId())));
@@ -76,8 +76,8 @@ public final class InsuranceAllocationPolicy {
         if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
             return new Resolution(false, 0);
         }
-        CoreInstrumentState targetInstrument = runtime.instrument(identities.symbol(target.symbolId()));
-        if (targetInstrument == null || targetInstrument.changeId() != target.instrumentChangeId()) {
+        CoreInstrument targetInstrument = runtime.instrument(identities.symbol(target.symbolId()));
+        if (targetInstrument == null || targetInstrument != target.instrument()) {
             return new Resolution(false, 0);
         }
         int assetId = identities.assetId(targetInstrument.settleAsset());
@@ -86,8 +86,8 @@ public final class InsuranceAllocationPolicy {
             if (id == null) continue;
             LiquidationRuntime claim = runtime.liquidation(id);
             if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            CoreInstrumentState instrument = runtime.instrument(identities.symbol(claim.symbolId()));
-            if (instrument != null && instrument.changeId() == claim.instrumentChangeId()
+            CoreInstrument instrument = runtime.instrument(identities.symbol(claim.symbolId()));
+            if (instrument != null && instrument == claim.instrument()
                     && identities.assetId(instrument.settleAsset()) == assetId) {
                 claims.add(new Claim(claim, identities.symbol(claim.symbolId())));
             }
@@ -125,15 +125,14 @@ public final class InsuranceAllocationPolicy {
         }
         CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
         if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return 0;
-        CoreInstrumentState targetInstrument = state.instruments().get(target.symbol());
+        CoreInstrument targetInstrument = state.instruments().get(target.symbol());
         if (targetInstrument == null) return 0;
         String asset = targetInstrument.settleAsset();
         ArrayList<CoreClaim> claims = new ArrayList<>();
         for (CoreLiquidationState liquidation : state.riskState().liquidations().values()) {
             if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
-            if (instrument != null && instrument.changeId() == liquidation.instrumentChangeId()
-                    && asset.equals(instrument.settleAsset())) {
+            CoreInstrument instrument = state.instruments().get(liquidation.symbol());
+            if (instrument != null && asset.equals(instrument.settleAsset())) {
                 claims.add(new CoreClaim(liquidation));
             }
         }
@@ -145,15 +144,14 @@ public final class InsuranceAllocationPolicy {
     public static boolean isNext(TradingCoreState state, long liquidationId) {
         CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
         if (target == null) return false;
-        CoreInstrumentState targetInstrument = state.instruments().get(target.symbol());
+        CoreInstrument targetInstrument = state.instruments().get(target.symbol());
         if (targetInstrument == null) return false;
         String targetAsset = targetInstrument.settleAsset();
         CoreLiquidationState first = state.riskState().liquidations().values().stream()
                 .filter(liquidation -> liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
                 .filter(liquidation -> {
-                    CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
-                    return instrument != null && instrument.changeId() == liquidation.instrumentChangeId()
-                            && targetAsset.equals(instrument.settleAsset());
+                    CoreInstrument instrument = state.instruments().get(liquidation.symbol());
+                    return instrument != null && targetAsset.equals(instrument.settleAsset());
                 })
                 .map(CoreClaim::new)
                 .min(CORE_CLAIM_ORDER)

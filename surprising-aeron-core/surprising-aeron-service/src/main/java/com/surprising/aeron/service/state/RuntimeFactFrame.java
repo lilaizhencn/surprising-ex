@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.settlement.FundsDelta;
@@ -255,7 +254,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
     public static CoreOrderStateView exportOrderView(CoreOrderState order) {
         return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(), order.symbol(),
-                order.instrumentChangeId(), order.side(), order.priceTicks(), order.quantitySteps(),
+                order.side(), order.priceTicks(), order.quantitySteps(),
                 order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                 order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(), order.postOnly(),
                 order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
@@ -526,23 +525,21 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     public record GlobalOwnerGroup(
             List<MarkPriceChange> markPrices,
             List<RiskScanChange> riskScans,
-            List<InstrumentChange> instruments,
             List<TreasuryAssetChange> treasuryAssets,
             List<TreasuryFundingChange> treasuryFunding,
             List<TreasuryLifecycleChange> treasuryLifecycle,
             NextLiquidationIdChange nextLiquidationId,
             RiskScanControlChange riskScanControl, MarketRevisionChange marketRevision) {
         public GlobalOwnerGroup(List<MarkPriceChange> markPrices, List<RiskScanChange> riskScans,
-                List<InstrumentChange> instruments, List<TreasuryAssetChange> treasuryAssets,
+                List<TreasuryAssetChange> treasuryAssets,
                 List<TreasuryFundingChange> treasuryFunding, List<TreasuryLifecycleChange> treasuryLifecycle,
                 NextLiquidationIdChange nextLiquidationId, RiskScanControlChange riskScanControl) {
-            this(markPrices, riskScans, instruments, treasuryAssets, treasuryFunding, treasuryLifecycle,
+            this(markPrices, riskScans, treasuryAssets, treasuryFunding, treasuryLifecycle,
                     nextLiquidationId, riskScanControl, null);
         }
         public GlobalOwnerGroup {
             markPrices = List.copyOf(markPrices);
             riskScans = List.copyOf(riskScans);
-            instruments = List.copyOf(instruments);
             treasuryAssets = List.copyOf(treasuryAssets);
             treasuryFunding = List.copyOf(treasuryFunding);
             treasuryLifecycle = List.copyOf(treasuryLifecycle);
@@ -647,11 +644,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     }
     public record RiskScanChange(int symbolId, RiskScanRuntime before, RiskScanRuntime after) {
         public RiskScanChange { requireChange(symbolId >= 0, before, after, "risk scan"); }
-    }
-    public record InstrumentChange(String symbol, CoreInstrumentState before, CoreInstrumentState after) {
-        public InstrumentChange {
-            requireChange(symbol != null && !symbol.isBlank(), before, after, "instrument");
-        }
     }
     public record TreasuryAssetValue(long fee, long insurance, long deficit, long liquidationFee,
                                      long fundingResidual, long roundingResidual, long clearingPnl) {}
@@ -1183,17 +1175,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             global.riskScans.record(symbolId, before, after);
             return this;
         }
-        public Builder recordInstrument(String symbol, CoreInstrumentState before, CoreInstrumentState after) {
-            requireOpen();
-            requireProductLine(before);
-            requireProductLine(after);
-            if (before != null && !before.symbol().equals(symbol)
-                    || after != null && !after.symbol().equals(symbol)) {
-                throw new IllegalArgumentException("instrument identity mismatch");
-            }
-            global.instruments.record(symbol, before, after);
-            return this;
-        }
         public Builder recordTreasuryAsset(int assetId, TreasuryAssetValue before, TreasuryAssetValue after) {
             requireOpen(); global.treasuryAssets.record(assetId, before, after); return this;
         }
@@ -1404,13 +1385,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             }
         }
 
-        private void requireProductLine(CoreInstrumentState value) {
-            requireOpen();
-            if (value != null && value.contractType().productLine() != productLine) {
-                throw new IllegalArgumentException("patch instrument product line mismatch");
-            }
-        }
-
         private void requireProductLine(CoreTriggerOrderState value) {
             requireOpen();
             if (value != null && value.productLine() != productLine) {
@@ -1498,7 +1472,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     private static final class GlobalChanges {
         private final IntChanges<MarkPriceRuntime> markPrices = new IntChanges<>();
         private final IntChanges<RiskScanRuntime> riskScans = new IntChanges<>();
-        private final Changes<String, CoreInstrumentState> instruments = new Changes<>();
         private final IntChanges<TreasuryAssetValue> treasuryAssets = new IntChanges<>();
         private final IntChanges<TreasuryFundingValue> treasuryFunding = new IntChanges<>();
         private final IntChanges<TreasuryLifecycleValue> treasuryLifecycle = new IntChanges<>();
@@ -1509,7 +1482,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private void reset() {
             markPrices.reset();
             riskScans.reset();
-            instruments.reset();
             treasuryAssets.reset();
             treasuryFunding.reset();
             treasuryLifecycle.reset();
@@ -1522,7 +1494,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             return new GlobalOwnerGroup(
                     markPrices.seal(MarkPriceChange::new),
                     riskScans.seal(RiskScanChange::new),
-                    instruments.seal((key, before, after) -> new InstrumentChange(key, before, after)),
                     treasuryAssets.seal(TreasuryAssetChange::new),
                     treasuryFunding.seal(TreasuryFundingChange::new),
                     treasuryLifecycle.seal(TreasuryLifecycleChange::new),

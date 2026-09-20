@@ -37,17 +37,17 @@ public class ClusterAccountControlBenchmark {
                 List.of(System.getProperty("surprising.aeron.hostnames").split(",")), "127.0.0.1",
                 Duration.ofSeconds(30), "account-control", UUID.randomUUID().toString(),
                 new AeronClientCapacity(1, 1, 256, 64, 256, 32, 128));
-        send(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                new UpsertInstrumentCommand(SYMBOL, 1, type.ordinal(), "BTC", "USDT", asset, 1, 1, 1,
+        send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", asset, 1, 1, 1,
                         100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? System.currentTimeMillis() + 3_600_000 : 0,
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
         for (long user : new long[]{USER, MAKER, POSITION_USER}) balance(user, FUNDS);
         if (product.isDerivative()) {
             send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                    product == ProductLine.OPTION ? new ApplyMarkPriceCommand(SYMBOL, 1, 100, 100, 100, 1, System.currentTimeMillis())
-                            : new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1, System.currentTimeMillis())));
+                    product == ProductLine.OPTION ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
+                            : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis())));
             for (boolean buy : new boolean[]{false, true}) send(CoreMessageType.PLACE_ORDER, buy ? POSITION_USER : MAKER,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(buy ? 9002 : 9001, SYMBOL, 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(buy ? 9002 : 9001, SYMBOL,
                             buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, 100, 10, false, CoreMarginMode.ISOLATED,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "control-" + buy)));
         }

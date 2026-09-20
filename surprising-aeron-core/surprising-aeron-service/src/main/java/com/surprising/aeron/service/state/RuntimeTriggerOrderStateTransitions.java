@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;
@@ -41,7 +41,7 @@ final class RuntimeTriggerOrderStateTransitions {
         if (view.clientTriggerOrderId().isBlank()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
         }
-        CoreInstrumentState instrument = runtime.instrument(view.symbol());
+        CoreInstrument instrument = runtime.instrument(view.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
         }
@@ -56,14 +56,8 @@ final class RuntimeTriggerOrderStateTransitions {
                     "clientTriggerOrderId already exists");
         }
         validatePlacement(runtime, userId, symbolId, positionKey, view);
-        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
-        if (trigger.instrumentChangeId() == 0) {
-            trigger = trigger.withExecutionSnapshot(instrument.changeId(), instrument.makerFeeRatePpm(),
-                    instrument.takerFeeRatePpm());
-        } else if (trigger.instrumentChangeId() != instrument.changeId()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
-                    "trigger order instrument version is stale");
-        }
+        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument)
+                .withExecutionSnapshot(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
         runtime.putTriggerOrder(trigger);
         runtime.incrementCommandRevision();
     }
@@ -120,7 +114,8 @@ final class RuntimeTriggerOrderStateTransitions {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
         runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(),
+                current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
                 activatedAtEpochMillis, current.orderType(), current.timeInForce(), current.priceTicks(),
@@ -128,7 +123,7 @@ final class RuntimeTriggerOrderStateTransitions {
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
                 current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
-                Math.incrementExact(current.revision()), current.instrumentChangeId(), current.makerFeeRatePpm(),
+                Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
                 current.takerFeeRatePpm()));
         runtime.incrementCommandRevision();
         return true;
@@ -225,7 +220,7 @@ final class RuntimeTriggerOrderStateTransitions {
                                                     long triggerSequence, long triggeredPriceTicks,
                                                     String rejectReason, long updatedAt) {
         return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(), current.userId(),
-                current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
+                current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
                 current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(),
@@ -235,7 +230,7 @@ final class RuntimeTriggerOrderStateTransitions {
                 status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
                         ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm());
+                current.makerFeeRatePpm(), current.takerFeeRatePpm());
     }
 
     private static CoreTriggerOrderState require(TradingRuntimeState runtime, long triggerOrderId) {

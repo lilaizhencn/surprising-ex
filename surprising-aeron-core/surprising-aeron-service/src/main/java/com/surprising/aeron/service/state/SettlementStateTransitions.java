@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
@@ -42,14 +42,13 @@ final class SettlementStateTransitions {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, command.symbol());
         if (instrument.contractType().isOption()) {
             com.surprising.aeron.service.state.math.OptionContractMath.optionSettlementCashUnits(
                     instrument, command.settlementPriceTicks());
         }
         CoreTreasuryState.LifecycleProgress progress = state.treasuryState().lifecycleProgress(command.symbol());
         if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentChangeId() != command.instrumentChangeId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
                 || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() || progress.nextCursorOrderId() != command.cursorOrderId()
@@ -62,7 +61,7 @@ final class SettlementStateTransitions {
         TradingCoreState canceled = OrderStateTransitions.cancelOrders(
                 state, orders == null ? List.of() : List.copyOf(orders));
         CoreTreasuryState nextTreasury = canceled.treasuryState().withLifecycleProgress(command.symbol(),
-                new CoreTreasuryState.LifecycleProgress(command.settlementId(), command.instrumentChangeId(),
+                new CoreTreasuryState.LifecycleProgress(command.settlementId(),
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
                         nextCursorOrderId, 0, chunkCommandId));
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()),
@@ -71,13 +70,10 @@ final class SettlementStateTransitions {
                 canceled.clientOrderIndex(), canceled.triggerOrders());
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

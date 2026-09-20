@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 import com.surprising.aeron.service.state.model.CoreRiskState;
@@ -88,7 +88,7 @@ class CoreLifecycleWorkTest {
     }
 
     private static TradingCoreRuntime stateWithLifecycleWork() {
-        CoreInstrumentState instrument = new CoreInstrumentState("BTC-USDT", 1,
+        CoreInstrument instrument = new CoreInstrument("BTC-USDT",
                 ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, null, 0, 10_000_000, 1_000_000,
                 0, 1, List.of(new CoreRiskLimitBracket(1, 0, 1_000_000,
@@ -97,12 +97,12 @@ class CoreLifecycleWorkTest {
         var insurance = liquidation(2, 1002, 100, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         var adl = liquidation(3, 1003, 50, CoreLiquidationState.Status.ADL_REQUIRED);
         CoreRiskState risk = new CoreRiskState(
-                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 60_000, 9, 1_000)),
+                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 60_000, 9, 1_000)),
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 1, 100, 0, 41,
+                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 100, 0, 41,
                         UUID.fromString("00000000-0000-0000-0000-000000000011"), 60_000, 9)),
-                Map.of("BTC-USDT", new CoreTreasuryState.LifecycleProgress(12, 1, 60_000,
+                Map.of("BTC-USDT", new CoreTreasuryState.LifecycleProgress(12, 60_000,
                         0, false, 91, 0,
                         UUID.fromString("00000000-0000-0000-0000-000000000012"))));
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
@@ -114,7 +114,7 @@ class CoreLifecycleWorkTest {
     private static CoreLiquidationState liquidation(long id, long userId, long deficit,
                                                      CoreLiquidationState.Status status) {
         return new CoreLiquidationState(id, userId, "BTC-USDT", CoreMarginMode.CROSS,
-                CorePositionSide.NET, 1, 9, 10, 10, deficit, status == CoreLiquidationState.Status.PLANNED ? 0 : 60_000,
+                CorePositionSide.NET, 9, 10, 10, deficit, status == CoreLiquidationState.Status.PLANNED ? 0 : 60_000,
                 status == CoreLiquidationState.Status.PLANNED ? 0 : 3_000, 0, status);
     }
 

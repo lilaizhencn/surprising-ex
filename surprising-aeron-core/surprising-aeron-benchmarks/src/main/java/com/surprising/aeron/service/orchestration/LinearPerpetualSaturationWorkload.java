@@ -200,7 +200,7 @@ final class LinearPerpetualSaturationWorkload {
                     harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                    symbol, current.instrumentChangeId(), current.markPriceTicks(),
+                                    symbol, current.markPriceTicks(),
                                     Math.incrementExact(current.priceSequence()), refreshTimestamp))));
                 }
                 nextMarkRefreshAt = Math.addExact(refreshTimestamp, MARK_REFRESH_INTERVAL_MILLIS);
@@ -254,7 +254,7 @@ final class LinearPerpetualSaturationWorkload {
             private void submit(LinearPerpetualBenchmarkSupport.Harness target, long userId,
                                 String symbol, CoreOrderSide side, CoreTimeInForce timeInForce) {
                 long orderId = target.nextOrderId();
-                var order = new PlaceOrderCommand(orderId, symbol, 1, side, PRICE_TICKS, 1,
+                var order = new PlaceOrderCommand(orderId, symbol, side, PRICE_TICKS, 1,
                         false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         timeInForce, false, "saturation-" + orderId);
                 long scheduledEntryNanos = Math.addExact(firstScheduledEntryNanos,

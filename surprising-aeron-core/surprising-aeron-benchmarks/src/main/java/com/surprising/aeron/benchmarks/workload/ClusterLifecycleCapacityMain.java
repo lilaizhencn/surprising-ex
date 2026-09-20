@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
@@ -89,13 +89,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     }
 
     private void setup() {
-        applied(CoreMessageType.UPSERT_INSTRUMENT, 1,
-                TradingCommandCodec.encodeUpsertInstrument(instrument()), "instrument");
+        applied(CoreMessageType.REGISTER_INSTRUMENT, 1,
+                TradingCommandCodec.encodeRegisterInstrument(instrument()), "instrument");
         // 与生产准入一致：建仓前提供新鲜标记价；期权同时提供指数价和远期价。
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                        ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, System.currentTimeMillis())
-                        : new ApplyMarkPriceCommand(symbol, 1, 100, 1, System.currentTimeMillis())),
+                        ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, System.currentTimeMillis())
+                        : new ApplyMarkPriceCommand(symbol, 100, 1, System.currentTimeMillis())),
                 "mark:initial");
         for (int pair = 0; pair < pairs; pair++) {
             long shortUser = shortUser(pair);
@@ -116,13 +116,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void liquidationStorm() {
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 1, 100, 2, System.currentTimeMillis())),
+                        symbol, 100, 2, System.currentTimeMillis())),
                 "mark:normal");
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long started = System.nanoTime();
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 1, markPrice, 3, System.currentTimeMillis())),
+                        symbol, markPrice, 3, System.currentTimeMillis())),
                 "mark:shock");
         var work = CoreLiquidationWorkCodec.decodeWork(query(
                 CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,
@@ -168,7 +168,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         long started = System.nanoTime();
         applied(CoreMessageType.SETTLE_INSTRUMENT, 1,
                 TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        9_500_000_000L + seed, symbol, 1, 120, productLine == ProductLine.OPTION ? 25 : 0)),
+                        9_500_000_000L + seed, symbol, 120, productLine == ProductLine.OPTION ? 25 : 0)),
                 "settle");
         long elapsed = System.nanoTime() - started;
         verifyFundsAndPositions(false);
@@ -209,16 +209,16 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         requireBookEmpty();
     }
 
-    private UpsertInstrumentCommand instrument() {
+    private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
 
     private byte[] order(long orderId, CoreOrderSide side, long reservedUnits) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, 1, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private void adjust(long userId, long units) {

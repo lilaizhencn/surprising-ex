@@ -29,13 +29,13 @@ class TradingStateSnapshotCodecTest {
     void roundTripPreservesBusinessAndEntityHashes() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = reducer.adjustBalance(
-                reducer.upsertInstrument(TradingCoreState.empty(ProductLine.OPTION),
+                reducer.registerInstrument(TradingCoreState.empty(ProductLine.OPTION),
                         CoreStateTestFixtures.instrument(ProductLine.OPTION,
-                                "BTC-OPTION", "BTC", "USDT", "USDT", 4)), 7,
+                                "BTC-OPTION", "BTC", "USDT", "USDT")), 7,
                 new BalanceAdjustmentCommand("USDT", 50_000));
         state = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-OPTION", 4, 500, 1_000, 1_000, 1, 1_000));
-        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", 4, CoreOrderSide.BUY, 500, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true, "option-client-71"));
+                new ApplyMarkPriceCommand("BTC-OPTION", 500, 1_000, 1_000, 1, 1_000));
+        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", CoreOrderSide.BUY, 500, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true, "option-client-71"));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.OPTION);
@@ -54,7 +54,7 @@ class TradingStateSnapshotCodecTest {
                 10, 11, 12, 13, false, TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL,
                 400, 300, 500, 70_000, 1_234, 88, 77);
         CoreRiskState risk = new CoreRiskState(
-                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 70_000, 7, 1_000)),
+                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 70_000, 7, 1_000)),
                 Map.of(), Map.of(), Map.of("BTC-USDT", scan), 1);
         TradingCoreState state = new TradingCoreState(empty.productLine(), empty.revision(), empty.users(),
                 empty.orders(), empty.instruments(), risk, empty.treasuryState(),

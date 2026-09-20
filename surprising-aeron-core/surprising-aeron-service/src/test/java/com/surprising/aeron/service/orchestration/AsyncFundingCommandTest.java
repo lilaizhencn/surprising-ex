@@ -18,17 +18,17 @@ class AsyncFundingCommandTest {
         try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             String asset = type.isInverse() ? "BTC" : "USDT";
-            applied(state, message(line, CoreMessageType.UPSERT_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT", 1,
+            applied(state, message(line, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",
                             type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, TIME))));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("BTC-USDT", 100, 1, TIME))));
             for (long user = 1; user <= 8; user++) {
                 applied(state, message(line, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 100_000))));
                 applied(state, message(line, CoreMessageType.PLACE_ORDER, user,
-                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT", 1,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT",
                                 user % 2 == 1 ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 10, false,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, "funding-" + user))));
@@ -38,8 +38,7 @@ class AsyncFundingCommandTest {
                 long cursor = 0;
                 for (int page = 0; page < 8; page++) {
                     var command = message(line, CoreMessageType.APPLY_FUNDING, 0,
-                            TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(900, "BTC-USDT", 1,
-                                    10_000, cursor, 1)));
+                            TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(900, "BTC-USDT", 10_000, cursor, 1)));
                     CoreResponse async = page == 0 ? fundingWithPendingBoundaryChecks(state, command) : applied(state, command);
                     CoreResponse sync = restored.apply(command);
                     assertThat(async.commandStatus()).isEqualTo(sync.commandStatus());
@@ -58,7 +57,7 @@ class AsyncFundingCommandTest {
                 try (var after = TradingCoreRuntime.fromSnapshot(line, state.snapshot(200))) {
                     assertThat(after.stateHash()).isEqualTo(state.stateHash());
                     var next = message(line, CoreMessageType.APPLY_FUNDING, 0,
-                            TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(901, "BTC-USDT", 1, -10_000)));
+                            TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(901, "BTC-USDT", -10_000)));
                     assertThat(applied(state, next).data()).isEqualTo(applied(after, next).data());
                     assertThat(state.tradingState().businessStateHash()).isEqualTo(after.tradingState().businessStateHash());
                     assertThat(economicUnits(state, asset)).isEqualTo(funds);

@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.snapshot;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.model.RiskLaneProgress;
 
@@ -36,7 +36,7 @@ public record TradingRuntimeSnapshot(
         Map<Integer, RiskScanSnapshot> riskScans,
         long nextLiquidationId,
         /** 最近行情输入序号，与分片估值游标对应。 */ long marketRevision,
-        Map<String, CoreInstrumentState> instruments,
+        Map<String, CoreInstrument> instruments,
         Map<CoreLeverageKey, Long> leverages,
         Map<Long, CoreAlgoOrderState> algoOrders,
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
@@ -135,7 +135,7 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record OrderSnapshot(ProductLine productLine, long userId, int symbolId, long instrumentChangeId,
+    public record OrderSnapshot(ProductLine productLine, long userId, int symbolId,
                                 com.surprising.aeron.protocol.CoreOrderSide side, long priceTicks,
                                 long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                                 boolean reduceOnly, com.surprising.aeron.protocol.CoreMarginMode marginMode,
@@ -147,22 +147,8 @@ public record TradingRuntimeSnapshot(
                                 long cumulativeFeeUnits,
                                 long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                                 CoreOrderStatus status, long revision) {
-        public OrderSnapshot(long userId, int symbolId, long quantitySteps, boolean canceled) {
-            this(ProductLine.LINEAR_PERPETUAL, userId, symbolId, 1,
-                    com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, quantitySteps, 0, quantitySteps, false,
-                    com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                    com.surprising.aeron.protocol.CorePositionSide.NET,
-                    com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                    com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "", new UUID(0, 1), 0, 0,
-                    0, 0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
-        }
-
-        public OrderSnapshot(long userId, int symbolId, long quantitySteps) {
-            this(userId, symbolId, quantitySteps, false);
-        }
-
         public OrderSnapshot {
-            if (productLine == null || userId <= 0 || symbolId < 0 || instrumentChangeId <= 0 || side == null || priceTicks < 0
+            if (productLine == null || userId <= 0 || symbolId < 0 || side == null || priceTicks < 0
                     || marginMode == null || positionSide == null || orderType == null || timeInForce == null
                     || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
                     || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
@@ -172,20 +158,15 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record ReservationSnapshot(long userId, int symbolId, long instrumentChangeId,
+    public record ReservationSnapshot(long userId, int symbolId,
                                       com.surprising.aeron.protocol.ReservationKind kind, int assetId,
                                       long totalReservedUnits, long releasedUnits, long consumedUnits,
                                       long orderQuantitySteps) {
-        public ReservationSnapshot(long userId, int assetId, long reservedUnits) {
-            this(userId, 0, 1, com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
-                    assetId, Math.max(1, reservedUnits), 0, 0, 1);
-        }
-
         public long reservedUnits() {
             return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits));
         }
         public ReservationSnapshot {
-            if (userId <= 0 || symbolId < 0 || instrumentChangeId <= 0 || kind == null || assetId < 0
+            if (userId <= 0 || symbolId < 0 || kind == null || assetId < 0
                     || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
                     || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
                 throw new IllegalArgumentException("invalid snapshot reservation");
@@ -206,7 +187,7 @@ public record TradingRuntimeSnapshot(
     }
 
     public record PositionSnapshot(long userId, int symbolId, int assetId, CoreMarginMode marginMode,
-                                   CorePositionSide positionSide, long instrumentChangeId,
+                                   CorePositionSide positionSide,
                                    long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                                    long realizedPnlUnits, long positionMarginUnits) {
         public PositionSnapshot {
@@ -218,14 +199,14 @@ public record TradingRuntimeSnapshot(
     }
 
     public record LiquidationSnapshot(long userId, int symbolId, CoreMarginMode marginMode,
-                                      CorePositionSide positionSide, long instrumentChangeId,
+                                      CorePositionSide positionSide,
                                       long triggerPriceSequence, long signedQuantitySteps,
                                       long closeQuantitySteps, long deficitUnits, long executionPriceTicks,
                                       long liquidationFeeRatePpm, long liquidationFeeUnits,
                                       CoreLiquidationState.Status status, long nextCancelOrderId) {
         public LiquidationSnapshot {
             if (userId <= 0 || symbolId < 0 || marginMode == null || positionSide == null
-                    || instrumentChangeId <= 0 || triggerPriceSequence <= 0 || signedQuantitySteps == 0
+                    || triggerPriceSequence <= 0 || signedQuantitySteps == 0
                     || closeQuantitySteps <= 0 || closeQuantitySteps > Math.absExact(signedQuantitySteps)
                     || deficitUnits < 0 || executionPriceTicks < 0 || liquidationFeeRatePpm < 0
                     || liquidationFeeRatePpm > 1_000_000 || liquidationFeeUnits < 0 || status == null
@@ -235,10 +216,10 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record MarkPriceSnapshot(long instrumentChangeId, long markPriceTicks, long indexPriceTicks,
+    public record MarkPriceSnapshot(long markPriceTicks, long indexPriceTicks,
                                     long forwardPriceTicks, long priceSequence, long generatedAtEpochMillis) {
         public MarkPriceSnapshot {
-            if (instrumentChangeId <= 0 || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
+            if (markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
                     || (indexPriceTicks == 0) != (forwardPriceTicks == 0) || priceSequence <= 0
                     || generatedAtEpochMillis <= 0) {
                 throw new IllegalArgumentException("invalid snapshot mark price");
@@ -275,11 +256,11 @@ public record TradingRuntimeSnapshot(
                                    long roundingResidualUnits, long clearingPnlUnits) {
     }
 
-    public record FundingProgressSnapshot(long settlementId, long instrumentChangeId, long fundingRatePpm,
+    public record FundingProgressSnapshot(long settlementId, long fundingRatePpm,
                                           int accountLaneId, long nextCursorUserId, UUID commandId,
                                           long markPriceTicks, long priceSequence) {
         public FundingProgressSnapshot {
-            if (settlementId <= 0 || instrumentChangeId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
+            if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid snapshot funding progress");
@@ -287,12 +268,12 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record LifecycleProgressSnapshot(long settlementId, long instrumentChangeId,
+    public record LifecycleProgressSnapshot(long settlementId,
                                             long settlementPriceTicks, long optionCashUnitsPerContract,
                                             boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
                                             long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
         public LifecycleProgressSnapshot {
-            if (settlementId <= 0 || instrumentChangeId <= 0 || settlementPriceTicks < 0
+            if (settlementId <= 0 || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0

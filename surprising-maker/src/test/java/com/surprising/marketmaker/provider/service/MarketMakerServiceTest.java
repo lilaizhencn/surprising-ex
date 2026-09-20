@@ -539,7 +539,7 @@ class MarketMakerServiceTest {
                                          long remainingQuantity,
                                          OrderStatus status,
                                          Instant now) {
-        return new OrderResponse(orderId, userId, clientOrderId, "BTC-USDT", 1L, side, OrderType.LIMIT,
+        return new OrderResponse(orderId, userId, clientOrderId, "BTC-USDT", side, OrderType.LIMIT,
                 TimeInForce.GTX, priceTicks, remainingQuantity, 0L, remainingQuantity, MarginMode.CROSS,
                 PositionSide.NET, -100L, 500L, false, true, status, null, now, now);
     }
@@ -1000,7 +1000,7 @@ class MarketMakerServiceTest {
 
         @Override
         public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
-            return new PositionResponse(userId, symbol, 1L, MarginMode.CROSS, PositionSide.NET,
+            return new PositionResponse(userId, symbol, MarginMode.CROSS, PositionSide.NET,
                     0L, 0L, 0L, Instant.parse("2026-01-01T00:00:00Z"));
         }
 

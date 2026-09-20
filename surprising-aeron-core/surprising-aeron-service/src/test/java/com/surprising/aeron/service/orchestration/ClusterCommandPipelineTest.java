@@ -444,7 +444,7 @@ class ClusterCommandPipelineTest {
             for (boolean buy : new boolean[]{false, true}) {
                 var order = live.message(CoreMessageType.PLACE_ORDER, buy ? 11 : disjointUser(11),
                         TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(buy ? 1001 : 1000,
-                                "BTC-USDT", 1, buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, 100, 10, false,
+                                "BTC-USDT", buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, 100, 10, false,
                                 CoreMarginMode.ISOLATED, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, buy ? "margin-buy" : "margin-sell")));
                 live.apply(order); serial.apply(order);
@@ -659,7 +659,7 @@ class ClusterCommandPipelineTest {
                     new AmendOrderCommand(101, 102, "amend-102", 90L, 1L, CoreTimeInForce.GTC, false))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             live.apply(live.message(CoreMessageType.REPLACE_ORDER, 11, TradingCommandCodec.encodeReplaceOrder(
-                    new ReplaceOrderCommand(102, new PlaceOrderCommand(103, "BTC-USDT", 1,
+                    new ReplaceOrderCommand(102, new PlaceOrderCommand(103, "BTC-USDT",
                             CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "replace-103")))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -859,13 +859,13 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "BTC-USDT",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
@@ -915,13 +915,13 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTX, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "BTC-USDT",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
@@ -966,7 +966,7 @@ class ClusterCommandPipelineTest {
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100,
                         overflow && id == 9101 ? Long.MAX_VALUE : 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
@@ -1050,7 +1050,7 @@ class ClusterCommandPipelineTest {
                     var liquidity = live.place(maker, "BTC-USDT", 7900, 80, 1, CoreOrderSide.SELL);
                     live.apply(liquidity); serial.apply(liquidity);
                 }
-                var item = new PlaceOrderCommand(8000, "BTC-USDT", 1, CoreOrderSide.BUY, 80,
+                var item = new PlaceOrderCommand(8000, "BTC-USDT", CoreOrderSide.BUY, 80,
                         scenario == 2 ? Long.MAX_VALUE : 1, false, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "single-batch");
                 var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
@@ -1081,7 +1081,7 @@ class ClusterCommandPipelineTest {
         try (Fixture live = new Fixture(ProductLine.LINEAR_DELIVERY);
              Fixture serial = new Fixture(ProductLine.LINEAR_DELIVERY)) {
             serial.applyAll(live.setup());
-            var item = new PlaceOrderCommand(1000, "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1,
+            var item = new PlaceOrderCommand(1000, "BTC-USDT", CoreOrderSide.BUY, 80, 1,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                     CoreTimeInForce.GTC, false, "before-expiry");
             var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
@@ -1200,15 +1200,15 @@ class ClusterCommandPipelineTest {
                 String symbol = "COIN" + i + "-USDT";
                 long user = 10_000 + i;
                 var setup = List.of(
-                        live.message(CoreMessageType.UPSERT_INSTRUMENT, 0,
-                                TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(symbol, 1,
+                        live.message(CoreMessageType.REGISTER_INSTRUMENT, 0,
+                                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
                                         type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
                                         100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
                                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))),
                         live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                                 TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                        ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, TIME)
-                                        : new ApplyMarkPriceCommand(symbol, 1, 100, 1, TIME))),
+                                        ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, TIME)
+                                        : new ApplyMarkPriceCommand(symbol, 100, 1, TIME))),
                         live.message(CoreMessageType.ADJUST_BALANCE, user,
                                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))));
                 live.applyAll(setup); serial.applyAll(setup);
@@ -2008,7 +2008,7 @@ class ClusterCommandPipelineTest {
                         0, trailing ? 100_000 : 0, trailing ? 120 : 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "scan", expired ? TIME + 500 : 0, 0, 0, 0, 1, 1, 0, 0);
+                        0, 0, 0, "", "scan", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
@@ -2020,8 +2020,8 @@ class ClusterCommandPipelineTest {
             live.sequence += 1000; // Commands occur after the expired order and the new mark timestamp.
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 2, TIME + 1000)
-                            : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2, TIME + 1000))));
+                            ? new ApplyMarkPriceCommand("BTC-USDT", 100, 100, 100, 2, TIME + 1000)
+                            : new ApplyMarkPriceCommand("BTC-USDT", 100, 2, TIME + 1000))));
             boolean resumed = false;
             for (int n = 0; n < 100 && runtime.firstIncompleteRiskScan() != null; n++) {
                 var command = live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
@@ -2057,8 +2057,8 @@ class ClusterCommandPipelineTest {
         boolean option = live.product == ProductLine.OPTION;
         live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(option
-                        ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 2, TIME)
-                        : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2, TIME))));
+                        ? new ApplyMarkPriceCommand("BTC-USDT", 100, 100, 100, 2, TIME)
+                        : new ApplyMarkPriceCommand("BTC-USDT", 100, 2, TIME))));
         for (int i = 0; i < 100 && live.service.state().runtimeState.firstIncompleteRiskScan() != null; i++) {
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(budget))));
@@ -2108,15 +2108,17 @@ class ClusterCommandPipelineTest {
             String asset = type.isInverse() ? "BTC" : "USDT";
             List<CoreMessage> commands = new ArrayList<>();
             for (String symbol : List.of("BTC-USDT", secondSymbol)) {
-                commands.add(message(CoreMessageType.UPSERT_INSTRUMENT, 0,
-                        TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(symbol, 1,
+                commands.add(message(CoreMessageType.REGISTER_INSTRUMENT, 0,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
                                 type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
                                 100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
+            }
+            for (String symbol : List.of("BTC-USDT", secondSymbol)) {
                 commands.add(message(CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, TIME)
-                                : new ApplyMarkPriceCommand(symbol, 1, 100, 1, TIME))));
+                                ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, TIME)
+                                : new ApplyMarkPriceCommand(symbol, 100, 1, TIME))));
             }
             for (long user : new long[]{11, disjointUser(11)})
                 commands.add(message(CoreMessageType.ADJUST_BALANCE, user,
@@ -2130,7 +2132,7 @@ class ClusterCommandPipelineTest {
         }
         CoreMessage place(long user, String symbol, long order, long price, long qty, CoreOrderSide side) {
             return message(CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(
-                    new PlaceOrderCommand(order, symbol, 1, side, price, qty, false, CoreMarginMode.CROSS,
+                    new PlaceOrderCommand(order, symbol, side, price, qty, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "order-" + order)));
         }
         CoreMessage cancel(long user, long order) {
@@ -2139,7 +2141,7 @@ class ClusterCommandPipelineTest {
         }
         CoreMessage placeBatch(long user, String symbol, long firstId) {
             List<PlaceOrderCommand> orders = new ArrayList<>();
-            for (int i = 0; i < 20; i++) orders.add(new PlaceOrderCommand(firstId+i, symbol, 1,
+            for (int i = 0; i < 20; i++) orders.add(new PlaceOrderCommand(firstId+i, symbol,
                     CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "batch-"+(firstId+i)));
             return message(CoreMessageType.PLACE_ORDER_BATCH, user,

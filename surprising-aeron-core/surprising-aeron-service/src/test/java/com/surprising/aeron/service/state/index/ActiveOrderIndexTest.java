@@ -15,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,9 +33,9 @@ class ActiveOrderIndexTest {
             var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
             var orders = new com.surprising.aeron.service.state.OrderRuntime[3];
             for (int i = 0; i < orders.length; i++) {
-                var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "BTC-USDT", 1,
-                        CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-                orders[i] = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities);
+                var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "BTC-USDT", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+                orders[i] = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                        order, identities, instrument(order.symbol()));
                 index.apply(i + 1, orders[i], identities);
             }
             var terminal = status == CoreOrderStatus.FILLED
@@ -64,16 +67,16 @@ class ActiveOrderIndexTest {
         var valuesField = org.agrona.collections.Long2ObjectHashMap.class.getDeclaredField("values");
         valuesField.setAccessible(true);
         for (long id = 1; id <= 32; id++) {
-            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", 1,
-                    CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities), identities);
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                    order, identities, instrument(order.symbol())), identities);
         }
         Object storage = valuesField.get(entries);
         for (long id = 33; id <= 4096; id++) {
             index.apply(id - 32, null, identities);
-            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", 1,
-                    CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities), identities);
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                    order, identities, instrument(order.symbol())), identities);
         }
         assertThat(valuesField.get(entries)).isSameAs(storage);
         var cursor = index.matchingIds(7, "BTC-USDT");
@@ -95,9 +98,9 @@ class ActiveOrderIndexTest {
     void runtimeUpdatesShareThePublishedOrderAndKeepQuerySnapshotsImmutable() throws Exception {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
-        var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(initial, identities);
+        var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                initial, identities, instrument(initial.symbol()));
         index.apply(1, order, identities);
         assertThat(index.activeOrderRuntime(1)).isSameAs(order);
         var oldQuery = index.activeOrder(1);
@@ -125,12 +128,12 @@ class ActiveOrderIndexTest {
     void runtimeScopeChangesReplaceMembershipWithoutRetainingThePreviousParticipant() {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
-        var first = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-        var second = new CoreOrderState(1, ProductLine.SPOT, 8, "ETH-USDT", 1,
-                CoreOrderSide.SELL, 110, 10, 0, 10, false, CoreOrderStatus.OPEN, 2);
-        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(first, identities), identities);
-        var replacement = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(second, identities);
+        var first = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var second = new CoreOrderState(1, ProductLine.SPOT, 8, "ETH-USDT", CoreOrderSide.SELL, 110, 10, 0, 10, false, CoreOrderStatus.OPEN, 2);
+        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                first, identities, instrument(first.symbol())), identities);
+        var replacement = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                second, identities, instrument(second.symbol()));
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRuntime(1)).isSameAs(replacement);
         assertThat(index.activeOrderSymbol(1)).isEqualTo("ETH-USDT");
@@ -146,13 +149,12 @@ class ActiveOrderIndexTest {
         for (long id = 1; id <= 12; id++) {
             long user = id <= 9 ? 11 : 12;
             String symbol = id % 3 == 0 ? "ETH-USDT" : "BTC-USDT";
-            orders.put(id, new CoreOrderState(id, ProductLine.SPOT, user, symbol, 1,
-                    CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
+            orders.put(id, new CoreOrderState(id, ProductLine.SPOT, user, symbol, CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
         }
         var state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11),
                         12L, CoreUserState.empty(ProductLine.SPOT, 12)), orders,
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                instruments(ProductLine.SPOT, "BTC-USDT", "ETH-USDT"), CoreRiskState.empty(), CoreTreasuryState.empty());
         var index = new ActiveOrderIndex(state);
         for (long user : new long[]{11, 12, 99}) {
             for (String symbol : new String[]{"BTC-USDT", "ETH-USDT", "NONE-USDT"}) {
@@ -175,15 +177,14 @@ class ActiveOrderIndexTest {
 
     @Test
     void maintainsRiskAggregatesAcrossOrderUpdates() {
-        CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+        CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderStatus.OPEN, 1);
-        CoreOrderState reducing = new CoreOrderState(8, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", 1,
-                CoreOrderSide.SELL, 100, 3, 0, 3, true, CoreMarginMode.ISOLATED, CorePositionSide.NET,
+        CoreOrderState reducing = new CoreOrderState(8, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", CoreOrderSide.SELL, 100, 3, 0, 3, true, CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 CoreOrderStatus.OPEN, 1);
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 11)),
-                Map.of(7L, opening, 8L, reducing), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(7L, opening, 8L, reducing), instruments(ProductLine.LINEAR_PERPETUAL, "BTC-USDT"),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
         ActiveOrderIndex index = new ActiveOrderIndex(before);
 
         assertThat(index.pendingQuantity(11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(5);
@@ -212,11 +213,10 @@ class ActiveOrderIndexTest {
 
     @Test
     void rebuildUsesOpenOrderLifecycle() {
-        CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreOrderStatus.OPEN, 1);
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), Map.of(7L, order),
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                instruments(ProductLine.SPOT, "BTC-USDT"), CoreRiskState.empty(), CoreTreasuryState.empty());
 
         ActiveOrderIndex index = new ActiveOrderIndex(state);
         assertThat(index.ids()).containsExactly(7L);
@@ -227,12 +227,11 @@ class ActiveOrderIndexTest {
     void pageUsesExclusiveCursorAndTheBoundedLifecycleLimit() {
         Map<Long, CoreOrderState> orders = new HashMap<>();
         for (long orderId = 1; orderId <= 2_049; orderId++) {
-            orders.put(orderId, new CoreOrderState(orderId, ProductLine.SPOT, 11, "BTC-USDT", 1,
-                    CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
+            orders.put(orderId, new CoreOrderState(orderId, ProductLine.SPOT, 11, "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
         }
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), orders,
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                instruments(ProductLine.SPOT, "BTC-USDT"), CoreRiskState.empty(), CoreTreasuryState.empty());
         ActiveOrderIndex index = new ActiveOrderIndex(state);
 
         ActiveOrderIndex.Page first = index.page(11, "BTC-USDT", 0, ActiveOrderIndex.MAX_PAGE_SIZE);
@@ -249,16 +248,13 @@ class ActiveOrderIndexTest {
 
     @Test
     void primitiveSortedCursorAvoidsBoxedCompatibilityView() {
-        CoreOrderState first = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
-        CoreOrderState second = new CoreOrderState(9, ProductLine.SPOT, 11, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 101, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
-        CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 102, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState first = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState second = new CoreOrderState(9, ProductLine.SPOT, 11, "BTC-USDT", CoreOrderSide.BUY, 101, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "BTC-USDT", CoreOrderSide.BUY, 102, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11),
                         12L, CoreUserState.empty(ProductLine.SPOT, 12)),
-                Map.of(7L, first, 8L, third, 9L, second), Map.of(), CoreRiskState.empty(),
+                Map.of(7L, first, 8L, third, 9L, second), instruments(ProductLine.SPOT, "BTC-USDT"), CoreRiskState.empty(),
                 CoreTreasuryState.empty());
         ActiveOrderIndex index = new ActiveOrderIndex(state);
 
@@ -270,5 +266,27 @@ class ActiveOrderIndexTest {
         assertThat(index.page(11, "BTC-USDT", 0, 1).orderIds()).containsExactly(9L);
         assertThat(index.page(11, "BTC-USDT", 9, 1).orderIds()).containsExactly(7L);
         assertThat(index.page(11, "BTC-USDT", 7, 1).orderIds()).isEmpty();
+    }
+
+    private static CoreInstrument instrument(String symbol) {
+        String baseAsset = symbol.substring(0, symbol.indexOf('-'));
+        return CoreInstrument.from(ProductLine.SPOT,
+                new RegisterInstrumentCommand(symbol, ContractType.SPOT.ordinal(), baseAsset,
+                        "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+    }
+
+    private static Map<String, CoreInstrument> instruments(ProductLine productLine, String... symbols) {
+        Map<String, CoreInstrument> instruments = new HashMap<>();
+        for (String symbol : symbols) {
+            String baseAsset = symbol.substring(0, symbol.indexOf('-'));
+            ContractType type = ContractType.valueOf(productLine.contractTypeCode());
+            instruments.put(symbol, CoreInstrument.from(productLine,
+                    new RegisterInstrumentCommand(symbol, type.ordinal(), baseAsset, "USDT",
+                            type.isInverse() ? baseAsset : "USDT", 1, 1,
+                            type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
+                            type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
+                            type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
+        }
+        return Map.copyOf(instruments);
     }
 }

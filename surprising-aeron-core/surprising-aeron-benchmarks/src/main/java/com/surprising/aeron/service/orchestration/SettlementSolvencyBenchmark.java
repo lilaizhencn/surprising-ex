@@ -31,15 +31,15 @@ public class SettlementSolvencyBenchmark {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         if (type.isPerpetual() && !"MAINTENANCE".equals(settlementTrigger)) throw new IllegalArgumentException("perpetual clearance requires MAINTENANCE");
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, productLine)) {
-            h.execute(h.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("DEBT", 1,
+            h.execute(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("DEBT",
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", asset, inverse ? 100 : 1,
                             1, inverse ? 100 : 1, 100_000, 50_000, 0, 0,
                             type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
-                            ? new ApplyMarkPriceCommand("DEBT", 1, 100, 100, 100, 1, h.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand("DEBT", 1, 100, 1, h.nextCommandTimestamp()))));
+                            ? new ApplyMarkPriceCommand("DEBT", 100, 100, 100, 1, h.nextCommandTimestamp())
+                            : new ApplyMarkPriceCommand("DEBT", 100, 1, h.nextCommandTimestamp()))));
             h.adjust(999, asset, 1_000_000_000L);
             order(h, 999, CoreOrderSide.BUY, 256, CoreMarginMode.CROSS);
             for (long user = 1000; user < 1256; user++) {
@@ -64,7 +64,7 @@ public class SettlementSolvencyBenchmark {
     private static void order(LinearPerpetualBenchmarkSupport.Harness h, long user, CoreOrderSide side,
                               long quantity, CoreMarginMode margin) {
         h.execute(h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, user,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "DEBT", 1,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "DEBT",
                         side, 100, quantity, false, margin, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, false, ""))));
     }
@@ -78,7 +78,7 @@ public class SettlementSolvencyBenchmark {
     private CoreSettlementProgressView page(long cursor) {
         return CoreSettlementProgressCodec.decode(harness.execute(harness.command(CoreMessageType.SETTLE_INSTRUMENT,
                 CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeSettleInstrument(
-                        new SettleInstrumentCommand(11, "DEBT", 1, 1000, 0, cursor, 16, 0, 16)))).data());
+                        new SettleInstrumentCommand(11, "DEBT", 1000, 0, cursor, 16, 0, 16)))).data());
     }
 
     @Benchmark

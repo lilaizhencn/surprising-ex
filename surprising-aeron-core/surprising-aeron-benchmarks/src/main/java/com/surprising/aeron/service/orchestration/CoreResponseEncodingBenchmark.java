@@ -55,7 +55,7 @@ public class CoreResponseEncodingBenchmark {
         @Setup(Level.Trial)
         public void setUp() {
             order = new com.surprising.aeron.protocol.CoreOrderStateView(71, ProductLine.valueOf(productLine),
-                    7, "BTC-USDT", 3, CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
+                    7, "BTC-USDT", CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
         }
     }
 
@@ -96,7 +96,7 @@ public class CoreResponseEncodingBenchmark {
         public void setUp() {
             ArrayList<PlaceOrderCommand> orders = new ArrayList<>(batchSize);
             for (int index = 0; index < batchSize; index++) {
-                orders.add(new PlaceOrderCommand(10_000L + index, "BTC_USDT", 1,
+                orders.add(new PlaceOrderCommand(10_000L + index, "BTC_USDT",
                         CoreOrderSide.BUY, 100_000, 1, false, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         false, "codec-" + index));

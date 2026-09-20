@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.math.*;
 
@@ -46,8 +46,8 @@ public final class RuntimeSpotMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return;
         }
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
+        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         if (ProductTradingRulesRegistry.forInstrument(instrument).productLine()
@@ -83,7 +83,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     static RuntimeTreasuryDelta applyLane(long takerOrderId, List<MatcherEvent> matches,
-                                          TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                          TradingRuntimeState runtime, CoreInstrument instrument,
                                           int baseAssetId, int quoteAssetId) {
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         OrderRuntime localTaker = runtime.order(takerOrderId);
@@ -115,7 +115,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
-                          TradingRuntimeState runtime, CoreInstrumentState instrument,
+                          TradingRuntimeState runtime, CoreInstrument instrument,
                           int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
                           long commitTimestamp, long commitPosition) {
         if (plan == null || treasuryDelta == null || laneId < 0
@@ -142,7 +142,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, int laneId,
-                                        TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                        TradingRuntimeState runtime, CoreInstrument instrument,
                                         int baseAssetId, int quoteAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition,
@@ -169,7 +169,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, int laneId,
-                                             TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                             TradingRuntimeState runtime, CoreInstrument instrument,
                                              int baseAssetId, int quoteAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
@@ -200,14 +200,14 @@ public final class RuntimeSpotMatchProcessor {
         validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
     }
 
-    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,
+    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrument instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
         return applyFill(runtime, instrument, order, fillPriceTicks, fillQuantitySteps, taker,
                 baseAssetId, quoteAssetId, treasuryDelta, -1, -1);
     }
 
-    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,
+    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrument instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
@@ -278,13 +278,13 @@ public final class RuntimeSpotMatchProcessor {
         private final java.util.ArrayDeque<IntObjectHashMap<SpotBalanceState>> freeBalanceMaps =
                 new java.util.ArrayDeque<>();
         private TradingRuntimeState runtime;
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private int baseAssetId;
         private int quoteAssetId;
         private long commitTimestamp;
         private long commitPosition;
 
-        void reset(TradingRuntimeState runtime, CoreInstrumentState instrument,
+        void reset(TradingRuntimeState runtime, CoreInstrument instrument,
                    int baseAssetId, int quoteAssetId, long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
             this.instrument = instrument;
@@ -453,8 +453,7 @@ public final class RuntimeSpotMatchProcessor {
                 // Synchronous/recovery path retains value semantics outside the Lane hot path.
                 ReservationRuntime nextReservation = new ReservationRuntime(
                         originalReservation.orderId(), originalReservation.userId(), originalReservation.symbolId(),
-                        originalReservation.instrumentChangeId(), originalReservation.kind(),
-                        originalReservation.assetId(), originalReservation.totalReservedUnits(),
+                        originalReservation.kind(), originalReservation.assetId(), originalReservation.totalReservedUnits(),
                         originalReservation.releasedUnits(), consumed, originalReservation.orderQuantitySteps());
                 OrderRuntime nextOrder = originalOrder.withFill(executed, remaining, feeDelta, status,
                         Math.addExact(originalOrder.revision(), fills), commitTimestamp, commitPosition);

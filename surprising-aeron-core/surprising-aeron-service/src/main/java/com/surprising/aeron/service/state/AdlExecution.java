@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -35,8 +35,7 @@ final class AdlExecution {
                 || command.coveredUnits() > liquidation.deficitUnits()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
         }
-        CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, liquidation.symbol());
         CoreMarkPriceState mark = state.riskState().markPrices().get(liquidation.symbol());
         if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
@@ -81,7 +80,7 @@ final class AdlExecution {
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         Map<String, CorePositionState> positions = StateMapSupport.delta(target.positions());
         positions.put(positionKey, new CorePositionState(position.symbol(), position.marginAsset(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
+                position.marginMode(), position.positionSide(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : coverCapacity),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
@@ -102,13 +101,10 @@ final class AdlExecution {
                 state.triggerOrders());
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

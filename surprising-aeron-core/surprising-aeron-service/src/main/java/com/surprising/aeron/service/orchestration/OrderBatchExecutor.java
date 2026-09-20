@@ -309,7 +309,7 @@ final class OrderBatchExecutor {
                 batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount++] =
                         owner.matchingAdapter.placeWithEvidence(
                         shard, pending.sequence(), pending.command().header().commandId(),
-                        command.instrumentChangeId(), pending.command().header().submittedAtEpochMillis(),
+                        pending.command().header().submittedAtEpochMillis(),
                         userId, matchingOrder);
             }
             if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
@@ -568,7 +568,6 @@ final class OrderBatchExecutor {
             if (owner.matchingAdapter.matcherShardId(symbol) != shard) break;
             batch.preparedAdmittedOrders[end - start] = order;
             item.cancelSymbol = symbol;
-            item.cancelInstrumentChangeId = order.instrumentChangeId();
             end++;
         }
         if (end == start) throw new IllegalStateException("validated cancel chunk is empty");
@@ -592,7 +591,7 @@ final class OrderBatchExecutor {
             for (int index = start; index < chunkEnd; index++) {
                 OrderBatchItem item = batch.items.get(index);
                 var result = owner.matchingAdapter.cancelWithEvidence(shard, pending.sequence(),
-                        pending.command().header().commandId(), item.orderId, item.cancelInstrumentChangeId,
+                        pending.command().header().commandId(), item.orderId,
                         pending.command().header().submittedAtEpochMillis(),
                         pending.command().header().userId(), item.cancelSymbol);
                 if (batch.pipelinedMatchingResultCount == batch.pipelinedMatchingResults.length)
@@ -723,7 +722,6 @@ final class OrderBatchExecutor {
             if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(batch, item, status, resultCode);
             batch.replacementAdmission = null;
             item.cancelSymbol = null;
-            item.cancelInstrumentChangeId = 0;
             batch.nextIndex++;
         } catch (RuntimeException exception) {
             // The matcher already applied this item. Operational settlement failures also require
@@ -1231,7 +1229,6 @@ final class OrderBatchExecutor {
             prepareOrderBatchMatchingCommand(
             CommandSlot pending, OrderBatchPending batch, OrderBatchItem item, int shard) {
         long orderId;
-        long instrumentChangeId;
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
         List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
                 owner.matcherCommands.preMatchingCancellationOrders(pending);
@@ -1239,7 +1236,6 @@ final class OrderBatchExecutor {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 orderId = command.orderId();
-                instrumentChangeId = command.instrumentChangeId();
                 var matchingOrder = owner.matchingOrder(item.orderId());
                 submission = () -> owner.matchingAdapter.place(
                         pending.command().header().userId(), matchingOrder);
@@ -1249,7 +1245,6 @@ final class OrderBatchExecutor {
                 OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
                 PlaceOrderCommand replacement = owner.replacementForAmend(command, order);
                 orderId = replacement.orderId();
-                instrumentChangeId = replacement.instrumentChangeId();
                 String symbol = owner.runtimeOrderSymbol(order);
                 var matchingOrder = batch.replacementAdmission.matchingOrder();
                 submission = () -> owner.matchingAdapter.replaceOrder(
@@ -1266,7 +1261,7 @@ final class OrderBatchExecutor {
             }
         };
         return () -> owner.matchingAdapter.executeShardWithEvidenceSync(shard, pending.sequence(),
-                pending.command().header().commandId(), orderId, instrumentChangeId,
+                pending.command().header().commandId(), orderId,
                 pending.command().header().submittedAtEpochMillis(), guarded);
     }
 }

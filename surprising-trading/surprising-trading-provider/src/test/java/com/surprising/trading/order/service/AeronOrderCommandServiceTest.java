@@ -221,7 +221,7 @@ class AeronOrderCommandServiceTest {
                 OrderType.LIMIT, TimeInForce.GTX, 59_000, 4, MarginMode.CROSS, PositionSide.NET,
                 false, true);
         com.surprising.trading.api.model.OrderResponse original = new com.surprising.trading.api.model.OrderResponse(
-                77, 1001, "old", "BTC-USDT", 7, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                77, 1001, "old", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                 60_000, 5, 0, 5, MarginMode.CROSS, PositionSide.NET, -10, 25,
                 false, false, OrderStatus.ACCEPTED, null,
                 java.time.Instant.ofEpochMilli(1_000), java.time.Instant.ofEpochMilli(1_000));
@@ -231,7 +231,7 @@ class AeronOrderCommandServiceTest {
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
                             UUID.fromString("10000000-0000-0000-0000-000000000001"),
-                            command.replacement().orderId(), 7, 1, 17, 19, List.of(
+                            command.replacement().orderId(), 1, 17, 19, List.of(
                             orderView(77, originalRequest),
                             orderView(command.replacement().orderId(), replacementRequest)), List.of()))));
         });
@@ -268,7 +268,7 @@ class AeronOrderCommandServiceTest {
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
                             UUID.fromString("10000000-0000-0000-0000-000000000002"),
-                            command.replacementOrderId(), 7, 1, 23, 29, List.of(
+                            command.replacementOrderId(), 1, 23, 29, List.of(
                             orderView(77, originalRequest), orderView(command.replacementOrderId(), replacementRequest)),
                             List.of()))));
         });
@@ -308,7 +308,7 @@ class AeronOrderCommandServiceTest {
     }
 
     private static CoreOrderStateView orderView(ProductLine productLine, long orderId, PlaceOrderRequest request) {
-        return new CoreOrderStateView(orderId, productLine, request.userId(), request.symbol(), 7,
+        return new CoreOrderStateView(orderId, productLine, request.userId(), request.symbol(),
                 CoreOrderSide.valueOf(request.side().name()), request.priceTicks(), request.quantitySteps(),
                 0, request.quantitySteps(), request.reduceOnly(), CoreMarginMode.valueOf(request.marginMode().name()),
                 CorePositionSide.valueOf(request.positionSide().name()), CoreOrderType.valueOf(request.orderType().name()),
@@ -321,6 +321,6 @@ class AeronOrderCommandServiceTest {
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
                         UUID.fromString("10000000-0000-0000-0000-000000000003"),
-                        order.orderId(), order.instrumentChangeId(), 1, 31, 37, List.of(order), executions)));
+                        order.orderId(), 1, 31, 37, List.of(order), executions)));
     }
 }

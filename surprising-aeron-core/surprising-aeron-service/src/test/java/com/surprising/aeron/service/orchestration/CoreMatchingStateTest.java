@@ -22,7 +22,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
@@ -151,7 +151,7 @@ class CoreMatchingStateTest {
             assertThat(state.terminalRetention().containsOrder(202, 8, "client-202")).isTrue();
             CoreMessage duplicateClientId = message(state, 5, 8, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            203, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, false,
+                            203, "BTC-USDT", CoreOrderSide.BUY, 100, 1, false,
                             com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                             com.surprising.aeron.protocol.CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "client-202")));
@@ -748,7 +748,7 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
             apply(state, 5, 22, CoreMessageType.REPLACE_ORDER,
                     TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(202,
-                            new PlaceOrderCommand(203, "BTC-USDT", 1, CoreOrderSide.BUY, 110, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""))));
+                            new PlaceOrderCommand(203, "BTC-USDT", CoreOrderSide.BUY, 110, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""))));
 
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
@@ -838,7 +838,7 @@ class CoreMatchingStateTest {
             String reservationAsset,
             long reservedUnits) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
     }
 
     private static byte[] place(
@@ -854,7 +854,7 @@ class CoreMatchingStateTest {
             long matchingPriceTicks,
             boolean postOnly) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, orderType, timeInForce, postOnly, "client-" + orderId));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, orderType, timeInForce, postOnly, "client-" + orderId));
     }
 
     private static byte[] placeWithFees(
@@ -873,7 +873,7 @@ class CoreMatchingStateTest {
             long makerFeeRatePpm,
             long takerFeeRatePpm) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, reduceOnly, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, orderType, timeInForce, postOnly, "client-" + orderId));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps, reduceOnly, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, orderType, timeInForce, postOnly, "client-" + orderId));
     }
 
     private static byte[] place(
@@ -886,7 +886,7 @@ class CoreMatchingStateTest {
             String reservationAsset,
             long reservedUnits) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, reduceOnly, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps, reduceOnly, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
     }
 
     private static void applyInstrument(TradingCoreRuntime state) {
@@ -897,20 +897,20 @@ class CoreMatchingStateTest {
         ProductLine productLine = state.productLine();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1, type.ordinal(),
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT", type.ordinal(),
                 "BTC", "USDT", settleAsset(productLine), 1, 1, type.isInverse() ? 1_000 : 1,
                 100_000, 50_000, makerFeeRatePpm, takerFeeRatePpm, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
-        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), productLine, CommandSource.OPERATIONS, 88, 1, 1,
-                1_000, 1), TradingCommandCodec.encodeUpsertInstrument(instrument));
+                1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument));
         assertThat(state.apply(message).status()).isEqualTo(ResponseStatus.APPLIED);
         CoreMessage mark = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), productLine, CommandSource.KAFKA_INPUT_BRIDGE, 89, 1, 1,
                 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
                         type.isOption()
-                                ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 1, 1_000)
-                                : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_000)));
+                                ? new ApplyMarkPriceCommand("BTC-USDT", 100, 100, 100, 1, 1_000)
+                                : new ApplyMarkPriceCommand("BTC-USDT", 100, 1, 1_000)));
         assertThat(state.apply(mark).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 

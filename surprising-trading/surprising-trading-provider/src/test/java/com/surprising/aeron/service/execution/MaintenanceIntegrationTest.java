@@ -45,7 +45,7 @@ class MaintenanceIntegrationTest {
             var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","BTC-USDT",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
-                    0,0,0,"","test",0,0,0,0,1,1,0,0);
+                    0,0,0,"","test",0,0,0,0,1,0,0);
             submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodeState(trigger));
             var request = new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","upgrade test");
             var task = fixture.service.create("1",request);
@@ -164,7 +164,7 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             var progress=CoreFundingProgressCodec.decode(submit(0,CoreMessageType.APPLY_FUNDING,
-                    TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",1,10_000,0,1))).data());
+                    TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",10_000,0,1))).data());
             assertThat(progress.complete()).isFalse();
             var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","wait for funding"));
             fixture.service.tick();
@@ -173,7 +173,7 @@ class MaintenanceIntegrationTest {
             for(int n=0;!progress.complete();n++) {
                 assertThat(n).isLessThan(10);
                 progress=CoreFundingProgressCodec.decode(submit(0,CoreMessageType.APPLY_FUNDING,
-                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",1,10_000,progress.nextCursorUserId(),1))).data());
+                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",10_000,progress.nextCursorUserId(),1))).data());
             }
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
@@ -185,7 +185,7 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(0,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("BTC-USDT",1,10_000,2,1_700_000_000_100L)));
+                    new ApplyMarkPriceCommand("BTC-USDT",10_000,2,1_700_000_000_100L)));
             submit(0,CoreMessageType.CONTINUE_RISK_SCAN,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16)));
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
             var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.SETTLEMENT,"120","wait for liquidation"));
@@ -250,8 +250,8 @@ class MaintenanceIntegrationTest {
     private Fixture fixture(ProductLine product) throws Exception {
         line=product; sequence=0; state=new TradingCoreRuntime(line);
         var type=ContractType.valueOf(line.contractTypeCode()); String asset=type.isInverse()?"BTC":"USDT";
-        submit(1,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT",1,type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0)));
-        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("BTC-USDT",1,100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("BTC-USDT",1,100,1,1_700_000_000_000L)));
+        submit(1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0)));
+        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("BTC-USDT",100,1,1_700_000_000_000L)));
         submit(11,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(line==ProductLine.SPOT?"BTC":asset,20_000)));
         submit(22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000)));
         return new Fixture();
@@ -304,8 +304,8 @@ class MaintenanceIntegrationTest {
         var header=CoreMessageHeader.query(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,998,++sequence,user,1_700_000_000_000L+sequence,sequence);
         var response=state.apply(new CoreMessage(header,bytes)); assertThat(response.status()).as("%s: %s",type,response.resultCode()).isEqualTo(ResponseStatus.OK); return response;
     }
-    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"BTC-USDT",1,side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
-    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",1,side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
-    private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",1,side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private long total() { var s=state.tradingState(); String asset=ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT"; var t=s.treasuryState(); return s.users().values().stream().mapToLong(u -> u.totalUnits(asset)).sum()+t.feeBalances().getOrDefault(asset,0L)+t.insuranceBalances().getOrDefault(asset,0L)+t.clearingPnlBalances().getOrDefault(asset,0L)+t.roundingResidualBalances().getOrDefault(asset,0L); }
 }

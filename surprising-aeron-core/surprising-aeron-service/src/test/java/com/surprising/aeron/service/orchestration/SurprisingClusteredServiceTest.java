@@ -27,7 +27,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
@@ -299,7 +299,7 @@ class SurprisingClusteredServiceTest {
                     com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST,
                     1001, 0, 0, 0, 91, "", "", new byte[0]))).isTrue();
             var place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "progress")));
             byte[] encoded = CoreMessageCodec.encode(place);
@@ -354,7 +354,7 @@ class SurprisingClusteredServiceTest {
             replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",10000))));
             replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20000,"BTC-USDT",1,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20000,"BTC-USDT",
                     CoreOrderSide.BUY,1000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"overflow-order"))));
             replayWithoutSession(service,command(CoreMessageType.CANCEL_ORDER,3,1001,
@@ -384,7 +384,7 @@ class SurprisingClusteredServiceTest {
                 assertThat(view.balances().getFirst().availableUnits()).isEqualTo(10_000);
             });
             replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20_000,"BTC-USDT",1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20_000,"BTC-USDT",
                     CoreOrderSide.BUY,1_000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"push-order"))));
             assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
@@ -425,7 +425,7 @@ class SurprisingClusteredServiceTest {
                 for (int cycle = 0; cycle < 256; cycle++) {
                     long orderId = 20_000 + cycle;
                     replayWithoutSession(service, command(CoreMessageType.PLACE_ORDER, 2 + cycle * 2, 1001,
-                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT",
                                     CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                                     false, "replay-" + orderId))));
@@ -541,7 +541,7 @@ class SurprisingClusteredServiceTest {
             onSessionMessage(service, responses, metrics);
             assertThat(responses).hasSize(1);
             CoreMessage later = command(CoreMessageType.PLACE_ORDER, 3, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(18_002, "BTC-USDT", 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(18_002, "BTC-USDT",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "later")));
             onSessionMessage(service, responses, later);
@@ -596,7 +596,7 @@ class SurprisingClusteredServiceTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                             false, "same-callback")));
@@ -627,7 +627,7 @@ class SurprisingClusteredServiceTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000012"))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
             assertThat(state.pendingMatchingCount()).isZero();
@@ -906,7 +906,7 @@ class SurprisingClusteredServiceTest {
                 .status()).isEqualTo(ResponseStatus.APPLIED);
         UUID commandId = UUID.randomUUID();
         CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "service-" + orderId)), commandId);
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "service-" + orderId)), commandId);
         assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         return state.matchingSequence(commandId);
     }
@@ -957,23 +957,23 @@ class SurprisingClusteredServiceTest {
     }
 
     private static CoreMessage timerInstrument() {
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.fromString("00000000-0000-0000-0000-000000000001"), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
-                TradingCommandCodec.encodeUpsertInstrument(instrument));
+                TradingCommandCodec.encodeRegisterInstrument(instrument));
     }
 
 
     private static CoreMessage instrument() {
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
-                TradingCommandCodec.encodeUpsertInstrument(instrument));
+                TradingCommandCodec.encodeRegisterInstrument(instrument));
     }
 
     private static CoreMessage command(CoreMessageType type, long sequence, long userId, byte[] payload) {

@@ -57,7 +57,7 @@ public class ExpiringContractSettlementFanoutService {
                     .getBytes(StandardCharsets.UTF_8));
             CoreResponse response = aeron.command(CoreMessageType.SETTLE_INSTRUMENT, commandId, 0,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                            settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract,
+                            settlementId, symbol, settlementPriceTicks, optionCashUnitsPerContract,
                             cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS, orderCursor,
                             SettleInstrumentCommand.DEFAULT_MAX_ORDERS)));
             if (response == null) throw new IllegalStateException("Aeron settlement response missing");

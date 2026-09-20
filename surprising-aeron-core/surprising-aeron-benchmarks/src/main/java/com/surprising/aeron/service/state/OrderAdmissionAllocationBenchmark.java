@@ -7,8 +7,8 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -35,13 +35,15 @@ import org.openjdk.jmh.infra.Blackhole;
 public class OrderAdmissionAllocationBenchmark {
     private ResolvedPlaceOrder resolved;
     private final UUID commandId = new UUID(1, 1);
-    private final ReservationRuntime reservation = new ReservationRuntime(11, 7, 0, 100);
+    private ReservationRuntime reservation;
 
     @Setup public void setup() {
-        var instrument = CoreInstrumentState.from(ProductLine.LINEAR_PERPETUAL,
-                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+        var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
-        var intent = new PlaceOrderCommand(11, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1,
+        reservation = new ReservationRuntime(11, 7, 0, ReservationKind.DERIVATIVE_MARGIN,
+                0, 100, 0, 0, 1);
+        var intent = new PlaceOrderCommand(11, "BTC-USDT", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
         resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,

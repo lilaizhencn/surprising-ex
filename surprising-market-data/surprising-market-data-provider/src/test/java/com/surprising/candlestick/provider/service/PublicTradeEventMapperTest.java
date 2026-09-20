@@ -24,7 +24,6 @@ class PublicTradeEventMapperTest {
                 "trade:1",
                 1L,
                 "BTC-USDT",
-                7L,
                 OrderSide.BUY,
                 6_000_000L,
                 250_000L,

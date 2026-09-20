@@ -17,7 +17,7 @@ class CoreMaintenanceCodecTest {
         assertThatThrownBy(()->CoreMaintenanceCodec.decodeCommand(Arrays.copyOf(bytes,bytes.length+1))).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void boundsPaginationAndPreservesLongValues() {
-        var page=new CoreMaintenanceCodec.Page(new CoreInstrumentMaintenance(Long.MAX_VALUE,CoreInstrumentMaintenance.Mode.SETTLEMENT,Long.MAX_VALUE),Long.MAX_VALUE,List.of(9007199254740997L),true);
+        var page=new CoreMaintenanceCodec.Page(new CoreInstrumentMaintenance(Long.MAX_VALUE,CoreInstrumentMaintenance.Mode.SETTLEMENT,Long.MAX_VALUE),List.of(9007199254740997L),true);
         assertThat(CoreMaintenanceCodec.decodePage(CoreMaintenanceCodec.encodePage(page))).isEqualTo(page);
         assertThatThrownBy(()->new CoreMaintenanceCodec.Query("BTC-USDT",0,33)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(()->new CoreMaintenanceCodec.Query("BTC-USDT",-1,1)).isInstanceOf(IllegalArgumentException.class);

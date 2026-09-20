@@ -35,7 +35,6 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.model.ValidationResult;
@@ -119,7 +118,7 @@ class OrderServiceTest {
     void closePositionReadsAccountOnceAndSubmitsAuthoritativeReduceOnlyOrder(ProductLine line, long quantity) {
         var gateway = org.mockito.Mockito.mock(OrderAeronGateway.class);
         var position = new com.surprising.aeron.protocol.CorePositionView(
-                "BTC-USDT", "USDT", 7, quantity, 100, 500, 0, 50);
+                "BTC-USDT", "USDT", quantity, 100, 500, 0, 50);
         when(gateway.userState(1001L)).thenReturn(new com.surprising.aeron.protocol.CoreUserStateView(
                 line, 1001, 7, List.of(), List.of(), List.of(position)));
         TradingOrderProperties properties = new TradingOrderProperties();
@@ -350,7 +349,7 @@ class OrderServiceTest {
 
     private OrderResponse response(long orderId, String clientOrderId, OrderStatus status) {
         Instant now = Instant.parse("2026-08-02T00:00:00Z");
-        return new OrderResponse(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
+        return new OrderResponse(orderId, 1001L, clientOrderId, "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, 100L, 200L, true, false, status, null, now, now);
     }

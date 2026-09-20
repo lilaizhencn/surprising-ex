@@ -268,7 +268,6 @@ class CommittedTradeExportIntegrationTest {
         return new PlaceOrderCommand(
                 id,
                 "BTC-USDT",
-                1,
                 side,
                 100,
                 3,
@@ -284,7 +283,7 @@ class CommittedTradeExportIntegrationTest {
     private static CoreMessage instrument() {
         return new CoreMessage(
                 CoreMessageHeader.command(
-                        CoreMessageType.UPSERT_INSTRUMENT,
+                        CoreMessageType.REGISTER_INSTRUMENT,
                         new UUID(88, 1),
                         ProductLine.SPOT,
                         CommandSource.OPERATIONS,
@@ -293,10 +292,9 @@ class CommittedTradeExportIntegrationTest {
                         0,
                         1700000000000L,
                         1),
-                TradingCommandCodec.encodeUpsertInstrument(
-                        new UpsertInstrumentCommand(
+                TradingCommandCodec.encodeRegisterInstrument(
+                        new RegisterInstrumentCommand(
                                 "BTC-USDT",
-                                1,
                                 ContractType.SPOT.ordinal(),
                                 "BTC",
                                 "USDT",

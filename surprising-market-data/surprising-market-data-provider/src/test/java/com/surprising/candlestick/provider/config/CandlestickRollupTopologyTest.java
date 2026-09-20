@@ -65,7 +65,7 @@ class CandlestickRollupTopologyTest {
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
             trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t1", 1, "BTC-USDT", 1, OrderSide.BUY, 2, 1, tradeTime, "trace"));
+                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace"));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
 
             driver.advanceWallClockTime(Duration.ofSeconds(1));
@@ -210,7 +210,7 @@ class CandlestickRollupTopologyTest {
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
             trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t1", 1, "BTC-USDT", 1, OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
+                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.CLOSED);
@@ -219,7 +219,7 @@ class CandlestickRollupTopologyTest {
             assertThat(rollup.status()).isEqualTo(CandleStatus.PARTIAL);
 
             trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t2", 2, "BTC-USDT", 1, OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
+                    "t2", 2, "BTC-USDT", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
             assertThat(output.readValuesToList()).isEmpty();
             verify(sink, times(1)).upsertBatch(org.mockito.ArgumentMatchers.anyList());
         }

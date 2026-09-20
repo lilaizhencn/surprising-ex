@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 class ReservationRuntimeTest {
     @Test void unchangedAmountsReuseTheImmutableVersionAndChangesPreserveTheOldOne() {
-        var original = new ReservationRuntime(11, 7, 0, 100);
+        var original = CoreStateTestFixtures.reservation(11, 7, 0, 100);
         assertThat(original.release(0)).isSameAs(original);
         assertThat(original.consume(0)).isSameAs(original);
         assertThat(original.withRemainingUnits(100)).isSameAs(original);

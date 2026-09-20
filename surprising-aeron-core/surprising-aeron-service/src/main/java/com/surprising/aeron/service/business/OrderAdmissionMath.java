@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
@@ -12,7 +12,7 @@ public final class OrderAdmissionMath {
     /**
      * 按单步费用计算冻结额度，避免先计算整笔费用时的分片舍入造成少冻结。
      */
-    public static long fragmentationSafeFeeDebit(CoreInstrumentState instrument,
+    public static long fragmentationSafeFeeDebit(CoreInstrument instrument,
                                                   ResolvedPlaceOrder order) {
         long feePerStep = CoreContractMath.feeDeltaUnits(
                 instrument, order.reservationPriceTicks(), 1, order.takerFeeRatePpm());

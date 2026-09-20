@@ -17,7 +17,8 @@ class LanePublishedMapTest {
                 runtime.realtimeCapture(capture);
                 var position = new PositionRuntime(7, symbol, asset,
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET, 1, 2, 100, 200, 17, 20);
+                        com.surprising.aeron.protocol.CorePositionSide.NET,
+                        CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 17, 20);
                 runtime.publishedPositions.put(1, position.snapshot());
                 var delta = new TradingRuntimeState.LaneDelta();
                 delta.positions.put(1, null);
@@ -120,15 +121,15 @@ class LanePublishedMapTest {
                 var orderRemovals = recordRemovals(runtime.publishedOrders);
                 var reservationRemovals = recordRemovals(runtime.publishedReservations);
                 for (long id = 1; id <= 5; id++) {
-                    runtime.publishedOrders.put(id, new OrderRuntime(id, 7, 0, 1).snapshot());
-                    runtime.publishedReservations.put(id, new ReservationRuntime(id, 7, 0, 1).snapshot());
+                    runtime.publishedOrders.put(id, CoreStateTestFixtures.order(id, 7, 0, 1).snapshot());
+                    runtime.publishedReservations.put(id, CoreStateTestFixtures.reservation(id, 7, 0, 1).snapshot());
                 }
                 var resting = runtime.publishedOrders.get(4);
                 var delta = new TradingRuntimeState.LaneDelta();
                 // 1: deleted with an after-image; 2: explicit null plus a route deletion;
                 // 3: route only; 4: unchanged live value; 5: null only; 6: already absent.
-                delta.orders.put(1, new OrderRuntime(1, 7, 0, 1, true).snapshot());
-                delta.reservations.put(1, new ReservationRuntime(1, 7, 0, 1).snapshot());
+                delta.orders.put(1, CoreStateTestFixtures.order(1, 7, 0, 1, true).snapshot());
+                delta.reservations.put(1, CoreStateTestFixtures.reservation(1, 7, 0, 1).snapshot());
                 for (long id : new long[]{2, 5, 6}) {
                     delta.orders.put(id, null);
                     delta.reservations.put(id, null);
@@ -194,8 +195,8 @@ class LanePublishedMapTest {
     @Test void settlementReusesPublicationAndDiscardsUnpublishedReferences() {
         var runtime = new TradingRuntimeState();
         var delta = new TradingRuntimeState.LaneDelta();
-        runtime.publishedOrders.put(99, new OrderRuntime(99, 7, 0, 1));
-        runtime.publishedReservations.put(99, new ReservationRuntime(99, 7, 0, 1));
+        runtime.publishedOrders.put(99, CoreStateTestFixtures.order(99, 7, 0, 1));
+        runtime.publishedReservations.put(99, CoreStateTestFixtures.reservation(99, 7, 0, 1));
         delta.removeOrderRoute(99);
         delta.removeReservationRoute(99);
         delta.users.put(7, new UserRuntime(7));

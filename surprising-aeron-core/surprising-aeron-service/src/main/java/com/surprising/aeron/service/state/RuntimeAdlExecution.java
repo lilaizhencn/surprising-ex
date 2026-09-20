@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
@@ -70,8 +70,7 @@ public final class RuntimeAdlExecution {
                 || command.coveredUnits() > liquidation.deficitUnits()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()));
         MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
         if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
@@ -101,7 +100,7 @@ public final class RuntimeAdlExecution {
         private ExecuteAdlCommand command;
         private TradingRuntimeState runtime;
         private LiquidationRuntime liquidation;
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private MarkPriceRuntime mark;
         private long positionKey;
         private int settleAssetId;
@@ -110,7 +109,7 @@ public final class RuntimeAdlExecution {
         private boolean done;
 
         private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
-                LiquidationRuntime liquidation, CoreInstrumentState instrument, MarkPriceRuntime mark,
+                LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
                 long positionKey, int settleAssetId, int targetLane) {
             this.command = command;
             this.runtime = runtime;
@@ -155,7 +154,7 @@ public final class RuntimeAdlExecution {
     }
 
     private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingRuntimeState runtime,
-            LiquidationRuntime liquidation, CoreInstrumentState instrument, MarkPriceRuntime mark,
+            LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
             long positionKey, int settleAssetId, RuntimeTreasuryDelta reuse) {
         PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.marginMode() != command.marginMode()
@@ -197,7 +196,7 @@ public final class RuntimeAdlExecution {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
+                position.marginMode(), position.positionSide(), position.instrument(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(),
                         instrument.contractType().isOption() ? 0 : coverCapacity),
@@ -215,20 +214,17 @@ public final class RuntimeAdlExecution {
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
 
         LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
+                current.symbolId(), current.marginMode(), current.positionSide(), current.instrument(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
         runtime.replaceLiquidation(nextLiquidation);
     }
 
-    private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime, String symbol, long version) {
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

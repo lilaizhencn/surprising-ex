@@ -11,8 +11,8 @@ class LaneAdmissionAggregateTest {
     @Test void orderAndReservationChurnRetainsTablesAndUnrelatedLiveState() throws Exception {
         var lane = new AccountLaneState(0, 256);
         lane.bindOwner();
-        var held = new OrderRuntime(1, 7, 3, 50);
-        var heldReservation = new ReservationRuntime(1, 7, 3, 50);
+        var held = CoreStateTestFixtures.order(1, 7, 3, 50);
+        var heldReservation = CoreStateTestFixtures.reservation(1, 7, 3, 50);
         lane.putOrder(held);
         lane.reservations.put(1, heldReservation);
         lane.rebuildLocalHashes();
@@ -22,8 +22,8 @@ class LaneAdmissionAggregateTest {
         Object orderStorage = values.get(lane.orders);
         Object reservationStorage = values.get(lane.reservations);
         for (long id = 2; id < 20_000; id++) {
-            lane.putOrder(new OrderRuntime(id, 7, 3, 50));
-            lane.reservations.put(id, new ReservationRuntime(id, 7, 3, 50));
+            lane.putOrder(CoreStateTestFixtures.order(id, 7, 3, 50));
+            lane.reservations.put(id, CoreStateTestFixtures.reservation(id, 7, 3, 50));
             lane.removeOrder(id);
             lane.reservations.remove(id);
         }
@@ -77,7 +77,7 @@ class LaneAdmissionAggregateTest {
         lane.bindOwner();
         var first = order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false);
         lane.putOrder(first);
-        lane.putOrder(new OrderRuntime(2, 7, 3, 50));
+        lane.putOrder(CoreStateTestFixtures.order(2, 7, 3, 50));
         lane.putOrder(first.withExecution(60, 40, CoreOrderStatus.OPEN, 2));
         var index = lane.admissionOrderIndex(3);
         var summary = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
@@ -105,7 +105,7 @@ class LaneAdmissionAggregateTest {
     }
 
     private static OrderRuntime order(CoreOrderSide side, CorePositionSide position, CoreMarginMode margin, boolean reduce) {
-        return new OrderRuntime(1, 7, 3, 1, side, 100, reduce, margin, position,
+        return new OrderRuntime(1, 7, 3, CoreStateTestFixtures.runtimeInstrument(), side, 100, reduce, margin, position,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 0, 0, 100, 0, 100, false);
     }
 }

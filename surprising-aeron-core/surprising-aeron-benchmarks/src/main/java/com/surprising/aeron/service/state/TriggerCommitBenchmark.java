@@ -4,6 +4,8 @@ import com.surprising.aeron.service.state.account.UserRuntime;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +27,7 @@ public class TriggerCommitBenchmark {
     @Param("4") public int accountLanes;
     private TradingRuntimeState runtime;
     private List<Long> users, triggerIds;
+    private CoreInstrument instrument;
     private long sequence;
 
     @Setup(Level.Trial)
@@ -32,6 +35,9 @@ public class TriggerCommitBenchmark {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, accountLanes,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
         runtime = new TradingRuntimeState(topology);
+        instrument = CoreInstrument.from(ProductLine.SPOT,
+                new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         var accounts = new java.util.ArrayList<Long>();
         var ids = new java.util.ArrayList<Long>();
         for (int lane = 0; lane < accountLanes; lane++) {
@@ -52,7 +58,7 @@ public class TriggerCommitBenchmark {
         for (int i = 0; i < users.size(); i++) {
             long id = triggerIds.get(i);
             runtime.putTriggerOrder(new CoreTriggerOrderState(id, ProductLine.SPOT, users.get(i),
-                    "trigger-" + id, "", "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                    "trigger-" + id, "", "BTC-USDT", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1, 1, 1));

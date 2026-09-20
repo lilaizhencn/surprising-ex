@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
@@ -331,11 +333,11 @@ public final class TreasuryRuntime {
         }
     }
 
-    public record FundingProgressRuntime(long settlementId, long instrumentChangeId, long fundingRatePpm,
+    public record FundingProgressRuntime(long settlementId, CoreInstrument instrument, long fundingRatePpm,
                                          int accountLaneId, long nextCursorUserId, UUID commandId,
                                          long markPriceTicks, long priceSequence) {
         public FundingProgressRuntime {
-            if (settlementId <= 0 || instrumentChangeId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
+            if (settlementId <= 0 || instrument == null || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid runtime funding progress");
@@ -343,28 +345,28 @@ public final class TreasuryRuntime {
         }
     }
 
-    public record LifecycleProgressRuntime(long settlementId, long instrumentChangeId, long settlementPriceTicks,
+    public record LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
                                            long optionCashUnitsPerContract, boolean ordersComplete,
                                            int accountLaneId, long nextCursorOrderId,
                                            long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
-        public LifecycleProgressRuntime(long settlementId, long instrumentChangeId, long settlementPriceTicks,
+        public LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
                                         long optionCashUnitsPerContract, boolean ordersComplete, int accountLaneId,
                                         long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentChangeId, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
+            this(settlementId, instrument, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
                     accountLaneId, nextCursorOrderId, nextCursorUserId, commandId, 0);
         }
         public LifecycleProgressRuntime {
-            if (settlementId <= 0 || instrumentChangeId <= 0 || settlementPriceTicks < 0
+            if (settlementId <= 0 || instrument == null || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)
                     || commandId == null) throw new IllegalArgumentException("invalid lifecycle progress");
         }
-        public LifecycleProgressRuntime(long settlementId, long instrumentChangeId, long settlementPriceTicks,
+        public LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
                                         long optionCashUnitsPerContract, boolean ordersComplete,
                                         long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentChangeId, settlementPriceTicks, optionCashUnitsPerContract,
+            this(settlementId, instrument, settlementPriceTicks, optionCashUnitsPerContract,
                     ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
         }
     }

@@ -28,7 +28,7 @@ final class CoreTestCompletion {
                 if (owner.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
                 } else {
-                    PendingMatching pending = owner.pendingMatching.get(sequence);
+                    CommandSlot pending = owner.pendingMatching.get(sequence);
                     CoreMatchingResult matching = pending != null
                             && pending.orderBatch != null
                             && (pending.orderBatch.itemSettlementEvent != null
@@ -36,7 +36,6 @@ final class CoreTestCompletion {
                             ? pending.orderBatch.lastMatchingResult
                             : pending != null
                             && (pending.settlementEvent() != null || pending.cancelEvent() != null
-                            || pending.replaceEvent() != null
                             || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
                             ? owner.laneCommandContexts.required(sequence).matchingResult()
                             : awaitMatchingResult(owner, sequence);
@@ -64,7 +63,7 @@ final class CoreTestCompletion {
 
     private static CoreMatchingResult awaitMatchingResult(TradingCoreRuntime owner, long sequence) {
         long deadline = System.nanoTime() + TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS;
-        PendingMatching pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching.get(sequence);
         while (pending != null && owner.placeAdmissionOutstanding(pending)
                 && !owner.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             owner.progressPlaceBatchAdmissions();
@@ -72,13 +71,13 @@ final class CoreTestCompletion {
         }
         if (owner.hasPendingMatchingRejection(sequence)) return null;
         while (owner.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
-            PendingMatching head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
+            CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated()) {
                 owner.batches.activateOrderBatch(head.orderBatch, head, true);
             }
             owner.drainMatchingCompletions();
             if (owner.hasPendingMatchingRejection(sequence)) return null;
-            LaneCommandContextRing.Context context = owner.laneCommandContexts.required(sequence);
+            CommandSlot context = owner.laneCommandContexts.required(sequence);
             CoreMatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result != null) return result;

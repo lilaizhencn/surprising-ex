@@ -20,7 +20,7 @@ public record ExecuteLiquidationBatchCommand(
         if (work == null) throw new IllegalArgumentException("liquidation work is required");
         List<ExecuteLiquidationBatchAction> actions = work.actions().stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
-                        action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
+                        action.triggerPriceSequence(), action.markPriceTicks(),
                         action.cursorOrderId()))
                 .toList();
         boolean continueScan = work.riskScanPending() && maxRiskScanUsers > 0;

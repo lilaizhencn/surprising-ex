@@ -28,7 +28,6 @@ public record MatcherSnapshot(
         long symbolRegistryHash,
         long symbolRouteHash,
         long userRegistryHash,
-        long instrumentRegistryHash,
         long activeOrderHash,
         String forkGitSha,
         String artifactSha256,
@@ -161,17 +160,14 @@ public record MatcherSnapshot(
     public void verifyCoreState(TradingCoreState state, long expectedCoreSequence,
                                 long expectedCoreBusinessStateHash) {
         if (state == null) throw new IllegalStateException("Core snapshot state is missing");
-        long actualInstrumentRegistryHash = instrumentRegistryHash(state);
         long actualActiveOrderHash = activeOrderHash(state);
         verifyCoreManifest(state.productLine(), expectedCoreSequence, expectedCoreBusinessStateHash);
-        if (instrumentRegistryHash != actualInstrumentRegistryHash
-                || activeOrderHash != actualActiveOrderHash) {
+        if (activeOrderHash != actualActiveOrderHash) {
             throw new IllegalStateException("Core and matcher snapshot manifests do not match"
                     + " (productLine=" + productLine + '/' + state.productLine()
                     + ", coreSequence=" + coreSequence + '/' + expectedCoreSequence
                     + ", businessStateHash=" + coreBusinessStateHash + '/' + expectedCoreBusinessStateHash
-                    + ", instrumentRegistryHash=" + instrumentRegistryHash + '/'
-                    + actualInstrumentRegistryHash + ", activeOrderHash=" + activeOrderHash + '/'
+                    + ", activeOrderHash=" + activeOrderHash + '/'
                     + actualActiveOrderHash + ')');
         }
     }
@@ -200,15 +196,6 @@ public record MatcherSnapshot(
     public static long userRegistryHash(Set<Long> users) {
         long hash = offset();
         for (Long userId : new TreeSet<>(users)) hash = mix(hash, userId);
-        return hash;
-    }
-
-    public static long instrumentRegistryHash(TradingCoreState state) {
-        long hash = offset();
-        for (var instrument : state.instruments().values()) {
-            hash = mix(hash, instrument.symbol());
-            hash = mix(hash, instrument.changeId());
-        }
         return hash;
     }
 

@@ -2,7 +2,7 @@ package com.surprising.aeron.tools.instrument;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -19,12 +19,12 @@ class InstrumentSeedCoreContractTest {
             assertThat(rows.size()).isBetween(1,512);
             for(var row:rows) {
                 var accessor=row.getClass().getDeclaredMethod("command"); accessor.setAccessible(true);
-                var command=(UpsertInstrumentCommand)accessor.invoke(row);
-                var decoded=TradingCommandCodec.decodeUpsertInstrument(TradingCommandCodec.encodeUpsertInstrument(command));
-                var state=CoreInstrumentState.from(line,decoded);
+                var command=(RegisterInstrumentCommand)accessor.invoke(row);
+                var decoded=TradingCommandCodec.decodeRegisterInstrument(TradingCommandCodec.encodeRegisterInstrument(command));
+                var state=CoreInstrument.from(line,decoded);
                 assertThat(state.contractType().productLine()).isEqualTo(line);
                 assertThat(state.baseAsset()).isNotEqualTo(state.quoteAsset());
-                assertThat(state.lastChangeId()).isGreaterThanOrEqualTo(state.changeId());
+                assertThat(state.maintenance()).isEqualTo(CoreInstrumentMaintenance.TRADING);
                 total++;
             }
         }

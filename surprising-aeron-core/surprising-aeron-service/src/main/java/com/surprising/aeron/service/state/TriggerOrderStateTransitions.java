@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;
@@ -39,7 +39,7 @@ final class TriggerOrderStateTransitions {
         if (view.clientTriggerOrderId().isBlank()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
         }
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(view.symbol()));
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(view.symbol()));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
         }
@@ -59,14 +59,8 @@ final class TriggerOrderStateTransitions {
         }
         validateTriggerPlacement(state, view, triggerOrderIndex);
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
-        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
-        if (trigger.instrumentChangeId() == 0) {
-            trigger = trigger.withExecutionSnapshot(instrument.changeId(), instrument.makerFeeRatePpm(),
-                    instrument.takerFeeRatePpm());
-        } else if (trigger.instrumentChangeId() != instrument.changeId()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
-                    "trigger order instrument version is stale");
-        }
+        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument)
+                .withExecutionSnapshot(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
         triggers.put(view.triggerOrderId(), trigger);
         return withTriggers(state, triggers);
     }
@@ -171,7 +165,8 @@ final class TriggerOrderStateTransitions {
         if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return state;
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         triggers.put(triggerOrderId, new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(),
+                current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(), current.activationPriceTicks(),
                 current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis,
                 current.orderType(), current.timeInForce(), current.priceTicks(), current.quantitySteps(),
@@ -179,7 +174,7 @@ final class TriggerOrderStateTransitions {
                 current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(), current.traceId(),
                 current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(), current.createdAtEpochMillis(),
                 Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis), Math.incrementExact(current.revision()),
-                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
+                current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }
 
@@ -208,7 +203,8 @@ final class TriggerOrderStateTransitions {
             String rejectReason, long updatedAt) {
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         triggers.put(current.triggerOrderId(), new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(),
+                current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(), current.activationPriceTicks(),
                 current.callbackRatePpm(), current.highestPriceTicks(), current.lowestPriceTicks(),
                 current.activatedAtEpochMillis(), current.orderType(), current.timeInForce(), current.priceTicks(),
@@ -216,7 +212,7 @@ final class TriggerOrderStateTransitions {
                 triggerSequence, triggeredPriceTicks, rejectReason, current.traceId(), current.expiresAtEpochMillis(),
                 status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
                         ? updatedAt : current.triggeredAtEpochMillis(), current.createdAtEpochMillis(), updatedAt,
-                Math.incrementExact(current.revision()), current.instrumentChangeId(), current.makerFeeRatePpm(),
+                Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
                 current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }

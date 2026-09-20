@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -57,8 +57,7 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
-        String symbol = order.instrument().symbol().equals(order.symbol())
-                ? order.instrument().symbol() : OrderReservation.normalizeSymbol(order.symbol());
+        String symbol = order.instrument().symbol();
         String positionIdentity = order.positionSide() == CorePositionSide.NET
                 ? symbol : symbol + ':' + order.positionSide().name();
         int symbolId = order.symbolId();
@@ -105,9 +104,8 @@ public final class RuntimeOrderAdmission {
         if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrumentState instrument = runtime.instrument(order.symbol());
-        if (instrument == null || instrument.changeId() != order.instrumentChangeId()
-                || !instrument.equals(order.instrument())) {
+        CoreInstrument instrument = runtime.instrument(order.symbol());
+        if (instrument == null || instrument != order.instrument()) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }
         if (lifecycleSettled) {
@@ -141,7 +139,7 @@ public final class RuntimeOrderAdmission {
     }
 
     private static void validateReservation(
-            boolean derivative, CoreInstrumentState instrument, ResolvedPlaceOrder order) {
+            boolean derivative, CoreInstrument instrument, ResolvedPlaceOrder order) {
         String asset = AssetBalance.normalizeAsset(order.reservationAsset());
         if (derivative) {
             if (order.reservationKind() != ReservationKind.DERIVATIVE_MARGIN) {
@@ -217,7 +215,7 @@ public final class RuntimeOrderAdmission {
     }
 
     private static void validateRiskLimits(
-            TradingRuntimeState runtime, CoreInstrumentState instrument, PositionRuntime position,
+            TradingRuntimeState runtime, CoreInstrument instrument, PositionRuntime position,
             ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
             OrderRuntime excluded, long leverage) {
         if (!runtime.productLine().isDerivative() || order.reduceOnly()) return;
@@ -257,7 +255,7 @@ public final class RuntimeOrderAdmission {
     }
 
     private static long effectiveLeverage(
-            TradingRuntimeState runtime, CoreInstrumentState instrument,
+            TradingRuntimeState runtime, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
         if (!runtime.productLine().isDerivative()) return instrument.maxLeveragePpm();
         Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));

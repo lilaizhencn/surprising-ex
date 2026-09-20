@@ -1212,7 +1212,7 @@ public class MarketMakerService {
             // AccountRpcApi 只访问账户服务本地快照，不会在报价周期内查询数据库。
             var balance = accountRpcApi.balance(accountId, instrument.baseAsset());
             long inventory = balance == null ? 0L : Math.max(0L, balance.equityUnits());
-            return new PositionResponse(accountId, symbol, instrument.changeId(),
+            return new PositionResponse(accountId, symbol,
                     strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
         }
         return accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(), PositionSide.NET.name());

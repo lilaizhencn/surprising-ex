@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.model.CoreOrderState;
@@ -14,6 +15,8 @@ import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.OrderAction;
@@ -38,18 +41,18 @@ class DeterministicExchangeCoreAdapterTest {
             int shard = direct.matcherShardId(order.symbol());
             int otherShard = composed.matcherShardId(order.symbol());
             var placement = new java.util.UUID(7, 1);
-            direct.placeWithEvidence(shard, 1, placement, 1, 1000, 7, order);
-            composed.executeShardWithEvidenceSync(otherShard, 1, placement, 901, 1, 1000,
+            direct.placeWithEvidence(shard, 1, placement, 1000, 7, order);
+            composed.executeShardWithEvidenceSync(otherShard, 1, placement, 901, 1000,
                     () -> composed.place(7, order));
             var taker = new CoreMatchingOrder(902, order.symbol(), CoreOrderSide.SELL,
                     CoreOrderType.LIMIT, CoreTimeInForce.IOC, 90, 4);
-            direct.placeWithEvidence(shard, 2, new java.util.UUID(8, 2), 1, 2000, 8, taker);
-            composed.executeShardWithEvidenceSync(otherShard, 2, new java.util.UUID(8, 2), 902, 1, 2000,
+            direct.placeWithEvidence(shard, 2, new java.util.UUID(8, 2), 2000, 8, taker);
+            composed.executeShardWithEvidenceSync(otherShard, 2, new java.util.UUID(8, 2), 902, 2000,
                     () -> composed.place(8, taker));
             for (int sequence = 3; sequence <= 4; sequence++) {
                 var id = new java.util.UUID(7, sequence);
-                var actual = direct.cancelWithEvidence(shard, sequence, id, 901, 1, sequence * 1000L, 7, order.symbol());
-                var expected = composed.executeShardWithEvidenceSync(otherShard, sequence, id, 901, 1, sequence * 1000L,
+                var actual = direct.cancelWithEvidence(shard, sequence, id, 901, sequence * 1000L, 7, order.symbol());
+                var expected = composed.executeShardWithEvidenceSync(otherShard, sequence, id, 901, sequence * 1000L,
                         () -> composed.cancelForContinuation(7, 901, order.symbol()));
                 assertThat(actual.accepted()).isEqualTo(sequence == 3);
                 assertThat(actual.accepted()).isEqualTo(expected.accepted());
@@ -70,13 +73,13 @@ class DeterministicExchangeCoreAdapterTest {
             var order = bid(901, 90);
             int shard = adapter.matcherShardId(order.symbol());
             assertThatThrownBy(() -> adapter.placeWithEvidence(shard, 0, new java.util.UUID(0, 1),
-                    1, 1000, 7, order)).isInstanceOf(IllegalArgumentException.class);
-            var placed = adapter.placeWithEvidence(shard, 1, new java.util.UUID(0, 1), 1, 1000, 7, order);
+                    1000, 7, order)).isInstanceOf(IllegalArgumentException.class);
+            var placed = adapter.placeWithEvidence(shard, 1, new java.util.UUID(0, 1), 1000, 7, order);
             assertThat(placed.accepted()).isTrue();
             assertThat(placed.nativeCommand().matcherSequence()).isEqualTo(1);
             adapter.poisonFromOwner("test divergence");
             assertThatThrownBy(() -> adapter.placeWithEvidence(shard, 2, new java.util.UUID(0, 2),
-                    1, 2000, 7, bid(902, 90))).isInstanceOf(IllegalStateException.class)
+                    2000, 7, bid(902, 90))).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher is poisoned");
         }
     }
@@ -95,8 +98,8 @@ class DeterministicExchangeCoreAdapterTest {
                 int shard = direct.matcherShardId(order.symbol());
                 int otherShard = composed.matcherShardId(order.symbol());
                 long user = i == 2 ? 8 : 7;
-                var actual = direct.placeWithEvidence(shard, i, id, 1, 1000 + i, user, order);
-                var expected = composed.executeShardWithEvidenceSync(otherShard, i, id, i, 1, 1000 + i,
+                var actual = direct.placeWithEvidence(shard, i, id, 1000 + i, user, order);
+                var expected = composed.executeShardWithEvidenceSync(otherShard, i, id, i, 1000 + i,
                         () -> composed.place(user, order));
                 assertThat(actual.accepted()).isEqualTo(expected.accepted());
                 assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
@@ -145,11 +148,11 @@ class DeterministicExchangeCoreAdapterTest {
             CoreMatchingResult previousResult = null;
             for (long id = 1; id <= 16; id++) {
                 long orderId = id;
-                previousResult = adapter.executeControlWithEvidenceSync(id, new java.util.UUID(7, id), id, 1, 1000,
+                previousResult = adapter.executeControlWithEvidenceSync(id, new java.util.UUID(7, id), id, 1000,
                         () -> adapter.place(7, new CoreMatchingOrder(orderId, first, CoreOrderSide.BUY,
                                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
             }
-            var result = adapter.executeControlWithEvidenceSync(17, new java.util.UUID(7, 17), 17, 1, 1000,
+            var result = adapter.executeControlWithEvidenceSync(17, new java.util.UUID(7, 17), 17, 1000,
                     () -> adapter.place(8, new CoreMatchingOrder(17, second, CoreOrderSide.BUY,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
             assertThat(result.accepted()).isTrue();
@@ -165,15 +168,15 @@ class DeterministicExchangeCoreAdapterTest {
     @Test
     void reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            var first = adapter.executeWithEvidenceSync(1, new java.util.UUID(0, 1), 901, 1, 1234,
+            var first = adapter.executeWithEvidenceSync(1, new java.util.UUID(0, 1), 901, 1234,
                     () -> adapter.place(7, bid(901, 90)));
-            var second = adapter.executeWithEvidenceSync(2, new java.util.UUID(0, 2), 902, 1, 5678,
+            var second = adapter.executeWithEvidenceSync(2, new java.util.UUID(0, 2), 902, 5678,
                     () -> adapter.place(7, bid(902, 90)));
             var unscoped = adapter.place(7, bid(903, 90));
             assertThat(first.nativeMatcherResult().timestamp()).isEqualTo(1234);
             assertThat(second.nativeMatcherResult().timestamp()).isEqualTo(5678);
             assertThat(unscoped.nativeMatcherResult().timestamp()).isZero();
-            var async = adapter.executeWithEvidence(3, new java.util.UUID(0, 3), 904, 1, 9876,
+            var async = adapter.executeWithEvidence(3, new java.util.UUID(0, 3), 904, 9876,
                     () -> adapter.placeAsync(7, bid(904, 90))).join();
             assertThat(async.nativeMatcherResult().timestamp()).isEqualTo(9876);
             assertThat(adapter.place(7, bid(905, 90)).nativeMatcherResult().timestamp()).isZero();
@@ -234,7 +237,6 @@ class DeterministicExchangeCoreAdapterTest {
                     3,
                     java.util.UUID.fromString("00000000-0000-0000-0000-000000000201"),
                     command.orderId(),
-                    1,
                     1_000,
                     () -> adapter.placeAsync(22, command)).join();
 
@@ -259,13 +261,13 @@ class DeterministicExchangeCoreAdapterTest {
 
             CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                    101, 7, 1_000, () -> {
+                    101, 1_000, () -> {
                         submissions.incrementAndGet();
                         return firstNative;
                     });
             CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000002"),
-                    102, 7, 1_001, () -> {
+                    102, 1_001, () -> {
                         submissions.incrementAndGet();
                         return secondNative;
                     });
@@ -297,10 +299,10 @@ class DeterministicExchangeCoreAdapterTest {
             CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
             CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000021"),
-                    201, 7, 1_000, () -> firstNative);
+                    201, 1_000, () -> firstNative);
             CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000022"),
-                    202, 7, 1_001, () -> secondNative);
+                    202, 1_001, () -> secondNative);
 
             secondNative.complete(nativeResult(2, 2));
             CoreMatchingResult secondResult = second.join();
@@ -326,9 +328,9 @@ class DeterministicExchangeCoreAdapterTest {
                         List.of(), List.of(new MatcherResult.Level(100, 2, 1)), 0, 0));
         java.util.UUID commandId = java.util.UUID.fromString("00000000-0000-0000-0000-000000000007");
         var firstProcess = new CoreMatchingResult.NativeCommand(
-                7, commandId, 101, 3, 41, 9, 1_000);
+                7, commandId, 101, 41, 9, 1_000);
         var restoredProcess = new CoreMatchingResult.NativeCommand(
-                7, commandId, 101, 3, 1, 9, 1_000);
+                7, commandId, 101, 1, 9, 1_000);
 
         long firstDigest = MatcherPrefixDigest.next(MatcherPrefixDigest.initial(), firstProcess, result);
         long restoredDigest = MatcherPrefixDigest.next(
@@ -345,13 +347,13 @@ class DeterministicExchangeCoreAdapterTest {
             AtomicInteger submissions = new AtomicInteger();
             CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000011"),
-                    101, 7, 1_000, () -> {
+                    101, 1_000, () -> {
                         submissions.incrementAndGet();
                         return firstNative;
                     });
             CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000012"),
-                    102, 7, 1_001, () -> {
+                    102, 1_001, () -> {
                         submissions.incrementAndGet();
                         return secondNative;
                     });
@@ -359,7 +361,7 @@ class DeterministicExchangeCoreAdapterTest {
             firstNative.complete(result(false, "EXCHANGE_CORE_FAILURE"));
             CompletableFuture<CoreMatchingResult> third = adapter.executeWithEvidence(
                     3, java.util.UUID.fromString("00000000-0000-0000-0000-000000000013"),
-                    103, 7, 1_002, () -> {
+                    103, 1_002, () -> {
                         submissions.incrementAndGet();
                         return CompletableFuture.completedFuture(result(true, "SUCCESS"));
                     });
@@ -400,7 +402,7 @@ class DeterministicExchangeCoreAdapterTest {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             beforeSnapshot = adapter.executeWithEvidence(
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000100"),
-                    100, 1, 1_000, () -> adapter.placeAsync(7, bid(100))).join();
+                    100, 1_000, () -> adapter.placeAsync(7, bid(100))).join();
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = adapter.snapshotAsync(
                     91, 1, state.businessStateHash(), state, activeOrders(state)).join();
@@ -432,7 +434,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(snapshot.bookStateHash());
             CoreMatchingResult afterRestore = restored.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000101"),
-                    101, 1, 1_001, () -> restored.placeAsync(8, bid(101, 90))).join();
+                    101, 1_001, () -> restored.placeAsync(8, bid(101, 90))).join();
             assertThat(afterRestore.matcherPrefix().before()).isEqualTo(
                     snapshot.progress(afterRestore.nativeCommand().matcherShardId()).prefixDigest());
         }
@@ -493,7 +495,7 @@ class DeterministicExchangeCoreAdapterTest {
                 divergent.businessStateHash(),
                 snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(),
                 snapshot.symbolRouteHash(), snapshot.userRegistryHash(),
-                MatcherSnapshot.instrumentRegistryHash(divergent), MatcherSnapshot.activeOrderHash(divergent),
+                MatcherSnapshot.activeOrderHash(divergent),
                 snapshot.forkGitSha(), snapshot.artifactSha256(), snapshot.matcherConfigHash(),
                 snapshot.symbols(), snapshot.users(), snapshot.modules());
 
@@ -520,7 +522,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static CoreOrderState order(long orderId) {
-        return new CoreOrderState(orderId, ProductLine.SPOT, 7, "BTC-USDT", 1,
+        return new CoreOrderState(orderId, ProductLine.SPOT, 7, "BTC-USDT",
                 CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
     }
 
@@ -548,10 +550,14 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static TradingCoreState stateWithOpenBid(long priceTicks) {
-        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT",
                 CoreOrderSide.BUY, priceTicks, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order), Map.of(),
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
+                Map.of("BTC-USDT", CoreInstrument.from(ProductLine.SPOT,
+                        new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                                "BTC", "USDT", "USDT", 1, 1, 1,
+                                100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
@@ -573,7 +579,7 @@ class DeterministicExchangeCoreAdapterTest {
     @org.junit.jupiter.api.Test
     void bindingNativeEvidencePreservesTheUnboundResultAndItsSequence() {
         CoreMatchingResult raw = nativeResult(1, 19);
-        var command = new CoreMatchingResult.NativeCommand(7, 1, 2, 19, 1, 19, 8, 1000, 0);
+        var command = new CoreMatchingResult.NativeCommand(7, 1, 2, 19, 19, 8, 1000, 0);
         var bound = raw.withEvidence(command, new CoreMatchingResult.MatcherPrefix(11, 12));
         org.assertj.core.api.Assertions.assertThat(raw.nativeSequence()).isEqualTo(19);
         org.assertj.core.api.Assertions.assertThat(raw.nativeCommand().coreSequence()).isZero();

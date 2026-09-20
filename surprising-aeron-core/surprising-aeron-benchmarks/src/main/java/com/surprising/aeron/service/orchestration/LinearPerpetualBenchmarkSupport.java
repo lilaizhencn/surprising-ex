@@ -28,7 +28,7 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
@@ -400,7 +400,7 @@ final class LinearPerpetualBenchmarkSupport {
         Harness harness = Harness.restore(template);
         CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS)));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS)));
         return new Scenario() {
             @Override
             public long run() {
@@ -437,7 +437,7 @@ final class LinearPerpetualBenchmarkSupport {
                 order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, 10, CoreTimeInForce.GTC)));
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS))));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS))));
         while (!harness.state.tradingState().riskState().scan().complete()) {
             int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
@@ -445,7 +445,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         CoreLiquidationActionView action = harness.executionWork().actions().getFirst();
         var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
-                action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
+                action.triggerPriceSequence(), action.markPriceTicks(),
                 action.cursorOrderId());
         var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
                 ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0);
@@ -483,7 +483,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS + 1))));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS + 1))));
         while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -495,7 +495,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
+                        action.symbol(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         CoreMessage command = harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS,
@@ -524,7 +524,7 @@ final class LinearPerpetualBenchmarkSupport {
         Harness harness = positionedUsers(accountLanes, liquidationUsers);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, 1, 2, BASE_EPOCH_MILLIS + 1))));
+                        new ApplyMarkPriceCommand(SYMBOL, 1, 2, BASE_EPOCH_MILLIS + 1))));
         while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -532,7 +532,7 @@ final class LinearPerpetualBenchmarkSupport {
         List<CoreLiquidationActionView> actions = harness.executionWork().actions();
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
+                        action.symbol(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         harness.execute(harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS, 0,
@@ -769,29 +769,29 @@ final class LinearPerpetualBenchmarkSupport {
             harness.close();
             throw new IllegalStateException("Core did not start with requested account lane count");
         }
-        harness.execute(harness.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                TradingCommandCodec.encodeUpsertInstrument(instrument())));
+        harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeRegisterInstrument(instrument())));
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS))));
+                        new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS))));
         return harness;
     }
 
     private static byte[] order(long orderId, CoreOrderSide side, long price, long quantity,
                                 CoreTimeInForce timeInForce) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1, side, price,
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, side, price,
                 quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 timeInForce, false, "jmh-" + orderId));
     }
 
     private static byte[] reduceOnlyOrder(long orderId, long price) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1,
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL,
                 CoreOrderSide.SELL, price, 1, true, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "jmh-ro-" + orderId));
     }
 
-    private static UpsertInstrumentCommand instrument() {
-        return new UpsertInstrumentCommand(SYMBOL, 1, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+    private static RegisterInstrumentCommand instrument() {
+        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
                 SETTLE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 
@@ -888,7 +888,7 @@ final class LinearPerpetualBenchmarkSupport {
                 if (now - mark.generatedAtEpochMillis() < 1_000) continue;
                 execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
-                                mark.instrumentChangeId(), mark.markPriceTicks(),
+                                mark.markPriceTicks(),
                                 Math.incrementExact(mark.priceSequence()), now))));
             }
         }

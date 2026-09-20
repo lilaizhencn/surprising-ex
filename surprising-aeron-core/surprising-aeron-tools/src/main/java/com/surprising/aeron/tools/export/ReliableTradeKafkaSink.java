@@ -35,10 +35,10 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
             for (var frame : frames) {
                 if (frame.productLine() != product
                         || frame.kind() != RealtimeFrame.Kind.TRADE
-                        || frame.payloadLength() != 33)
+                        || frame.payloadLength() != 25)
                     throw new IllegalArgumentException("invalid reliable trade");
                 var b = ByteBuffer.wrap(frame.payload()).order(ByteOrder.LITTLE_ENDIAN);
-                long instrument = b.getLong(), price = b.getLong(), quantity = b.getLong();
+                long price = b.getLong(), quantity = b.getLong();
                 b.getLong();
                 int side = b.get();
                 var event =
@@ -46,7 +46,6 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                                 frame.entityId(),
                                 Math.incrementExact(tradeSequence),
                                 frame.symbol(),
-                                instrument,
                                 OrderSide.valueOf(CoreOrderSide.values()[side].name()),
                                 price,
                                 quantity,

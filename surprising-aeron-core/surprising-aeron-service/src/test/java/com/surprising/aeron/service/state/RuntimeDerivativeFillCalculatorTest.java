@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.snapshot.*;
@@ -16,7 +16,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -85,7 +85,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void opensLinearPositionAndPreservesExplainedLockedFunds() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -113,7 +113,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void rejectsInsufficientReservationBeforeAnyRuntimeMutation() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -130,7 +130,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void partiallyClosesPositionAndRealizesProfit() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -157,7 +157,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void addsMarginOnlyForTheNewQuantityAtItsFillPrice() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -179,7 +179,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void reversesPositionAtFillPrice() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -206,7 +206,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void rejectsReduceOnlyReversalWithoutMutation() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        CoreInstrumentState instrument = instrument();
+        CoreInstrument instrument = instrument();
         int symbolId = identities.symbolId(instrument.symbol());
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
@@ -224,10 +224,10 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = new TradingRuntimeState();
         runtime.putUser(new UserRuntime(7));
         runtime.putBalance(new BalanceRuntime(7, assetId, 800, 200));
-        runtime.putOrder(new OrderRuntime(11, 7, symbolId, 1, CoreOrderSide.BUY, 100, false,
+        runtime.putOrder(new OrderRuntime(11, 7, symbolId, instrument(), CoreOrderSide.BUY, 100, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 10_000, 2, 0, 2, false));
-        runtime.putReservation(new ReservationRuntime(11, 7, assetId, reservationUnits));
+        runtime.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
         return runtime;
     }
 
@@ -238,17 +238,17 @@ class RuntimeDerivativeFillCalculatorTest {
         runtime.putUser(new UserRuntime(7));
         runtime.putBalance(new BalanceRuntime(7, assetId, available, locked));
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId, CoreMarginMode.CROSS,
-                CorePositionSide.NET, 1, 2, 100, 200, 0, 20));
-        runtime.putOrder(new OrderRuntime(11, 7, symbolId, 1, side, 120, reduceOnly,
+                CorePositionSide.NET, instrument(), 2, 100, 200, 0, 20));
+        runtime.putOrder(new OrderRuntime(11, 7, symbolId, instrument(), side, 120, reduceOnly,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 10_000, quantity, 0, quantity, false));
-        runtime.putReservation(new ReservationRuntime(11, 7, assetId, reservationUnits));
+        runtime.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
         return runtime;
     }
 
-    private static CoreInstrumentState instrument() {
-        return CoreInstrumentState.from(ProductLine.LINEAR_PERPETUAL,
-                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+    private static CoreInstrument instrument() {
+        return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,

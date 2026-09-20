@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
@@ -17,7 +17,7 @@ final class MarkPriceStateTransitions {
     }
 
     static TradingCoreState apply(TradingCoreState state, ApplyMarkPriceCommand command) {
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, command.symbol());
         CoreMarkPriceState current = state.riskState().markPrices().get(instrument.symbol());
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
@@ -28,7 +28,7 @@ final class MarkPriceStateTransitions {
             throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
                     "option mark requires index and same-expiry forward prices");
         }
-        marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.changeId(),
+        marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(),
                 command.markPriceTicks(), command.indexPriceTicks(), command.forwardPriceTicks(),
                 command.priceSequence(), command.generatedAtEpochMillis()));
         Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
@@ -63,13 +63,10 @@ final class MarkPriceStateTransitions {
                 state.triggerOrders());
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

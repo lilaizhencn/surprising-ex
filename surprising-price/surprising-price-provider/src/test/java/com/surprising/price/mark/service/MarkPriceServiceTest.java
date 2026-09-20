@@ -188,7 +188,7 @@ class MarkPriceServiceTest {
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class), mapper);
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
-        PublicTradeEvent event = new PublicTradeEvent("match-1", 1L, "BTC-USDT", 8L, OrderSide.BUY,
+        PublicTradeEvent event = new PublicTradeEvent("match-1", 1L, "BTC-USDT", OrderSide.BUY,
                 10_005L, 200L, now, "trace-1");
         PerpTradeEvent mapped = new PerpTradeEvent("BTC-USDT", "match-1", 1L, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY");

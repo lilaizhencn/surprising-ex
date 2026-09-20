@@ -25,7 +25,7 @@ public final class CommandReplicationLoad {
     static byte[] command(int batchSize) {
         var orders = new ArrayList<PlaceOrderCommand>();
         for (int i = 0; i < batchSize; i++) {
-            orders.add(new PlaceOrderCommand(i + 1, "BTC-USDT", 1, CoreOrderSide.BUY,
+            orders.add(new PlaceOrderCommand(i + 1, "BTC-USDT", CoreOrderSide.BUY,
                     100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "replication-" + i));
         }

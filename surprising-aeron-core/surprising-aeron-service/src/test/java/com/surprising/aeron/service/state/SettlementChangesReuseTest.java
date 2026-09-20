@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 class SettlementChangesReuseTest {
     @Test void completionCanReuseAnImmutableAdmissionWithoutFreezingItAgain() {
-        var order = new OrderRuntime(1, 7, 0, 1);
+        var order = CoreStateTestFixtures.order(1, 7, 0, 1);
         var admission = order.snapshot();
         var changes = new RuntimeIndexedChangeBuffer<OrderRuntime, Void>();
         changes.put(1, admission);
@@ -29,7 +29,7 @@ class SettlementChangesReuseTest {
                 long firstId = nextId;
                 for (int i = 0; i < count; i++) {
                     long id = nextId++;
-                    delta.orders.put(id, new OrderRuntime(id, id + 100, 0, 1, true).snapshot());
+                    delta.orders.put(id, CoreStateTestFixtures.order(id, id + 100, 0, 1, true).snapshot());
                 }
                 delta.preparePublication(runtime);
                 assertThat(delta.terminalOrderCount()).isEqualTo(count);
@@ -59,7 +59,7 @@ class SettlementChangesReuseTest {
                     assertThat(changes.laneDeltas[i].orders.isEmpty()).isTrue();
                     assertThat(changes.completedPending[i]).isZero();
                 }
-                changes.laneDeltas[lane].putOrder(turn + 1, new OrderRuntime(turn + 1,7,0,1,true));
+                changes.laneDeltas[lane].putOrder(turn + 1, CoreStateTestFixtures.order(turn + 1, 7, 0, 1, true));
                 changes.completedPending[lane] = 3;
                 runtime.releaseMatcherSettlementChanges(changes);
             }

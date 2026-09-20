@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
@@ -60,7 +60,7 @@ public final class MatcherSettlementPlan {
      */
     private com.surprising.aeron.protocol.CoreOrderSide directTakerSide;
     private int directTakerSymbolId;
-    private long directTakerInstrumentChangeId;
+    private CoreInstrument directTakerInstrument;
     private static final ThreadLocal<LongHashSet> DIRECT_ORDER_KEYS = ThreadLocal.withInitial(LongHashSet::new);
     /** Read-only view owned by this plan; it remains valid until the enclosing context is recycled. */
     private final List<Long> orderIdView = new OrderIdView(this);
@@ -75,43 +75,43 @@ public final class MatcherSettlementPlan {
         directTaker = null; admittedTaker = null; takerLaneId = -1;
         directTakerSide = null;
         directTakerSymbolId = 0;
-        directTakerInstrumentChangeId = 0;
+        directTakerInstrument = null;
     }
 
     /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
-    void buildDirect(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
+    void buildDirect(long sequence, OrderRuntime taker, CoreInstrument instrument,
                      CoreMatchingResult result, TradingRuntimeState runtime) {
         if (taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
-                || instrument.changeId() != taker.instrumentChangeId())
+                || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct matcher fact");
         buildDirect(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
-                taker.instrumentChangeId(), taker.remainingQuantitySteps(), taker, instrument, result, runtime);
+                taker.instrument(), taker.remainingQuantitySteps(), taker, instrument, result, runtime);
     }
 
     /** Build an accepted PLACE fact from immutable admission data; no detached runtime order. */
-    void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrumentState instrument,
+    void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
                      CoreMatchingResult result, TradingRuntimeState runtime) {
         if (userId <= 0 || taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
-                || instrument.changeId() != taker.instrumentChangeId())
+                || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct matcher fact");
         buildDirect(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
-                taker.instrumentChangeId(), taker.quantitySteps(), null, instrument, result, runtime);
+                taker.instrument(), taker.quantitySteps(), null, instrument, result, runtime);
     }
 
     private void buildDirect(long sequence, long orderId, long userId,
                              com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
-                             long instrumentChangeId, long remainingQuantity, OrderRuntime taker,
-                             CoreInstrumentState instrument, CoreMatchingResult result,
+                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
+                             CoreInstrument instrument, CoreMatchingResult result,
                              TradingRuntimeState runtime) {
         clearReferences();
         coreSequence = sequence; directTaker = taker; admittedTaker = taker;
         directTakerSide = side;
         directTakerSymbolId = symbolId;
-        directTakerInstrumentChangeId = instrumentChangeId;
+        directTakerInstrument = takerInstrument;
         takerOrderId = orderId; activeUserId = userId;
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
@@ -205,7 +205,7 @@ public final class MatcherSettlementPlan {
 
     /** The single account writer checks the current order, including earlier fills in this batch. */
     void validateDirectLane(AccountLaneState lane, TradingRuntimeState runtime,
-                            RuntimeIdentityRegistry identities, CoreInstrumentState instrument) {
+                            RuntimeIdentityRegistry identities, CoreInstrument instrument) {
         if (directTakerSide == null) return;
         if (runtime.topology().accountLaneId(activeUserId) == lane.laneId()) {
             OrderRuntime taker = lane.orders.get(takerOrderId);
@@ -237,7 +237,7 @@ public final class MatcherSettlementPlan {
                                     com.surprising.aeron.protocol.CoreOrderSide side) {
         if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
                 || order.symbolId() != directTakerSymbolId || order.side() != side
-                || order.instrumentChangeId() != directTakerInstrumentChangeId)
+                || order.instrument() != directTakerInstrument)
             throw new IllegalStateException("matcher fact does not match Lane-owned order");
     }
     /** 仅触发子订单携带；owner 派发前构造，taker Lane 在同一结算事件中写入。 */
@@ -359,7 +359,7 @@ public final class MatcherSettlementPlan {
     }
 
     /** 批量构建与累计数量校验共用一次成交遍历；scratch 只在本批 Owner 调用期间使用。 */
-    static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
+    static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrument instrument,
                                                 CoreMatchingResult result, TradingRuntimeState runtime,
                                                 RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
         return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
@@ -369,7 +369,7 @@ public final class MatcherSettlementPlan {
     private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, CoreMatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                               OrderRuntime preparedTaker, CoreInstrumentState preparedInstrument,
+                                               OrderRuntime preparedTaker, CoreInstrument preparedInstrument,
                                                BatchValidationScratch batch, MatcherSettlementPlan target) {
         if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
                 || result == null || runtime == null || identities == null
@@ -379,9 +379,9 @@ public final class MatcherSettlementPlan {
         OrderRuntime taker = preparedTaker == null ? requireOpen(runtime, takerOrderId) : preparedTaker;
         if (taker.status() != CoreOrderStatus.OPEN || batch != null && batch.terminalOrderIds.contains(takerOrderId))
             throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
-        CoreInstrumentState instrument = preparedInstrument == null
+        CoreInstrument instrument = preparedInstrument == null
                 ? runtime.instrument(identities.symbol(taker.symbolId())) : preparedInstrument;
-        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
+        if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
@@ -470,7 +470,7 @@ public final class MatcherSettlementPlan {
         plan.directTaker = null;
         plan.directTakerSide = null;
         plan.directTakerSymbolId = 0;
-        plan.directTakerInstrumentChangeId = 0;
+        plan.directTakerInstrument = null;
         plan.takerLaneId = builtTakerLaneId;
         plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
         plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
@@ -523,7 +523,7 @@ public final class MatcherSettlementPlan {
     }
 
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                                CoreInstrumentState instrument, OrderRuntime order) {
+                                                CoreInstrument instrument, OrderRuntime order) {
         if (!runtime.productLine().isDerivative()) return;
         String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
                 ? instrument.symbol() : instrument.symbol() + ':' + order.positionSide().name();

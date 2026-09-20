@@ -19,7 +19,7 @@ import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
@@ -295,8 +295,8 @@ public final class TradingCoreReducer {
         return MatchStateTransitions.apply(state, takerOrderId, baseAsset, quoteAsset, matches);
     }
 
-    public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
-        return InstrumentStateTransitions.upsert(state, command);
+    public TradingCoreState registerInstrument(TradingCoreState state, RegisterInstrumentCommand command) {
+        return InstrumentStateTransitions.register(state, command);
     }
 
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command) {

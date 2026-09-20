@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
@@ -108,7 +108,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private boolean obsolete;
         private TradingRuntimeState runtime;
         private LiquidationRuntime liquidation;
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private int assetId;
         private long positionKey;
         private int laneId;
@@ -117,7 +117,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
                                     long nextCursorOrderId, boolean advance, boolean obsolete,
                                     TradingRuntimeState runtime, LiquidationRuntime liquidation,
-                                    CoreInstrumentState instrument, int assetId, long positionKey) {
+                                    CoreInstrument instrument, int assetId, long positionKey) {
             reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
                     instrument, assetId, positionKey);
         }
@@ -125,7 +125,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private void reset(ExecuteLiquidationCommand command, long[] orderIds,
                            long nextCursorOrderId, boolean advance, boolean obsolete,
                            TradingRuntimeState runtime, LiquidationRuntime liquidation,
-                           CoreInstrumentState instrument, int assetId, long positionKey) {
+                           CoreInstrument instrument, int assetId, long positionKey) {
             this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
             this.canceledCount = orderIds == null ? 0 : orderIds.length;
             this.advance = advance; this.obsolete = obsolete; this.runtime = runtime;
@@ -180,8 +180,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     orderIds[index++] = order.orderId();
                 }
             }
-            CoreInstrumentState instrument = advance || obsolete ? null : requireInstrument(runtime,
-                    identities.symbol(liquidation.symbolId()), liquidation.instrumentChangeId());
+            CoreInstrument instrument = advance || obsolete ? null : requireInstrument(runtime,
+                    identities.symbol(liquidation.symbolId()));
             int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
             long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
                     positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
@@ -213,8 +213,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
             }
             if (advance) {
                 runtime.replaceLiquidation(new LiquidationRuntime(liquidation.liquidationId(), liquidation.userId(),
-                        liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(),
-                        liquidation.instrumentChangeId(), liquidation.triggerPriceSequence(),
+                        liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(), liquidation.instrument(),
+                        liquidation.triggerPriceSequence(),
                         liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
                         liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
                         liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
@@ -303,7 +303,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     private static RuntimeTreasuryDelta executeAccountLiquidation(ExecuteLiquidationCommand command,
-            TradingRuntimeState runtime, LiquidationRuntime liquidation, CoreInstrumentState instrument,
+            TradingRuntimeState runtime, LiquidationRuntime liquidation, CoreInstrument instrument,
             int settleAssetId, long positionKey) {
         PositionRuntime position = runtime.position(positionKey);
         BalanceRuntime balance = runtime.balance(liquidation.userId(), settleAssetId);
@@ -334,7 +334,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
+                position.marginMode(), position.positionSide(), position.instrument(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
@@ -419,14 +419,14 @@ public final class RuntimeDerivativeLiquidationProcessor {
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                       RuntimeIdentityRegistry identities) {
         String symbol = identities.symbol(liquidation.symbolId());
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         long positionKey = identities.positionKey(liquidation.userId(),
                 positionKey(symbol, liquidation.positionSide()));
         PositionRuntime position = runtime.position(positionKey);
         RiskSnapshotRuntime risk = runtime.riskSnapshot(positionKey);
-        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
+        return position != null && position.instrument() == liquidation.instrument()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
@@ -444,13 +444,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
     }
 
-    private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime, String symbol, long version) {
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }
@@ -458,7 +455,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     private static LiquidationRuntime copy(LiquidationRuntime current, long deficit, long priceTicks,
                                            long feeRatePpm, CoreLiquidationState.Status status, long feeUnits) {
         return new LiquidationRuntime(current.liquidationId(), current.userId(), current.symbolId(),
-                current.marginMode(), current.positionSide(), current.instrumentChangeId(),
+                current.marginMode(), current.positionSide(), current.instrument(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 deficit, priceTicks, feeRatePpm, feeUnits, status, 0);
     }

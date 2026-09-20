@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business.option;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Validates the risk prices required by option marking and risk checks. */
@@ -8,7 +8,7 @@ public final class OptionRiskRules {
     private OptionRiskRules() {
     }
 
-    public static void requireOptionRiskPrices(CoreInstrumentState instrument, long indexPriceTicks,
+    public static void requireOptionRiskPrices(CoreInstrument instrument, long indexPriceTicks,
                                                long forwardPriceTicks) {
         if (instrument.contractType().isOption() && (indexPriceTicks <= 0 || forwardPriceTicks <= 0)) {
             throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",

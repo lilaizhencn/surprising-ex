@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.business.spot.SpotTradingRules;
 import com.surprising.aeron.service.business.linear.perpetual.LinearPerpetualTradingRules;
 import com.surprising.aeron.service.business.linear.delivery.LinearDeliveryTradingRules;
@@ -22,7 +22,7 @@ public final class ProductTradingRulesRegistry {
     private ProductTradingRulesRegistry() {
     }
 
-    public static ProductTradingRules forInstrument(CoreInstrumentState instrument) {
+    public static ProductTradingRules forInstrument(CoreInstrument instrument) {
         if (instrument == null) throw new IllegalArgumentException("settlement instrument is required");
         ProductTradingRules kernel = forProductLine(instrument.contractType().productLine());
         kernel.requireInstrument(instrument);

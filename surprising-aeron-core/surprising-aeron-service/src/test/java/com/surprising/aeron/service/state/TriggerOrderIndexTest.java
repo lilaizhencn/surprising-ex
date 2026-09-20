@@ -127,7 +127,8 @@ class TriggerOrderIndexTest {
 
     private static CoreTriggerOrderState trigger(long id, long user, long price) {
         return new CoreTriggerOrderState(id, ProductLine.SPOT, user, "published-" + id, "",
-                "BTC-USDT", CoreOrderSide.BUY, CoreTriggerOrderType.STOP_LOSS,
+                "BTC-USDT", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY,
+                CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.GREATER_OR_EQUAL, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
@@ -139,7 +140,8 @@ class TriggerOrderIndexTest {
         Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
         for (long id = 1; id <= 300; id++) {
             triggers.put(id, new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "",
-                    "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                    "BTC-USDT", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.SELL,
+                    CoreTriggerOrderType.TAKE_PROFIT,
                     CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0,
                     CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
@@ -219,7 +221,8 @@ class TriggerOrderIndexTest {
 
     private static CoreTriggerOrderState trailing(long id, CoreOrderSide side, long activationPrice,
                                                   long callbackRate, long highest, long lowest, long activatedAt) {
-        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "", "BTC-USDT", side,
+        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "", "BTC-USDT",
+                CoreStateTestFixtures.runtimeInstrument(), side,
                 CoreTriggerOrderType.TRAILING_STOP, CoreTriggerCondition.GREATER_OR_EQUAL, 0,
                 activationPrice, callbackRate, highest, lowest, activatedAt, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,

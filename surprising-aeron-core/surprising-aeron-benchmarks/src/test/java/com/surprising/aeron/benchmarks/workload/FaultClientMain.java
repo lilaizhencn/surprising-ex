@@ -91,9 +91,9 @@ public final class FaultClientMain {
                     boolean query = false;
                     switch (op) {
                         case "init" -> {
-                            type = CoreMessageType.UPSERT_INSTRUMENT;
-                            payload = TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
-                                    "QA-BTC-USDT", 1, 0, "BTC", "USDT", "USDT", 1, 1, 1,
+                            type = CoreMessageType.REGISTER_INSTRUMENT;
+                            payload = TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                    "QA-BTC-USDT", 0, "BTC", "USDT", "USDT", 1, 1, 1,
                                     100_000, 50_000, 0, 0, 0, -1, 0));
                         }
                         case "adjust" -> {
@@ -104,7 +104,7 @@ public final class FaultClientMain {
                         case "place" -> {
                             type = CoreMessageType.PLACE_ORDER;
                             payload = TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                                    input.path("order").asLong(), "QA-BTC-USDT", 1,
+                                    input.path("order").asLong(), "QA-BTC-USDT",
                                     CoreOrderSide.valueOf(input.path("side").asText()), input.path("price").asLong(100),
                                     input.path("qty").asLong(), false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "qa-" + input.path("order").asLong()));

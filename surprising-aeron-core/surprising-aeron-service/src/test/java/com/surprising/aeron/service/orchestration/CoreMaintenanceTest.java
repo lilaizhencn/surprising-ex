@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.*;
@@ -21,37 +21,39 @@ class CoreMaintenanceTest {
             applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(303,false,CoreOrderSide.BUY))));
             long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
             var instrument=state.tradingState().instruments().get("BTC-USDT");
-            var halt=config(instrument,1,2,2);
-            applied(state,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(halt)));
-            assertThat(state.tradingState().instruments().get("BTC-USDT").changeId()).isEqualTo(1);
+            applied(state,gate(line,0,new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0)));
+            assertThat(state.tradingState().instruments().get("BTC-USDT")).isSameAs(instrument);
+            assertThat(instrument.maintenance()).isEqualTo(
+                    new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
             assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             var denied=apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(304,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            // A new calculation reference remains forbidden while an order or position uses the instrument.
-            var edit=apply(state,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(config(instrument,3,3,2))));
+            // Registration is startup-only; the canonical object cannot be replaced after startup.
+            var edit=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
+                    TradingCommandCodec.encodeRegisterInstrument(config(instrument))));
             assertThat(edit.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             try (var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(501))) {
                 var recovered=restored.tradingState().instruments().get("BTC-USDT");
-                assertThat(recovered.status()).isEqualTo(com.surprising.instrument.api.model.InstrumentStatus.HALT);
-                assertThat(recovered.lastChangeId()).isEqualTo(2);
+                assertThat(recovered.maintenance()).isEqualTo(
+                        new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
                 assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
-                applied(restored,gate(line,0,new CoreInstrumentMaintenance(999,CoreInstrumentMaintenance.Mode.HALTED,0)));
-                applied(restored,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(config(instrument,1,4,1))));
-                assertThat(restored.tradingState().instruments().get("BTC-USDT").maintenance().taskId()).isEqualTo(999);
                 assertThat(apply(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(305,false,CoreOrderSide.BUY)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-                applied(restored,gate(line,999,CoreInstrumentMaintenance.TRADING));
+                applied(restored,gate(line,2,CoreInstrumentMaintenance.TRADING));
                 applied(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(306,false,CoreOrderSide.BUY))));
-                // A delayed pause cannot override the newer resume.
-                assertThat(apply(restored,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(halt))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                // Releasing a task returns ownership to task 0; a new task can then claim it.
+                applied(restored,gate(line,0,
+                        new CoreInstrumentMaintenance(3,CoreInstrumentMaintenance.Mode.HALTED,0)));
+                assertThat(recovered.maintenance()).isEqualTo(
+                        new CoreInstrumentMaintenance(3,CoreInstrumentMaintenance.Mode.HALTED,0));
             }
         }
     }
 
-    private static UpsertInstrumentCommand config(com.surprising.aeron.service.state.instrument.CoreInstrumentState v,long calculationId,long auditId,int status) {
-        return new UpsertInstrumentCommand(v.symbol(),calculationId,v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
+    private static RegisterInstrumentCommand config(com.surprising.aeron.service.state.instrument.CoreInstrument v) {
+        return new RegisterInstrumentCommand(v.symbol(),v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
                 v.notionalMultiplierUnits(),v.priceTickUnits(),v.settleScaleUnits(),v.initialMarginRatePpm(),v.maintenanceMarginRatePpm(),
                 v.makerFeeRatePpm(),v.takerFeeRatePpm(),v.expiryEpochMillis(),v.optionType()==null?-1:v.optionType().ordinal(),v.strikePriceTicks(),
-                v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),v.riskLimitBrackets(),status,auditId);
+                v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),v.riskLimitBrackets());
     }
 
 
@@ -86,30 +88,30 @@ class CoreMaintenanceTest {
             applied(state,gate(line,0,new CoreInstrumentMaintenance(801,CoreInstrumentMaintenance.Mode.SETTLEMENT,120)));
             var type=ContractType.valueOf(line.contractTypeCode());
             applied(state,command(line,0,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                    ? new ApplyMarkPriceCommand("BTC-USDT",1,10_000,10_000,10_000,2,1_700_000_000_000L+sequence+1)
-                    : new ApplyMarkPriceCommand("BTC-USDT",1,10_000,2,1_700_000_000_000L+sequence+1))));
+                    ? new ApplyMarkPriceCommand("BTC-USDT",10_000,10_000,10_000,2,1_700_000_000_000L+sequence+1)
+                    : new ApplyMarkPriceCommand("BTC-USDT",10_000,2,1_700_000_000_000L+sequence+1))));
             applied(state,command(line,0,CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16))));
             assertThat(state.tradingState().riskState().liquidations()).isEmpty();
             if (type.isPerpetual()) {
                 assertThat(apply(state,command(line,0,CoreMessageType.APPLY_FUNDING,
-                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(899,"BTC-USDT",1,10_000)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(899,"BTC-USDT",10_000)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             }
             // A different price and premature ordinary expiry settlement must never clear positions.
             var repriced = apply(state,command(line,0,CoreMessageType.SETTLE_INSTRUMENT,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",1,121,0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",121,0))));
             assertThat(repriced.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             // The operator is not a settlement participant. A nonzero actor must not add
             // an unrelated account lane to either the first page or a recovered continuation.
             var first = applied(state,command(line,1,CoreMessageType.SETTLE_INSTRUMENT,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",1,120,0,0,1,0,1))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",120,0,0,1,0,1))));
             var progress = CoreSettlementProgressCodec.decode(first.data());
             try (var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(700))) {
                 int steps = 0;
                 while (!progress.complete()) {
                     assertThat(++steps).isLessThan(20);
                     var message = command(line,1,CoreMessageType.SETTLE_INSTRUMENT,TradingCommandCodec.encodeSettleInstrument(
-                            new SettleInstrumentCommand(801,"BTC-USDT",1,120,0,progress.nextCursorUserId(),1,progress.nextCursorOrderId(),1)));
+                            new SettleInstrumentCommand(801,"BTC-USDT",120,0,progress.nextCursorUserId(),1,progress.nextCursorOrderId(),1)));
                     var response = applied(restored,message);
                     progress = CoreSettlementProgressCodec.decode(response.data());
                     assertThat(apply(restored,message).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -129,12 +131,12 @@ class CoreMaintenanceTest {
         var state = new TradingCoreRuntime(line);
         var type = ContractType.valueOf(line.contractTypeCode());
         String asset = type.isInverse() ? "BTC" : "USDT";
-        applied(state,command(line,1,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(
-                new UpsertInstrumentCommand("BTC-USDT",1,type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1_000:1,
+        applied(state,command(line,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(
+                new RegisterInstrumentCommand("BTC-USDT",type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1_000:1,
                         100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0))));
         applied(state,command(line,1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                ? new ApplyMarkPriceCommand("BTC-USDT",1,100,100,100,1,1_700_000_000_000L)
-                : new ApplyMarkPriceCommand("BTC-USDT",1,100,1,1_700_000_000_000L))));
+                ? new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,1_700_000_000_000L)
+                : new ApplyMarkPriceCommand("BTC-USDT",100,1,1_700_000_000_000L))));
         applied(state,command(line,11,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(line==ProductLine.SPOT?"BTC":asset,20_000))));
         applied(state,command(line,22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000))));
         return state;
@@ -155,7 +157,7 @@ class CoreMaintenanceTest {
         return new CoreMessage(CoreMessageHeader.command(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,981,seq,user,1_700_000_000_000L+seq,seq),payload);
     }
     private static PlaceOrderCommand order(long id,boolean reduce,CoreOrderSide side) {
-        return new PlaceOrderCommand(id,"BTC-USDT",1,side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maint-test-"+id);
+        return new PlaceOrderCommand(id,"BTC-USDT",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maint-test-"+id);
     }
     private static CoreResponse applied(TradingCoreRuntime state,CoreMessage message) {
         var response = apply(state,message);

@@ -38,7 +38,6 @@ class OrderPlacementStateServiceTest {
                 MarginMode.ISOLATED, PositionSide.SHORT);
 
         assertThat(result.signedQuantitySteps()).isEqualTo(-5);
-        assertThat(result.instrumentChangeId()).isEqualTo(7);
         verify(aeron).userState(1001);
         verifyNoMoreInteractions(aeron);
     }
@@ -73,7 +72,7 @@ class OrderPlacementStateServiceTest {
     }
 
     private static CorePositionView position(String symbol, CoreMarginMode margin, CorePositionSide side, long qty) {
-        return new CorePositionView(symbol, "USDT", margin, side, 7, qty, 100, 500, 0, 50);
+        return new CorePositionView(symbol, "USDT", margin, side, qty, 100, 500, 0, 50);
     }
 
     @Test

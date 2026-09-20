@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -22,7 +22,7 @@ public final class RuntimeDerivativeFillCalculator {
     }
 
     public static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                             CoreInstrumentState instrument, OrderRuntime order,
+                             CoreInstrument instrument, OrderRuntime order,
                              long positionKey, long fillPriceTicks, long fillQuantitySteps,
                              boolean taker, long leveragePpm, int settleAssetId) {
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
@@ -32,7 +32,7 @@ public final class RuntimeDerivativeFillCalculator {
     }
 
     static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                      CoreInstrumentState instrument, OrderRuntime order,
+                      CoreInstrument instrument, OrderRuntime order,
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
                       RuntimeTreasuryDelta treasuryDelta) {
@@ -41,7 +41,7 @@ public final class RuntimeDerivativeFillCalculator {
     }
 
     static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                      CoreInstrumentState instrument, OrderRuntime order,
+                      CoreInstrument instrument, OrderRuntime order,
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
                       RuntimeTreasuryDelta treasuryDelta, long commitTimestamp, long commitPosition) {
@@ -88,7 +88,7 @@ public final class RuntimeDerivativeFillCalculator {
 
     /** Lane-local scalar state for one taker order; never published or shared with another Lane. */
     static final class FillCursor {
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private OrderRuntime originalOrder;
         private ReservationRuntime originalReservation;
         private MarkPriceRuntime riskMark;
@@ -100,7 +100,7 @@ public final class RuntimeDerivativeFillCalculator {
         private long feeTreasuryUnits, clearingTreasuryUnits;
         private long positionKey, leveragePpm;
 
-        void reset(CoreInstrumentState instrument, OrderRuntime order, ReservationRuntime reservation,
+        void reset(CoreInstrument instrument, OrderRuntime order, ReservationRuntime reservation,
                    PositionRuntime current, long available, long locked, int assetId, MarkPriceRuntime mark) {
             if (instrument == null || order == null || reservation == null || available < 0 || locked < 0
                     || assetId < 0 || reservation.userId() != order.userId() || reservation.assetId() != assetId
@@ -138,7 +138,7 @@ public final class RuntimeDerivativeFillCalculator {
         long positionKey() { return positionKey; }
         OrderRuntime order() {
             OrderRuntime o = originalOrder;
-            return new OrderRuntime(o.orderId(), o.productLine(), o.userId(), o.symbolId(), o.instrumentChangeId(),
+            return new OrderRuntime(o.orderId(), o.productLine(), o.userId(), o.symbolId(), o.instrument(),
                     o.side(), o.priceTicks(), o.matchingPriceTicks(), o.quantitySteps(), executed, remaining,
                     o.reduceOnly(), o.marginMode(), o.positionSide(), o.orderType(), o.timeInForce(), o.postOnly(),
                     o.clientOrderId(), o.commandId(), o.makerFeeRatePpm(), o.takerFeeRatePpm(), cumulativeFee,
@@ -150,13 +150,13 @@ public final class RuntimeDerivativeFillCalculator {
         ReservationRuntime reservation() {
             ReservationRuntime r = originalReservation;
             if (consumed == r.consumedUnits()) return r;
-            return new ReservationRuntime(r.orderId(), r.userId(), r.symbolId(), r.instrumentChangeId(),
-                    r.kind(), r.assetId(), r.totalReservedUnits(), r.releasedUnits(), consumed, r.orderQuantitySteps());
+            return new ReservationRuntime(r.orderId(), r.userId(), r.symbolId(), r.kind(), r.assetId(),
+                    r.totalReservedUnits(), r.releasedUnits(), consumed, r.orderQuantitySteps());
         }
         PositionRuntime position() {
             OrderRuntime o = originalOrder;
             return new PositionRuntime(o.userId(), o.symbolId(), settleAssetId, o.marginMode(), o.positionSide(),
-                    quantity == 0 ? 0 : o.instrumentChangeId(), quantity, entryPrice, entryValue, realizedPnl, margin);
+                    o.instrument(), quantity, entryPrice, entryValue, realizedPnl, margin);
         }
         OrderRuntime publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return null;
@@ -168,7 +168,7 @@ public final class RuntimeDerivativeFillCalculator {
                 runtime.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
                 runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
                 runtime.updatePositionInLane(positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
-                        quantity == 0 ? 0 : originalOrder.instrumentChangeId(), quantity, entryPrice, entryValue,
+                        originalOrder.instrument(), quantity, entryPrice, entryValue,
                         realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
                 OrderRuntime nextOrder = runtime.updateOrderInLane(originalOrder.orderId(), executed, remaining,
                         feeDelta, nextStatus, orderRevision, timestamp, clusterPosition);
@@ -199,7 +199,7 @@ public final class RuntimeDerivativeFillCalculator {
         }
     }
 
-    static FillCursor beginTaker(TradingRuntimeState runtime, CoreInstrumentState instrument,
+    static FillCursor beginTaker(TradingRuntimeState runtime, CoreInstrument instrument,
                                 OrderRuntime order, long positionKey, long leverage, int assetId,
                                 long timestamp, long position) {
         FillCursor cursor = TAKER.get();
@@ -211,7 +211,7 @@ public final class RuntimeDerivativeFillCalculator {
     }
 
     /** Initializes a caller-owned cursor for a settlement-level order accumulator. */
-    static void begin(FillCursor cursor, TradingRuntimeState runtime, CoreInstrumentState instrument,
+    static void begin(FillCursor cursor, TradingRuntimeState runtime, CoreInstrument instrument,
                       OrderRuntime order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {
         if (cursor == null || runtime == null || instrument == null || order == null
@@ -239,7 +239,7 @@ public final class RuntimeDerivativeFillCalculator {
 
     private static void calculateInto(FillCursor state, long fillPriceTicks, long fillQuantitySteps,
                                       boolean taker, long leveragePpm, long commitTimestamp, long commitPosition) {
-        CoreInstrumentState instrument = state.instrument;
+        CoreInstrument instrument = state.instrument;
         OrderRuntime order = state.originalOrder;
         ReservationRuntime reservation = state.originalReservation;
         MarkPriceRuntime riskMark = state.riskMark;
@@ -388,7 +388,7 @@ public final class RuntimeDerivativeFillCalculator {
         return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
-    private static long openingMarginForFill(CoreInstrumentState instrument,
+    private static long openingMarginForFill(CoreInstrument instrument,
                                              long projectedQuantitySteps,
                                              long signedFillSteps,
                                              long openSteps,

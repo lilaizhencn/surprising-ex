@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.business;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -12,7 +12,7 @@ import com.surprising.product.api.ProductLine;
 
 public interface ProductTradingRules {
 
-    long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                           ResolvedPlaceOrder order, long leverage,
                           long pendingQuantitySteps);
 
@@ -25,7 +25,7 @@ public interface ProductTradingRules {
      * account-lane settlement work. Sequencing and state mutation remain in the
      * runtime; product permission and maintenance-gate rules live here.
      */
-    default void validateLifecycleSettlement(CoreInstrumentState instrument,
+    default void validateLifecycleSettlement(CoreInstrument instrument,
                                              SettleInstrumentCommand command) {
         requireInstrument(instrument);
         if (command == null) {
@@ -45,13 +45,13 @@ public interface ProductTradingRules {
     }
 
     /** Product-specific lifecycle admission. Unsupported lines reject by default. */
-    default void validateLifecycleSettlementProductRule(CoreInstrumentState instrument,
+    default void validateLifecycleSettlementProductRule(CoreInstrument instrument,
                                                         SettleInstrumentCommand command) {
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                 "instrument settlement is unsupported for " + productLine());
     }
 
-    default void requireInstrument(CoreInstrumentState instrument) {
+    default void requireInstrument(CoreInstrument instrument) {
         if (instrument.contractType() != contractType()
                 || instrument.contractType().productLine() != productLine()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
@@ -59,27 +59,27 @@ public interface ProductTradingRules {
         }
     }
 
-    default long premiumDeltaUnits(CoreInstrumentState instrument, CoreOrderSide side,
+    default long premiumDeltaUnits(CoreInstrument instrument, CoreOrderSide side,
                                    long priceTicks, long quantitySteps) {
         requireInstrument(instrument);
         return 0;
     }
 
-    default long realizedPnlUnits(CoreInstrumentState instrument, long signedCloseSteps,
+    default long realizedPnlUnits(CoreInstrument instrument, long signedCloseSteps,
                                   long entryPriceTicks, long executionPriceTicks) {
         requireInstrument(instrument);
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                 "realized PnL is unsupported for " + productLine());
     }
 
-    default long fundingDeltaUnits(CoreInstrumentState instrument, long signedQuantitySteps,
+    default long fundingDeltaUnits(CoreInstrument instrument, long signedQuantitySteps,
                                    long markPriceTicks, long fundingRatePpm) {
         requireInstrument(instrument);
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                 "funding is unsupported for " + productLine());
     }
 
-    default long lifecycleCashDeltaUnits(CoreInstrumentState instrument, long signedQuantitySteps,
+    default long lifecycleCashDeltaUnits(CoreInstrument instrument, long signedQuantitySteps,
                                          long entryPriceTicks, long settlementPriceTicks) {
         requireInstrument(instrument);
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
@@ -87,7 +87,7 @@ public interface ProductTradingRules {
     }
 
     /** Cash change for one position at the product line's lifecycle settlement boundary. */
-    default long lifecycleSettlementCashDeltaUnits(CoreInstrumentState instrument,
+    default long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
                                                    long signedQuantitySteps,
                                                    long entryPriceTicks,
                                                    long settlementPriceTicks) {

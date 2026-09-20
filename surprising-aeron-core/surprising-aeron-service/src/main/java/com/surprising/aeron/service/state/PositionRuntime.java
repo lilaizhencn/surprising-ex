@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 /** Lane-owned position state with primitive in-place updates and immutable publication snapshots. */
 public final class PositionRuntime {
@@ -10,7 +11,7 @@ public final class PositionRuntime {
     private final int assetId;
     private final CoreMarginMode marginMode;
     private final CorePositionSide positionSide;
-    private long instrumentChangeId;
+    private final CoreInstrument instrument;
     private long signedQuantitySteps;
     private long entryPriceTicks;
     private long entryValueTicks;
@@ -19,29 +20,30 @@ public final class PositionRuntime {
     private boolean mutable;
 
     public PositionRuntime(long userId, int symbolId, int assetId, CoreMarginMode marginMode,
-                           CorePositionSide positionSide, long instrumentChangeId,
+                           CorePositionSide positionSide, CoreInstrument instrument,
                            long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                            long realizedPnlUnits, long positionMarginUnits) {
-        validate(userId, symbolId, assetId, marginMode, positionSide, instrumentChangeId,
+        validate(userId, symbolId, assetId, marginMode, positionSide, instrument,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, positionMarginUnits);
         this.userId = userId; this.symbolId = symbolId; this.assetId = assetId;
         this.marginMode = marginMode; this.positionSide = positionSide;
-        this.instrumentChangeId = instrumentChangeId; this.signedQuantitySteps = signedQuantitySteps;
+        this.instrument = instrument; this.signedQuantitySteps = signedQuantitySteps;
         this.entryPriceTicks = entryPriceTicks; this.entryValueTicks = entryValueTicks;
         this.realizedPnlUnits = realizedPnlUnits; this.positionMarginUnits = positionMarginUnits;
         this.mutable = true;
     }
 
     private static void validate(long userId, int symbolId, int assetId, CoreMarginMode marginMode,
-                                 CorePositionSide positionSide, long instrumentChangeId,
+                                 CorePositionSide positionSide, CoreInstrument instrument,
                                  long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                                  long positionMarginUnits) {
         if (userId <= 0 || symbolId < 0 || assetId < 0 || marginMode == null || positionSide == null
+                || instrument == null
                 || positionMarginUnits < 0) throw new IllegalArgumentException("invalid runtime position");
         if (signedQuantitySteps == 0) {
-            if (instrumentChangeId != 0 || entryPriceTicks != 0 || entryValueTicks != 0 || positionMarginUnits != 0)
+            if (entryPriceTicks != 0 || entryValueTicks != 0 || positionMarginUnits != 0)
                 throw new IllegalArgumentException("flat runtime position contains open state");
-        } else if (instrumentChangeId <= 0 || entryPriceTicks <= 0 || entryValueTicks <= 0) {
+        } else if (entryPriceTicks <= 0 || entryValueTicks <= 0) {
             throw new IllegalArgumentException("open runtime position is incomplete");
         }
     }
@@ -51,7 +53,7 @@ public final class PositionRuntime {
     public int assetId() { return assetId; }
     public CoreMarginMode marginMode() { return marginMode; }
     public CorePositionSide positionSide() { return positionSide; }
-    public long instrumentChangeId() { return instrumentChangeId; }
+    public CoreInstrument instrument() { return instrument; }
     public long signedQuantitySteps() { return signedQuantitySteps; }
     public long entryPriceTicks() { return entryPriceTicks; }
     public long entryValueTicks() { return entryValueTicks; }
@@ -60,7 +62,7 @@ public final class PositionRuntime {
 
     public PositionRuntime snapshot() {
         PositionRuntime copy = new PositionRuntime(userId, symbolId, assetId, marginMode, positionSide,
-                instrumentChangeId, signedQuantitySteps, entryPriceTicks, entryValueTicks,
+                instrument, signedQuantitySteps, entryPriceTicks, entryValueTicks,
                 realizedPnlUnits, positionMarginUnits);
         copy.mutable = false;
         return copy;
@@ -68,17 +70,17 @@ public final class PositionRuntime {
 
     PositionRuntime laneValue() {
         return mutable ? this : new PositionRuntime(userId, symbolId, assetId, marginMode, positionSide,
-                instrumentChangeId, signedQuantitySteps, entryPriceTicks, entryValueTicks, realizedPnlUnits,
+                instrument, signedQuantitySteps, entryPriceTicks, entryValueTicks, realizedPnlUnits,
                 positionMarginUnits);
     }
 
     PositionRuntime publicationValue() { return mutable ? snapshot() : this; }
 
-    void applyInPlace(long instrumentChangeId, long signedQuantitySteps, long entryPriceTicks,
+    void applyInPlace(CoreInstrument instrument, long signedQuantitySteps, long entryPriceTicks,
                       long entryValueTicks, long realizedPnlUnits, long positionMarginUnits) {
-        validate(userId, symbolId, assetId, marginMode, positionSide, instrumentChangeId,
+        if (this.instrument != instrument) throw new IllegalArgumentException("position instrument mismatch");
+        validate(userId, symbolId, assetId, marginMode, positionSide, instrument,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, positionMarginUnits);
-        this.instrumentChangeId = instrumentChangeId;
         this.signedQuantitySteps = signedQuantitySteps;
         this.entryPriceTicks = entryPriceTicks;
         this.entryValueTicks = entryValueTicks;
@@ -91,7 +93,7 @@ public final class PositionRuntime {
         if (this == other) return true;
         if (!(other instanceof PositionRuntime value)) return false;
         return userId == value.userId && symbolId == value.symbolId && assetId == value.assetId
-                && instrumentChangeId == value.instrumentChangeId && signedQuantitySteps == value.signedQuantitySteps
+                && instrument == value.instrument && signedQuantitySteps == value.signedQuantitySteps
                 && entryPriceTicks == value.entryPriceTicks && entryValueTicks == value.entryValueTicks
                 && realizedPnlUnits == value.realizedPnlUnits && positionMarginUnits == value.positionMarginUnits
                 && marginMode == value.marginMode && positionSide == value.positionSide;
@@ -100,7 +102,7 @@ public final class PositionRuntime {
     @Override
     public int hashCode() {
         return java.util.Objects.hash(userId, symbolId, assetId, marginMode, positionSide,
-                instrumentChangeId, signedQuantitySteps, entryPriceTicks, entryValueTicks,
+                System.identityHashCode(instrument), signedQuantitySteps, entryPriceTicks, entryValueTicks,
                 realizedPnlUnits, positionMarginUnits);
     }
 

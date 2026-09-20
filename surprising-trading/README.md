@@ -18,7 +18,7 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 - `MARKET` 订单要求 `priceTicks = 0`。
 - `MARKET` 订单只允许 `IOC` 或 `FOK`。
 - notional 校验按 `contract_type` 分支。U 本位线性合约校验 `priceTicks * quantitySteps * notional_multiplier_units`；币本位反向合约校验 `quantitySteps * notional_multiplier_units`，因为 multiplier 表示每个合约 step 的报价币面值。两条路径都用 `Math.multiplyExact` 防止 long 溢出。
-- 市价单只向 Aeron 提交业务意图，`priceTicks = 0`。Product Core 使用自身 Runtime 中带 instrument version 和生成时间的 mark，按 Core 固定滑点边界生成 exchange-core 保护价；U 本位线性合约按上边界冻结，币本位反向合约按下边界冻结。
+- 市价单只向 Aeron 提交业务意图，`priceTicks = 0`。Product Core 使用自身 Runtime 中绑定 canonical instrument 的 mark 及其生成时间，按 Core 固定滑点边界生成 exchange-core 保护价；U 本位线性合约按上边界冻结，币本位反向合约按下边界冻结。
 - 当 `surprising.trading.order.risk.limit-price-protection-enabled=true` 时，限价单也要求新鲜 mark price。BUY 限价不能高于 `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`，SELL 限价不能低于 `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`。被动低价买单和高价卖单仍然允许。
 - instrument version 保存产品默认 maker/taker ppm 费率；费率配置先通过 `UPSERT_FEE_POLICY` 导入对应 Product Core。Core 在接受订单时按用户、symbol、优先级和有效期选择费率，并把结果固化到 Core 订单事实；Provider 不参与费率裁决。
 
@@ -49,15 +49,15 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 ### 全量普通开仓预占
 
 - 每个非 `reduceOnly` 的普通订单必须按**全量** `quantitySteps` 在 `reservation price` 计算可能形成的开仓敞口，再加该全量敞口的 **worst positive fee**，一次性形成不可变 reservation。不得只按预计立即成交量、盘口可见量、历史平均成交率或 provider 投影缩小预占。
-- `reduceOnly=true` 是唯一可以省略新增开仓保证金的路径；它并不省略仓位、方向、持仓版本、产品/结算资产或 `PositionCloseCapacity` 校验。强平和触发生成的用户平仓单同样必须由 Core 明确标记为 reduce-only，不能以“预计不成交”为理由跳过校验。
+- `reduceOnly=true` 是唯一可以省略新增开仓保证金的路径；它并不省略仓位、方向、产品/结算资产或 `PositionCloseCapacity` 校验。强平和触发生成的用户平仓单同样必须由 Core 明确标记为 reduce-only，不能以“预计不成交”为理由跳过校验。
 - 成交、撤单、拒绝或 IOC/FOK 未成交结束时，Core 只按实际状态转换释放未使用 reservation；价格改善或实际正费用小于预留上限时的差额在同一事实链路释放。任何 reservation 缺失、负数或溢出都是 fail-closed 会计错误。
 
 ### `PositionCloseCapacity`：独占的可平承诺
 
 - `PositionCloseCapacity` 是 Product Core 按 `userId + symbol + marginMode + positionSide + positionRevision` 维护的独占可平数量承诺，不是 provider 本地缓存、数据库行锁或账户投影推算值。每一笔活动 reduce-only 订单占用其尚未成交的可平数量；同一数量不得被两笔订单重复承诺。
 - 只有与当前持仓相反的 reduce-only 方向可以申请容量：多仓对应 `SELL`，空仓对应 `BUY`。申请、缩减、成交消耗、撤单释放、强平/ADL/持仓变更后的重新裁决必须在同一个 Core owner-thread 状态转换中完成。
-- 当持仓减少、版本变化或新 reduce-only 请求造成已承诺数量超过当前可平数量时，Core 必须在向 matcher 提交任何受影响订单之前，按 **newest-first** 的确定性顺序处理冲突：先比较较新的 Core command sequence；序列相同再比较较大的 `orderId`；依次取消或缩减最新活动订单，直到每个 `PositionCloseCapacity` 都不超过可平数量。不得按数据库更新时间、网络到达顺序或 provider 实例本地时间决定赢家。
-- 旧持仓版本、错误方向、容量不足或无法确定排序的请求必须拒绝或由上述 newest-first 规则收敛；不得把超额部分留给 matcher、延后到异步投影，或让多个 reduce-only 订单竞争同一仓位。
+- 当持仓减少或新 reduce-only 请求造成已承诺数量超过当前可平数量时，Core 必须在向 matcher 提交任何受影响订单之前，按 **newest-first** 的确定性顺序处理冲突：先比较较新的 Core command sequence；序列相同再比较较大的 `orderId`；依次取消或缩减最新活动订单，直到每个 `PositionCloseCapacity` 都不超过可平数量。不得按数据库更新时间、网络到达顺序或 provider 实例本地时间决定赢家。
+- 错误方向、容量不足或无法确定排序的请求必须拒绝或由上述 newest-first 规则收敛；不得把超额部分留给 matcher、延后到异步投影，或让多个 reduce-only 订单竞争同一仓位。
 
 ### 累计 maker/taker 费用与返佣
 
@@ -326,14 +326,12 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 所以交易模块 Java 代码仍然保持 long-only。
 
-## Instrument 版本绑定
+## Core Instrument 启动绑定
 
-- 每个已接受订单都会保存校验时使用的 `instrument_change_id`。
-- `reduceOnly` 平仓单绑定当前持仓版本，因此用户可以安全平掉旧版本持仓。
-- Core place command 携带 `instrumentChangeId`；撮合结果和订单元数据保留 taker command 审计引用。
-- Core execution fact 同时关联 taker 和 maker 的订单元数据及 instrument version，历史投影可按双方各自合约版本解释成交。
-- ProductExecutionCore 遇到同一 symbol 已有不同 `instrument_change_id` 的开放订单时拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 配置。
-- 运维上，tick size、quantity step、multiplier、contract type、settlement asset 这类核心字段变更前，应先暂停交易并清理开放订单。
+- `InstrumentCoreSyncService` 在缓存首次就绪时冻结本产品线的启动集合，并在同一次启动同步中按 symbol 顺序注册全部 instrument。
+- Core 为每个 symbol 只创建一次 canonical `CoreInstrument`；订单、持仓、mark、触发单、撮合结算和账户 Lane 直接共享该对象引用，协议、撮合 evidence 与快照不携带 instrument 版本字段。
+- 运行中 instrument 配置事件不会替换或再次注册 Core 对象。暂停、只减仓、结算和关闭只通过独立 maintenance 命令修改 canonical 对象中的维护状态。
+- tick size、quantity step、multiplier、contract type、settlement asset 或风险参数需要变化时，必须停止业务流量并以新的启动配置重启对应产品线 Core，不能热替换。
 
 ## 幂等和多节点
 
@@ -381,7 +379,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 命令在 Core 单写 transition 内按以下顺序执行：
 
-1. 校验幂等、instrument 版本、价格/数量、资金或保证金、margin scope 和风险边界。
+1. 校验幂等、canonical instrument、价格/数量、资金或保证金、margin scope 和风险边界。
 2. 将订单映射为 fork 原生命令：
 
 - `PLACE` -> `ApiPlaceOrder`
@@ -583,5 +581,5 @@ rg -n "BigDecimal" surprising-trading -g '*.java'
 ```
 
 
-Instrument 仅保留当前配置；`instrumentChangeId` 引用交易计算参数对应的操作日志。
-纯状态更新使用独立的最近操作 ID，不使已有订单/持仓引用失效。后台低频同步到 Core，并展示确认结果。
+Core 仅保留启动时注册并封存的 canonical instrument；启动器一次冻结并注册完整集合，交易热路径不再复制配置或传递版本号。
+纯维护状态使用独立 maintenance 命令更新同一对象，不替换订单、持仓及结算路径持有的引用。

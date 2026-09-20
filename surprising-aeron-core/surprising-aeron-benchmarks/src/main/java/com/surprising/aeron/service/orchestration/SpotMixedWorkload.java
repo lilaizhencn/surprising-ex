@@ -14,7 +14,7 @@ import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
@@ -79,8 +79,8 @@ final class SpotMixedWorkload {
         Harness harness = Harness.create(accountLanes, ProductLine.SPOT);
         try {
             for (int index = 0; index < symbolCount; index++) {
-                harness.execute(harness.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeUpsertInstrument(
+                harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                        TradingCommandCodec.encodeRegisterInstrument(
                                 instrument(symbols.get(index), baseAssets.get(index)))));
             }
 
@@ -408,13 +408,13 @@ final class SpotMixedWorkload {
 
     private static PlaceOrderCommand orderCommand(long orderId, String symbol, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce timeInForce) {
-        return new PlaceOrderCommand(orderId, symbol, 1, side, price, quantity, false,
+        return new PlaceOrderCommand(orderId, symbol, side, price, quantity, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false,
                 "spot-mixed-" + orderId);
     }
 
-    private static UpsertInstrumentCommand instrument(String symbol, String baseAsset) {
-        return new UpsertInstrumentCommand(symbol, 1, ContractType.SPOT.ordinal(), baseAsset, QUOTE_ASSET,
+    private static RegisterInstrumentCommand instrument(String symbol, String baseAsset) {
+        return new RegisterInstrumentCommand(symbol, ContractType.SPOT.ordinal(), baseAsset, QUOTE_ASSET,
                 QUOTE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 }

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.snapshot.*;
@@ -29,7 +29,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -105,13 +105,13 @@ class TradingCoreReducerTest {
 
     @Test
     void derivativeReservationMustUseSettleAsset() {
-        TradingCoreState base = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.INVERSE_PERPETUAL),
+        TradingCoreState base = reducer.registerInstrument(TradingCoreState.empty(ProductLine.INVERSE_PERPETUAL),
                 CoreStateTestFixtures.instrument(ProductLine.INVERSE_PERPETUAL,
-                        "BTC-USD", "BTC", "USD", "BTC", 1));
+                        "BTC-USD", "BTC", "USD", "BTC"));
         TradingCoreState funded = reducer.adjustBalance(base, 101,
                 new BalanceAdjustmentCommand("USDT", 1_000));
 
-        PlaceOrderCommand invalid = new PlaceOrderCommand(1, "BTC-USD", 1, CoreOrderSide.BUY, 60_000, 1,
+        PlaceOrderCommand invalid = new PlaceOrderCommand(1, "BTC-USD", CoreOrderSide.BUY, 60_000, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
@@ -207,8 +207,8 @@ class TradingCoreReducerTest {
     void betterPricedLinearSellFillUsesTheAcceptedReservationWithoutDiverging() {
         TradingCoreState state = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 1_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
-        PlaceOrderCommand makerBuy = new PlaceOrderCommand(2, "BTC-USDT", 1, CoreOrderSide.BUY, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-2");
-        PlaceOrderCommand takerSell = new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.SELL, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-1");
+        PlaceOrderCommand makerBuy = new PlaceOrderCommand(2, "BTC-USDT", CoreOrderSide.BUY, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-2");
+        PlaceOrderCommand takerSell = new PlaceOrderCommand(1, "BTC-USDT", CoreOrderSide.SELL, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-1");
         state = reducer.placeOrder(state, 202, makerBuy);
         state = reducer.placeOrder(state, 101, takerSell);
 
@@ -226,9 +226,9 @@ class TradingCoreReducerTest {
     void higherAskPlacedBeforeLowerAskCannotLeaveTheLowerFillUnderReserved() {
         TradingCoreState state = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 1_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
-        PlaceOrderCommand higherMakerAsk = new PlaceOrderCommand(2, "BTC-USDT", 1, CoreOrderSide.SELL, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-high");
-        PlaceOrderCommand lowerMakerAsk = new PlaceOrderCommand(3, "BTC-USDT", 1, CoreOrderSide.SELL, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-low");
-        PlaceOrderCommand takerBuy = new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.BUY, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker");
+        PlaceOrderCommand higherMakerAsk = new PlaceOrderCommand(2, "BTC-USDT", CoreOrderSide.SELL, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-high");
+        PlaceOrderCommand lowerMakerAsk = new PlaceOrderCommand(3, "BTC-USDT", CoreOrderSide.SELL, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-low");
+        PlaceOrderCommand takerBuy = new PlaceOrderCommand(1, "BTC-USDT", CoreOrderSide.BUY, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker");
         state = reducer.placeOrder(state, 202, higherMakerAsk);
         state = reducer.placeOrder(state, 202, lowerMakerAsk);
         state = reducer.placeOrder(state, 101, takerBuy);
@@ -247,10 +247,10 @@ class TradingCoreReducerTest {
         TradingCoreState state = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 1_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
         state = reducer.adjustBalance(state, 303, new BalanceAdjustmentCommand("USDT", 1_000));
-        PlaceOrderCommand lowerMakerAsk = new PlaceOrderCommand(2, "BTC-USDT", 1, CoreOrderSide.SELL, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-low");
-        PlaceOrderCommand higherMakerAsk = new PlaceOrderCommand(3, "BTC-USDT", 1, CoreOrderSide.SELL, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-high");
-        PlaceOrderCommand firstTaker = new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.BUY, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-1");
-        PlaceOrderCommand secondTaker = new PlaceOrderCommand(4, "BTC-USDT", 1, CoreOrderSide.BUY, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-2");
+        PlaceOrderCommand lowerMakerAsk = new PlaceOrderCommand(2, "BTC-USDT", CoreOrderSide.SELL, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-low");
+        PlaceOrderCommand higherMakerAsk = new PlaceOrderCommand(3, "BTC-USDT", CoreOrderSide.SELL, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "maker-high");
+        PlaceOrderCommand firstTaker = new PlaceOrderCommand(1, "BTC-USDT", CoreOrderSide.BUY, 0, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-1");
+        PlaceOrderCommand secondTaker = new PlaceOrderCommand(4, "BTC-USDT", CoreOrderSide.BUY, 20, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.IOC, false, "taker-2");
         state = reducer.placeOrder(state, 202, lowerMakerAsk);
         state = reducer.placeOrder(state, 202, higherMakerAsk);
         state = reducer.placeOrder(state, 101, firstTaker);
@@ -284,9 +284,9 @@ class TradingCoreReducerTest {
                 List.of(trade(2, 202, 10, 10, true, true)));
 
         TradingCoreState withMaker = reducer.placeOrder(state, 202,
-                new PlaceOrderCommand(3, "BTC-USDT", 1, CoreOrderSide.SELL, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
+                new PlaceOrderCommand(3, "BTC-USDT", CoreOrderSide.SELL, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
         TradingCoreState withAdd = reducer.placeOrder(withMaker, 101,
-                new PlaceOrderCommand(4, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
+                new PlaceOrderCommand(4, "BTC-USDT", CoreOrderSide.BUY, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
 
         assertThat(withAdd.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
         TradingCoreState matched = reducer.applyMatches(withAdd, 4, "BTC", "USDT",
@@ -304,7 +304,7 @@ class TradingCoreReducerTest {
                 new BalanceAdjustmentCommand("USDT", 1_000));
 
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
-                new PlaceOrderCommand(9, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 30, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")))
+                new PlaceOrderCommand(9, "BTC-USDT", CoreOrderSide.BUY, 10, 30, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("LEVERAGE_EXCEEDS_RISK_BRACKET"));
     }
@@ -318,7 +318,7 @@ class TradingCoreReducerTest {
         TradingCoreState placed = state;
 
         assertThatThrownBy(() -> reducer.placeOrder(placed, 101,
-                new PlaceOrderCommand(2, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 6, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")))
+                new PlaceOrderCommand(2, "BTC-USDT", CoreOrderSide.BUY, 10, 6, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("POSITION_NOTIONAL_LIMIT_EXCEEDED"));
     }
@@ -358,7 +358,7 @@ class TradingCoreReducerTest {
     @Test
     void reduceOnlyWaitsForPositionStateInsteadOfBypassingValidation() {
         TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 1_000);
-        PlaceOrderCommand reduceOnly = new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.SELL, 60_000, 1, true, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
+        PlaceOrderCommand reduceOnly = new PlaceOrderCommand(1, "BTC-USDT", CoreOrderSide.SELL, 60_000, 1, true, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
 
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101, reduceOnly))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -371,7 +371,7 @@ class TradingCoreReducerTest {
         TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);
         TradingCoreState hedge = reducer.updatePositionMode(funded, 101,
                 new UpdatePositionModeCommand(CorePositionMode.HEDGE));
-        PlaceOrderCommand openLong = new PlaceOrderCommand(91, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
+        PlaceOrderCommand openLong = new PlaceOrderCommand(91, "BTC-USDT", CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
         TradingCoreState placed = reducer.placeOrder(hedge, 101, openLong);
 
         assertThat(placed.user(101).positionMode()).isEqualTo(CorePositionMode.HEDGE);
@@ -389,7 +389,7 @@ class TradingCoreReducerTest {
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put("USDT", new AssetBalance("USDT", 9_000, 1_000));
         CorePositionState position = new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.ISOLATED,
-                CorePositionSide.NET, 1, 10, 10, 100, 0, 1_000);
+                CorePositionSide.NET, 10, 10, 100, 0, 1_000);
         CoreUserState user = new CoreUserState(current.productLine(), current.userId(), current.revision() + 1,
                 balances, current.reservations(), Map.of(position.key(), position), current.positionMode());
         Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
@@ -424,7 +424,7 @@ class TradingCoreReducerTest {
         TradingCoreState leveraged = reducer.updateLeverage(funded, 101,
                 new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L));
         assertThat(StateMapSupport.isDelta(leveraged.leverages())).isTrue();
-        PlaceOrderCommand order = new PlaceOrderCommand(301, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
+        PlaceOrderCommand order = new PlaceOrderCommand(301, "BTC-USDT", CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
 
         TradingCoreState placed = reducer.placeOrder(leveraged, 101, order);
         assertThat(placed.user(101).reservations().get(301L).reservedUnits()).isEqualTo(20);
@@ -503,8 +503,8 @@ class TradingCoreReducerTest {
         if (productLine.isDerivative()) {
             state = reducer.applyMarkPrice(state,
                     productLine == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 100, 100, 1, 1)
-                            : new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 1, 1));
+                            ? new ApplyMarkPriceCommand("BTC-USDT", 10, 100, 100, 1, 1)
+                            : new ApplyMarkPriceCommand("BTC-USDT", 10, 1, 1));
         }
         return reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand(asset, units));
     }
@@ -515,7 +515,7 @@ class TradingCoreReducerTest {
             ReservationKind kind,
             String asset,
             long reservedUnits) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 10, 10, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
+        return new PlaceOrderCommand(orderId, "BTC-USDT", side, 10, 10, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
     }
 
     private static ResolvedPlaceOrder feeOrder(
@@ -526,7 +526,7 @@ class TradingCoreReducerTest {
             String asset,
             long makerFeeRatePpm,
             long takerFeeRatePpm) {
-        PlaceOrderCommand intent = new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 10, 10, false,
+        PlaceOrderCommand intent = new PlaceOrderCommand(orderId, "BTC-USDT", side, 10, 10, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
@@ -536,7 +536,7 @@ class TradingCoreReducerTest {
     private static ResolvedPlaceOrder resolved(
             TradingCoreState state, PlaceOrderCommand intent, ReservationKind kind, String asset,
             long makerFeeRatePpm, long takerFeeRatePpm) {
-        CoreInstrumentState instrument = state.instruments().get(intent.symbol());
+        CoreInstrument instrument = state.instruments().get(intent.symbol());
         return new ResolvedPlaceOrder(intent, instrument, -1, intent.limitPriceTicks(), intent.limitPriceTicks(),
                 intent.limitPriceTicks(), 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm, 0);
     }
@@ -548,26 +548,26 @@ class TradingCoreReducerTest {
     private TradingCoreState derivativeWithRiskPolicy(long maxPosition, long openInterestFloor,
                                                        long openInterestRate, long bracketCap,
                                                        long bracketMaxLeverage) {
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
                 com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
                 List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000)));
         return reducer.applyMarkPrice(
-                reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
-                new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 1, 1));
+                reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
+                new ApplyMarkPriceCommand("BTC-USDT", 10, 1, 1));
     }
 
     private TradingCoreState derivativeWithBrackets() {
-        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
                 com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000L, 1_000, 10_000_000L, 1_000,
                 List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),
                         new CoreRiskLimitBracket(2, 200, 1_000, 10_000_000L, 200_000, 100_000)));
         return reducer.applyMarkPrice(
-                reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
-                new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 1, 1));
+                reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
+                new ApplyMarkPriceCommand("BTC-USDT", 10, 1, 1));
     }
 
     private static void assertBalance(

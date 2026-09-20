@@ -64,7 +64,7 @@ final class TradingCoreQueryRouter {
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount, runtime.cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                                 new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
-                                        instrument.maintenance(), instrument.changeId(), users, more)));
+                                        instrument.maintenance(), users, more)));
             } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
             }

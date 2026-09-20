@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -19,8 +19,7 @@ final class LiquidationResolution {
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
-        CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, liquidation.symbol());
         CoreLiquidationState.Status nextStatus;
         CoreTreasuryState treasury = state.treasuryState();
         switch (command.resolution()) {
@@ -82,13 +81,10 @@ final class LiquidationResolution {
                 state.triggerOrders());
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

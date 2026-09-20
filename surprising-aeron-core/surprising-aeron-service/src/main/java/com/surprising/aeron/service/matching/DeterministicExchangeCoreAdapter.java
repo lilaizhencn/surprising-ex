@@ -3,7 +3,7 @@ package com.surprising.aeron.service.matching;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -287,16 +287,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     /** A single native placement produces its immutable result and recovery evidence once. */
     public CoreMatchingResult placeWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId,
-            long instrumentChangeId, long aeronTimestamp, long userId, CoreMatchingOrder command) {
+            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp, long userId, CoreMatchingOrder command) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null)
             throw new IllegalArgumentException("invalid native matcher command");
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             var result = placeNative(userId, command);
             return bindNativeMatcherEvidence(shardId, coreSequence, commandId, command.orderId(),
-                    instrumentChangeId, aeronTimestamp, result);
+                    aeronTimestamp, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -308,16 +307,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     /** Ordinary Lane admission already owns the resolved order; avoid rebuilding a matcher DTO. */
     public CoreMatchingResult placeWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId,
-            long instrumentChangeId, long aeronTimestamp, long userId, ResolvedPlaceOrder command) {
+            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp, long userId, ResolvedPlaceOrder command) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null)
             throw new IllegalArgumentException("invalid resolved matcher command");
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             var result = placeNative(userId, command);
             return bindNativeMatcherEvidence(shardId, coreSequence, commandId, command.orderId(),
-                    instrumentChangeId, aeronTimestamp, result);
+                    aeronTimestamp, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -333,28 +331,26 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * submission transactionally harmless when the Account Lane rejects the reservation.
      */
     public CoreMatchingResult rejectedPlaceWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long instrumentChangeId, long aeronTimestamp, String resultCode) {
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, String resultCode) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || resultCode == null || resultCode.isBlank())
             throw new IllegalArgumentException("invalid rejected matcher command");
-        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
         CoreMatchingResult result = new CoreMatchingResult(false, resultCode);
         long sequence = matcherEvidence.nextSequence(shardId);
-        return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+        return bindMatcherEvidence(coreSequence, commandId, orderId,
                 aeronTimestamp, sequence, shardId, result);
     }
 
     public CoreMatchingResult cancelWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long instrumentChangeId, long aeronTimestamp, long userId, String symbol) {
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, long userId, String symbol) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || symbol == null || symbol.isBlank())
             throw new IllegalArgumentException("invalid native matcher cancellation");
-        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             return bindNativeMatcherEvidence(shardId, coreSequence, commandId, orderId,
-                    instrumentChangeId, aeronTimestamp, cancelNative(userId, orderId, symbol));
+                    aeronTimestamp, cancelNative(userId, orderId, symbol));
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -371,19 +367,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * preserved while the caller can use a fixed command-slot continuation.
      */
     public CoreMatchingResult replaceWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long instrumentChangeId, long aeronTimestamp, long userId, long originalOrderId,
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, long userId, long originalOrderId,
             String symbol, CoreMatchingOrder replacement) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || symbol == null || symbol.isBlank() || replacement == null) {
             throw new IllegalArgumentException("invalid native matcher replacement");
         }
-        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             CoreMatchingResult result = replaceOrder(userId, originalOrderId, symbol, replacement);
             long sequence = matcherEvidence.nextSequence(shardId);
-            return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+            return bindMatcherEvidence(coreSequence, commandId, orderId,
                     aeronTimestamp, sequence, shardId, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -395,8 +390,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private CoreMatchingResult bindNativeMatcherEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long instrumentChangeId, long aeronTimestamp, exchange.core2.core.common.MatcherResult result) {
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, exchange.core2.core.common.MatcherResult result) {
         Throwable poison = matcherFailure.get();
         if (poison != null)
             throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
@@ -404,7 +398,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (nativeShard >= 0 && nativeShard != shardId)
             throw new IllegalStateException("native matcher result crossed its evidence partition");
         CoreMatchingResult bound = matcherEvidence.bindNative(coreSequence, commandId, orderId,
-                instrumentChangeId, aeronTimestamp, matcherEvidence.nextSequence(shardId),
+                aeronTimestamp, matcherEvidence.nextSequence(shardId),
                 shardId, nativeShard, result);
         poisonIfFatal(bound);
         return bound;
@@ -447,10 +441,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        return executeWithEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+        return executeWithEvidence(coreSequence, commandId, orderId,
                 aeronTimestamp, false, command);
     }
 
@@ -458,10 +451,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        return executeWithEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+        return executeWithEvidence(coreSequence, commandId, orderId,
                 aeronTimestamp, true, command);
     }
 
@@ -469,10 +461,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
-        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
+        return executeWithEvidenceSync(coreSequence, commandId, orderId,
                 aeronTimestamp, -2, command);
     }
 
@@ -480,20 +471,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
-        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
+        return executeWithEvidenceSync(coreSequence, commandId, orderId,
                 aeronTimestamp, -1, command);
     }
 
     /** 普通交易的证据由实际订单簿分片单写，拒绝结果也保留其原始路由。 */
     public CoreMatchingResult executeShardWithEvidenceSync(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long instrumentChangeId, long aeronTimestamp, Supplier<CoreMatchingResult> command) {
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, Supplier<CoreMatchingResult> command) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount())
             throw new IllegalArgumentException("invalid matcher evidence shard");
-        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
+        return executeWithEvidenceSync(coreSequence, commandId, orderId,
                 aeronTimestamp, shardId, command);
     }
 
@@ -501,18 +490,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             int evidenceShard,
             Supplier<CoreMatchingResult> command) {
-        validateCommandEvidence(coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
         if (command == null) throw new IllegalArgumentException("invalid matcher command evidence");
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             CoreMatchingResult result = command.get();
             int matcherShardId = evidenceShard == -2 ? matcherShardId(result) : evidenceShard;
             long sequence = matcherEvidence.nextSequence(matcherShardId);
-            return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
+            return bindMatcherEvidence(coreSequence, commandId, orderId,
                     aeronTimestamp, sequence, matcherShardId, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -524,8 +512,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private static void validateCommandEvidence(long coreSequence, java.util.UUID commandId,
-            long orderId, long instrumentChangeId, long aeronTimestamp) {
-        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentChangeId < 0
+            long orderId, long aeronTimestamp) {
+        if (coreSequence <= 0 || commandId == null || orderId < 0
                 || aeronTimestamp < 0)
             throw new IllegalArgumentException("invalid matcher command evidence");
     }
@@ -548,11 +536,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentChangeId < 0
+        if (coreSequence <= 0 || commandId == null || orderId < 0
                 || aeronTimestamp < 0 || command == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher command evidence"));
         }
@@ -570,7 +557,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         dispatchHighWaterMark.accumulateAndGet(depth, Math::max);
         CompletableFuture<CoreMatchingResult> pipeline = executeWithEvidenceNow(
-                coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, controlShard, command);
+                coreSequence, commandId, orderId, aeronTimestamp, controlShard, command);
         NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
         pipeline.whenComplete((result, completionFailure) -> {
             dispatchInFlight.decrementAndGet();
@@ -587,7 +574,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
@@ -616,7 +602,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int matcherShardId = controlShard ? -1 : matcherShardId(result);
             long sequence = matcherEvidence.nextSequence(matcherShardId);
             return bindMatcherEvidence(coreSequence, commandId, orderId,
-                    instrumentChangeId, aeronTimestamp, sequence, matcherShardId, result);
+                    aeronTimestamp, sequence, matcherShardId, result);
         });
     }
 
@@ -624,7 +610,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentChangeId,
             long aeronTimestamp,
             long sequence,
             int matcherShardId,
@@ -639,7 +624,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalStateException("native matcher result crossed its evidence partition");
         // 控制证据可串联不同订单簿，native sequence 仍必须在原生引擎自己的序列内严格递增。
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
-                instrumentChangeId, aeronTimestamp, sequence,
+                aeronTimestamp, sequence,
                 matcherShardId, nativeShard, result);
         poisonIfFatal(bound);
         return bound;
@@ -760,7 +745,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 Math.addExact(cancellations.successfulPrefixCount(), result.successfulPrefixCount()),
                 cancellations.matcherStateChanged() || result.matcherStateChanged()
                         || !cancellations.cancellations().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, nativeSequence, 0, 0, -1),
+                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, nativeSequence, 0, 0, -1),
                 new CoreMatchingResult.MatcherPrefix(0, 0), result.nativeMatcherResult(), events,
                 result.marketData());
     }
@@ -808,7 +793,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 : failure == null ? "SUCCESS" : failure.resultCode();
         return new CoreMatchingResult(accepted, resultCode, cancellations,
                 outcome.successfulPrefix().size(), !accepted && !outcome.successfulPrefix().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, nativeSequence, 0, 0, -1),
+                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, nativeSequence, 0, 0, -1),
                 new CoreMatchingResult.MatcherPrefix(0, 0), null, events,
                 new exchange.core2.core.common.MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
@@ -962,7 +947,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                     MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
                     matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(), hashes.bookHash(),
                     MatcherSnapshot.symbolRegistryHash(symbols), topology.symbolRouteHash(symbols),
-                    MatcherSnapshot.userRegistryHash(userSnapshot), MatcherSnapshot.instrumentRegistryHash(state),
+                    MatcherSnapshot.userRegistryHash(userSnapshot),
                     MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
                     MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
                     symbols, userSnapshot, modules);
@@ -1031,7 +1016,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             MatcherSnapshot.symbolRegistryHash(symbols),
                                             topology.symbolRouteHash(symbols),
                                             MatcherSnapshot.userRegistryHash(userSnapshot),
-                                            MatcherSnapshot.instrumentRegistryHash(state),
                                             MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
                                             MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
                                             symbols, userSnapshot, modules);
@@ -1269,7 +1253,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private record BookResult(String symbol, L2MarketData book) {
     }
 
-    public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrumentState instrument) {
+    public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrument instrument) {
         if (instrument == null) {
             throw new IllegalArgumentException("instrument is required");
         }

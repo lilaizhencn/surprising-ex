@@ -33,17 +33,17 @@ final class MatcherCommandSubmission {
                 var admittedOrder = pending.admittedPlaceOrder();
                 int shard = owner.matcherShard(pending);
                 if (admittedOrder != null) {
-                    return pending.preparePlaceMatching(owner, shard, command.instrumentChangeId(), userId,
+                    return pending.preparePlaceMatching(owner, shard, userId,
                             admittedOrder, null);
                 }
                 // Ordinary PLACE admissions run on the Account Lane and Matcher concurrently.
                 // Until the Lane publishes its mutable runtime object, use the immutable input
                 // captured by the admission event.
                 if (pending.placeAdmission() != null) {
-                    return pending.preparePlaceMatching(owner, shard, command.instrumentChangeId(), userId,
+                    return pending.preparePlaceMatching(owner, shard, userId,
                             pending.placeAdmission().matchingOrder(), null);
                 }
-                return pending.preparePlaceMatching(owner, shard, command.instrumentChangeId(), userId,
+                return pending.preparePlaceMatching(owner, shard, userId,
                         null, owner.matchingOrder(command.orderId()));
             }
             if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
@@ -51,9 +51,8 @@ final class MatcherCommandSubmission {
                 var order = owner.runtimeState.order(command.orderId());
                 if (order != null) {
                     String symbol = owner.identities.symbol(order.symbolId());
-                    long instrumentChangeId = order.instrumentChangeId();
                     int shard = owner.matcherShard(pending);
-                    return pending.prepareCancelMatching(owner, shard, command.orderId(), instrumentChangeId,
+                    return pending.prepareCancelMatching(owner, shard, command.orderId(),
                             userId, symbol);
                 }
             }
@@ -65,7 +64,7 @@ final class MatcherCommandSubmission {
                 var order = owner.runtimeOrder(admission.originalOrderId());
                 String symbol = owner.runtimeOrderSymbol(order);
                 return pending.prepareReplaceMatching(owner, owner.matcherShard(pending),
-                        admission.resolved().orderId(), admission.resolved().instrumentChangeId(), userId,
+                        admission.resolved().orderId(), userId,
                         admission.originalOrderId(), symbol, admission.matchingOrder());
             }
             MatchingSubmission matching = switch (pending.operation()) {
@@ -73,24 +72,23 @@ final class MatcherCommandSubmission {
                     var command = pending.decodedCommand().placeOrder();
                     var admittedOrder = pending.admittedPlaceOrder();
                     if (admittedOrder != null) {
-                        yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
+                        yield new MatchingSubmission(command.orderId(),
                                 () -> owner.matchingAdapter.place(userId, admittedOrder));
                     }
                     if (pending.placeAdmission() != null) {
                         var order = pending.placeAdmission().matchingOrder();
-                        yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
+                        yield new MatchingSubmission(command.orderId(),
                                 () -> owner.matchingAdapter.place(userId, order));
                     }
                     var order = owner.matchingOrder(command.orderId());
-                    yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
+                    yield new MatchingSubmission(command.orderId(),
                             () -> owner.matchingAdapter.place(userId, order));
                 }
                 case CANCEL -> {
                     var command = pending.decodedCommand().cancelOrder();
                     var order = owner.runtimeState.order(command.orderId());
                     String symbol = order == null ? "" : owner.identities.symbol(order.symbolId());
-                    long instrumentChangeId = order == null ? 0 : order.instrumentChangeId();
-                    yield new MatchingSubmission(command.orderId(), instrumentChangeId,
+                    yield new MatchingSubmission(command.orderId(),
                             () -> owner.matchingAdapter.cancelForContinuation(userId, command.orderId(), symbol));
                 }
                 case REPLACE, AMEND -> {
@@ -98,7 +96,6 @@ final class MatcherCommandSubmission {
                     var order = owner.runtimeOrder(admission.originalOrderId());
                     String symbol = owner.runtimeOrderSymbol(order);
                     yield new MatchingSubmission(admission.resolved().orderId(),
-                            admission.resolved().instrumentChangeId(),
                             () -> owner.matchingAdapter.replaceOrder(userId, admission.originalOrderId(),
                                     symbol, admission.matchingOrder()));
                 }
@@ -106,13 +103,13 @@ final class MatcherCommandSubmission {
                     long[] execute = pending.decodedCommand().trigger();
                     var trigger = owner.runtimeState.triggerOrder(execute[0]);
                     if (trigger == null) {
-                        yield new MatchingSubmission(0, 0, () ->
+                        yield new MatchingSubmission(0, () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(
                                         false, "TRIGGER_ORDER_NOT_FOUND"));
                     }
                     var order = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(),
                             "trigger admission is missing");
-                    yield new MatchingSubmission(order.orderId(), trigger.instrumentChangeId(),
+                    yield new MatchingSubmission(order.orderId(),
                             () -> owner.matchingAdapter.place(trigger.userId(), order));
                 }
                 case LIQUIDATION -> {
@@ -120,40 +117,39 @@ final class MatcherCommandSubmission {
                     var liquidation = owner.runtimeState.liquidation(command.liquidationId());
                     if (liquidation == null || !com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
                             .isExecutable(owner.runtimeState, owner.identities, command)) {
-                        yield new MatchingSubmission(command.liquidationId(),
-                                liquidation == null ? 0 : liquidation.instrumentChangeId(), () ->
+                        yield new MatchingSubmission(command.liquidationId(), () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
                     }
                     var orders = owner.lifecycleOrders(liquidation.userId(),
                             owner.runtimeLiquidationSymbol(liquidation), command.cursorOrderId(),
                             command.maxOrders()).orders();
-                    yield new MatchingSubmission(command.liquidationId(), liquidation.instrumentChangeId(),
+                    yield new MatchingSubmission(command.liquidationId(),
                             () -> owner.matchingAdapter.cancelBatch(orders));
                 }
                 case LIQUIDATION_BATCH -> {
                     var orders = owner.batchCancellationOrders(pending);
-                    yield new MatchingSubmission(0, 0, () -> owner.matchingAdapter.cancelBatch(orders));
+                    yield new MatchingSubmission(0, () -> owner.matchingAdapter.cancelBatch(orders));
                 }
                 case SETTLEMENT -> {
                     var command = pending.decodedCommand().settlement();
                     var progress = owner.runtimeLifecycleProgress(command.symbol());
                     if (progress != null && progress.ordersComplete()) {
-                        yield new MatchingSubmission(0, command.instrumentChangeId(), () ->
+                        yield new MatchingSubmission(0, () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
                     }
                     var orders = owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(),
                             command.maxOrders()).orders();
-                    yield new MatchingSubmission(0, command.instrumentChangeId(),
+                    yield new MatchingSubmission(0,
                             () -> owner.matchingAdapter.cancelBatch(orders));
                 }
             };
             Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> guarded =
                     () -> owner.matchingAdapter.executeAfterCancellationsSync(
                             preMatchingCancellations, matching.submission());
-            return withEvidence(pending, matching.orderId(), matching.instrumentChangeId(),
+            return withEvidence(pending, matching.orderId(),
                     isControlCommand(pending), guarded);
         } catch (RuntimeException exception) {
-            return withEvidence(pending, 0, 0, isControlCommand(pending), () ->
+            return withEvidence(pending, 0, isControlCommand(pending), () ->
                     new com.surprising.aeron.service.matching.CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE"));
         }
     }
@@ -165,7 +161,7 @@ final class MatcherCommandSubmission {
     }
 
     private Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> withEvidence(
-            CommandSlot pending, long orderId, long instrumentChangeId, boolean control,
+            CommandSlot pending, long orderId, boolean control,
             Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> command) {
         long coreSequence = pending.sequence();
         UUID commandId = pending.command().header().commandId();
@@ -173,9 +169,9 @@ final class MatcherCommandSubmission {
         int shard = control ? -1 : owner.matcherShard(pending);
         return control
                 ? () -> owner.matchingAdapter.executeControlWithEvidenceSync(
-                        coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command)
+                        coreSequence, commandId, orderId, aeronTimestamp, command)
                 : () -> owner.matchingAdapter.executeShardWithEvidenceSync(
-                        shard, coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command);
+                        shard, coreSequence, commandId, orderId, aeronTimestamp, command);
     }
 
     List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellationOrders(
@@ -196,7 +192,6 @@ final class MatcherCommandSubmission {
 
     private record MatchingSubmission(
             long orderId,
-            long instrumentChangeId,
             Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission) {
     }
 }

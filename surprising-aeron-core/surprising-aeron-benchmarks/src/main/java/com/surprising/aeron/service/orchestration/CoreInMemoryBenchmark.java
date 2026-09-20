@@ -17,7 +17,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
@@ -49,8 +49,8 @@ public final class CoreInMemoryBenchmark {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             long gatewaySequence = 1;
             long operationsSequence = 1;
-            applied(state, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
-                    TradingCommandCodec.encodeUpsertInstrument(instrument()));
+            applied(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument()));
             applied(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
             long[] latencies = measured ? new long[orderCount] : new long[0];
@@ -78,11 +78,11 @@ public final class CoreInMemoryBenchmark {
     }
 
     private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "bench-" + orderId);
+        return new PlaceOrderCommand(orderId, SYMBOL, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "bench-" + orderId);
     }
 
-    private static UpsertInstrumentCommand instrument() {
-        return new UpsertInstrumentCommand(SYMBOL, 1, ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+    private static RegisterInstrumentCommand instrument() {
+        return new RegisterInstrumentCommand(SYMBOL, ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 

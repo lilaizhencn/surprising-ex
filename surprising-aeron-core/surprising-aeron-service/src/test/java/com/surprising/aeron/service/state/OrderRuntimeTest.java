@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class OrderRuntimeTest {
     @Test
     void combinesFillAndCommitWithoutChangingRevisionFeesOrPriorSnapshot() {
-        OrderRuntime before = new OrderRuntime(11, 7, 5, 10).withCommitMetadata(100, 200);
+        OrderRuntime before = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
         OrderRuntime expected = before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2)
                 .withCommitMetadata(110, 210);
         OrderRuntime actual = before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2, 110, 210);
@@ -24,7 +24,7 @@ class OrderRuntimeTest {
 
     @Test
     void combinesCancellationAndCommitAndPreservesTheOldOrder() {
-        OrderRuntime before = new OrderRuntime(11, 7, 5, 10).withCommitMetadata(100, 200);
+        OrderRuntime before = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
         assertThat(before.withStatus(CoreOrderStatus.CANCELED, 2, 110, 210))
                 .isEqualTo(before.withStatus(CoreOrderStatus.CANCELED, 2).withCommitMetadata(110, 210));
         assertThat(before.status()).isEqualTo(CoreOrderStatus.OPEN);

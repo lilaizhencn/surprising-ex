@@ -25,7 +25,7 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
@@ -47,15 +47,15 @@ class SharedProductLineSnapshotContractTest {
                 TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settleAsset(productLine), BALANCE_UNITS)));
         try (TradingCoreRuntime original = new TradingCoreRuntime(productLine)) {
-            assertApplied(applyTerminal(original, operations(productLine, 1, CoreMessageType.UPSERT_INSTRUMENT,
-                    TradingCommandCodec.encodeUpsertInstrument(instrument(productLine)))));
+            assertApplied(applyTerminal(original, operations(productLine, 1, CoreMessageType.REGISTER_INSTRUMENT,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(productLine)))));
             if (productLine.isDerivative()) {
                 assertApplied(applyTerminal(original, market(productLine, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(
                                 productLine == ProductLine.OPTION
-                                        ? new ApplyMarkPriceCommand(SYMBOL, 1, 100, 100, 100, 1,
+                                        ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1,
                                         1_700_000_000_000L)
-                                        : new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1,
+                                        : new ApplyMarkPriceCommand(SYMBOL, 100, 1,
                                         1_700_000_000_000L)))));
                 assertThat(original.tradingState().riskState().markPrices().get(SYMBOL).markPriceTicks())
                         .isEqualTo(100);
@@ -113,7 +113,7 @@ class SharedProductLineSnapshotContractTest {
         if (productLine.isFundingProduct()) {
             CoreResponse funding = applyTerminal(state, market(productLine, 2, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            90_000L + productLine.ordinal(), SYMBOL, 1, 10))));
+                            90_000L + productLine.ordinal(), SYMBOL, 10))));
             assertApplied(funding);
             assertThat(state.tradingState().treasuryState().fundingSettlements())
                     .containsEntry(SYMBOL, 90_000L + productLine.ordinal());
@@ -124,7 +124,7 @@ class SharedProductLineSnapshotContractTest {
 
         CoreResponse funding = state.apply(market(productLine, 2, CoreMessageType.APPLY_FUNDING,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        90_000L + productLine.ordinal(), SYMBOL, 1, 10))));
+                        90_000L + productLine.ordinal(), SYMBOL, 10))));
         assertThat(funding.status()).isEqualTo(ResponseStatus.REJECTED);
         assertThat(funding.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_UNSUPPORTED);
         if (!productLine.isDeliveryProduct()) return;
@@ -132,7 +132,7 @@ class SharedProductLineSnapshotContractTest {
         long settlementId = 91_000L + productLine.ordinal();
         CoreResponse settlement = applyTerminal(state, operations(productLine, 2, CoreMessageType.SETTLE_INSTRUMENT,
                 TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        settlementId, SYMBOL, 1, 100, productLine.isOptionProduct() ? 10 : 0))));
+                        settlementId, SYMBOL, 100, productLine.isOptionProduct() ? 10 : 0))));
         assertApplied(settlement);
         assertThat(state.tradingState().treasuryState().lifecycleSettlements()).containsEntry(SYMBOL, settlementId);
         CoreResponse rejectedAfterSettlement = applyTerminal(state, gateway(productLine, 4, USER_ID,
@@ -142,16 +142,16 @@ class SharedProductLineSnapshotContractTest {
         assertThat(rejectedAfterSettlement.resultCode()).isEqualTo(CoreResultCode.INSTRUMENT_SETTLED);
     }
 
-    private static UpsertInstrumentCommand instrument(ProductLine productLine) {
+    private static RegisterInstrumentCommand instrument(ProductLine productLine) {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new UpsertInstrumentCommand(SYMBOL, 1, type.ordinal(), "BTC", "USDT", settleAsset(productLine),
+        return new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", settleAsset(productLine),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
 
     private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 100, 1, false,
+        return new PlaceOrderCommand(orderId, SYMBOL, CoreOrderSide.BUY, 100, 1, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 false, "v17-" + orderId);
     }

@@ -17,7 +17,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -61,15 +61,15 @@ public final class ClusterFundsSmokeMain {
                 return;
             }
             submitApplied(client, command(productLine, sourceId + 1_000_000, seed, 1,
-                    CoreMessageType.UPSERT_INSTRUMENT,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
-                            "BTC-USDT", 1, ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+                    CoreMessageType.REGISTER_INSTRUMENT,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "BTC-USDT", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
             submitApplied(client, command(productLine, sourceId, seed, userId, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", fundedUnits))));
             submitApplied(client, command(productLine, sourceId, seed + 1, userId, CoreMessageType.PLACE_ORDER,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
             var reserved = queryUser(client, productLine, sourceId, userId, seed + 2);
             var reservedBalance = reserved.balances().stream()
                     .filter(value -> value.asset().equals("USDT"))

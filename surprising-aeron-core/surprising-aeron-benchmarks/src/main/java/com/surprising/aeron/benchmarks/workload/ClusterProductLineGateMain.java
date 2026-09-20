@@ -24,7 +24,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -76,8 +76,8 @@ public final class ClusterProductLineGateMain {
     }
 
     private void execute() {
-        applied(1, CoreMessageType.UPSERT_INSTRUMENT,
-                TradingCommandCodec.encodeUpsertInstrument(instrument()));
+        applied(1, CoreMessageType.REGISTER_INSTRUMENT,
+                TradingCommandCodec.encodeRegisterInstrument(instrument()));
         if (productLine == ProductLine.SPOT) {
             executeSpot();
             return;
@@ -85,8 +85,8 @@ public final class ClusterProductLineGateMain {
         // Core admission requires a fresh authoritative mark (and option index/forward).
         applied(1, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
                 productLine == ProductLine.OPTION
-                        ? new ApplyMarkPriceCommand(SYMBOL, 1, 100, 100, 100, 1, System.currentTimeMillis())
-                        : new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1, System.currentTimeMillis())));
+                        ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
+                        : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis())));
         executeDerivative();
     }
 
@@ -119,7 +119,7 @@ public final class ClusterProductLineGateMain {
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            9_000_000_000L + seed, SYMBOL, 1, 10_000)));
+                            9_000_000_000L + seed, SYMBOL, 10_000)));
             executeLiquidation(settleAsset);
             return;
         }
@@ -135,7 +135,7 @@ public final class ClusterProductLineGateMain {
         long optionCash = productLine == ProductLine.OPTION ? 20 : 0;
         applied(1, CoreMessageType.SETTLE_INSTRUMENT,
                 TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        9_100_000_000L + seed, SYMBOL, 1, 120, optionCash)));
+                        9_100_000_000L + seed, SYMBOL, 120, optionCash)));
     }
 
     private void executeLiquidation(String settleAsset) {
@@ -152,7 +152,7 @@ public final class ClusterProductLineGateMain {
         long priceSequence = 2;
         applied(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        SYMBOL, 1, markPrice, priceSequence, System.currentTimeMillis())));
+                        SYMBOL, markPrice, priceSequence, System.currentTimeMillis())));
         var work = executionWork();
         int scanBudget = com.surprising.aeron.protocol.CoreRiskScanControlCodec.decodeView(
                 query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0, new byte[0])).scanBatchSize();
@@ -234,10 +234,10 @@ public final class ClusterProductLineGateMain {
         }
     }
 
-    private UpsertInstrumentCommand instrument() {
+    private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? expiryEpochMillis : 0;
-        return new UpsertInstrumentCommand(SYMBOL, 1, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000,
                 MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
@@ -246,7 +246,7 @@ public final class ClusterProductLineGateMain {
     private byte[] order(long orderId, CoreOrderSide side, long quantity, String reservationAsset, long reserved) {
         ReservationKind kind = productLine == ProductLine.SPOT
                 ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cluster-gate-" + orderId));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cluster-gate-" + orderId));
     }
 
     private void adjust(long userId, String asset, long units) {

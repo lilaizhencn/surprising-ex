@@ -14,19 +14,19 @@ class LaneEntityMembershipTest {
             state.putUser(new UserRuntime(7));
             state.putBalance(new BalanceRuntime(7, 1, 1000, 0));
             state.putBalance(new BalanceRuntime(7, 2, 1000, 0));
-            state.putReservation(new ReservationRuntime(11, 7, 1, 40));
+            state.putReservation(CoreStateTestFixtures.reservation(11, 7, 1, 40));
             state.markPendingReservation(7, 11, 1);
             var lane = state.onLane(7L, value -> value);
             var ids = lane.reservationIdsByUser.get(7);
-            state.replaceReservation(new ReservationRuntime(11, 7, 1, 20));
+            state.replaceReservation(CoreStateTestFixtures.reservation(11, 7, 1, 20));
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
             assertThat(lane.pendingReservedUnits(7, 1)).isEqualTo(20);
-            state.replaceReservation(new ReservationRuntime(11, 7, 2, 10));
+            state.replaceReservation(CoreStateTestFixtures.reservation(11, 7, 2, 10));
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
             assertThat(ids.toArray()).containsExactly(11);
             assertThat(lane.pendingReservedUnits(7, 1)).isZero();
             assertThat(lane.pendingReservedUnits(7, 2)).isEqualTo(10);
-            assertThatThrownBy(() -> state.replaceReservation(new ReservationRuntime(11, 8, 2, 10)))
+            assertThatThrownBy(() -> state.replaceReservation(CoreStateTestFixtures.reservation(11, 8, 2, 10)))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
             state.completePendingReservations(1);
@@ -95,7 +95,7 @@ class LaneEntityMembershipTest {
 
     private static PositionRuntime position(long user, int symbol, long quantity) {
         return new PositionRuntime(user, symbol, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
-                quantity == 0 ? 0 : 1, quantity, quantity == 0 ? 0 : 100,
+                CoreStateTestFixtures.runtimeInstrument(), quantity, quantity == 0 ? 0 : 100,
                 Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10);
     }
 }

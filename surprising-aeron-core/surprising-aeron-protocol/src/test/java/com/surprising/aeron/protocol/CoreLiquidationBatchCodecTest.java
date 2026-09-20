@@ -15,7 +15,7 @@ class CoreLiquidationBatchCodecTest {
     @Test
     void buildsProductionBatchWithExactContinuationAndActionFields() {
         var action = new CoreLiquidationActionView(7,11,"BTC-USDT",CoreMarginMode.CROSS,
-                CorePositionSide.NET,3,19,10,5,60_000,"ORDERED",91);
+                CorePositionSide.NET,19,10,5,60_000,"ORDERED",91);
         var cursor = new CoreRiskScanContinuation("ETH-USDT",23,41);
         var work = new CoreLiquidationWorkView(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
                 7,true,cursor,List.of(action),List.of());
@@ -80,7 +80,7 @@ class CoreLiquidationBatchCodecTest {
     @Test
     void rejectsNegativeCursorsAndInvalidRiskBounds() {
         assertThatThrownBy(() -> new ExecuteLiquidationBatchAction(
-                7, 11, "BTC-USDT", 3, 19, 60_000, -1))
+                7, 11, "BTC-USDT", 19, 60_000, -1))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CoreRiskScanContinuation("BTC-USDT", 19, -1))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -149,7 +149,7 @@ class CoreLiquidationBatchCodecTest {
     }
 
     private static ExecuteLiquidationBatchAction action(long liquidationId, long userId, String symbol) {
-        return new ExecuteLiquidationBatchAction(liquidationId, userId, symbol, 3, 19, 60_000, 91);
+        return new ExecuteLiquidationBatchAction(liquidationId, userId, symbol, 19, 60_000, 91);
     }
 
     private static void decodeWithBudget(int budget) {
@@ -162,14 +162,14 @@ class CoreLiquidationBatchCodecTest {
         ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
         buffer.position(Integer.BYTES * 2 + Long.BYTES * 2);
         int symbolLength = Short.toUnsignedInt(buffer.getShort());
-        return buffer.position() + symbolLength + Long.BYTES * 4;
+        return buffer.position() + symbolLength + Long.BYTES * 3;
     }
 
     private static int firstCursorOffset(byte[] encoded) {
         ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
         buffer.position(Integer.BYTES * 2 + Long.BYTES * 2);
         int symbolLength = Short.toUnsignedInt(buffer.getShort());
-        return buffer.position() + symbolLength + Long.BYTES * 3;
+        return buffer.position() + symbolLength + Long.BYTES * 2;
     }
 
     private static int budgetOffset(byte[] encoded) {
@@ -179,7 +179,7 @@ class CoreLiquidationBatchCodecTest {
         for (int index = 0; index < count; index++) {
             buffer.position(buffer.position() + Long.BYTES * 2);
             int symbolLength = Short.toUnsignedInt(buffer.getShort());
-            buffer.position(buffer.position() + symbolLength + Long.BYTES * 4);
+            buffer.position(buffer.position() + symbolLength + Long.BYTES * 3);
         }
         return buffer.position();
     }

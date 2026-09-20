@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.math.*;
 
@@ -82,7 +82,7 @@ final class ReducerSettlementSupport {
     }
 
     static long openingMarginForFill(
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             long projectedQuantitySteps,
             long signedFillSteps,
             long openSteps,

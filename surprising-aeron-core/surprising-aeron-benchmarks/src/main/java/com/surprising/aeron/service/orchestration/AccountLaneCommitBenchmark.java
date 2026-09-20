@@ -5,6 +5,14 @@ import com.surprising.aeron.service.state.LaneCommitEvent;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.OrderRuntime;
+import com.surprising.aeron.service.state.ReservationRuntime;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.protocol.*;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -77,12 +85,23 @@ public class AccountLaneCommitBenchmark {
             }
             var userList = new java.util.ArrayList<Long>(accountLanes);
             var orderList = new java.util.ArrayList<Long>(accountLanes);
+            var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                    new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];
-                runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(user, 3, 1000, 0));
-                runtime.reserveOrder(10000 + laneId, user, 20000 + laneId, 5, 1, 3, 100);
+                runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(user, 3, 900, 100));
+                long orderId = 10000L + laneId;
+                var order = new OrderRuntime(orderId, ProductLine.LINEAR_PERPETUAL, user, 5,
+                        instrument, CoreOrderSide.BUY, 20_000 + laneId, false, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                        0, 0, 1, 0, 1, false);
+                var reservation = new ReservationRuntime(orderId, user, 5,
+                        ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 1);
+                runtime.putOrder(order);
+                runtime.putReservation(reservation);
                 userList.add(user);
-                orderList.add(10000L + laneId);
+                orderList.add(orderId);
             }
             metadataUsers = java.util.List.copyOf(userList);
             metadataOrders = java.util.List.copyOf(orderList);

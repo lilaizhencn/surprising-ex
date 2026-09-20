@@ -42,7 +42,6 @@ final class OrderBatchItem {
     com.surprising.aeron.service.state.OrderRuntime admittedOrder;
     /** Owner 一次解析的撤单身份；同分片批次任务读取，完成后清空。 */
     String cancelSymbol;
-    long cancelInstrumentChangeId;
 
     OrderBatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         initialize(orderId, originalOrderId, replacementOrderId, command);
@@ -73,7 +72,6 @@ final class OrderBatchItem {
         realtimeTakerOrder = null;
         admittedOrder = null;
         cancelSymbol = null;
-        cancelInstrumentChangeId = 0;
     }
 
     long orderId() { return orderId; }

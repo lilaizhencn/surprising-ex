@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -9,7 +9,7 @@ import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -35,7 +35,7 @@ class CoreProductLineArchitectureContractTest {
             assertThat(productLine.isDeliveryProduct())
                     .isEqualTo(contractType.isDelivery() || contractType.isOption());
 
-            TradingCoreState configured = reducer.upsertInstrument(state, instrument(productLine));
+            TradingCoreState configured = reducer.registerInstrument(state, instrument(productLine));
             assertThat(configured.instruments()).containsKey("BTC-USDT-" + productLine.name());
             assertThat(configured.instruments().get("BTC-USDT-" + productLine.name()).contractType())
                     .isEqualTo(contractType);
@@ -52,7 +52,7 @@ class CoreProductLineArchitectureContractTest {
                 TradingCoreState state = TradingCoreState.empty(target);
                 long beforeHash = state.businessStateHash();
 
-                assertThatThrownBy(() -> reducer.upsertInstrument(state, instrument(foreign)))
+                assertThatThrownBy(() -> reducer.registerInstrument(state, instrument(foreign)))
                         .isInstanceOfSatisfying(CoreStateRejectedException.class,
                                 exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_MISMATCH"));
                 assertThat(state.businessStateHash()).isEqualTo(beforeHash);
@@ -65,12 +65,12 @@ class CoreProductLineArchitectureContractTest {
     void productRulesRejectForeignInstrumentsAndUnsupportedLifecycleOperations() {
         for (ProductLine line : ProductLine.values()) {
             ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
-            CoreInstrumentState own = reducer.upsertInstrument(TradingCoreState.empty(line), instrument(line))
+            CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();
             rules.requireInstrument(own);
             for (ProductLine other : ProductLine.values()) {
                 if (other == line) continue;
-                CoreInstrumentState foreign = reducer.upsertInstrument(
+                CoreInstrument foreign = reducer.registerInstrument(
                         TradingCoreState.empty(other), instrument(other)).instruments().values().iterator().next();
                 assertThatThrownBy(() -> rules.requireInstrument(foreign))
                         .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -102,10 +102,10 @@ class CoreProductLineArchitectureContractTest {
     void lifecycleSettlementAdmissionIsOwnedByTheProductRule() {
         for (ProductLine line : ProductLine.values()) {
             ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
-            CoreInstrumentState own = reducer.upsertInstrument(TradingCoreState.empty(line), instrument(line))
+            CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();
             SettleInstrumentCommand command = new SettleInstrumentCommand(
-                    7, own.symbol(), own.changeId(), 100, 0);
+                    7, own.symbol(), 100, 0);
 
             if (line.isDeliveryProduct()) {
                 rules.validateLifecycleSettlement(own, command);
@@ -117,12 +117,12 @@ class CoreProductLineArchitectureContractTest {
         }
     }
 
-    private static UpsertInstrumentCommand instrument(ProductLine productLine) {
+    private static RegisterInstrumentCommand instrument(ProductLine productLine) {
         ContractType contractType = ContractType.valueOf(productLine.contractTypeCode());
         boolean inverse = contractType.isInverse();
         boolean lifecycle = contractType.isDelivery() || contractType.isOption();
-        return new UpsertInstrumentCommand(
-                "BTC-USDT-" + productLine.name(), 1, contractType.ordinal(), "BTC",
+        return new RegisterInstrumentCommand(
+                "BTC-USDT-" + productLine.name(), contractType.ordinal(), "BTC",
                 inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
                 inverse ? 100 : 1, 1, inverse ? 100 : 1,
                 100_000, 50_000, 100_000, 200_000,

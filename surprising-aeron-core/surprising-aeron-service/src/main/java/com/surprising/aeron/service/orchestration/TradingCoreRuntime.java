@@ -1605,7 +1605,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     CoreOrderStateView orderView(OrderRuntime order) {
         return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
-                runtimeOrderSymbol(order), order.instrumentChangeId(), order.side(), order.priceTicks(),
+                runtimeOrderSymbol(order), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),

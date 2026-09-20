@@ -178,17 +178,17 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     static PlaceOrderCommand order(long id,String symbol,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
-        return new PlaceOrderCommand(id,symbol,1,side,price,quantity,false,CoreMarginMode.CROSS,
+        return new PlaceOrderCommand(id,symbol,side,price,quantity,false,CoreMarginMode.CROSS,
                 CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,expectedClientOrderId(id));
     }
 
     private void setup() {
         for(int i=0;i<SYMBOLS;i++) {
-            send(CoreMessageType.UPSERT_INSTRUMENT,0,TradingCommandCodec.encodeUpsertInstrument(
-                    new UpsertInstrumentCommand(symbol(i),1,ContractType.LINEAR_PERPETUAL.ordinal(),"MIX"+i,
+            send(CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand(symbol(i),ContractType.LINEAR_PERPETUAL.ordinal(),"MIX"+i,
                             "USDT","USDT",1,1,1,100_000,50_000,0,0,0,-1,0)),1,null);
-            price(i,100);
         }
+        for(int i=0;i<SYMBOLS;i++) price(i,100);
         for(long user:users) send(CoreMessageType.ADJUST_BALANCE,user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",user==users.getFirst()?Long.getLong("surprising.aeron.mixed-loss-balance", 100L):BALANCE)),1,null);
         send(CoreMessageType.ADJUST_INSURANCE_FUND,0,TradingCommandCodec.encodeAdjustInsuranceFund(
@@ -203,7 +203,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             for (int n = 0; n < 3; n++) {
                 long id = nextOrder();
                 send(CoreMessageType.PLACE_ORDER, users.getFirst(), TradingCommandCodec.encodePlaceOrder(
-                        new PlaceOrderCommand(id, symbol(SYMBOLS-1), 1, CoreOrderSide.SELL, 110, 1, true,
+                        new PlaceOrderCommand(id, symbol(SYMBOLS-1), CoreOrderSide.SELL, 110, 1, true,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, expectedClientOrderId(id))), 1, null);
             }
@@ -326,7 +326,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void publishPrice(int i, long value, long generatedAt) {
         mark[i]=value;markTime[i]=generatedAt;
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol(i),1,value,++markSequence[i],markTime[i])),1,null);
+                new ApplyMarkPriceCommand(symbol(i),value,++markSequence[i],markTime[i])),1,null);
     }
     private long place(int i,long user,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         refresh(i);long id=nextOrder();
@@ -385,7 +385,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void funding(int i) {
         if(fundingComplete[i]) { fundingId[i]+=SYMBOLS;fundingComplete[i]=false; }
         var r=execute(CoreMessageType.APPLY_FUNDING,0,TradingCommandCodec.encodeApplyFunding(
-                new ApplyFundingCommand(fundingId[i],symbol(i),1,(i&1)==0?100_000:-100_000,fundingCursor[i],controlPageSize == 0 ? 64 : controlPageSize)));
+                new ApplyFundingCommand(fundingId[i],symbol(i),(i&1)==0?100_000:-100_000,fundingCursor[i],controlPageSize == 0 ? 64 : controlPageSize)));
         var progress=CoreFundingProgressCodec.decode(r.data());
         fundingCursor[i]=progress.nextCursorUserId();fundingComplete[i]=progress.complete();
     }
@@ -395,7 +395,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 CoreOrderSide.SELL,loss?CoreTriggerOrderType.STOP_LOSS:CoreTriggerOrderType.TAKE_PROFIT,
                 loss?CoreTriggerCondition.LESS_OR_EQUAL:CoreTriggerCondition.GREATER_OR_EQUAL,mark[i],
                 0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,110,1,CoreMarginMode.CROSS,CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING,0,0,0,"","mixed-trace-"+id,0,0,0,0,1,1,0,0);
+                CoreTriggerOrderStatus.PENDING,0,0,0,"","mixed-trace-"+id,0,0,0,0,1,0,0);
         send(CoreMessageType.PLACE_TRIGGER_ORDER,taker(i),CoreTriggerOrderCodec.encodeState(trigger),1,null);
         send(CoreMessageType.EXECUTE_TRIGGER_ORDER,0,CoreTriggerOrderCodec.encodeExecute(id,markSequence[i],mark[i],System.currentTimeMillis()),1,null);
         triggerExecutions++;
@@ -440,7 +440,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         while (true) {
             execute(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,0,TradingCommandCodec.encodeExecuteLiquidationBatch(
                     new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.symbol(),
-                            a.instrumentChangeId(),a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
+                            a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
                             liquidationCancellationBoundary ? 1 : ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,0,null,0)));
             cancellationPages++;
             var remaining = work(CoreLiquidationWorkView.Purpose.EXECUTION).actions();

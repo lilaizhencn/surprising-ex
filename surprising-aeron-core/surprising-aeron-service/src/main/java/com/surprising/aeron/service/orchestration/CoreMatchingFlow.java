@@ -314,7 +314,7 @@ final class CoreMatchingFlow {
         var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
         boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
         String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
-        return new PlaceOrderCommand(command.replacementOrderId(), symbol, order.instrumentChangeId(),
+        return new PlaceOrderCommand(command.replacementOrderId(), symbol,
                 order.side(), priceTicks, quantitySteps, order.reduceOnly(), order.marginMode(),
                 order.positionSide(), order.orderType(), timeInForce, postOnly, clientOrderId);
     }
@@ -337,7 +337,7 @@ final class CoreMatchingFlow {
         }
         long limitPriceTicks = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (order.priceTicks() > 0 ? order.priceTicks() : triggeredPriceTicks) : 0;
-        return new PlaceOrderCommand(order.orderId(), trigger.symbol(), trigger.instrumentChangeId(),
+        return new PlaceOrderCommand(order.orderId(), trigger.symbol(),
                 trigger.side(), limitPriceTicks, order.quantitySteps(), order.reduceOnly(),
                 trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(),
                 false, order.clientOrderId());

@@ -14,7 +14,7 @@ class CoreCommandResultCodecTest {
     @Test
     void roundTripsMatcherPrefixIntegrityFields() {
         UUID commandId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
-        CoreCommandResultView result = new CoreCommandResultView(41, commandId, 71, 9, 83,
+        CoreCommandResultView result = new CoreCommandResultView(41, commandId, 71, 83,
                 0x1020_3040_5060_7080L, 0x1121_3141_5161_7181L, List.of(),
                 List.of(new CoreExecutionView(71, 70, 7, 8, 102, 1)));
 
@@ -24,7 +24,6 @@ class CoreCommandResultCodecTest {
         assertThat(restored.coreSequence()).isEqualTo(41);
         assertThat(restored.commandId()).isEqualTo(commandId);
         assertThat(restored.orderId()).isEqualTo(71);
-        assertThat(restored.instrumentChangeId()).isEqualTo(9);
         assertThat(restored.matcherSequence()).isEqualTo(83);
         assertThat(restored.matcherPrefixBefore()).isEqualTo(0x1020_3040_5060_7080L);
         assertThat(restored.matcherPrefixAfter()).isEqualTo(0x1121_3141_5161_7181L);
@@ -32,7 +31,7 @@ class CoreCommandResultCodecTest {
 
     @Test
     void rejectsV2Result() {
-        CoreCommandResultView result = new CoreCommandResultView(41, UUID.randomUUID(), 71, 9, 83,
+        CoreCommandResultView result = new CoreCommandResultView(41, UUID.randomUUID(), 71, 83,
                 17, 19, List.of(), List.of());
         byte[] encoded = CoreCommandResultCodec.encode(result);
         ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 2);
@@ -46,11 +45,11 @@ class CoreCommandResultCodecTest {
     void singleOrderEncodingMatchesListEncoding() {
         UUID commandId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
         CoreOrderStateView order = new CoreOrderStateView(71, com.surprising.product.api.ProductLine.SPOT,
-                7, "BTC-USDT", 9, CoreOrderSide.BUY, 100, 3, 0, 3, false,
+                7, "BTC-USDT", CoreOrderSide.BUY, 100, 3, 0, 3, false,
                 "OPEN", 1);
-        byte[] listEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 9, 83, 17, 19,
+        byte[] listEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 83, 17, 19,
                 List.of(order), List.of());
-        byte[] singleEncoded = CoreCommandResultCodec.encodeSingleOrder(41, commandId, 71, 9, 83,
+        byte[] singleEncoded = CoreCommandResultCodec.encodeSingleOrder(41, commandId, 71, 83,
                 17, 19, order);
 
         assertThat(singleEncoded).containsExactly(listEncoded);
@@ -61,15 +60,15 @@ class CoreCommandResultCodecTest {
     void sourceListEncodingMatchesViewListEncoding() {
         UUID commandId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
         CoreOrderStateView first = new CoreOrderStateView(71, com.surprising.product.api.ProductLine.SPOT,
-                7, "BTC-USDT", 9, CoreOrderSide.BUY, 100, 3, 0, 3, false,
+                7, "BTC-USDT", CoreOrderSide.BUY, 100, 3, 0, 3, false,
                 "OPEN", 1);
         CoreOrderStateView second = new CoreOrderStateView(72, com.surprising.product.api.ProductLine.SPOT,
-                8, "BTC-USDT", 9, CoreOrderSide.SELL, 101, 2, 1, 1, false,
+                8, "BTC-USDT", CoreOrderSide.SELL, 101, 2, 1, 1, false,
                 "OPEN", 2);
 
-        byte[] viewEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 9, 83, 17, 19,
+        byte[] viewEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 83, 17, 19,
                 List.of(first, second), List.of());
-        byte[] sourceEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 9, 83, 17, 19,
+        byte[] sourceEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 83, 17, 19,
                 List.<CoreOrderStateSource>of(first, second), List.of());
 
         assertThat(sourceEncoded).containsExactly(viewEncoded);

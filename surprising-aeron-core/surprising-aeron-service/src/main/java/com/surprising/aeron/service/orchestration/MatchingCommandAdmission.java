@@ -536,7 +536,6 @@ final class MatchingCommandAdmission {
                     || liquidation.status() == CoreLiquidationState.Status.CANCELED) continue;
             if (liquidation.userId() != action.userId()
                     || !owner.runtimeLiquidationSymbol(liquidation).equals(action.symbol())
-                    || liquidation.instrumentChangeId() != action.instrumentChangeId()
                     || liquidation.triggerPriceSequence() != action.triggerPriceSequence()
                     || action.executionPriceTicks() <= 0) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "liquidation batch action does not match state");
@@ -591,7 +590,6 @@ final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentChangeId() != command.instrumentChangeId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
                 || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() != (command.cursorOrderId() == 0)

@@ -133,7 +133,7 @@ class CommandSlotTest {
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 7, sourceSequence,
                 101, 1_700_000_000_000L, sourceSequence),
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        1_000 + sourceSequence, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1,
+                        1_000 + sourceSequence, "BTC-USDT", CoreOrderSide.BUY, 100, 1,
                         false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, false, "pending-" + sourceSequence)));
     }

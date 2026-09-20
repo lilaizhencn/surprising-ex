@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.risk.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -48,7 +48,7 @@ final class RiskScanExecution {
         if (scan == null) {
             return state;
         }
-        CoreInstrumentState instrument = state.instruments().get(scan.symbol());
+        CoreInstrument instrument = state.instruments().get(scan.symbol());
         CoreMarkPriceState mark = state.riskState().markPrices().get(scan.symbol());
         if (instrument == null || mark == null || mark.priceSequence() != scan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
@@ -169,7 +169,7 @@ final class RiskScanExecution {
     }
 
     private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
-                                    CoreInstrumentState instrument, CoreMarkPriceState mark,
+                                    CoreInstrument instrument, CoreMarkPriceState mark,
                                     Map<String, CoreRiskSnapshot> snapshots,
                                     Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId,
                                     LiquidationIndex liquidationIndex) {
@@ -185,7 +185,7 @@ final class RiskScanExecution {
     }
 
     private RiskUserPage processRiskUserPage(TradingCoreState state, CoreRiskState.RiskScan scan,
-                                             CoreUserState user, CoreInstrumentState changedInstrument,
+                                             CoreUserState user, CoreInstrument changedInstrument,
                                              CoreMarkPriceState changedMark, int maxWork,
                                              Map<String, CoreRiskSnapshot> snapshots,
                                              Map<Long, CoreLiquidationState> liquidations,
@@ -221,7 +221,7 @@ final class RiskScanExecution {
                     continue;
                 }
                 if (!position.marginAsset().equals(changedInstrument.settleAsset())) continue;
-                CoreInstrumentState positionInstrument = state.instruments().get(position.symbol());
+                CoreInstrument positionInstrument = state.instruments().get(position.symbol());
                 CoreMarkPriceState positionMark = state.riskState().markPrices().get(position.symbol());
                 if (positionInstrument == null || positionMark == null) continue;
                 PositionRisk risk = positionRisk(position, positionInstrument, positionMark);
@@ -262,7 +262,7 @@ final class RiskScanExecution {
             work++;
             if (position.signedQuantitySteps() == 0 || position.marginMode() != CoreMarginMode.CROSS
                     || !position.marginAsset().equals(changedInstrument.settleAsset())) continue;
-            CoreInstrumentState positionInstrument = state.instruments().get(position.symbol());
+            CoreInstrument positionInstrument = state.instruments().get(position.symbol());
             CoreMarkPriceState positionMark = state.riskState().markPrices().get(position.symbol());
             if (positionInstrument == null || positionMark == null) continue;
             PositionRisk risk = positionRisk(position, positionInstrument, positionMark);
@@ -285,7 +285,7 @@ final class RiskScanExecution {
                 scan.lastUserId()), nextLiquidationId, work, false);
     }
 
-    private PositionRisk positionRisk(CorePositionState position, CoreInstrumentState instrument,
+    private PositionRisk positionRisk(CorePositionState position, CoreInstrument instrument,
                                       CoreMarkPriceState mark) {
         long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(),
                 position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks(),
@@ -299,7 +299,7 @@ final class RiskScanExecution {
         return new PositionRisk(position, instrument, mark, unrealized, maintenance, equityDelta);
     }
 
-    private long ensureLiquidation(long userId, CorePositionState position, CoreInstrumentState instrument,
+    private long ensureLiquidation(long userId, CorePositionState position, CoreInstrument instrument,
                                    long priceSequence, CoreRiskStatus status,
                                    Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId,
                                    LiquidationIndex liquidationIndex) {
@@ -327,7 +327,7 @@ final class RiskScanExecution {
             return nextLiquidationId;
         }
         CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, userId, position.symbol(),
-                position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
+                position.marginMode(), position.positionSide(), priceSequence,
                 position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()), 0,
                 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         liquidations.put(nextLiquidationId, liquidation);
@@ -398,7 +398,7 @@ final class RiskScanExecution {
         return cursor == 0 ? sorted.firstEntry() : sorted.higherEntry(cursor);
     }
 
-    private record PositionRisk(CorePositionState position, CoreInstrumentState instrument,
+    private record PositionRisk(CorePositionState position, CoreInstrument instrument,
                                 CoreMarkPriceState mark, long unrealizedPnlUnits,
                                 long maintenanceMarginUnits, long equityDeltaUnits) {}
 

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -39,7 +39,7 @@ final class RiskSnapshotQueries {
     private static CoreRiskSnapshotView toView(TradingCoreState state, CoreRiskSnapshot risk) {
         CoreUserState user = state.user(risk.userId());
         CorePositionState position = user.positions().get(positionKey(risk.symbol(), risk.positionSide()));
-        CoreInstrumentState instrument = state.instruments().get(risk.symbol());
+        CoreInstrument instrument = state.instruments().get(risk.symbol());
         CoreMarkPriceState mark = state.riskState().markPrices().get(risk.symbol());
         if (position == null || instrument == null || mark == null) {
             throw new IllegalStateException("risk snapshot source state is missing");
@@ -49,7 +49,7 @@ final class RiskSnapshotQueries {
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
         long walletBalance = crossWalletBalance(state, user, instrument.settleAsset());
         return new CoreRiskSnapshotView(risk.userId(), risk.symbol(), position.marginMode(), risk.positionSide(),
-                position.instrumentChangeId(), instrument.settleAsset(), position.signedQuantitySteps(),
+                instrument.settleAsset(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), mark.markPriceTicks(), notional, position.positionMarginUnits(),
                 risk.priceSequence(), walletBalance, risk.equityUnits(), risk.unrealizedPnlUnits(),
                 risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status().name());

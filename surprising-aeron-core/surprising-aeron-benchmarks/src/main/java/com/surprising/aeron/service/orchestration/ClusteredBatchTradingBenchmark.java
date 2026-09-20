@@ -516,24 +516,20 @@ public class ClusteredBatchTradingBenchmark {
             while (com.surprising.aeron.service.state.TradingDependencyMask.account(pipelineSymbolB.hashCode())
                     == com.surprising.aeron.service.state.TradingDependencyMask.account("JMH-PIPE-A-USDT".hashCode()))
                 pipelineSymbolB = "X" + pipelineSymbolB;
-            for (String symbol : new String[]{"JMH-PIPE-A-USDT", pipelineSymbolB}) {
-                apply(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                        new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
+            String[] startupSymbols = {"JMH-PIPE-A-USDT", pipelineSymbolB, "JMH-BTC-USDT"};
+            for (String symbol : startupSymbols) {
+                apply(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                        new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
                                 type.isInverse() ? 1000 : 1, 100_000, 50_000, 0, 0,
                                 type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
-                if (productLine.isDerivative()) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
-                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, 1_700_000_000_000L)
-                                : new ApplyMarkPriceCommand(symbol, 1, 100, 1, 1_700_000_000_000L)));
             }
-            apply(CoreMessageType.UPSERT_INSTRUMENT,0,TradingCommandCodec.encodeUpsertInstrument(
-                new UpsertInstrumentCommand("JMH-BTC-USDT",1,type.ordinal(),"BTC","USDT",settleAsset,1,1,
-                    type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
-                    type.isOption()?0:-1,type.isOption()?100:0)));
-            if(productLine.isDerivative())apply(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                type.isOption()?new ApplyMarkPriceCommand("JMH-BTC-USDT",1,100,100,100,1,1_700_000_000_000L)
-                :new ApplyMarkPriceCommand("JMH-BTC-USDT",1,100,1,1_700_000_000_000L)));
+            if (productLine.isDerivative()) {
+                for (String symbol : startupSymbols) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
+                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, 1_700_000_000_000L)
+                                : new ApplyMarkPriceCommand(symbol, 100, 1, 1_700_000_000_000L)));
+            }
             for (int user = 0; user <= 256; user++) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_000 + user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(settleAsset, BALANCE)));
@@ -623,9 +619,9 @@ public class ClusteredBatchTradingBenchmark {
             long priceSequence = sequence + 1;
             send(command(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand("JMH-BTC-USDT", 1, 100, 100, 100,
+                            ? new ApplyMarkPriceCommand("JMH-BTC-USDT", 100, 100, 100,
                                     priceSequence, 1_700_000_000_000L)
-                            : new ApplyMarkPriceCommand("JMH-BTC-USDT", 1, 100,
+                            : new ApplyMarkPriceCommand("JMH-BTC-USDT", 100,
                                     priceSequence, 1_700_000_000_000L))));
             drain();
             int rounds = 0;
@@ -776,7 +772,8 @@ public class ClusteredBatchTradingBenchmark {
                             firstOrders[user] = orderId++;
                             var trigger = new com.surprising.aeron.service.state.model.CoreTriggerOrderState(
                                     firstOrders[user], productLine, 1_000 + user, "trigger-" + firstOrders[user], "",
-                                    "JMH-BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                                    "JMH-BTC-USDT", service.state().tradingState().instruments().get("JMH-BTC-USDT"),
+                                    CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
@@ -886,7 +883,7 @@ public class ClusteredBatchTradingBenchmark {
                     firstOrders[user] = id;
                     String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
                     send(command(CoreMessageType.PLACE_ORDER, 1_000 + user,
-                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, symbol, 1,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, symbol,
                                     CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "pipeline-" + id))));
                 }
@@ -915,7 +912,7 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 for (int i = 0; i < 2; i++) send(command(CoreMessageType.PLACE_ORDER, 1256,
                         TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(i == 0 ? first : second,
-                                symbols[i], 1, CoreOrderSide.SELL, 120, 1, false, CoreMarginMode.CROSS,
+                                symbols[i], CoreOrderSide.SELL, 120, 1, false, CoreMarginMode.CROSS,
                                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
                 drain();
                 singleResponses = false;
@@ -940,7 +937,7 @@ public class ClusteredBatchTradingBenchmark {
                 var orders = new ArrayList<PlaceOrderCommand>(batchSize);
                 for (int item = 0; item < batchSize; item++) {
                     long id = orderId++;
-                    orders.add(new PlaceOrderCommand(id, symbol, 1, CoreOrderSide.BUY, 90, 1,
+                    orders.add(new PlaceOrderCommand(id, symbol, CoreOrderSide.BUY, 90, 1,
                             false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "batch-window-" + id));
                 }
@@ -1065,14 +1062,14 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private PlaceOrderCommand order(long id, CoreOrderSide side, long price, long quantity) {
-            return new PlaceOrderCommand(id, "JMH-BTC-USDT", 1, side, price, quantity, false,
+            return new PlaceOrderCommand(id, "JMH-BTC-USDT", side, price, quantity, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "cluster-batch-" + id);
         }
 
         private static boolean nonFlat(com.surprising.aeron.service.state.model.CorePositionState p) {
             return p.signedQuantitySteps()!=0 || p.positionMarginUnits()!=0 || p.entryPriceTicks()!=0
-                    || p.entryValueTicks()!=0 || p.instrumentChangeId()!=0 || p.realizedPnlUnits()!=0;
+                    || p.entryValueTicks()!=0 || p.realizedPnlUnits()!=0;
         }
 
         @TearDown(Level.Iteration)

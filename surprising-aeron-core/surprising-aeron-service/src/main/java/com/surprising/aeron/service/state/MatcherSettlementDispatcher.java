@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import java.util.List;
@@ -38,8 +38,8 @@ final class MatcherSettlementDispatcher {
             storage.admittedOrders[index] = order;
             int prior = storage.metadataSlots.getIfAbsent(order.symbolId(), -1);
             if (prior < 0) {
-                CoreInstrumentState instrument = owner.instrument(identities.symbol(order.symbolId()));
-                if (instrument == null || instrument.changeId() != order.instrumentChangeId())
+                CoreInstrument instrument = owner.instrument(identities.symbol(order.symbolId()));
+                if (instrument == null || instrument != order.instrument())
                     throw new IllegalStateException("direct settlement instrument changed");
                 storage.instruments[index] = instrument;
                 storage.baseAssetIds[index] = identities.assetId(instrument.baseAsset());
@@ -70,8 +70,8 @@ final class MatcherSettlementDispatcher {
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
         MatcherSettlementEvent.BatchStorage storage = event.batchStorage(1);
-        CoreInstrumentState instrument = owner.instrument(identities.symbol(resolved.symbolId()));
-        if (instrument == null || instrument.changeId() != resolved.instrumentChangeId()) {
+        CoreInstrument instrument = owner.instrument(identities.symbol(resolved.symbolId()));
+        if (instrument == null || instrument != resolved.instrument()) {
             throw new IllegalStateException("direct settlement instrument changed");
         }
         storage.instruments[0] = instrument;
@@ -234,7 +234,7 @@ final class MatcherSettlementDispatcher {
         OrderRuntime taker = plan.admittedTaker();
         if (taker == null) taker = owner.order(takerOrderId);
         if (taker == null) throw new IllegalStateException("taker order is missing");
-        CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
+        CoreInstrument instrument = owner.instrument(identities.symbol(taker.symbolId()));
         if (instrument == null) throw new IllegalStateException("match instrument is missing");
         owner.ensureMatcherSettlementDispatchCapacity(expectedLaneMask);
         int baseAssetId = identities.assetId(instrument.baseAsset());
@@ -351,7 +351,7 @@ final class MatcherSettlementDispatcher {
         if (event == null) event = new MatcherSettlementEvent();
         MatcherSettlementEvent.BatchStorage storage = event.batchStorage(batch.settlementCount());
         MatcherSettlementPlan[] plans = storage.plans;
-        CoreInstrumentState[] instruments = storage.instruments;
+        CoreInstrument[] instruments = storage.instruments;
         int[] baseAssetIds = storage.baseAssetIds;
         int[] quoteAssetIds = storage.quoteAssetIds;
         int[] settleAssetIds = storage.settleAssetIds;
@@ -372,7 +372,7 @@ final class MatcherSettlementDispatcher {
                 if (taker == null) throw new IllegalStateException("taker order is missing");
                 int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
                 if (slot < 0) {
-                    CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
+                    CoreInstrument instrument = owner.instrument(identities.symbol(taker.symbolId()));
                     if (instrument == null) throw new IllegalStateException("match instrument is missing");
                     instruments[index] = instrument;
                     baseAssetIds[index] = identities.assetId(instrument.baseAsset());

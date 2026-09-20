@@ -13,9 +13,9 @@ public final class InstrumentConfigurationCommands {
 
     public InstrumentConfigurationCommands(CommandOwnerContext owner) { this.owner = java.util.Objects.requireNonNull(owner); }
 
-    public void executeUpsertInstrument(CoreMessage message, long clusterTimestamp) {
-        var command = TradingCommandCodec.decodeUpsertInstrument(message.payloadUnsafe());
-        RuntimeCommandProcessor.upsertInstrument(
+    public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp) {
+        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe());
+        RuntimeCommandProcessor.registerInstrument(
                 owner.runtimeState(), owner.identities(), command);
         owner.requestCommitPublication();
     }

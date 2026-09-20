@@ -26,7 +26,6 @@ public final class RollingBusinessStateHash {
     private final Aggregate orders = new Aggregate();
     private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap orderContributions =
             new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
-    private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
     private final Aggregate timers = new Aggregate();
@@ -251,12 +250,6 @@ public final class RollingBusinessStateHash {
             userUpdater.publish();
         }
         RuntimeFactFrame.GlobalOwnerGroup global = patch.globalOwnerGroup();
-        for (RuntimeFactFrame.InstrumentChange change : global.instruments()) {
-            validateCachedBefore("instruments", change.symbol(), change.before(), value -> stable(value),
-                    ignored -> true);
-            updateCachedValue("instruments", instruments, change.symbol(), change.after(),
-                    value -> stable(value), ignored -> true);
-        }
         for (RuntimeFactFrame.MarkPriceChange change : patch.globalOwnerGroup().markPrices()) {
             String symbol = identities.symbol(change.symbolId());
             validateCachedBefore("marks", symbol, change.before(), this::stableMark, ignored -> true);
@@ -380,7 +373,6 @@ public final class RollingBusinessStateHash {
         hash = CoreStateHash.mix(hash, revision);
         hash = mixAggregate(hash, "users", users);
         hash = mixAggregate(hash, "orders", orders);
-        hash = mixAggregate(hash, "instruments", instruments);
         hash = mixAggregate(hash, "leverages", leverages);
         hash = mixAggregate(hash, "algo", algoOrders);
         hash = mixAggregate(hash, "timers", timers);
@@ -417,7 +409,6 @@ public final class RollingBusinessStateHash {
         contributions.clear();
         rebuildUsers(state.users());
         rebuildOrders(state.orders());
-        rebuildCached("instruments", instruments, state.instruments(), ignored -> true);
         rebuildCached("leverages", leverages, state.leverages(), ignored -> true);
         rebuildCached("algo", algoOrders, state.algoOrders(), algo -> !algo.terminal());
         rebuildCached("timers", timers, state.cancelAllAfterTimers(), ignored -> true);
@@ -682,7 +673,6 @@ public final class RollingBusinessStateHash {
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, identities.symbol(order.symbolId()));
-        hash = CoreStateHash.mix(hash, order.instrumentChangeId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());
@@ -736,7 +726,6 @@ public final class RollingBusinessStateHash {
         if (value instanceof OrderReservation reservation) {
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.symbol());
-            hash = CoreStateHash.mix(hash, reservation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, reservation.kind().ordinal());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -749,7 +738,6 @@ public final class RollingBusinessStateHash {
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, position.instrumentChangeId());
             hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, position.entryPriceTicks());
             hash = CoreStateHash.mix(hash, position.entryValueTicks());
@@ -786,7 +774,7 @@ public final class RollingBusinessStateHash {
     }
 
     private static long stableMark(CoreMarkPriceState value) {
-        return canonical(CoreMarkPriceState.class).text(value.symbol()).number(value.instrumentChangeId())
+        return canonical(CoreMarkPriceState.class).text(value.symbol())
                 .number(value.markPriceTicks()).number(value.indexPriceTicks()).number(value.forwardPriceTicks())
                 .number(value.priceSequence())
                 .number(value.generatedAtEpochMillis()).value();
@@ -794,7 +782,7 @@ public final class RollingBusinessStateHash {
 
     private long stableMark(MarkPriceRuntime value) {
         return canonical(CoreMarkPriceState.class).text(identities.symbol(value.symbolId()))
-                .number(value.instrumentChangeId()).number(value.markPriceTicks()).number(value.indexPriceTicks())
+                .number(value.markPriceTicks()).number(value.indexPriceTicks())
                 .number(value.forwardPriceTicks()).number(value.priceSequence())
                 .number(value.generatedAtEpochMillis()).value();
     }
@@ -816,7 +804,7 @@ public final class RollingBusinessStateHash {
     private static long stableLiquidation(CoreLiquidationState value) {
         return canonical(CoreLiquidationState.class).number(value.liquidationId()).number(value.userId())
                 .text(value.symbol()).enumeration(value.marginMode()).enumeration(value.positionSide())
-                .number(value.instrumentChangeId()).number(value.triggerPriceSequence())
+                .number(value.triggerPriceSequence())
                 .number(value.signedQuantitySteps()).number(value.closeQuantitySteps()).number(value.deficitUnits())
                 .number(value.executionPriceTicks()).number(value.liquidationFeeRatePpm())
                 .number(value.liquidationFeeUnits()).enumeration(value.status()).number(value.nextCancelOrderId())
@@ -826,7 +814,7 @@ public final class RollingBusinessStateHash {
     private long stableLiquidation(LiquidationRuntime value) {
         return canonical(CoreLiquidationState.class).number(value.liquidationId()).number(value.userId())
                 .text(identities.symbol(value.symbolId())).enumeration(value.marginMode())
-                .enumeration(value.positionSide()).number(value.instrumentChangeId())
+                .enumeration(value.positionSide())
                 .number(value.triggerPriceSequence()).number(value.signedQuantitySteps())
                 .number(value.closeQuantitySteps()).number(value.deficitUnits()).number(value.executionPriceTicks())
                 .number(value.liquidationFeeRatePpm()).number(value.liquidationFeeUnits())
@@ -888,40 +876,40 @@ public final class RollingBusinessStateHash {
     }
 
     private static long stableFundingProgress(CoreTreasuryState.FundingProgress value) {
-        return fundingProgressHasher(value.settlementId(), value.instrumentChangeId(), value.fundingRatePpm(),
+        return fundingProgressHasher(value.settlementId(), value.fundingRatePpm(),
                 value.accountLaneId(), value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence());
     }
 
     private long stableFundingProgress(TreasuryRuntime.FundingProgressRuntime value) {
-        return fundingProgressHasher(value.settlementId(), value.instrumentChangeId(), value.fundingRatePpm(),
+        return fundingProgressHasher(value.settlementId(), value.fundingRatePpm(),
                 value.accountLaneId(), value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence());
     }
 
-    private static long fundingProgressHasher(long settlementId, long instrumentChangeId, long fundingRatePpm,
+    private static long fundingProgressHasher(long settlementId, long fundingRatePpm,
                                               int accountLaneId, long nextCursorUserId, Object commandId,
                                               long markPriceTicks, long priceSequence) {
-        return canonical(CoreTreasuryState.FundingProgress.class).number(settlementId).number(instrumentChangeId)
+        return canonical(CoreTreasuryState.FundingProgress.class).number(settlementId)
                 .number(fundingRatePpm).number(accountLaneId).number(nextCursorUserId).text(String.valueOf(commandId))
                 .number(markPriceTicks).number(priceSequence).value();
     }
 
     private static long stableLifecycleProgress(CoreTreasuryState.LifecycleProgress value) {
-        return lifecycleProgressHasher(value.settlementId(), value.instrumentChangeId(), value.settlementPriceTicks(),
+        return lifecycleProgressHasher(value.settlementId(), value.settlementPriceTicks(),
                 value.optionCashUnitsPerContract(), value.ordersComplete(), value.accountLaneId(),
                 value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
     private long stableLifecycleProgress(TreasuryRuntime.LifecycleProgressRuntime value) {
-        return lifecycleProgressHasher(value.settlementId(), value.instrumentChangeId(), value.settlementPriceTicks(),
+        return lifecycleProgressHasher(value.settlementId(), value.settlementPriceTicks(),
                 value.optionCashUnitsPerContract(), value.ordersComplete(), value.accountLaneId(),
                 value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
-    private static long lifecycleProgressHasher(long settlementId, long instrumentChangeId,
+    private static long lifecycleProgressHasher(long settlementId,
                                                 long settlementPriceTicks, long optionCashUnitsPerContract,
                                                 boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
                                                 long nextCursorUserId, Object commandId, long requiredInsuranceUnits) {
-        return canonical(CoreTreasuryState.LifecycleProgress.class).number(settlementId).number(instrumentChangeId)
+        return canonical(CoreTreasuryState.LifecycleProgress.class).number(settlementId)
                 .number(settlementPriceTicks).number(optionCashUnitsPerContract).flag(ordersComplete)
                 .number(accountLaneId).number(nextCursorOrderId).number(nextCursorUserId)
                 .text(String.valueOf(commandId)).number(requiredInsuranceUnits).value();
@@ -1221,7 +1209,6 @@ public final class RollingBusinessStateHash {
         long hash = CoreStateHash.mix(CoreStateHash.start(), OrderReservation.class.getName());
         hash = CoreStateHash.mix(hash, reservation.orderId());
         hash = CoreStateHash.mix(hash, identities.symbol(reservation.symbolId()));
-        hash = CoreStateHash.mix(hash, reservation.instrumentChangeId());
         hash = CoreStateHash.mix(hash, reservation.kind().ordinal());
         hash = CoreStateHash.mix(hash, identities.asset(reservation.assetId()));
         hash = CoreStateHash.mix(hash, reservation.totalReservedUnits());
@@ -1236,7 +1223,6 @@ public final class RollingBusinessStateHash {
         hash = CoreStateHash.mix(hash, identities.asset(position.assetId()));
         hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
         hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
-        hash = CoreStateHash.mix(hash, position.instrumentChangeId());
         hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
         hash = CoreStateHash.mix(hash, position.entryPriceTicks());
         hash = CoreStateHash.mix(hash, position.entryValueTicks());

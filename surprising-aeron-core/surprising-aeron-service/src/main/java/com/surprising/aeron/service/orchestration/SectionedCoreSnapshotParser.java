@@ -285,7 +285,7 @@ final class SectionedCoreSnapshotParser {
                     manifest.coreSequence(), manifest.clusterTimestamp(), manifest.clusterPosition(),
                     appliedCommandCount, manifest.matcherSequence(), manifest.businessStateHash(),
                     manifest.engineStateHash(), manifest.bookStateHash(), manifest.symbolRegistryHash(),
-                    manifest.userRegistryHash(), manifest.instrumentRegistryHash(), manifest.activeOrderHash(),
+                    manifest.userRegistryHash(), manifest.activeOrderHash(),
                     manifest.sourceSequenceDigest(), manifest.forkGitSha(), manifest.artifactSha256(),
                     manifest.matcherConfigHash(), manifest.topology(), manifest.topologyHash(),
                     manifest.symbolRouteHash(), manifest.globalFundsHash(), exportState.status(),

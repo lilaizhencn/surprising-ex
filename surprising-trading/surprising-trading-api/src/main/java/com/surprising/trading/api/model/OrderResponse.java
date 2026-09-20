@@ -7,7 +7,6 @@ public record OrderResponse(
         long userId,
         String clientOrderId,
         String symbol,
-        long instrumentChangeId,
         OrderSide side,
         OrderType orderType,
         TimeInForce timeInForce,
@@ -35,7 +34,6 @@ public record OrderResponse(
                          long userId,
                          String clientOrderId,
                          String symbol,
-                         long instrumentChangeId,
                          OrderSide side,
                          OrderType orderType,
                          TimeInForce timeInForce,
@@ -52,7 +50,7 @@ public record OrderResponse(
                          String rejectReason,
                          Instant createdAt,
                          Instant updatedAt) {
-        this(orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType, timeInForce,
+        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, PositionSide.NET,
                 makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);
     }
@@ -61,7 +59,6 @@ public record OrderResponse(
                          long userId,
                          String clientOrderId,
                          String symbol,
-                         long instrumentChangeId,
                          OrderSide side,
                          OrderType orderType,
                          TimeInForce timeInForce,
@@ -75,7 +72,7 @@ public record OrderResponse(
                          String rejectReason,
                          Instant createdAt,
                          Instant updatedAt) {
-        this(orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType, timeInForce,
+        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, MarginMode.CROSS,
                 PositionSide.NET,
                 0L, 0L, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);

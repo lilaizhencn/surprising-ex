@@ -32,9 +32,9 @@ class TradingOrderBatchCodecTest {
     @Test
     void reusedOrderCursorPreservesEveryItemAndOwnsEncodedBytes() {
         var first = new CoreOrderStateView(701, ProductLine.SPOT, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "OPEN", 3);
+                "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "OPEN", 3);
         var second = new CoreOrderStateView(702, ProductLine.SPOT, 8,
-                "ETH-USDT", 2, CoreOrderSide.SELL, 99, 3, 3, 0, false, "FILLED", 4);
+                "ETH-USDT", CoreOrderSide.SELL, 99, 3, 3, 0, false, "FILLED", 4);
         var orders = new CoreOrderStateView[]{first, null, second};
         var current = new CoreOrderStateView[1];
         var cursor = (CoreOrderStateSource) java.lang.reflect.Proxy.newProxyInstance(
@@ -64,7 +64,7 @@ class TradingOrderBatchCodecTest {
     @Test
     void rawExecutionSourcePreservesWireFormatAndEnforcesFrameBounds() {
         var order = new CoreOrderStateView(701, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "FILLED", 3);
+                "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "FILLED", 3);
         var executions = List.of(new CoreExecutionView(701, 702, 7, 8, 999, 1),
                 new CoreExecutionView(701, 703, 7, 9, 1_000, 1));
         var items = List.of(new CoreOrderBatchResult.Item(0, 701, 0, 0,
@@ -201,7 +201,7 @@ class TradingOrderBatchCodecTest {
                 TradingOrderBatchCodec.encodeAmendOrderBatch(amends))).isEqualTo(amends);
 
         CoreOrderStateView order = new CoreOrderStateView(701, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 1, 1, false, "OPEN", 2);
+                "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, 1, 1, false, "OPEN", 2);
         CoreOrderBatchResult result = new CoreOrderBatchResult(List.of(
                 new CoreOrderBatchResult.Item(0, 701, 0, 0, ResponseStatus.APPLIED,
                         CoreResultCode.NONE, order, List.of()),
@@ -292,7 +292,7 @@ class TradingOrderBatchCodecTest {
     }
 
     private static PlaceOrderCommand place(long orderId, String clientOrderId) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
+        return new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
     private static List<PlaceOrderCommand> repeatedPlaces(int count) {

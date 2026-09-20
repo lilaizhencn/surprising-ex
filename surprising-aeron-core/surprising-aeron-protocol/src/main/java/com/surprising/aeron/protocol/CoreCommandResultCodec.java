@@ -8,7 +8,7 @@ import java.util.UUID;
 public final class CoreCommandResultCodec {
 
     private static final int VERSION = 3;
-    private static final int IDENTITY_LENGTH = Long.BYTES * 8;
+    private static final int IDENTITY_LENGTH = Long.BYTES * 7;
     private static final int EXECUTION_LENGTH = Long.BYTES * 6;
     private static final int MAX_ITEMS = 100_000;
 
@@ -19,17 +19,17 @@ public final class CoreCommandResultCodec {
         if (result == null) {
             throw new IllegalArgumentException("command result is required");
         }
-        return encode(result.coreSequence(), result.commandId(), result.orderId(), result.instrumentChangeId(),
+        return encode(result.coreSequence(), result.commandId(), result.orderId(),
                 result.matcherSequence(), result.matcherPrefixBefore(), result.matcherPrefixAfter(),
                 result.orders(), result.executions());
     }
 
-    public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
+    public static byte[] encode(long coreSequence, UUID commandId, long orderId,
                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
                                 List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions) {
         int length = encodedLength(orders, executions);
         byte[] result = new byte[length];
-        encodeInto(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
+        encodeInto(coreSequence, commandId, orderId, matcherSequence,
                 matcherPrefixBefore, matcherPrefixAfter, orders, executions, result, 0);
         return result;
     }
@@ -53,7 +53,7 @@ public final class CoreCommandResultCodec {
     }
 
     /** Writes a result into caller-owned storage and returns the number of bytes written. */
-    public static int encodeInto(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
+    public static int encodeInto(long coreSequence, UUID commandId, long orderId,
                                  long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
                                  List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions,
                                  byte[] destination, int offset) {
@@ -74,7 +74,6 @@ public final class CoreCommandResultCodec {
         buffer.putLong(commandId.getMostSignificantBits());
         buffer.putLong(commandId.getLeastSignificantBits());
         buffer.putLong(orderId);
-        buffer.putLong(instrumentChangeId);
         buffer.putLong(matcherSequence);
         buffer.putLong(matcherPrefixBefore);
         buffer.putLong(matcherPrefixAfter);
@@ -98,12 +97,12 @@ public final class CoreCommandResultCodec {
      * format identical to the list overload without allocating a singleton List.
      */
     public static byte[] encodeSingleOrder(long coreSequence, UUID commandId, long orderId,
-                                           long instrumentChangeId, long matcherSequence,
+                                           long matcherSequence,
                                            long matcherPrefixBefore, long matcherPrefixAfter,
                                            CoreOrderStateSource order) {
         int length = encodedSingleOrderLength(order);
         byte[] result = new byte[length];
-        encodeSingleOrderInto(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
+        encodeSingleOrderInto(coreSequence, commandId, orderId, matcherSequence,
                 matcherPrefixBefore, matcherPrefixAfter, order, result, 0);
         return result;
     }
@@ -117,21 +116,21 @@ public final class CoreCommandResultCodec {
     }
 
     public static int encodeSingleOrderInto(long coreSequence, UUID commandId, long orderId,
-                                            long instrumentChangeId, long matcherSequence,
+                                            long matcherSequence,
                                             long matcherPrefixBefore, long matcherPrefixAfter,
                                             CoreOrderStateSource order, byte[] destination, int offset) {
         if (commandId == null || order == null || destination == null || offset < 0) {
             throw new IllegalArgumentException("command result fields are required");
         }
         return encodeSingleOrderInto(coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, instrumentChangeId, matcherSequence,
+                commandId.getLeastSignificantBits(), orderId, matcherSequence,
                 matcherPrefixBefore, matcherPrefixAfter, order, destination, offset);
     }
 
     /** Allocation-free identity overload for Lane-owned response encoders. */
     public static int encodeSingleOrderInto(long coreSequence, long commandIdMostSignificantBits,
                                             long commandIdLeastSignificantBits, long orderId,
-                                            long instrumentChangeId, long matcherSequence,
+                                            long matcherSequence,
                                             long matcherPrefixBefore, long matcherPrefixAfter,
                                             CoreOrderStateSource order, byte[] destination, int offset) {
         if (order == null || destination == null || offset < 0) {
@@ -149,7 +148,6 @@ public final class CoreCommandResultCodec {
         buffer.putLong(commandIdMostSignificantBits);
         buffer.putLong(commandIdLeastSignificantBits);
         buffer.putLong(orderId);
-        buffer.putLong(instrumentChangeId);
         buffer.putLong(matcherSequence);
         buffer.putLong(matcherPrefixBefore);
         buffer.putLong(matcherPrefixAfter);
@@ -175,7 +173,6 @@ public final class CoreCommandResultCodec {
         long coreSequence = buffer.getLong();
         UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
         long orderId = buffer.getLong();
-        long instrumentChangeId = buffer.getLong();
         long matcherSequence = buffer.getLong();
         long matcherPrefixBefore = buffer.getLong();
         long matcherPrefixAfter = buffer.getLong();
@@ -197,7 +194,7 @@ public final class CoreCommandResultCodec {
             executions.add(new CoreExecutionView(buffer.getLong(), buffer.getLong(), buffer.getLong(),
                     buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
-        return new CoreCommandResultView(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
+        return new CoreCommandResultView(coreSequence, commandId, orderId, matcherSequence,
                 matcherPrefixBefore, matcherPrefixAfter, orderViews, executions);
     }
 

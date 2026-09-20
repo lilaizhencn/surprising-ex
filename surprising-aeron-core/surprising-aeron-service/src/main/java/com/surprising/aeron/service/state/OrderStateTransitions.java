@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -76,10 +76,9 @@ final class OrderStateTransitions {
         AssetBalance currentBalance = currentUser.balances().getOrDefault(asset, new AssetBalance(asset, 0, 0));
         AssetBalance nextBalance = currentBalance.reserve(requiredReservation);
         OrderReservation reservation = OrderReservation.create(command.orderId(), command.symbol(),
-                command.instrumentChangeId(), command.reservationKind(), asset, requiredReservation,
-                command.quantitySteps());
+                command.reservationKind(), asset, requiredReservation, command.quantitySteps());
         CoreOrderState order = new CoreOrderState(command.orderId(), state.productLine(), userId,
-                command.symbol(), command.instrumentChangeId(), command.side(), command.limitPriceTicks(),
+                command.symbol(), command.side(), command.limitPriceTicks(),
                 command.matchingPriceTicks(), command.quantitySteps(), 0, command.quantitySteps(),
                 command.reduceOnly(), command.marginMode(), command.positionSide(), command.orderType(),
                 command.timeInForce(), command.postOnly(), command.clientOrderId(), commandId,
@@ -117,7 +116,7 @@ final class OrderStateTransitions {
         if (!command.clientOrderId().isEmpty() && state.order(userId, command.clientOrderId()) != null) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, command.symbol());
         if (state.treasuryState().lifecycleSettlements().containsKey(instrument.symbol())) {
             throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
         }
@@ -309,8 +308,8 @@ final class OrderStateTransitions {
         }
     }
 
-    private static void validateInstrumentOrder(CoreInstrumentState instrument, ResolvedPlaceOrder command) {
-        if (!instrument.equals(command.instrument())) {
+    private static void validateInstrumentOrder(CoreInstrument instrument, ResolvedPlaceOrder command) {
+        if (instrument != command.instrument()) {
             throw new CoreStateRejectedException("INSTRUMENT_ORDER_MISMATCH",
                     "order assets do not match instrument state");
         }
@@ -320,7 +319,7 @@ final class OrderStateTransitions {
     }
 
     private static long requiredReservationUnits(
-            TradingCoreState state, CoreInstrumentState instrument, CoreUserState user,
+            TradingCoreState state, CoreInstrument instrument, CoreUserState user,
             ResolvedPlaceOrder command, ActiveOrderIndex activeOrderIndex) {
         return switch (instrument.contractType().productLine()) {
             case SPOT -> SpotOrderAdmission.reservationUnitsForState(
@@ -334,7 +333,7 @@ final class OrderStateTransitions {
     }
 
     private static void validateDerivativeRiskLimits(
-            TradingCoreState state, CoreInstrumentState instrument, CoreUserState user,
+            TradingCoreState state, CoreInstrument instrument, CoreUserState user,
             ResolvedPlaceOrder command, ActiveOrderIndex activeOrderIndex, long indexedOpenInterestSteps) {
         if (!state.productLine().isDerivative() || command.reduceOnly()) return;
         long projectedNotional = projectedPositionNotionalUnits(state, instrument, user, command, activeOrderIndex);
@@ -374,7 +373,7 @@ final class OrderStateTransitions {
     }
 
     private static long projectedPositionNotionalUnits(
-            TradingCoreState state, CoreInstrumentState instrument, CoreUserState user,
+            TradingCoreState state, CoreInstrument instrument, CoreUserState user,
             ResolvedPlaceOrder command, ActiveOrderIndex activeOrderIndex) {
         return CoreContractMath.riskNotionalUnits(instrument,
                 projectedPositionSteps(state, instrument, user, command, command.quantitySteps(), activeOrderIndex),
@@ -382,14 +381,14 @@ final class OrderStateTransitions {
     }
 
     private static long projectedPositionSteps(
-            TradingCoreState state, CoreInstrumentState instrument, CoreUserState user,
+            TradingCoreState state, CoreInstrument instrument, CoreUserState user,
             ResolvedPlaceOrder command, long additionalQuantitySteps, ActiveOrderIndex activeOrderIndex) {
         return Math.absExact(projectedPositionSignedSteps(state, instrument, user, command,
                 additionalQuantitySteps, activeOrderIndex));
     }
 
     private static long projectedPositionSignedSteps(
-            TradingCoreState state, CoreInstrumentState instrument, CoreUserState user,
+            TradingCoreState state, CoreInstrument instrument, CoreUserState user,
             ResolvedPlaceOrder command, long additionalQuantitySteps, ActiveOrderIndex activeOrderIndex) {
         CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
         long current = position == null ? 0 : position.signedQuantitySteps();
@@ -481,14 +480,11 @@ final class OrderStateTransitions {
         }
     }
 
-    private static CoreInstrumentState requireInstrument(
-            TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(
+            TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

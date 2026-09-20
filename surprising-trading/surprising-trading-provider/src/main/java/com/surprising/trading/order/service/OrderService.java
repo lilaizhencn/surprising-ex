@@ -30,7 +30,6 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.ValidationResult;
@@ -895,29 +894,4 @@ public class OrderService {
         return properties.getKafka().getProductLine();
     }
 
-    private OrderResponse toResponse(OrderRecord order) {
-        return new OrderResponse(
-                order.orderId(),
-                order.userId(),
-                order.clientOrderId(),
-                order.symbol(),
-                order.instrumentChangeId(),
-                order.side(),
-                order.orderType(),
-                order.timeInForce(),
-                order.priceTicks(),
-                order.quantitySteps(),
-                order.executedQuantitySteps(),
-                order.remainingQuantitySteps(),
-                order.marginMode(),
-                order.positionSide(),
-                order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(),
-                order.reduceOnly(),
-                order.postOnly(),
-                order.status(),
-                order.rejectReason(),
-                order.createdAt(),
-                order.updatedAt());
-    }
 }

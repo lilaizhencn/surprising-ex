@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.CoreAcceptFreezeBenchmark;
 import com.surprising.aeron.service.orchestration.CoreInMemoryBenchmark;
 import com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmark;
@@ -241,8 +241,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
     private void setup() {
         for (String symbol : symbols) {
-            applied(CoreMessageType.UPSERT_INSTRUMENT, 1,
-                    TradingCommandCodec.encodeUpsertInstrument(instrument(symbol)), stableId("instrument:" + symbol));
+            applied(CoreMessageType.REGISTER_INSTRUMENT, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(symbol)), stableId("instrument:" + symbol));
         }
         for (int pair = 0; pair < pairCount; pair++) {
             long first = firstUser(pair);
@@ -556,7 +556,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
+                            symbol, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
             record(response, System.nanoTime() - started, measured);
         }
     }
@@ -608,7 +608,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         return markGates[index].refresh(System.currentTimeMillis(), now -> {
             long sequence = nextPriceSequence.incrementAndGet();
             return commandAsync(CoreMessageType.APPLY_MARK_PRICE, stableId("feed:" + seed + ':' + sequence), 1,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol, 1, PRICE_TICKS, sequence, now)))
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol, PRICE_TICKS, sequence, now)))
                     .thenAccept(response -> {
                         if (response.commandStatus() != ResponseStatus.APPLIED) throw new IllegalStateException("mark rejected " + response.resultCode());
                         if (measured) marketDataCommands.incrementAndGet();
@@ -669,13 +669,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
             String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
         String reservationAsset = productLine == ProductLine.SPOT
                 ? (side == CoreOrderSide.BUY ? "USDT" : "BTC") : settleAsset();
-        return new PlaceOrderCommand(orderId, symbol, 1, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
+        return new PlaceOrderCommand(orderId, symbol, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
     }
 
-    private UpsertInstrumentCommand instrument(String symbol) {
+    private RegisterInstrumentCommand instrument(String symbol) {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC", "USDT", settleAsset(), 1, 1,
+        return new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset(), 1, 1,
                 type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

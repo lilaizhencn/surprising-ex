@@ -51,7 +51,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         verify(aeron).command(eq(CoreMessageType.SETTLE_INSTRUMENT), org.mockito.ArgumentMatchers.any(),
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
-                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "BTC-USDT-260327", 4, 100, 0));
+                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "BTC-USDT-260327", 100, 0));
     }
 
     @Test
@@ -72,7 +72,7 @@ class ExpiringContractSettlementFanoutServiceTest {
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
                 new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(),
-                        "BTC-USDT-260925-70000-C", 6, 71_000_000, 1_000));
+                        "BTC-USDT-260925-70000-C", 71_000_000, 1_000));
     }
 
     @Test
@@ -167,7 +167,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         when(aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                         new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
-                                new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,120),1,java.util.List.of(),false))));
+                                new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,120),java.util.List.of(),false))));
         var service=new ExpiringContractSettlementFanoutService(aeron,properties(ProductLine.LINEAR_DELIVERY));
         if(mode==com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) assertThat(service.fanout(event())).isEqualTo(1);
         else assertThatThrownBy(()->service.fanout(event())).hasMessageContaining("progress mismatch");

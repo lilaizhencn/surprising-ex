@@ -7,7 +7,6 @@ public final class ReservationRuntime {
     private final long orderId;
     private final long userId;
     private final int symbolId;
-    private final long instrumentChangeId;
     private final ReservationKind kind;
     private final int assetId;
     private final long totalReservedUnits;
@@ -16,30 +15,24 @@ public final class ReservationRuntime {
     private final long orderQuantitySteps;
     private boolean mutable;
 
-    public ReservationRuntime(long orderId, long userId, int symbolId, long instrumentChangeId,
-                              ReservationKind kind, int assetId, long totalReservedUnits,
+    public ReservationRuntime(long orderId, long userId, int symbolId, ReservationKind kind,
+                              int assetId, long totalReservedUnits,
                               long releasedUnits, long consumedUnits, long orderQuantitySteps) {
-        if (orderId <= 0 || userId <= 0 || symbolId < 0 || instrumentChangeId <= 0 || kind == null
+        if (orderId <= 0 || userId <= 0 || symbolId < 0 || kind == null
                 || assetId < 0 || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
                 || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
             throw new IllegalArgumentException("invalid runtime reservation");
         }
         this.orderId = orderId; this.userId = userId; this.symbolId = symbolId;
-        this.instrumentChangeId = instrumentChangeId; this.kind = kind; this.assetId = assetId;
+        this.kind = kind; this.assetId = assetId;
         this.totalReservedUnits = totalReservedUnits; this.releasedUnits = releasedUnits;
         this.consumedUnits = consumedUnits; this.orderQuantitySteps = orderQuantitySteps;
         this.mutable = true;
     }
 
-    public ReservationRuntime(long orderId, long userId, int assetId, long remainingUnits) {
-        this(orderId, userId, 0, 1, ReservationKind.DERIVATIVE_MARGIN, assetId,
-                Math.max(1, remainingUnits), 0, 0, 1);
-    }
-
     public long orderId() { return orderId; }
     public long userId() { return userId; }
     public int symbolId() { return symbolId; }
-    public long instrumentChangeId() { return instrumentChangeId; }
     public ReservationKind kind() { return kind; }
     public int assetId() { return assetId; }
     public long totalReservedUnits() { return totalReservedUnits; }
@@ -49,19 +42,19 @@ public final class ReservationRuntime {
     public long reservedUnits() { return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits)); }
 
     public ReservationRuntime snapshot() {
-        ReservationRuntime copy = new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        ReservationRuntime copy = new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
         copy.mutable = false;
         return copy;
     }
 
     ReservationRuntime laneValue() {
-        return mutable ? this : new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return mutable ? this : new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
     }
 
     ReservationRuntime copyForLane() {
-        return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
     }
 
@@ -87,7 +80,7 @@ public final class ReservationRuntime {
         if (remainingUnits < 0 || remainingUnits > reservedUnits())
             throw new IllegalArgumentException("invalid runtime reservation remainder");
         if (remainingUnits == reservedUnits()) return this;
-        return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, reservedUnits() - remainingUnits),
                 consumedUnits, orderQuantitySteps);
     }
@@ -95,14 +88,14 @@ public final class ReservationRuntime {
     public ReservationRuntime release(long units) {
         if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime release");
         if (units == 0) return this;
-        return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
     }
 
     public ReservationRuntime consume(long units) {
         if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
         if (units == 0) return this;
-        return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
     }
 
@@ -111,7 +104,7 @@ public final class ReservationRuntime {
         if (this == other) return true;
         if (!(other instanceof ReservationRuntime value)) return false;
         return orderId == value.orderId && userId == value.userId && symbolId == value.symbolId
-                && instrumentChangeId == value.instrumentChangeId && assetId == value.assetId
+                && assetId == value.assetId
                 && totalReservedUnits == value.totalReservedUnits && releasedUnits == value.releasedUnits
                 && consumedUnits == value.consumedUnits && orderQuantitySteps == value.orderQuantitySteps
                 && kind == value.kind;
@@ -119,7 +112,7 @@ public final class ReservationRuntime {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+        return java.util.Objects.hash(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
     }
 

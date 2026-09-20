@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state.query;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -35,7 +35,7 @@ public final class RuntimeLiquidationQueryService {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
         }
         String symbol = identities.symbol(liquidation.symbolId());
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         String positionName = liquidation.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
@@ -43,7 +43,7 @@ public final class RuntimeLiquidationQueryService {
         Long positionKey = identities.findPositionKey(liquidation.userId(), positionName);
         PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
         RiskSnapshotRuntime risk = positionKey == null ? null : runtime.riskSnapshot(positionKey);
-        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
+        return position != null && position.instrument() == liquidation.instrument()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
@@ -85,15 +85,15 @@ public final class RuntimeLiquidationQueryService {
             if (query.purpose() == CoreLiquidationWorkView.Purpose.EXECUTION) {
                 MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
                 action = new CoreLiquidationActionView(value.liquidationId(), value.userId(), symbol,
-                        value.marginMode(), value.positionSide(), value.instrumentChangeId(),
+                        value.marginMode(), value.positionSide(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.closeQuantitySteps(),
                         mark.markPriceTicks(), value.status().name(),
                         value.status() == CoreLiquidationState.Status.ORDERED ? value.nextCancelOrderId() : 0);
                 actions.add(action);
             } else {
-                CoreInstrumentState instrument = runtime.instrument(symbol);
+                CoreInstrument instrument = runtime.instrument(symbol);
                 resolution = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(), symbol,
-                        instrument.settleAsset(), value.marginMode(), value.positionSide(), value.instrumentChangeId(),
+                        instrument.settleAsset(), value.marginMode(), value.positionSide(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
                         insuranceAllocations.getOrDefault(value.liquidationId(), 0L), query.purpose());
                 resolutions.add(resolution);
@@ -133,8 +133,8 @@ public final class RuntimeLiquidationQueryService {
             MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
             return mark != null && mark.priceSequence() == value.triggerPriceSequence();
         }
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(value.symbolId()));
-        return instrument != null && instrument.changeId() == value.instrumentChangeId()
+        CoreInstrument instrument = runtime.instrument(identities.symbol(value.symbolId()));
+        return instrument != null && instrument == value.instrument()
                 && instrument.contractType().productLine() == productLine;
     }
 

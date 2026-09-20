@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.admission;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.OrderReservation;
@@ -31,7 +31,7 @@ public final class CoreOrderDecisionResolver {
             throw new IllegalArgumentException("invalid order decision input");
         }
         runtime.assertOwner();
-        CoreInstrumentState instrument = runtime.instrument(intent.symbol());
+        CoreInstrument instrument = runtime.instrument(intent.symbol());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         Integer symbolId = identities.findSymbolId(instrument.symbol());
         if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
@@ -41,14 +41,14 @@ public final class CoreOrderDecisionResolver {
     }
 
     /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
-    public record Context(CoreInstrumentState instrument, int symbolId, MarkPriceRuntime mark,
+    public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
                           CoreFeeRate fee, long clusterTimestamp, boolean lifecycleSettled,
                           boolean fundingInProgress) { }
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, String symbol, long clusterTimestamp) {
         runtime.assertOwner();
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         Integer symbolId = identities.findSymbolId(instrument.symbol());
         if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
@@ -64,13 +64,11 @@ public final class CoreOrderDecisionResolver {
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
     }
 
-    private static ResolvedPlaceOrder resolveValues(CoreInstrumentState instrument, int symbolId,
+    private static ResolvedPlaceOrder resolveValues(CoreInstrument instrument, int symbolId,
                                                     MarkPriceRuntime mark, CoreFeeRate fee,
                                                     long clusterTimestamp, boolean lifecycleSettled,
                                                     PlaceOrderCommand intent) {
         if (!instrument.symbol().equals(intent.symbol())) throw new IllegalArgumentException("decision context symbol mismatch");
-        if (instrument.changeId() != intent.instrumentChangeId())
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         instrument.requireTrading(intent.reduceOnly());
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis())
             throw new CoreStateRejectedException(lifecycleSettled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
@@ -97,17 +95,14 @@ public final class CoreOrderDecisionResolver {
 
     public static ResolvedPlaceOrder resolve(TradingCoreState state, PlaceOrderCommand intent) {
         if (state == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(intent.symbol()));
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(intent.symbol()));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != intent.instrumentChangeId()) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
         CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.symbol());
-        if (!spotLimit && (mark == null || mark.instrumentChangeId() != instrument.changeId())) {
+        if (!spotLimit && mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
@@ -128,9 +123,9 @@ public final class CoreOrderDecisionResolver {
                 instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0);
     }
 
-    private static void requireFreshMark(MarkPriceRuntime mark, CoreInstrumentState instrument,
+    private static void requireFreshMark(MarkPriceRuntime mark, CoreInstrument instrument,
                                          long clusterTimestamp) {
-        if (mark == null || mark.instrumentChangeId() != instrument.changeId()) {
+        if (mark == null || mark.instrument() != instrument) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
         long age = Math.subtractExact(clusterTimestamp, mark.generatedAtEpochMillis());
@@ -146,7 +141,7 @@ public final class CoreOrderDecisionResolver {
         return Math.max(1, scalePpm(markPriceTicks, factor, side == CoreOrderSide.BUY));
     }
 
-    private static long reservationPrice(PlaceOrderCommand intent, CoreInstrumentState instrument,
+    private static long reservationPrice(PlaceOrderCommand intent, CoreInstrument instrument,
                                          long markPriceTicks, long matchingPriceTicks) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             return matchingPriceTicks;

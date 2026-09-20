@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.math;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 import static com.surprising.aeron.service.state.math.CoreArithmetic.*;
@@ -15,7 +15,7 @@ public final class OptionContractMath {
     }
 
     public static long optionSellOpenOrderMarginUnits(
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             long orderPriceTicks,
             long markPriceTicks,
             long quantitySteps,
@@ -36,7 +36,7 @@ public final class OptionContractMath {
     }
 
     public static long optionPremiumUnits(
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             long priceTicks,
             long quantitySteps) {
         if (!instrument.contractType().isOption() || priceTicks <= 0 || quantitySteps <= 0) {
@@ -51,13 +51,13 @@ public final class OptionContractMath {
         }
     }
 
-    public static long optionMarketValueUnits(CoreInstrumentState instrument, long signedQuantitySteps,
+    public static long optionMarketValueUnits(CoreInstrument instrument, long signedQuantitySteps,
                                        long markPriceTicks) {
         long value = optionPremiumUnits(instrument, markPriceTicks, Math.absExact(signedQuantitySteps));
         return signedQuantitySteps > 0 ? value : Math.negateExact(value);
     }
 
-    public static long optionOutOfMoneyTicks(CoreInstrumentState instrument, long forwardPriceTicks) {
+    public static long optionOutOfMoneyTicks(CoreInstrument instrument, long forwardPriceTicks) {
         return instrument.optionType() == OptionType.CALL
                 ? Math.max(0, Math.subtractExact(instrument.strikePriceTicks(), forwardPriceTicks))
                 : Math.max(0, Math.subtractExact(forwardPriceTicks, instrument.strikePriceTicks()));
@@ -71,7 +71,7 @@ public final class OptionContractMath {
     }
 
     public static long optionSettlementCashUnits(
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             long underlyingSettlementPriceTicks) {
         if (!instrument.contractType().isOption() || underlyingSettlementPriceTicks <= 0
                 || instrument.optionType() == null || instrument.strikePriceTicks() <= 0) {
@@ -84,7 +84,7 @@ public final class OptionContractMath {
                 : strike.subtract(settlement).max(BigInteger.ZERO);
         return intrinsic.multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
     }
-    public static long openingMarginUnits(CoreInstrumentState instrument, CoreOrderSide side, long priceTicks,
+    public static long openingMarginUnits(CoreInstrument instrument, CoreOrderSide side, long priceTicks,
                 long quantitySteps, long initialMarginRatePpm, long indexPriceTicks, long forwardPriceTicks,
                 long optionMarginFactorPpm) {
         if (side == CoreOrderSide.BUY) {
@@ -100,7 +100,7 @@ public final class OptionContractMath {
         long risk = optionPremiumUnits(instrument, riskTicks, quantitySteps);
         return Math.addExact(premium, risk);
     }
-    public static long maintenanceMarginUnits(CoreInstrumentState instrument, long signedQuantitySteps,
+    public static long maintenanceMarginUnits(CoreInstrument instrument, long signedQuantitySteps,
                 long markPriceTicks, long indexPriceTicks, long forwardPriceTicks, CoreRiskLimitBracket bracket,
                 long maintenanceMarginRatePpm) {
         if (signedQuantitySteps > 0) {

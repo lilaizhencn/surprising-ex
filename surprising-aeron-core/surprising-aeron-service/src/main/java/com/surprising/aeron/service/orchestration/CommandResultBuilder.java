@@ -403,11 +403,10 @@ final class CommandResultBuilder {
         long matcherPrefixBefore = matchingResult.matcherPrefixBefore();
         long matcherPrefixAfter = matchingResult.matcherPrefixAfter();
         long nativeOrderId = matchingResult.nativeOrderId();
-        long nativeInstrumentChangeId = matchingResult.nativeInstrumentChangeId();
         long nativeMatcherSequence = matchingResult.nativeMatcherSequence();
         if (matchingResult.nativeCoreSequence() != pending.sequence()
                 || !matchingResult.nativeMatches(pending.command().header().commandId())
-                || nativeOrderId <= 0 || nativeInstrumentChangeId <= 0
+                || nativeOrderId <= 0
                 || nativeMatcherSequence <= 0 || matcherPrefixBefore == 0 || matcherPrefixAfter == 0) {
             return setResponse(EMPTY_RESULT);
         }
@@ -418,7 +417,7 @@ final class CommandResultBuilder {
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeInstrumentChangeId, nativeMatcherSequence,
+                        nativeOrderId, nativeMatcherSequence,
                         matcherPrefixBefore, matcherPrefixAfter, commandSingleOrderSource,
                         destination, responseOffset);
                 return destination;
@@ -428,7 +427,7 @@ final class CommandResultBuilder {
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
                         pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeInstrumentChangeId, nativeMatcherSequence,
+                        nativeOrderId, nativeMatcherSequence,
                         matcherPrefixBefore, matcherPrefixAfter, commandOrderViews.get(0),
                         destination, responseOffset);
                 return destination;
@@ -438,7 +437,7 @@ final class CommandResultBuilder {
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeInto(
                         pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeInstrumentChangeId, nativeMatcherSequence,
+                        nativeOrderId, nativeMatcherSequence,
                         matcherPrefixBefore, matcherPrefixAfter, commandOrderSources, List.of(),
                         destination, responseOffset);
                 return destination;
@@ -447,7 +446,7 @@ final class CommandResultBuilder {
             byte[] destination = prepareResponseStorage(length);
             responseLength = CoreCommandResultCodec.encodeInto(
                     pending.sequence(), pending.command().header().commandId(),
-                    nativeOrderId, nativeInstrumentChangeId, nativeMatcherSequence,
+                    nativeOrderId, nativeMatcherSequence,
                     matcherPrefixBefore, matcherPrefixAfter, commandOrderViews, List.of(),
                     destination, responseOffset);
             return destination;
@@ -550,7 +549,6 @@ final class CommandResultBuilder {
         public ProductLine productLine() { return order.productLine(); }
         public long userId() { return order.userId(); }
         public String symbol() { return symbol; }
-        public long instrumentChangeId() { return order.instrumentChangeId(); }
         public CoreOrderSide side() { return order.side(); }
         public long priceTicks() { return order.priceTicks(); }
         public long quantitySteps() { return order.quantitySteps(); }

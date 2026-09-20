@@ -1372,3 +1372,47 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 聚焦 JMH 普通轮 108.385±11.623 cycles/s，即约 55493 Core/s、1109862 business/s；独立 GC 轮 105.919 cycles/s，`gc.alloc.rate.norm=23241329 B/cycle`，约 **2269.7 B/business、45393.2 B/Core**，三次测量 75 次 GC/291 ms。与上一轮 2269.5 B/business 实质相同，说明本轮不解决分配。
 - 最终结论：**Owner 完成索引和同线程响应往返已彻底移除，当前同口径性能与 p99 达标；但架构级 FIFO 等待和发布快照分配仍未消除。** 下一步不能再把 `OrderRuntime.snapshot()` 直接省掉，必须改变发布表示：让 Lane 把只含本命令 after-image 的固定容量不可变值/编码缓冲交给 Owner，且生命周期覆盖响应、实时发布和恢复校验；随后单独设计 `CoreMatchingResult` 的固定 window slot 与显式归还协议。两项都必须各自做恢复重放、六产品线资金一致性和 JFR 分配验证，不能混改。
 - 本轮 Java/Cluster/JMH 进程均已退出；四个真实集群 run 与两份 JMH JSON 共约 13 GiB 已移动到 `/Users/atomex/.Trash/surprising-ex-owner-direct-retire-20260919/`，可恢复。清理后 swap 为 0，磁盘约 289 GiB 可用，`git diff --check` 通过。
+
+## 2026-09-20 canonical instrument 完整迁移验证（canonical-instrument-20260920）
+
+### 采集前锁定计划
+
+- 本轮只验证当前 `master=7dbcaebdb032b06c61a3a5b22d84887e15c4e9d0` 加工作区 canonical instrument 完整迁移；对照 commit 不适用，不检出旧版本，也不把历史 `41.5万 business/s` 当成本轮基线。采集前 tracked diff SHA-256 为 `3b4f42e6696a4f24672a3eaf3f8031480799e4ef4364e2168805df76e1546d09`，status 摘要 SHA-256 为 `0d5009b4326f2bad6c32a6d4c6f08f08ea134b5c2aaf053c3041014e0544338a`。
+- 测试修正后、正式采集前的最终 tracked diff SHA-256 为 `8238aa34aa1d314df93787e3f115492bcb8c5d6d3140edee3384c776454ae433`，status 摘要 SHA-256 为 `dfa08bb009f8a21e7c8017e0912a95e37f7f7895d850edee9709771135a39ef6`。偏差来自删除最后的 price-provider 历史尺度测试、把 `InstrumentCoreSyncService` 改为首次缓存就绪时一次冻结并注册完整启动集合，以及同步文档；性能参数不变。
+- 首个 `canonical-instrument-20260920-main1` 在功能检查阶段因压测夹具逐 symbol 交错执行 register/mark、触发新 registry seal 而立即失败，未进入预热或测量，数据作废。夹具已改为先注册全部 128 个 instrument、再统一发布 mark；重建后采集源码 tracked diff SHA-256 为 `7eb3e22f34d0526d2845536c89ee8c1de776d0dbdfd8a033fe2fb0fc1f96811b`，作废轮不占三轮样本。
+- 改动目标：instrument 在 Core 启动注册后封存为唯一 canonical `CoreInstrument` 对象，订单、持仓、标记价、触发单及结算进度只在确需合约计算的长期状态保留该引用；删除 `CoreInstrumentState`、`instrumentChangeId` 的 Core 协议/撮合 evidence/查询/快照传播、reservation 重复引用、instrument 专用 rolling/snapshot hash、兼容命令与死 API。恢复仍依赖 snapshotId、Core/matcher sequence、业务/资金状态 hash、active-order hash、模块 checksum 和快照 CRC；不增加线程、barrier、状态副本或 fallback。
+- 正确性门槛：JDK 27 下全仓测试零 failure/error（环境条件测试允许既有 skip）；六产品线资金、冻结、持仓、订单终态、风险/强平/资金费/交割/期权及快照恢复保持一致；真实集群每轮零业务错误/超时，accepted=terminal business/Core、unfinished=0、期末 backlog=0、fundsDiff=0、population/HFT positions/reservations/loss 均通过。任一业务或恢复错误判失败。
+- 环境：本机用户明确授权；macOS 26.7 x86_64、16 logical CPU、16 GiB，HotSpot Corretto 27.0.0.33.1、Maven 3.9.16、G1；开始磁盘 285 GiB 可用、swap total/used/in/out 均为 0。无 CPU 绑核或物理独占，不终止 IntelliJ 等用户进程，结果不能外推三节点生产容量。
+- 全仓测试结束后、正式采集前 swap used 从 0 增至 128.5 MiB，且 Java/Aeron 进程已全部退出；这是本机共享环境偏差。每轮额外记录 swap 与 `vm_stat`，要求 used 不继续增长且测量窗无持续 page-in/page-out；不满足则该轮无效，不能与历史零 swap 轮作严格 A/B。
+- 真实集群固定同前口径：单 Aeron 成员，网络与 Archive 保留；LINEAR_PERPETUAL，MIXED，batch=20，128 symbols，seed=25620，1385 users；4 Account Lane、1 matcher，全局/session in-flight=256，Owner/Matcher/Lane BUSY_SPIN；30s 预热、60s 稳态、排空单列。无 profiler 三轮 `canonical-instrument-20260920-main{1,2,3}`；独立 JFR 一轮 `canonical-instrument-20260920-jfr`，不把 profiler 吞吐与主轮混算。
+- 探索门槛沿用当前同口径：每个有效主轮持续 business throughput 不低于 300,000/s、Core throughput 不低于 30,000/s，各类请求 p99 不高于 30ms；三轮极差/均值超过 10%标记不稳定。窗口满 256 后报告背压占比和 coordinated-omission 缺口，不把最好轮或短峰值称为容量。
+- JFR 使用现有 owner profile，node/runner/fork 每份最大 256MiB；要求 `jdk.DataLoss=0`、无 swap 增长，采集 owner/matcher/lane CPU与等待、GC/safepoint、ThreadAllocationStatistics、TLAB/非TLAB及 allocation samples。保护窗按稳定期首尾各剔 2s；采样权重不冒充精确对象数。
+- 分配补充使用现有 `ContinuousOwnerBenchmark.placeCancelWithoutTimers`：LINEAR_PERPETUAL、batch20、DISTINCT/BUSY_SPIN、1 matcher/4 Lane/window256、1 fork/1 thread、3×3s warmup、3×3s measurement、512MiB/G1；主轮和独立 `-prof gc` 分开。报告 B/business、B/Core、GC count/time；JMH 不含真实网络/Archive，不替代集群吞吐。
+- 完整命令：先 `mvn test` 和 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package`；集群按 `ASYNC_RUN_ID=<run> ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=<false|true> ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。采集后停止进程并仅清理本轮 Archive/JFR/log/report，结果与清理状态追加在本节。
+
+### 构建、正确性与真实集群结果
+
+- HotSpot Corretto 27.0.0.33.1 / Maven 3.9.16 下根 reactor `mvn test` 通过；此前完整 benchmark reactor package 通过，修正 `ClusterMixedCapacityMain` 启动顺序后 `-DskipTests package` 与 `ClusterMixedCapacityTest` 定向测试通过。Core 内 `instrumentChangeId|CoreInstrumentState|instrumentRegistryHash|hashInstrument|instrumentHash` 残留扫描为零，`git diff --check` 通过。
+- 首个无效轮只暴露夹具问题：旧夹具每注册一个 symbol 就发 mark，首个 mark 会封存 registry，第二次注册被 `INVALID_COMMAND` 拒绝。现改为先连续注册全部 128 个 instrument，再统一发布 mark；生产启动器同时改为首次 cache 就绪时冻结完整启动集合并在一次 reconcile 内顺序注册，后续配置事件不替换 Core canonical 对象。
+
+| run | 稳态秒 | business/s | Core/s | 最大业务 p99 | drain | window blocked | gate |
+|---|---:|---:|---:|---:|---:|---:|---|
+| main1-valid | 60.055805 | 368355.247 | 35197.380 | 26.509 ms | 16.079 ms | 49.199 s | PASS |
+| main2 | 60.013397 | 338875.204 | 32390.035 | 30.113 ms | 5.361 ms | 49.332 s | PASS |
+| main3 | 60.008596 | 325643.011 | 31129.473 | 30.867 ms | 5.674 ms | 49.027 s | PASS |
+
+- 三轮均值 **344291.154 business/s、32905.629 Core/s**；极差/均值 12.406%/12.362%，CV 6.351%/6.328%，超过 10% 稳定性门槛。相对上一节 357266.837/34141.879 均值低 3.63%/3.62%，但本轮测试后有 128.5 MiB 冷页留在 swap 且三轮单向走低，不能把差异归因于 canonical instrument 改造，也不能作严格同环境 A/B。
+- main2/main3 p99 分别比 30 ms 门槛高 0.113/0.867 ms，因此结论是吞吐下限门槛通过、延迟与稳定性门槛未完全通过。三轮均达到 in-flight 256，offered=terminal business/Core、unfinished=0、期末 backlog=0、fundsDiff=0，population/HFT positions/reservations/loss 全部通过；swap used 始终 128.5 MiB，轮后连续采样未见 swapin/swapout 增量。
+- JFR 诊断轮为 318414.015 business/s、30441.035 Core/s、p99 31.965 ms，仅用于归因。Owner、matcher 和四条 Lane 都约 98.1% 单核占用，说明独占 CPU 下 BUSY_SPIN 正常工作，瓶颈不是阻塞唤醒；context/matcher/completion high-water 分别 255/225/208，Lane high-water 45–62，Owner 与 matcher 饱和而 Lane 实际业务执行占比约 44.8%。
+
+### JFR、分配与结论
+
+- node/runner/fork 三份 JFR 均 `jdk.DataLoss=0`。56 秒保护窗内 96 次 G1 young GC，总暂停 522.480 ms、最大 12.068 ms，约占保护窗 0.93%；GC 会放大尾延迟，但不是 3 万 Core/s 的唯一限制。
+- Owner 终态提交均值/p99 18.600/66.157 µs，其中 fact publication 5.496/14.323 µs、terminal bookkeeping 3.080/7.525 µs、realtime publication 0.118/0.232 µs、response+retirement 0.914/2.158 µs。`OwnerSettlementMerge` 的 923 个 timing 样本总耗时均值/p99 9.116/21.192 µs；publication 7.267/17.486 µs、removals 3.345/10.919 µs、terminal index 1.152/4.256 µs。删除 instrument hash/版本传播没有引入新的 Owner 热点。
+- Lane 执行 p99：PLACE 17.751 µs、CANCEL 20.751 µs、PLACE_BATCH 137.252 µs；Lane 完成到 Owner p99：283.841/1686.546/1113.767 µs。`OwnerTurn` 21394 个稀疏样本中平均退休 1.184，p50/p99 均为 0，14203 个零退休、6553 个单条、638 个多条，21305 个标记 head wait。真正的主限制仍是跨线程完成可见性、严格 FIFO 队首等待与 Owner/matcher cadence，不是 instrument 对象引用或唤醒策略。
+- JFR 分配权重：`OrderRuntime` 25.91%（`snapshot()` 18.03%）、`CoreMatchingResult` 8.06%、byte[] 8.01%、`ReservationRuntime` 7.71%（`snapshot()` 4.45%）、long[] 6.85%、native `MatcherResult` 5.99%。canonical instrument、instrument hash 和版本包装不在分配头部。
+- 聚焦 JMH 普通轮 105.818±22.740 cycles/s，约 54179 Core/s、1083575 business/s；独立 GC 轮 104.885 cycles/s，`gc.alloc.rate.norm=22468371 B/cycle`，折合 **2194.2 B/business、43883.5 B/Core**，三次测量 72 次 GC/259 ms。相对上一轮 2269.7 B/business 下降约 **3.33%**，说明本轮删减有效但没有触及主要快照分配。
+- 最终判断：canonical instrument 迁移本身已完成，Core 每个 symbol 只有启动时创建的单一对象，订单/持仓/mark/触发/结算仅在需要合约数学时持有该引用；reservation 重复引用、Core 版本字段、撮合 evidence 版本、instrument rolling/snapshot hash、兼容命令和死 API 已删除。保留的 `CanonicalHasher` 只服务资金与业务恢复状态校验，原本即存在且不再包含 instrument 配置，不是 instrument canonicalization 层；删除它会移除恢复一致性边界，不能作为本轮减法。
+- 性能没有退回“只能 3 万”：当前真实网络/Archive 满载为 31.1k–35.2k Core/s、32.6万–36.8万 business/s；纯内存 Owner/Lane JMH 约 54.2k Core/s。要继续提升并压低 p99，下一项应单独重构 `OrderRuntime.snapshot()`/`ReservationRuntime.snapshot()` 的发布表示，再处理 `CoreMatchingResult` 固定 window slot；instrument 路径已不是下一瓶颈。
+- 证据 SHA-256：main1/main2/main3/JFR summary 分别为 `07b21c63e303ee9ff6d00ca0875c458772909635bd00434287d8b0d12e089002`、`37cdec1a2eafdedd156db7be21d82eaedad068d4101f59bf52f041be93c697a0`、`5fc9e995b5e978eba288683d4c54f4ae676d350a638a6e83bac7fbc0849edc18`、`4ee18438d71a4467e770c1ed72001b6133eafd04262dbd5343d519266fecc86f`；node JFR `425f06002bc0d403dd805381b9cf547a7170e25d89a1cf7c39fd0a753ff9aeda`；JMH main/GC JSON `4ddf02919677ee06697f84f5bc95f700228ac96f3a99cf7137352f1424009a7c` / `c9ad20d76560467120ad584fa6f5e8bcbe37f3ea75e35d6dbf3b7994e83131c6`。
+- 本轮全部 Java/Aeron/JMH 进程已退出；5 个真实集群 run（含一个启动功能检查作废轮）和 2 份 JMH JSON 共约 12 GiB 已移动到 `/Users/atomex/.Trash/surprising-ex-canonical-instrument-20260920/`，可恢复，未移动或删除其他轮次。清理后 swap used 仍为 128.5 MiB、磁盘约 271 GiB 可用。

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.math.*;
 
@@ -18,7 +18,7 @@ final class ReducerSpotSettlement {
     static SpotFillResult applySpotFill(
             CoreUserState user,
             CoreOrderState order,
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             String baseAsset,
             String quoteAsset,
             long fillPriceTicks,

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.risk.*;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -71,8 +71,7 @@ final class LiquidationExecution {
         if (!isExecutable(state, liquidation)) {
             return cancel(state, liquidation);
         }
-        CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, liquidation.symbol());
         CoreUserState user = state.user(liquidation.userId());
         String positionKey = positionKey(liquidation.symbol(), liquidation.positionSide());
         CorePositionState position = user.positions().get(positionKey);
@@ -114,7 +113,7 @@ final class LiquidationExecution {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
+                position.marginMode(), position.positionSide(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
@@ -143,7 +142,7 @@ final class LiquidationExecution {
     }
 
     private static boolean isExecutable(TradingCoreState state, CoreLiquidationState liquidation) {
-        CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
+        CoreInstrument instrument = state.instruments().get(liquidation.symbol());
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         CoreUserState user = state.user(liquidation.userId());
@@ -151,8 +150,7 @@ final class LiquidationExecution {
                 : user.positions().get(positionKey(liquidation.symbol(), liquidation.positionSide()));
         CoreRiskSnapshot risk = state.riskState().snapshots().get(
                 riskKey(liquidation.userId(), liquidation.symbol(), liquidation.positionSide()));
-        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
-                && position.marginMode() == liquidation.marginMode()
+        return position != null && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
                 && risk.status() == CoreRiskStatus.LIQUIDATION;
@@ -186,13 +184,10 @@ final class LiquidationExecution {
                 ? userId + ":" + symbol : userId + ":" + symbol + ":" + positionSide.name();
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

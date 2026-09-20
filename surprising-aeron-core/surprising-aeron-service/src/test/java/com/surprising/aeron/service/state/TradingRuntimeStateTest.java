@@ -47,8 +47,8 @@ class TradingRuntimeStateTest {
                 state.putUser(new UserRuntime(user));
                 state.putBalance(new BalanceRuntime(user, 3, 1000, 0));
             }
-            state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
-            state.reserveOrder(12, second, 92, 5, 2, 3, 200);
+            CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
+            CoreStateTestFixtures.reserveOrder(state, 12, second, 92, 5, 2, 3, 200);
             var original = state.order(11);
             state.clearChangedKeys();
             state.startAccountLanes();
@@ -95,7 +95,7 @@ class TradingRuntimeStateTest {
             state.clearChangedKeys();
             state.startAccountLanes();
             for (int index = 0; index < 2; index++)
-                state.reserveOrder(11 + index, 7, 91 + index, 5, 2, 3, 200);
+                CoreStateTestFixtures.reserveOrder(state, 11 + index, 7, 91 + index, 5, 2, 3, 200);
             if (batch) {
                 state.onLane(7L, lane -> {
                     lane.markPendingReservation(11, 4);
@@ -293,8 +293,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(7));
         BalanceRuntime balance = new BalanceRuntime(7, 3, 1_000, 0);
         state.putBalance(balance);
-        state.putOrder(new OrderRuntime(11, 7, 5, 2));
-        state.putReservation(new ReservationRuntime(11, 7, 3, 200));
+        state.putOrder(CoreStateTestFixtures.order(11, 7, 5, 2));
+        state.putReservation(CoreStateTestFixtures.reservation(11, 7, 3, 200));
         state.putClientOrder(7, 91, 11);
 
         assertThat(state.user(7).userId()).isEqualTo(7);
@@ -424,7 +424,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
 
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
@@ -436,7 +436,7 @@ class TradingRuntimeStateTest {
     void rejectedReservationCompletionPreservesCountersAndCanCompleteLater() {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
-        state.putReservation(new ReservationRuntime(11, 7, 3, 200));
+        state.putReservation(CoreStateTestFixtures.reservation(11, 7, 3, 200));
         state.markPendingReservation(7, 11, 4);
 
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
@@ -454,7 +454,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
         state.clearChangedKeys();
 
@@ -468,7 +468,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
         state.removeClientOrder(7, 91);
         state.clearChangedKeys();
@@ -483,8 +483,8 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
-        state.reserveOrder(12, 7, 92, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 12, 7, 92, 5, 2, 3, 200);
         state.putClientOrder(7, 93, 11);
         state.putClientOrder(7, 94, 11);
         state.putClientOrder(7, 93, 12);
@@ -509,7 +509,7 @@ class TradingRuntimeStateTest {
             state.putUser(new UserRuntime(userId));
             for (int assetId = 1; assetId <= 10; assetId++) {
                 for (int reservation = 0; reservation < 10; reservation++) {
-                    state.putReservation(new ReservationRuntime(orderId, userId, assetId, assetId));
+                    state.putReservation(CoreStateTestFixtures.reservation(orderId, userId, assetId, assetId));
                     state.markPendingReservation(userId, orderId, 1);
                     orderId++;
                 }
@@ -548,7 +548,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
 
         // When: the reservation is completed once and completion is retried.
@@ -577,7 +577,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
 
         // When: the mark is duplicated and completion uses a sequence that was never marked.
@@ -604,7 +604,7 @@ class TradingRuntimeStateTest {
         state.putBalance(new BalanceRuntime(7, assetId, 1_000, 0));
         TradingCoreState global = RuntimeStateMaterializer.materialize(state, identities);
         var snapshots = state.accountLaneSnapshots(1, global);
-        state.reserveOrder(11, 7, 91, 5, 2, assetId, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, assetId, 200);
         state.markPendingReservation(7, 11, 2);
 
         // When: a pending reservation is partially released, then the pre-pending snapshot is restored.
@@ -631,7 +631,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
 
         // When: the reservation is partially consumed and then canceled.
@@ -653,7 +653,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.markPendingReservation(7, 11, 4);
 
         // When: a caller attempts to remove it before lifecycle completion.
@@ -672,9 +672,9 @@ class TradingRuntimeStateTest {
     void laneCounterOverflowFailsBeforePendingStateChanges() {
         // Given: an account lane with one maximum-unit pending reservation.
         AccountLaneState lane = new AccountLaneState(0, 8);
-        lane.reservations.put(1, new ReservationRuntime(1, 7, 3, Long.MAX_VALUE));
+        lane.reservations.put(1, CoreStateTestFixtures.reservation(1, 7, 3, Long.MAX_VALUE));
         lane.markPendingReservation(1, 1);
-        lane.reservations.put(2, new ReservationRuntime(2, 7, 3, 1));
+        lane.reservations.put(2, CoreStateTestFixtures.reservation(2, 7, 3, 1));
 
         // When: the next mark would overflow reserved units.
         assertThatThrownBy(() -> lane.markPendingReservation(2, 1)).isInstanceOf(ArithmeticException.class);
@@ -712,8 +712,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laterUser));
         state.putBalance(new BalanceRuntime(firstUser, 3, 1_000, 0));
         state.putBalance(new BalanceRuntime(laterUser, 3, 1_000, 0));
-        state.reserveOrder(11, firstUser, 91, 5, 2, 3, 200);
-        state.reserveOrder(12, laterUser, 92, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, firstUser, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 12, laterUser, 92, 5, 2, 3, 200);
         state.markPendingReservation(firstUser, 11, 4);
         state.markPendingReservation(laterUser, 12, 4);
         ReservationRuntime firstReservation = state.reservation(11);
@@ -750,11 +750,11 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
-        assertThatThrownBy(() -> state.reserveOrder(11, 7, 92, 5, 2, 3, 100))
+        assertThatThrownBy(() -> CoreStateTestFixtures.reserveOrder(state, 11, 7, 92, 5, 2, 3, 100))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> state.reserveOrder(12, 7, 91, 5, 2, 3, 100))
+        assertThatThrownBy(() -> CoreStateTestFixtures.reserveOrder(state, 12, 7, 91, 5, 2, 3, 100))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
@@ -766,7 +766,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 100, 0));
 
-        assertThatThrownBy(() -> state.reserveOrder(11, 7, 91, 5, 2, 3, 101))
+        assertThatThrownBy(() -> CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 101))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(state.order(11)).isNull();
         assertThat(state.reservation(11)).isNull();
@@ -799,7 +799,7 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
         TradingRuntimeSnapshot snapshot = state.snapshot(4);
 
@@ -808,7 +808,7 @@ class TradingRuntimeStateTest {
         assertThat(snapshot.totalLockedUnits()).isEqualTo(200);
         assertThat(snapshot.orders()).containsKey(11L);
         assertThatThrownBy(() -> snapshot.orders().put(12L,
-                new TradingRuntimeSnapshot.OrderSnapshot(7, 5, 1)))
+                snapshot.orders().get(11L)))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -820,7 +820,7 @@ class TradingRuntimeStateTest {
         state.putPosition(9, new PositionRuntime(7, 5, 3,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                1, 2, 100, 200, 0, 40));
+                CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 0, 40));
         state.treasury().setFee(3, 7);
         state.treasury().setInsurance(3, 11, 0);
 
@@ -841,7 +841,8 @@ class TradingRuntimeStateTest {
         LiquidationRuntime planned = new LiquidationRuntime(1, 7, 5,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                1, 9, 2, 2, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0);
+                CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2, 0, 0, 0, 0,
+                CoreLiquidationState.Status.PLANNED, 0);
         state.putLiquidation(planned);
 
         assertThat(state.activeLiquidation(7, 5,
@@ -850,7 +851,8 @@ class TradingRuntimeStateTest {
         LiquidationRuntime canceled = new LiquidationRuntime(1, 7, 5,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                1, 9, 2, 2, 0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0);
+                CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2, 0, 0, 0, 0,
+                CoreLiquidationState.Status.CANCELED, 0);
         state.replaceLiquidation(canceled);
 
         assertThat(state.activeLiquidation(7, 5,
@@ -950,7 +952,7 @@ class TradingRuntimeStateTest {
         PositionRuntime open = new PositionRuntime(7, symbolId, assetId,
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                1, 2, 100, 200, 0, 40);
+                CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 0, 40);
         state.putPosition(positionKey, open);
         state.clearChangedKeys();
 
@@ -1057,7 +1059,7 @@ class TradingRuntimeStateTest {
         long userId = 1, orderId = 10_000;
         state.putUser(new UserRuntime(userId));
         state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
-        state.reserveOrder(orderId, userId, identities.clientKey(userId, "cancel"), 5, 1, 3, 1);
+        CoreStateTestFixtures.reserveOrder(state, orderId, userId, identities.clientKey(userId, "cancel"), 5, 1, 3, 1);
         state.clearChangedKeys();
         state.startAccountLanes();
         var release = new java.util.concurrent.CountDownLatch(1);
@@ -1114,7 +1116,7 @@ class TradingRuntimeStateTest {
             long clientKey = identities.clientKey(userId, "cancel-" + index);
             state.putUser(new UserRuntime(userId));
             state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
-            state.reserveOrder(orderId, userId, clientKey, 5, 1, 3, 1);
+            CoreStateTestFixtures.reserveOrder(state, orderId, userId, clientKey, 5, 1, 3, 1);
         }
         state.clearChangedKeys();
         state.startAccountLanes();
@@ -1231,8 +1233,8 @@ class TradingRuntimeStateTest {
         try (TradingRuntimeState state = new TradingRuntimeState()) {
             state.putUser(new UserRuntime(7));
             state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-            OrderRuntime order = new OrderRuntime(11, 7, 5, 2);
-            ReservationRuntime reservation = new ReservationRuntime(11, 7, 5, 1,
+            OrderRuntime order = CoreStateTestFixtures.order(11, 7, 5, 2);
+            ReservationRuntime reservation = new ReservationRuntime(11, 7, 5,
                     com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
             state.startAccountLanes();
             state.reserveOrder(order, reservation, 91);
@@ -1242,8 +1244,8 @@ class TradingRuntimeStateTest {
             assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
             assertThatThrownBy(() -> state.reserveOrder(order, reservation, 92))
                     .isInstanceOf(IllegalArgumentException.class);
-            var next = new OrderRuntime(12, 7, 5, 2);
-            var nextReservation = new ReservationRuntime(12, 7, 5, 1,
+            var next = CoreStateTestFixtures.order(12, 7, 5, 2);
+            var nextReservation = new ReservationRuntime(12, 7, 5,
                     com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
             assertThatThrownBy(() -> state.reserveOrder(next, nextReservation, 91))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -1293,7 +1295,7 @@ class TradingRuntimeStateTest {
     @Test
     void activeOrderMembershipSurvivesUpdatesGrowthAndTerminalRemoval() {
         AccountLaneState lane = new AccountLaneState(0, 16);
-        for (long id = 1; id <= 100; id++) lane.putOrder(new OrderRuntime(id, 7, 5, 2));
+        for (long id = 1; id <= 100; id++) lane.putOrder(CoreStateTestFixtures.order(id, 7, 5, 2));
         var membership = lane.activeOrderIdsByUser.get(7);
         for (long id = 1; id <= 100; id++) {
             OrderRuntime order = lane.orders.get(id);
@@ -1358,8 +1360,8 @@ class TradingRuntimeStateTest {
         try (var state = new TradingRuntimeState()) {
             state.putUser(new UserRuntime(7));
             state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-            state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
-            state.reserveOrder(12, 7, 92, 5, 2, 3, 200);
+            CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
+            CoreStateTestFixtures.reserveOrder(state, 12, 7, 92, 5, 2, 3, 200);
             state.onLane(7L, lane -> {
                 lane.markPendingReservation(11, 4);
                 lane.markPendingReservation(12, 4);

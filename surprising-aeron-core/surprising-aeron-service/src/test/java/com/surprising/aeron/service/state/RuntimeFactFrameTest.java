@@ -292,7 +292,7 @@ class RuntimeFactFrameTest {
     void preservesCompactOrderStateForIndexAndOffOwnerFactAssembly() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");
-        OrderRuntime order = new OrderRuntime(71, 7, symbolId, 2);
+        OrderRuntime order = CoreStateTestFixtures.order(71, 7, symbolId, 2);
         RuntimeFactFrame.Builder builder = RuntimeFactFrame.builder(
                 ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
@@ -337,23 +337,23 @@ class RuntimeFactFrameTest {
         builder.recordBalance(1, 9, assetId, null, new RuntimeFactFrame.UserBalance(900, 100, 0));
         builder.recordBalance(1, 7, assetId, null, new RuntimeFactFrame.UserBalance(700, 300, 0));
         builder.recordReservation(1, 99, null,
-                new ReservationRuntime(99, 9, symbolId, 1,
+                new ReservationRuntime(99, 9, symbolId,
                         com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
                         assetId, 100, 0, 0, 1), false, false);
         builder.recordReservation(1, 77, null,
-                new ReservationRuntime(77, 7, symbolId, 1,
+                new ReservationRuntime(77, 7, symbolId,
                         com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
                         assetId, 300, 0, 0, 1), false, false);
         builder.recordPosition(1, secondPositionKey, null,
                 new PositionRuntime(9, symbolId, assetId,
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.SHORT,
-                        1, -1, 100, 100, 0, 100));
+                        CoreStateTestFixtures.runtimeInstrument(), -1, 100, 100, 0, 100));
         builder.recordPosition(1, firstPositionKey, null,
                 new PositionRuntime(7, symbolId, assetId,
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.LONG,
-                        1, 1, 100, 100, 0, 300));
+                        CoreStateTestFixtures.runtimeInstrument(), 1, 100, 100, 0, 300));
         builder.laneMask(1L << 1);
 
         UUID factCommandId = UUID.randomUUID();
@@ -387,7 +387,7 @@ class RuntimeFactFrameTest {
     void assemblesCompactOrderDeletionAsTombstone() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");
-        OrderRuntime order = new OrderRuntime(72, 7, symbolId, 2);
+        OrderRuntime order = CoreStateTestFixtures.order(72, 7, symbolId, 2);
         RuntimeFactFrame.Builder builder = baseBuilder();
         CoreOrderState businessOrder = RuntimeStateMaterializer.orderSnapshot(order, identities);
         builder.recordOrder(1, order, null, businessOrder, null);
@@ -495,6 +495,7 @@ class RuntimeFactFrameTest {
 
     private static CoreTriggerOrderState trigger(long id, ProductLine productLine) {
         return new CoreTriggerOrderState(id, productLine, 7, "", "", "BTC-USDT",
+                CoreStateTestFixtures.runtimeInstrument(),
                 com.surprising.aeron.protocol.CoreOrderSide.BUY,
                 com.surprising.aeron.protocol.CoreTriggerOrderType.STOP_LOSS,
                 com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL,

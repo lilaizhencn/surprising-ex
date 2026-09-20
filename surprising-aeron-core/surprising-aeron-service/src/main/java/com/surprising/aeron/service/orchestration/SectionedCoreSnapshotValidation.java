@@ -55,7 +55,6 @@ final class SectionedCoreSnapshotValidation {
         int bookStateHash = header.getInt();
         long symbolRegistryHash = header.getLong();
         long userRegistryHash = header.getLong();
-        long instrumentRegistryHash = header.getLong();
         long activeOrderHash = header.getLong();
         long sourceSequenceDigest = header.getLong();
         long outboxAcknowledgedSequence = header.getLong();
@@ -91,7 +90,7 @@ final class SectionedCoreSnapshotValidation {
                 businessStateHash, globalFundsHash, auditBusinessStateHash, auditFundsStateHash,
                 engineStateHash, bookStateHash,
                 symbolRegistryHash, userRegistryHash,
-                instrumentRegistryHash, activeOrderHash, sourceSequenceDigest, outboxAcknowledgedSequence,
+                activeOrderHash, sourceSequenceDigest, outboxAcknowledgedSequence,
                 outboxNextSequence, outboxPendingCount, outboxPendingDigest, forkGitSha, artifactSha256,
                 matcherConfigHash);
     }
@@ -123,9 +122,6 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.bookStateHash() == matcherSnapshot.bookStateHash(), "book state hash");
         requireMatch(manifest.symbolRegistryHash() == matcherSnapshot.symbolRegistryHash(), "symbol registry hash");
         requireMatch(manifest.userRegistryHash() == matcherSnapshot.userRegistryHash(), "user registry hash");
-        requireMatch(manifest.instrumentRegistryHash() == matcherSnapshot.instrumentRegistryHash()
-                && manifest.instrumentRegistryHash() == MatcherSnapshot.instrumentRegistryHash(tradingState),
-                "instrument registry hash");
         requireMatch(manifest.activeOrderHash() == matcherSnapshot.activeOrderHash()
                 && manifest.activeOrderHash() == MatcherSnapshot.activeOrderHash(tradingState), "active order hash");
         requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
@@ -183,7 +179,7 @@ final class SectionedCoreSnapshotValidation {
             long matcherSequence, long businessStateHash, long globalFundsHash,
             long auditBusinessStateHash, long auditFundsStateHash,
             int engineStateHash, int bookStateHash,
-            long symbolRegistryHash, long userRegistryHash, long instrumentRegistryHash, long activeOrderHash,
+            long symbolRegistryHash, long userRegistryHash, long activeOrderHash,
             long sourceSequenceDigest, long outboxAcknowledgedSequence, long outboxNextSequence,
             int outboxPendingCount, long outboxPendingDigest, String forkGitSha, String artifactSha256,
             long matcherConfigHash) {

@@ -19,7 +19,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import exchange.core2.core.common.MatcherEventType;
 import com.surprising.instrument.api.model.ContractType;
@@ -80,10 +80,10 @@ public final class CorePerpetualEndToEndBenchmark {
     }
 
     private static void setup(TradingCoreRuntime state, Sequences sequences) {
-        apply(state, sequences, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                TradingCommandCodec.encodeUpsertInstrument(instrument()));
+        apply(state, sequences, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeRegisterInstrument(instrument()));
         apply(state, sequences, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1, 1_000, 1, 1_000)));
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));
         importFeePolicy(state, sequences, 1, MAKER_USER_ID);
         importFeePolicy(state, sequences, 2, TAKER_USER_ID);
         adjust(state, sequences, MAKER_USER_ID);
@@ -183,11 +183,11 @@ public final class CorePerpetualEndToEndBenchmark {
 
     private static PlaceOrderCommand order(long orderId, CoreOrderSide side, CoreTimeInForce timeInForce,
                                            long quantity) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, side, 1_000, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "perpetual-e2e-" + orderId);
+        return new PlaceOrderCommand(orderId, SYMBOL, side, 1_000, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "perpetual-e2e-" + orderId);
     }
 
-    private static UpsertInstrumentCommand instrument() {
-        return new UpsertInstrumentCommand(SYMBOL, 1, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+    private static RegisterInstrumentCommand instrument() {
+        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
                 "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0);
     }
 

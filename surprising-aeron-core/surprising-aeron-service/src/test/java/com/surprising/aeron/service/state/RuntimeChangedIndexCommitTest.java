@@ -28,8 +28,9 @@ class RuntimeChangedIndexCommitTest {
         int assetId = identities.assetId("USDT");
         long positionKey = identities.positionKey(7, "BTC-USDT:NET");
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
-                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 2, 100, 200, 0, 40));
-        runtime.putOrder(new OrderRuntime(11, 7, symbolId, 2));
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
+                2, 100, 200, 0, 40));
+        runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 2));
 
         IndexSet indexes = indexes(initial, identities);
         indexes.coordinator.applyCurrent(runtime, identities);
@@ -40,8 +41,9 @@ class RuntimeChangedIndexCommitTest {
 
         runtime.clearChangedKeys();
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
-                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 3, 100, 300, 0, 60));
-        runtime.putOrder(new OrderRuntime(11, 7, symbolId, 5));
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
+                3, 100, 300, 0, 60));
+        runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.pendingQuantity(
@@ -70,13 +72,14 @@ class RuntimeChangedIndexCommitTest {
         long userId = 7;
         long positionKey = identities.positionKey(userId, "BTC-USDT:NET");
         runtime.putPosition(positionKey, new PositionRuntime(userId, symbolId, assetId,
-                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 2, 100, 200, 0, 40));
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
+                2, 100, 200, 0, 40));
         runtime.clearChangedKeys();
         runtime.startAccountLanes();
 
         IndexSet indexes = indexes(initial, identities);
         RiskSnapshotRuntime risk = new RiskSnapshotRuntime(userId, symbolId, CorePositionSide.NET,
-                1, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL);
+                9, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL);
         runtime.executeUserRisk(userId, () -> {
             runtime.putRiskSnapshot(positionKey, risk);
             return null;
@@ -108,7 +111,7 @@ class RuntimeChangedIndexCommitTest {
         int symbolId = identities.symbolId("BTC-USDT");
         long userId = 7;
         LiquidationRuntime planned = new LiquidationRuntime(1, userId, symbolId,
-                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 9, 2, 2,
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
                 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0);
         runtime.startAccountLanes();
         IndexSet indexes = indexes(initial, identities);

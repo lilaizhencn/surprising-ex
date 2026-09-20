@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
@@ -40,8 +40,8 @@ public final class RuntimeDerivativeMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return runtime;
         }
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
+        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         validateAndPrepare(takerOrderId, matches, runtime, identities);
@@ -86,7 +86,7 @@ public final class RuntimeDerivativeMatchProcessor {
                                    TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
         validateMatches(runtime, taker, matches);
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
         identities.positionKey(taker.userId(), positionKey(instrument.symbol(), taker.positionSide()));
         for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             MatcherEvent match = matches.get(matchIndex);
@@ -98,7 +98,7 @@ public final class RuntimeDerivativeMatchProcessor {
 
     static void applyLane(long takerOrderId, List<MatcherEvent> matches,
                           TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                          CoreInstrumentState instrument, int settleAssetId,
+                          CoreInstrument instrument, int settleAssetId,
                           RuntimeTreasuryDelta treasuryDelta) {
         if (treasuryDelta == null) throw new IllegalArgumentException("treasury delta is required");
         OrderRuntime localTaker = runtime.order(takerOrderId);
@@ -138,7 +138,7 @@ public final class RuntimeDerivativeMatchProcessor {
 
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
                           TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                          CoreInstrumentState instrument, int settleAssetId,
+                          CoreInstrument instrument, int settleAssetId,
                           RuntimeTreasuryDelta treasuryDelta,
                           long commitTimestamp, long commitPosition) {
         if (plan == null || treasuryDelta == null || laneId < 0
@@ -170,7 +170,7 @@ public final class RuntimeDerivativeMatchProcessor {
 
     private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, int laneId,
                                         TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                        CoreInstrumentState instrument, int settleAssetId,
+                                        CoreInstrument instrument, int settleAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition) {
         OrderRuntime localTaker = runtime.order(takerOrderId);
@@ -201,7 +201,7 @@ public final class RuntimeDerivativeMatchProcessor {
 
     private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, int laneId,
                                              TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                             CoreInstrumentState instrument, int settleAssetId,
+                                             CoreInstrument instrument, int settleAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
                                              OrderRuntime localTaker) {
@@ -237,13 +237,13 @@ public final class RuntimeDerivativeMatchProcessor {
                 new java.util.ArrayDeque<>();
         private TradingRuntimeState runtime;
         private RuntimeIdentityRegistry identities;
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private int settleAssetId;
         private long commitTimestamp;
         private long commitPosition;
 
         void reset(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                   CoreInstrumentState instrument, int settleAssetId,
+                   CoreInstrument instrument, int settleAssetId,
                    long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
             this.identities = identities;
@@ -355,7 +355,7 @@ public final class RuntimeDerivativeMatchProcessor {
 
 
     private static void applyFill(TradingRuntimeState runtime,
-                                  RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                                  RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
         applyFill(runtime, identities, instrument, order, priceTicks, quantitySteps, taker,
@@ -363,7 +363,7 @@ public final class RuntimeDerivativeMatchProcessor {
     }
 
     private static void applyFill(TradingRuntimeState runtime,
-                                  RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                                  RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {

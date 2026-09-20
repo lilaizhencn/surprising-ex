@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
@@ -38,14 +38,14 @@ public final class RuntimeDerivativeRiskProcessor {
         if (command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, command.symbol(), command.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(runtime, command.symbol());
         int symbolId = identities.symbolId(instrument.symbol());
         MarkPriceRuntime current = runtime.markPrice(symbolId);
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
         OptionRiskRules.requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
-        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.changeId(), command.markPriceTicks(),
+        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument, command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
                 command.generatedAtEpochMillis()));
         RiskScanRuntime currentScan = runtime.riskScan(symbolId);
@@ -109,7 +109,7 @@ public final class RuntimeDerivativeRiskProcessor {
         RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
         if (sourceScan == null || sourceScan.riskComplete()) return 0;
         String symbol = identities.symbol(sourceScan.symbolId());
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(symbol);
         MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
@@ -131,7 +131,7 @@ public final class RuntimeDerivativeRiskProcessor {
         RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
         if (sourceScan == null || sourceScan.riskComplete()) return 0;
         String symbol = identities.symbol(sourceScan.symbolId());
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(symbol);
         MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
@@ -173,19 +173,16 @@ public final class RuntimeDerivativeRiskProcessor {
                 identities.symbolId(symbol), scan)));
     }
 
-    private static int continueScan(TradingRuntimeState runtime, CoreInstrumentState instrument,
+    private static int continueScan(TradingRuntimeState runtime, CoreInstrument instrument,
             long priceSequence, int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
             RuntimeIdentityRegistry identities) {
         return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.symbol()), positionUsers,
                 indexedUserIds, runtime, identities);
     }
 
-    private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime, String symbol, long version) {
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
-        }
         return instrument;
     }
 

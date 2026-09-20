@@ -147,7 +147,6 @@ public final class RealtimeStateCapture {
                                         new CoreReservationView(
                                                 v.orderId(),
                                                 identities.symbol(v.symbolId()),
-                                                v.instrumentChangeId(),
                                                 v.kind(),
                                                 identities.asset(v.assetId()),
                                                 v.totalReservedUnits(),
@@ -164,7 +163,6 @@ public final class RealtimeStateCapture {
                                                 identities.asset(v.assetId()),
                                                 v.marginMode(),
                                                 v.positionSide(),
-                                                v.instrumentChangeId(),
                                                 v.signedQuantitySteps(),
                                                 v.entryPriceTicks(),
                                                 v.entryValueTicks(),
@@ -258,7 +256,6 @@ public final class RealtimeStateCapture {
                 new CoreReservationView(
                         r.orderId(),
                         identities.symbol(r.symbolId()),
-                        r.instrumentChangeId(),
                         r.kind(),
                         identities.asset(r.assetId()),
                         r.totalReservedUnits(),
@@ -310,7 +307,7 @@ public final class RealtimeStateCapture {
                         p.assetId(),
                         p.marginMode(),
                         p.positionSide(),
-                        0,
+                        p.instrument(),
                         0,
                         0,
                         0,
@@ -327,7 +324,6 @@ public final class RealtimeStateCapture {
                         identities.asset(p.assetId()),
                         p.marginMode(),
                         p.positionSide(),
-                        p.instrumentChangeId(),
                         p.signedQuantitySteps(),
                         p.entryPriceTicks(),
                         p.entryValueTicks(),
@@ -353,7 +349,6 @@ public final class RealtimeStateCapture {
                             o.productLine(),
                             o.userId(),
                             identities.symbol(o.symbolId()),
-                            o.instrumentChangeId(),
                             o.side(),
                             o.priceTicks(),
                             o.quantitySteps(),
@@ -407,9 +402,8 @@ public final class RealtimeStateCapture {
             long makerUserId) {
         if (!active() || taker == null) return;
         byte[] data =
-                ByteBuffer.allocate(33)
+                ByteBuffer.allocate(25)
                         .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(taker.instrumentChangeId())
                         .putLong(price)
                         .putLong(quantity)
                         .putLong(matcherSequence)
@@ -430,7 +424,6 @@ public final class RealtimeStateCapture {
         execution(
                 taker.userId(),
                 taker.orderId(),
-                taker.instrumentChangeId(),
                 identities.symbol(taker.symbolId()),
                 id,
                 price,
@@ -440,7 +433,6 @@ public final class RealtimeStateCapture {
         execution(
                 makerUserId,
                 makerOrderId,
-                taker.instrumentChangeId(),
                 identities.symbol(taker.symbolId()),
                 id,
                 price,
@@ -452,7 +444,6 @@ public final class RealtimeStateCapture {
     private void execution(
             long user,
             long order,
-            long instrument,
             String symbol,
             String id,
             long price,
@@ -460,9 +451,8 @@ public final class RealtimeStateCapture {
             CoreOrderSide side,
             boolean maker) {
         byte[] payload =
-                ByteBuffer.allocate(34)
+                ByteBuffer.allocate(26)
                         .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(instrument)
                         .putLong(order)
                         .putLong(price)
                         .putLong(quantity)

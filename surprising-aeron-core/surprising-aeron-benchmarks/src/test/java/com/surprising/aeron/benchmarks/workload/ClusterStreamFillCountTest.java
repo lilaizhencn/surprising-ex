@@ -9,12 +9,12 @@ import static org.assertj.core.api.Assertions.*;
 
 class ClusterStreamFillCountTest {
     private static CoreOrderStateView order(long id, long executed) {
-        return new CoreOrderStateView(id, ProductLine.LINEAR_PERPETUAL, id, "STREAM1", 1,
+        return new CoreOrderStateView(id, ProductLine.LINEAR_PERPETUAL, id, "STREAM1",
                 CoreOrderSide.BUY, 100, 1, executed, 1-executed, false,
                 executed == 0 ? "OPEN" : "FILLED", 1);
     }
     private static CoreCommandResultView result(CoreOrderStateView... orders) {
-        var result = new CoreCommandResultView(1, new UUID(0, 10), 10, 1, 1, 11, 12,
+        var result = new CoreCommandResultView(1, new UUID(0, 10), 10, 1, 11, 12,
                 List.of(orders), List.of());
         return CoreCommandResultCodec.decode(CoreCommandResultCodec.encode(result));
     }

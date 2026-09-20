@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -39,7 +39,7 @@ final class AdlCandidateQueries {
                     : user.positions().get(positionKey(key.symbol(), key.positionSide()));
             if (user == null || position == null) continue;
             if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(normalizedAsset)) continue;
-            CoreInstrumentState instrument = state.instruments().get(position.symbol());
+            CoreInstrument instrument = state.instruments().get(position.symbol());
             CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
             if (instrument == null || mark == null
                     || !(instrument.contractType().isPerpetual() || instrument.contractType().isDelivery()

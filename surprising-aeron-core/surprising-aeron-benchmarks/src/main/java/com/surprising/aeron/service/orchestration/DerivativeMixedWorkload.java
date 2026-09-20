@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
@@ -83,15 +83,17 @@ final class DerivativeMixedWorkload {
         try {
             for (int index = 0; index < symbolCount; index++) {
                 String symbol = symbols.get(index);
-                harness.execute(harness.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeUpsertInstrument(instrument(profile, symbol, index))));
+                harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(profile, symbol, index))));
+            }
+            for (String symbol : symbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
                                 productLine == ProductLine.OPTION
-                                        ? new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, ENTRY_PRICE,
+                                        ? new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, ENTRY_PRICE,
                                         ENTRY_PRICE, 1, BASE_EPOCH_MILLIS)
-                                        : new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, 1,
+                                        : new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, 1,
                                         BASE_EPOCH_MILLIS))));
             }
 
@@ -213,9 +215,9 @@ final class DerivativeMixedWorkload {
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     source.productLine() == ProductLine.OPTION
-                                            ? new ApplyMarkPriceCommand(symbol, 1, 99, ENTRY_PRICE,
+                                            ? new ApplyMarkPriceCommand(symbol, 99, ENTRY_PRICE,
                                             ENTRY_PRICE, sequence, target.nextCommandTimestamp())
-                                            : new ApplyMarkPriceCommand(symbol, 1, 99, sequence,
+                                            : new ApplyMarkPriceCommand(symbol, 99, sequence,
                                             target.nextCommandTimestamp()))));
                 }
                 if (!source.productLine().isFundingProduct()) return;
@@ -227,7 +229,7 @@ final class DerivativeMixedWorkload {
                 var response = target.execute(target.command(CoreMessageType.APPLY_FUNDING,
                         CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                fundingIds[index], symbol, 1, (index & 1) == 0 ? 100_000 : -100_000,
+                                fundingIds[index], symbol, (index & 1) == 0 ? 100_000 : -100_000,
                                 fundingCursors[index], RISK_BATCH_SIZE))));
                 var progress = CoreFundingProgressCodec.decode(response.data());
                 fundingCursors[index] = progress.complete() ? 0 : progress.nextCursorUserId();
@@ -386,13 +388,13 @@ final class DerivativeMixedWorkload {
 
     private static PlaceOrderCommand orderCommand(long id, String symbol, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce tif) {
-        return new PlaceOrderCommand(id, symbol, 1, side, price, quantity, false,
+        return new PlaceOrderCommand(id, symbol, side, price, quantity, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, tif, false,
                 "derivative-mixed-" + id);
     }
 
-    private static UpsertInstrumentCommand instrument(Profile profile, String symbol, int index) {
-        return new UpsertInstrumentCommand(symbol, 1, profile.contractType().ordinal(),
+    private static RegisterInstrumentCommand instrument(Profile profile, String symbol, int index) {
+        return new RegisterInstrumentCommand(symbol, profile.contractType().ordinal(),
                 "D" + index, profile.quoteAsset(), profile.settleAsset(),
                 profile.notionalMultiplier(), 1, profile.settleScale(), 100_000, 50_000,
                 0, 0, profile.expiryEpochMillis(), profile.optionTypeCode(), profile.strikePrice());

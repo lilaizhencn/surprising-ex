@@ -32,8 +32,8 @@ public class ClusterSequentialBatchBenchmark {
                 long user = 1001 + i * 2L, maker = user + 1, id = 10000 + i * 10L;
                 String asset = "B" + i, symbol = asset + "-USDT";
                 if (args[0].equals("run")) {
-                    send(client, CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                            new UpsertInstrumentCommand(symbol, 1, ContractType.SPOT.ordinal(), asset, "USDT", "USDT",
+                    send(client, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                            new RegisterInstrumentCommand(symbol, ContractType.SPOT.ordinal(), asset, "USDT", "USDT",
                                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
                     send(client, CoreMessageType.ADJUST_BALANCE, user, TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand(asset, 1)));
@@ -42,7 +42,7 @@ public class ClusterSequentialBatchBenchmark {
                     batch(client, maker, CoreMessageType.PLACE_ORDER_BATCH, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(order(id, symbol, CoreOrderSide.BUY)))), 1);
                     // Force sequential admission, then exercise native rejection and admission rejection.
-                    var postOnly = new PlaceOrderCommand(id + 4, symbol, 1, CoreOrderSide.SELL, 1000, 1, false,
+                    var postOnly = new PlaceOrderCommand(id + 4, symbol, CoreOrderSide.SELL, 1000, 1, false,
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
                             true, "reject-" + id);
                     var rejected = send(client, CoreMessageType.PLACE_ORDER_BATCH, user,
@@ -78,7 +78,7 @@ public class ClusterSequentialBatchBenchmark {
     }
 
     private static PlaceOrderCommand order(long id, String symbol, CoreOrderSide side) {
-        return new PlaceOrderCommand(id, symbol, 1, side, 1000, 1, false, CoreMarginMode.CROSS,
+        return new PlaceOrderCommand(id, symbol, side, 1000, 1, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "seq-" + id);
     }
     private static void batch(SurprisingAeronClient client, long user, CoreMessageType type, byte[] payload, int count) {

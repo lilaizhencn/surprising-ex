@@ -50,13 +50,13 @@ final class RuntimeOrderStateTransitions {
                     "available balance is insufficient");
         }
         OrderRuntime order = new OrderRuntime(command.orderId(), runtime.productLine(), userId, symbolId,
-                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.instrument(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                0, 0, 0, CoreOrderStatus.OPEN, 1);
+                0, 0, 0, 0, CoreOrderStatus.OPEN, 1);
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
+                command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
         runtime.reserveOrder(order, reservation, clientKey);
         runtime.putUser(new UserRuntime(runtime.productLine(), userId,

@@ -26,7 +26,7 @@ class LiquidationAeronGatewayTest {
                 new CoreRiskScanContinuation("BTC-USDT",1,0),List.of(),List.of());
         gateway.executeBatch(risk,0,1);gateway.executeBatch(risk,0,1);
         var action=new CoreLiquidationActionView(1,7,"BTC-USDT",CoreMarginMode.CROSS,
-                CorePositionSide.NET,1,1,1,1,100);
+                CorePositionSide.NET,1,1,1,100);
         var work=new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,1,true,null,List.of(action),List.of());
         gateway.executeBatch(work,0,0);gateway.executeBatch(work,0,0);
         var ids=ArgumentCaptor.forClass(UUID.class);

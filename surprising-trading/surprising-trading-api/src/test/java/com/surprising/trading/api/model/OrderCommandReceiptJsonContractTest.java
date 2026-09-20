@@ -52,7 +52,7 @@ class OrderCommandReceiptJsonContractTest {
     }
 
     private static OrderResponse order() {
-        return new OrderResponse(42L, 7L, "client-42", "BTC-USDT", 1L, OrderSide.BUY,
+        return new OrderResponse(42L, 7L, "client-42", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000L, 2L, 0L, 2L, MarginMode.CROSS,
                 PositionSide.NET, 10L, 20L, false, false, OrderStatus.ACCEPTED, null, null, null);
     }

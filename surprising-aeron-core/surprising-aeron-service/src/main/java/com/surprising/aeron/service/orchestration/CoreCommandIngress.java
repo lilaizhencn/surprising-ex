@@ -58,6 +58,10 @@ final class CoreCommandIngress {
         if (message.header().productLine() != runtime.productLine) {
             return runtime.rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
+        if (message.header().kind() == WireMessageKind.COMMAND
+                && message.header().messageType() != CoreMessageType.REGISTER_INSTRUMENT) {
+            runtime.runtimeState.sealInstrumentRegistry();
+        }
         if (message.header().messageType() == CoreMessageType.ACK_EXPORT
                 || message.header().messageType() == CoreMessageType.EXPORT_BATCH_QUERY
                 || message.header().messageType() == CoreMessageType.EXPORT_STATUS_QUERY) {
@@ -88,7 +92,7 @@ final class CoreCommandIngress {
                     UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
                     ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE,
                     UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
-                    UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, UPSERT_INSTRUMENT,
+                    UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, REGISTER_INSTRUMENT,
                     UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
             case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER, CANCEL_ORDER_BATCH -> false;
             case CONTINUE_RISK_SCAN, AMEND_ORDER_BATCH, PLACE_ORDER_BATCH, EXECUTE_ADL,

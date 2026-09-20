@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -18,7 +18,7 @@ class AdmissionReceiptRingTest {
         try (var runtime = new TradingRuntimeState()) {
             for (int sequence = 1; sequence <= 64; sequence++) {
                 var event = preparedEvent(runtime, sequence);
-                var laneOrder = new OrderRuntime(11, 7, 0, 100);
+                var laneOrder = CoreStateTestFixtures.order(11, 7, 0, 100);
                 var receipt = laneOrder.snapshot();
                 boolean accepted = sequence % 2 == 1;
                 ring.publish(sequence, 11, 1, 100, accepted, 0, accepted ? receipt : null);
@@ -39,7 +39,7 @@ class AdmissionReceiptRingTest {
     @Test
     void rejectsMissingOrMismatchedOrderWithoutConsumingCapacity() {
         var ring = new AdmissionReceiptRing(1);
-        var receipt = new OrderRuntime(11, 7, 0, 100).snapshot();
+        var receipt = CoreStateTestFixtures.order(11, 7, 0, 100).snapshot();
         assertThatThrownBy(() -> ring.publish(1, 11, 1, 100, true, 0, null))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ring.publish(1, 12, 1, 100, true, 0, receipt))
@@ -50,10 +50,10 @@ class AdmissionReceiptRingTest {
     }
 
     private static MatcherSettlementEvent preparedEvent(TradingRuntimeState runtime, long sequence) {
-        var instrument = CoreInstrumentState.from(ProductLine.LINEAR_PERPETUAL,
-                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+        var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
-        var intent = new PlaceOrderCommand(11, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1,
+        var intent = new PlaceOrderCommand(11, "BTC-USDT", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
         var resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,

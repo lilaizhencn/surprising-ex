@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
@@ -61,12 +61,9 @@ public final class RuntimePerpetualFundingProcessor {
         if (!runtime.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
-        CoreInstrumentState instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != command.instrumentChangeId()) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
@@ -93,7 +90,7 @@ public final class RuntimePerpetualFundingProcessor {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
             }
             if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrumentChangeId() != command.instrumentChangeId()
+                    || previousProgress.instrument() != instrument
                     || previousProgress.fundingRatePpm() != command.fundingRatePpm()
                     || previousProgress.nextCursorUserId() != command.cursorUserId())) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
@@ -116,7 +113,7 @@ public final class RuntimePerpetualFundingProcessor {
         /** owner 负责财库和进度；Lane 通过作用域访问自己的账户。 */
         private TradingRuntimeState runtime;
         /** 本页固定币对、结算资产和标记价，禁止中途切换价格。 */
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private int symbolId, settleAssetId;
         private long fundingMark, fundingPriceSequence;
         /** 原有全局用户分页及其 Lane 参与范围。 */
@@ -130,14 +127,14 @@ public final class RuntimePerpetualFundingProcessor {
         private FundingResult result;
 
         private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingRuntimeState runtime,
-                CoreInstrumentState instrument, int symbolId, int settleAssetId, long fundingMark,
+                CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
                 long fundingPriceSequence, UserPage userPage) {
             reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
                     fundingMark, fundingPriceSequence, userPage);
         }
 
         private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrumentState instrument, int symbolId,
+                TradingRuntimeState runtime, CoreInstrument instrument, int symbolId,
                 int settleAssetId, long fundingMark, long fundingPriceSequence, UserPage userPage) {
             this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
@@ -203,7 +200,7 @@ public final class RuntimePerpetualFundingProcessor {
                 runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
             } else {
                 runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
-                        command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
+                        command.settlementId(), instrument, command.fundingRatePpm(),
                         userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
             }
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
@@ -228,7 +225,7 @@ public final class RuntimePerpetualFundingProcessor {
             long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
             if (complete) runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
             else runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
-                    command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
+                    command.settlementId(), instrument, command.fundingRatePpm(),
                     userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
@@ -238,7 +235,7 @@ public final class RuntimePerpetualFundingProcessor {
     }
 
     private static LaneFundingResult applyLane(ApplyFundingCommand command, LongArrayList selectedUserIds,
-                                               TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                               TradingRuntimeState runtime, CoreInstrument instrument,
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();

@@ -81,7 +81,7 @@ final class PositionStateTransitions {
         balances.put(nextBalance.asset(), nextBalance);
         var positions = StateMapSupport.delta(user.positions());
         positions.put(key, new CorePositionState(position.symbol(), position.marginAsset(), position.marginMode(),
-                position.positionSide(), position.instrumentChangeId(), position.signedQuantitySteps(),
+                position.positionSide(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin));
         CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
                 balances, user.reservations(), positions, user.positionMode());

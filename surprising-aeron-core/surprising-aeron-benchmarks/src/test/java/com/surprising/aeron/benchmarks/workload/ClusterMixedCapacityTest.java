@@ -16,7 +16,7 @@ class ClusterMixedCapacityTest {
     }
     @Test void cancelResponseMustNotResurrectAnOrderRetiredByTheLane() {
         var order = new CoreOrderStateView(10, com.surprising.product.api.ProductLine.SPOT, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+                "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
         var stale = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,order,List.of());
         assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(stale),new long[]{10},7,null,true))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("removed order");
@@ -55,7 +55,7 @@ class ClusterMixedCapacityTest {
 
     @Test void batchOrderCursorMustNotReuseAnotherItemsIdentity() {
         var order = new CoreOrderStateView(11, com.surprising.product.api.ProductLine.SPOT, 1,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+                "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
         var item = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, order, List.of());
         assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item), new long[]{10}))
@@ -77,8 +77,8 @@ class ClusterMixedCapacityTest {
     }
 
     @Test void closedPositionWithRealizedLossIsFlatButLiveExposureOrMarginIsNot() {
-        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",0,0,0,0,-990,0)))).isTrue();
-        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",1,1,100,100,0,10)))).isFalse();
-        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",1,0,0,0,-990,10)))).isFalse();
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",0,0,0,-990,0)))).isTrue();
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",1,100,100,0,10)))).isFalse();
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",0,0,0,-990,10)))).isFalse();
     }
 }

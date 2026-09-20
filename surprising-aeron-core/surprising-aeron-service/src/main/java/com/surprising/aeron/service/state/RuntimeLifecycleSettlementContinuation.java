@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
@@ -43,7 +43,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                 || activeOrderIndex == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
         }
-        CoreInstrumentState instrument = RuntimeLifecycleSettlement.requireInstrument(runtime, command);
+        CoreInstrument instrument = RuntimeLifecycleSettlement.requireInstrument(runtime, command);
         int symbolId = identities.symbolId(instrument.symbol());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
@@ -89,7 +89,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         private SettleInstrumentCommand command;
         private UUID chunkCommandId;
         private TradingRuntimeState runtime;
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private ProductTradingRules kernel;
         private int symbolId, assetId;
         private TreasuryRuntime.LifecycleProgressRuntime previousProgress;
@@ -108,7 +108,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         private CoreSettlementProgressView result;
 
         private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrumentState instrument,
+                TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CoreOrderState> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
@@ -140,7 +140,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         private SettlementWork reset(SettleInstrumentCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrumentState instrument,
+                TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CoreOrderState> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
@@ -224,7 +224,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                                 : selectedOrders.getLast().orderId();
                         runtime.treasury().setLifecycleProgress(symbolId,
                                 new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                        command.instrumentChangeId(), command.settlementPriceTicks(),
+                                        instrument, command.settlementPriceTicks(),
                                         command.optionCashUnitsPerContract(), false,
                                         previousProgress == null ? 0 : previousProgress.accountLaneId(),
                                         nextCursor, 0, chunkCommandId));
@@ -260,7 +260,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                         UUID progressId = chunkCommandId;
                         runtime.treasury().setLifecycleProgress(symbolId,
                                 new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                        command.instrumentChangeId(), command.settlementPriceTicks(),
+                                        instrument, command.settlementPriceTicks(),
                                         command.optionCashUnitsPerContract(), true, 0, 0, cursor,
                                         progressId, requiredInsurance));
                         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
@@ -291,7 +291,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                     if (complete) runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
                     else runtime.treasury().setLifecycleProgress(symbolId,
                             new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                    command.instrumentChangeId(), command.settlementPriceTicks(),
+                                    instrument, command.settlementPriceTicks(),
                                     command.optionCashUnitsPerContract(), true,
                                     previousProgress == null ? 0 : previousProgress.accountLaneId(),
                                     0, nextCursor, chunkCommandId));

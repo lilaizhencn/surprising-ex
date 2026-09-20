@@ -8,7 +8,7 @@ final class RiskLiquidationBatch {
     private final int capacity;
     /** 不可变持仓引用和固定风险输入，仅有新增清算时才分配有界数组。 */
     private PositionRuntime[] positions;
-    private long[] instrumentChanges, priceSequences;
+    private long[] priceSequences;
     /** Lane 写入数量，完成发布后由 owner 读取。 */
     private int count;
     /** owner 唯一写入的起始编号，派发后由 Lane 读取。 */
@@ -24,15 +24,13 @@ final class RiskLiquidationBatch {
         firstId = 0;
     }
 
-    void add(PositionRuntime position, long instrumentChange, long priceSequence) {
+    void add(PositionRuntime position, long priceSequence) {
         if (positions == null) {
             positions = new PositionRuntime[capacity];
-            instrumentChanges = new long[capacity];
             priceSequences = new long[capacity];
         }
         if (count == capacity) throw new IllegalStateException("risk creation budget exceeded");
         positions[count] = position;
-        instrumentChanges[count] = instrumentChange;
         priceSequences[count++] = priceSequence;
     }
 
@@ -47,7 +45,7 @@ final class RiskLiquidationBatch {
         for (int i = 0; i < count; i++) {
             PositionRuntime p = positions[i];
             runtime.putLiquidation(new LiquidationRuntime(firstId + i, p.userId(), p.symbolId(), p.marginMode(),
-                    p.positionSide(), instrumentChanges[i], priceSequences[i], p.signedQuantitySteps(),
+                    p.positionSide(), p.instrument(), priceSequences[i], p.signedQuantitySteps(),
                     Math.absExact(p.signedQuantitySteps()), 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
         }
     }

@@ -14,8 +14,8 @@ public final class CoreMaintenanceCodec {
     public record Query(String symbol, long afterUserId, int limit) {
         public Query { symbol = CoreMaintenanceCodec.symbol(symbol); if (afterUserId < 0 || limit < 1 || limit > 32) throw new IllegalArgumentException("invalid maintenance query"); }
     }
-    public record Page(CoreInstrumentMaintenance state, long instrumentChangeId, List<Long> userIds, boolean hasMore) {
-        public Page { userIds = List.copyOf(userIds); if (state == null || instrumentChangeId <= 0 || userIds.size() > 32) throw new IllegalArgumentException("invalid maintenance page"); }
+    public record Page(CoreInstrumentMaintenance state, List<Long> userIds, boolean hasMore) {
+        public Page { userIds = List.copyOf(userIds); if (state == null || userIds.size() > 32) throw new IllegalArgumentException("invalid maintenance page"); }
     }
     public static byte[] encodeCommand(Command value) {
         var b = buffer(128); text(b, value.symbol()); b.putLong(value.expectedTaskId()); state(b, value.state()); return bytes(b);
@@ -32,15 +32,15 @@ public final class CoreMaintenanceCodec {
         catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance query",e); }
     }
     public static byte[] encodePage(Page value) {
-        var b = buffer(512); state(b, value.state()); b.putLong(value.instrumentChangeId()).putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
+        var b = buffer(512); state(b, value.state()); b.putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
         value.userIds().forEach(b::putLong); return bytes(b);
     }
     public static Page decodePage(byte[] bytes) {
         try {
-        var b = read(bytes); var state = state(b); long version = b.getLong(); int more = b.getInt(), count = b.getInt();
+        var b = read(bytes); var state = state(b); int more = b.getInt(), count = b.getInt();
         if (more < 0 || more > 1 || count < 0 || count > 32) throw new IllegalArgumentException("invalid maintenance page");
         var ids = new java.util.ArrayList<Long>(count); for (int i = 0; i < count; i++) ids.add(b.getLong());
-        end(b); return new Page(state, version, ids, more == 1);
+        end(b); return new Page(state, ids, more == 1);
         } catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance page",e); }
     }
     private static String symbol(String value) {

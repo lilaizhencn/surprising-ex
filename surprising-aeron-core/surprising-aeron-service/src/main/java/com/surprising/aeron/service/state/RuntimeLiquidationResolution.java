@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -58,8 +58,7 @@ public final class RuntimeLiquidationResolution {
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()));
         LiquidationRuntime current = liquidation;
         ResolutionWork work = reuse == null ? new ResolutionWork() : reuse;
         CoreLiquidationState.Status nextStatus;
@@ -115,7 +114,7 @@ public final class RuntimeLiquidationResolution {
             default -> throw new IllegalStateException("unknown liquidation resolution");
         }
         LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
+                current.symbolId(), current.marginMode(), current.positionSide(), current.instrument(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
@@ -169,13 +168,10 @@ public final class RuntimeLiquidationResolution {
         }
     }
 
-    private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime, String symbol, long version) {
-        CoreInstrumentState instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
+        CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

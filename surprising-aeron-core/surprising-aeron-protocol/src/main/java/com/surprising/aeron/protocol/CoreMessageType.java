@@ -8,7 +8,7 @@ public enum CoreMessageType {
     CANCEL_ORDER(12, WireMessageKind.COMMAND),
     REPLACE_ORDER(13, WireMessageKind.COMMAND),
     AMEND_ORDER(14, WireMessageKind.COMMAND),
-    UPSERT_INSTRUMENT(20, WireMessageKind.COMMAND),
+    REGISTER_INSTRUMENT(20, WireMessageKind.COMMAND),
     APPLY_MARK_PRICE(21, WireMessageKind.COMMAND),
     APPLY_FUNDING(22, WireMessageKind.COMMAND),
     SETTLE_INSTRUMENT(23, WireMessageKind.COMMAND),

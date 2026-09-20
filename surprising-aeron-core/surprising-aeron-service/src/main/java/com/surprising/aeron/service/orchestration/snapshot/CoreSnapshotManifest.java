@@ -20,7 +20,6 @@ public record CoreSnapshotManifest(
         int bookStateHash,
         long symbolRegistryHash,
         long userRegistryHash,
-        long instrumentRegistryHash,
         long activeOrderHash,
         long sourceSequenceDigest,
         String forkGitSha,
@@ -60,7 +59,6 @@ public record CoreSnapshotManifest(
             int bookStateHash,
             long symbolRegistryHash,
             long userRegistryHash,
-            long instrumentRegistryHash,
             long activeOrderHash,
             String forkGitSha,
             String artifactSha256,
@@ -74,7 +72,7 @@ public record CoreSnapshotManifest(
         this(productLine, schemaVersion, coreShardId, routeVersion,
                 0, appliedCommandCount, 0, 0, appliedCommandCount, matcherSequence,
                 businessStateHash, engineStateHash, bookStateHash, symbolRegistryHash,
-                userRegistryHash, instrumentRegistryHash, activeOrderHash, 0,
+                userRegistryHash, activeOrderHash, 0,
                 forkGitSha, artifactSha256, matcherConfigHash, topology, topologyHash,
                 symbolRouteHash, globalFundsHash, exportStatus, 0, checksum);
     }

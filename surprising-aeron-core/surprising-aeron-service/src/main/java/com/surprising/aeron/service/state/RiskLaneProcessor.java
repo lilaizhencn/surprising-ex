@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
@@ -21,7 +21,7 @@ final class RiskLaneProcessor {
     private RiskLaneProcessor() { }
     static Page scan(TradingRuntimeState runtime, RiskScanRuntime initial,
                                         PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-                                        CoreInstrumentState changedInstrument, MarkPriceRuntime changedMark,
+                                        CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RuntimeIdentityRegistry identities, long expectedUserRevision, long expectedMarketRevision) {
         RiskLiquidationBatch creations = runtime.riskLiquidationBatch(maxWork);
@@ -61,7 +61,7 @@ final class RiskLaneProcessor {
 
     private static UserPage processUser(TradingRuntimeState runtime,
                                         RiskScanRuntime scan, UserRuntime user,
-                                        CoreInstrumentState changedInstrument, MarkPriceRuntime changedMark,
+                                        CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RiskLiquidationBatch creations,
                                         RuntimeIdentityRegistry identities) {
@@ -162,7 +162,7 @@ final class RiskLaneProcessor {
     }
 
     private static void updateIsolated(TradingRuntimeState runtime, long userId, String positionKey,
-                                       PositionRuntime position, CoreInstrumentState instrument,
+                                       PositionRuntime position, CoreInstrument instrument,
                                        MarkPriceRuntime mark, RiskLiquidationBatch creations,
                                        RuntimeIdentityRegistry identities) {
         long unrealized = unrealized(position, instrument, mark.markPriceTicks());
@@ -179,7 +179,7 @@ final class RiskLaneProcessor {
     }
 
     private static void putRiskAndLiquidation(TradingRuntimeState runtime, long userId, String positionKey,
-                                              PositionRuntime position, CoreInstrumentState instrument,
+                                              PositionRuntime position, CoreInstrument instrument,
                                               long priceSequence, long equity, long unrealized, long maintenance,
                                               long ratio, RiskLiquidationBatch creations,
                                               RuntimeIdentityRegistry identities) {
@@ -211,7 +211,7 @@ final class RiskLaneProcessor {
                 || !CoreRiskPolicy.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {
             if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
                 runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), active.userId(),
-                        active.symbolId(), active.marginMode(), active.positionSide(), active.instrumentChangeId(),
+                        active.symbolId(), active.marginMode(), active.positionSide(), active.instrument(),
                         active.triggerPriceSequence(), active.signedQuantitySteps(), active.closeQuantitySteps(),
                         0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
             }
@@ -223,28 +223,28 @@ final class RiskLaneProcessor {
                 if (active.userId() != userId || active.symbolId() != symbolId
                         || active.marginMode() != position.marginMode()
                         || active.positionSide() != position.positionSide()
-                        || active.instrumentChangeId() != instrument.changeId()
+                        || active.instrument() != instrument
                         || active.triggerPriceSequence() != priceSequence
                         || active.signedQuantitySteps() != quantity
                         || active.closeQuantitySteps() != Math.absExact(quantity)) {
                     runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), userId, symbolId,
-                            position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
+                            position.marginMode(), position.positionSide(), instrument, priceSequence,
                             quantity, Math.absExact(quantity), 0, 0, 0, 0,
                             CoreLiquidationState.Status.PLANNED, 0));
                 }
             }
             return;
         }
-        creations.add(position, instrument.changeId(), priceSequence);
+        creations.add(position, priceSequence);
     }
 
     private static boolean risk(TradingRuntimeState runtime, PositionRuntime position,
                                 RuntimeIdentityRegistry identities, PositionRiskScratch result) {
         int symbolId = position.symbolId();
-        CoreInstrumentState instrument = result.instrument;
+        CoreInstrument instrument = result.instrument;
         MarkPriceRuntime mark = result.mark;
         if (instrument == null || mark == null || result.symbolId != symbolId
-                || instrument.changeId() != position.instrumentChangeId()
+                || instrument != position.instrument()
                 || result.marketRevision != result.scanMarketRevision
                 || result.runtime != runtime) {
             instrument = runtime.instrument(identities.preparedSymbol(symbolId));
@@ -269,7 +269,7 @@ final class RiskLaneProcessor {
         return true;
     }
 
-    private static long unrealized(PositionRuntime position, CoreInstrumentState instrument, long markPriceTicks) {
+    private static long unrealized(PositionRuntime position, CoreInstrument instrument, long markPriceTicks) {
         return PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), markPriceTicks, instrument.notionalMultiplierUnits(),
                 instrument.priceTickUnits(), instrument.settleScaleUnits());
@@ -317,7 +317,7 @@ final class RiskLaneProcessor {
     /** 当前持仓估值的线程内临时值，处理下一持仓时覆盖。 */
     private static final class PositionRiskScratch {
         /** 本次计算使用的币对及价格序列。 */
-        private CoreInstrumentState instrument;
+        private CoreInstrument instrument;
         private MarkPriceRuntime mark;
         private int symbolId = -1;
         private long marketRevision = Long.MIN_VALUE;

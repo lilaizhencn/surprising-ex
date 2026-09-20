@@ -12,6 +12,7 @@ import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -421,12 +422,6 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         applyRuntime(orderId, current, current == null ? null : identities.symbol(current.symbolId()));
     }
 
-    /** Snapshot ingestion belongs to recovery and detached snapshot callers, never Lane completion. */
-    public void applySnapshot(long orderId, CoreOrderState current) {
-        applyRuntime(orderId, current == null ? null : RuntimeStateProjector.toRuntimeOrder(current, recoveryIdentities),
-                current == null ? null : current.symbol());
-    }
-
     private void applyRuntime(long orderId, OrderRuntime current, String symbol) {
         if (current == null) {
             // Removal already returns the old entry; do not probe the same order twice.
@@ -465,7 +460,14 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         ordersById.clear();
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
-                .forEach(order -> applySnapshot(order.orderId(), order));
+                .forEach(order -> {
+                    CoreInstrument instrument = state.instruments().get(order.symbol());
+                    if (instrument == null) {
+                        throw new IllegalStateException("instrument is not registered: " + order.symbol());
+                    }
+                    applyRuntime(order.orderId(), RuntimeStateProjector.toRuntimeOrder(
+                            order, recoveryIdentities, instrument), order.symbol());
+                });
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {

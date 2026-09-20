@@ -18,7 +18,7 @@ class AccountLanePendingReservationTest {
         for (long user = Long.MAX_VALUE - 2048; user < Long.MAX_VALUE; user++) {
             for (int asset = 0; asset < 2; asset++) {
                 long id = asset + 1;
-                lane.reservations.put(id, new ReservationRuntime(id, user, asset, 19));
+                lane.reservations.put(id, CoreStateTestFixtures.reservation(id, user, asset, 19));
                 lane.markPendingReservation(id, 1);
                 assertThat(lane.pendingReservedUnits(user, asset)).isEqualTo(19);
                 lane.completePendingReservation(id, 1);
@@ -39,17 +39,17 @@ class AccountLanePendingReservationTest {
     void assetMigrationOverflowAndReverseReplacementPreserveOtherReservations() {
         var lane = new AccountLaneState(0, 256);
         lane.bindOwner();
-        var previous = new ReservationRuntime(1, 7, 0, 40);
-        var other = new ReservationRuntime(2, 7, 1, Long.MAX_VALUE - 10);
+        var previous = CoreStateTestFixtures.reservation(1, 7, 0, 40);
+        var other = CoreStateTestFixtures.reservation(2, 7, 1, Long.MAX_VALUE - 10);
         lane.reservations.put(1, previous);
         lane.reservations.put(2, other);
         lane.markPendingReservation(1, 1);
         lane.markPendingReservation(2, 1);
         assertThatThrownBy(() -> lane.replacePendingReservation(previous,
-                new ReservationRuntime(1, 7, 1, 11))).isInstanceOf(ArithmeticException.class);
+                CoreStateTestFixtures.reservation(1, 7, 1, 11))).isInstanceOf(ArithmeticException.class);
         assertThat(lane.pendingReservedUnits(7, 0)).isEqualTo(40);
         assertThat(lane.pendingReservedUnits(7, 1)).isEqualTo(Long.MAX_VALUE - 10);
-        var replacement = new ReservationRuntime(1, 7, 1, 10);
+        var replacement = CoreStateTestFixtures.reservation(1, 7, 1, 10);
         lane.replacePendingReservation(previous, replacement);
         lane.reservations.put(1, replacement);
         assertThat(lane.pendingReservedUnits(7, 0)).isZero();

@@ -65,7 +65,7 @@ public final class DirectCommandDispatcher {
             case TRANSFER_OUT -> balances.executeTransferOut(message, clusterTimestamp);
             case TRANSFER_IN -> balances.executeTransferIn(message, clusterTimestamp);
             case COMPLETE_TRANSFER -> balances.executeCompleteTransfer(message, clusterTimestamp);
-            case UPSERT_INSTRUMENT -> instruments.executeUpsertInstrument(message, clusterTimestamp);
+            case REGISTER_INSTRUMENT -> instruments.executeRegisterInstrument(message, clusterTimestamp);
             case APPLY_MARK_PRICE -> risk.executeApplyMarkPrice(message, clusterTimestamp);
             case APPLY_FUNDING -> funding.executeApplyFunding(message, clusterTimestamp);
             case EXECUTE_ADL -> adl.executeExecuteAdl(message, clusterTimestamp);

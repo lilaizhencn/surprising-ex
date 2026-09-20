@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.command.trigger;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -382,14 +382,7 @@ public final class TriggerOrderCommands {
                 triggeredPriceTicks, triggeredAtEpochMillis)) {
             owner.requestCommitPublication();
         }
-        var instrument = owner.runtimeState().instrument(trigger.symbol());
-        if (instrument == null || instrument.changeId() <= 0 || trigger.instrumentChangeId() <= 0
-                || instrument.changeId() != trigger.instrumentChangeId()) {
-            completeTriggerOrderRuntime(triggerOrderId, false, 0,
-                    instrument == null ? "INSTRUMENT_NOT_FOUND" : "STALE_INSTRUMENT_CHANGE_ID",
-                    triggeredAtEpochMillis);
-            return;
-        }
+        var instrument = trigger.instrument();
         var place = childOrder(trigger, triggeredPriceTicks, instrument);
         long childOrderId = place.orderId();
         owner.requireOrderIdentityAvailable(trigger.userId(), place);
@@ -419,11 +412,11 @@ public final class TriggerOrderCommands {
     }
 
     private PlaceOrderCommand childOrder(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
-            long price, com.surprising.aeron.service.state.instrument.CoreInstrumentState instrument) {
+            long price, com.surprising.aeron.service.state.instrument.CoreInstrument instrument) {
         long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
         return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId(), owner.runtimeState()),
-                trigger.symbol(), trigger.instrumentChangeId(), trigger.side(), limit, trigger.quantitySteps(),
+                trigger.symbol(), trigger.side(), limit, trigger.quantitySteps(),
                 instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT,
                 trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(), false,
                 "TRIGGER:" + trigger.triggerOrderId());
@@ -631,13 +624,10 @@ public final class TriggerOrderCommands {
             long price, long triggeredAt, UUID commandId, boolean cancelOco) {
         var trigger = executableTrigger(triggerId, triggerSequence, price);
         if (trigger == null) return COMPLETE;
-        var instrument = owner.runtimeState().instrument(trigger.symbol());
+        var instrument = trigger.instrument();
         com.surprising.aeron.service.state.ResolvedPlaceOrder resolved = null;
         String failureReason = "";
-        if (instrument == null || instrument.changeId() <= 0 || trigger.instrumentChangeId() <= 0
-                || instrument.changeId() != trigger.instrumentChangeId()) {
-            failureReason = instrument == null ? "INSTRUMENT_NOT_FOUND" : "STALE_INSTRUMENT_CHANGE_ID";
-        } else {
+        {
             var place = childOrder(trigger, price, instrument);
             owner.requireOrderIdentityAvailable(trigger.userId(), place);
             try {

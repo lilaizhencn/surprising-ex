@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -21,7 +21,7 @@ final class LeverageStateTransitions {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                     "leverage requires derivative product line");
         }
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(command.symbol()));
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(command.symbol()));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         }

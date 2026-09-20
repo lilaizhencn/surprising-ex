@@ -54,7 +54,7 @@ public final class RuntimeStateQueryService {
             ReservationRuntime reservation = runtime.reservation(orderId);
             if (reservation == null) continue;
             reservations.add(new CoreReservationView(reservation.orderId(),
-                    identities.symbol(reservation.symbolId()), reservation.instrumentChangeId(), reservation.kind(),
+                    identities.symbol(reservation.symbolId()), reservation.kind(),
                     identities.asset(reservation.assetId()), reservation.totalReservedUnits(),
                     reservation.releasedUnits(), reservation.consumedUnits(), reservation.orderQuantitySteps()));
         }
@@ -65,7 +65,7 @@ public final class RuntimeStateQueryService {
             if (position == null) continue;
             String symbol = identities.symbol(position.symbolId());
             CorePositionView view = new CorePositionView(symbol, identities.asset(position.assetId()),
-                    position.marginMode(), position.positionSide(), position.instrumentChangeId(),
+                    position.marginMode(), position.positionSide(),
                     position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                     position.realizedPnlUnits(), position.positionMarginUnits());
             String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
@@ -91,7 +91,7 @@ public final class RuntimeStateQueryService {
         OrderRuntime order = runtime.order(orderId);
         if (order == null) return OrderQueryResult.notFound();
         CoreOrderStateView view = new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
-                identities.symbol(order.symbolId()), order.instrumentChangeId(), order.side(), order.priceTicks(),
+                identities.symbol(order.symbolId()), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
@@ -127,7 +127,6 @@ public final class RuntimeStateQueryService {
             }
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.symbol());
-            hash = CoreStateHash.mix(hash, reservation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, reservation.kind().wireCode());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -140,7 +139,6 @@ public final class RuntimeStateQueryService {
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, position.instrumentChangeId());
             hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, position.entryPriceTicks());
             hash = CoreStateHash.mix(hash, position.entryValueTicks());
@@ -160,7 +158,6 @@ public final class RuntimeStateQueryService {
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, symbol);
-        hash = CoreStateHash.mix(hash, order.instrumentChangeId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());

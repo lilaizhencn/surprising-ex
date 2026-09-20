@@ -3,7 +3,7 @@ package com.surprising.aeron.service.business.option;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.business.OrderAdmissionMath;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
@@ -23,7 +23,7 @@ public final class OptionOrderAdmission {
     private OptionOrderAdmission() {
     }
 
-    public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
                                         long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
@@ -59,7 +59,7 @@ public final class OptionOrderAdmission {
     /** 由确定性状态重放使用的期权冻结计算入口。 */
     public static long reservationUnitsForState(
             TradingCoreState state,
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             CoreUserState user,
             ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {

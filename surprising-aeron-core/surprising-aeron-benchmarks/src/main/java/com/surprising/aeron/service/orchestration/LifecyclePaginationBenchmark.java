@@ -30,15 +30,15 @@ public class LifecyclePaginationBenchmark {
                 : option ? ContractType.VANILLA_OPTION : ContractType.LINEAR_DELIVERY;
         asset = inverse ? "BTC" : "USDT";
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, productLine)) {
-            h.execute(h.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("PAGE", 1,
+            h.execute(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("PAGE",
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", asset,
                             inverse ? 100 : 1, 1, inverse ? 100 : 1, 100_000, 50_000,
                             0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
-                            ? new ApplyMarkPriceCommand("PAGE", 1, 100, 100, 100, 1, h.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand("PAGE", 1, 100, 1, h.nextCommandTimestamp()))));
+                            ? new ApplyMarkPriceCommand("PAGE", 100, 100, 100, 1, h.nextCommandTimestamp())
+                            : new ApplyMarkPriceCommand("PAGE", 100, 1, h.nextCommandTimestamp()))));
             h.adjust(999, asset, 1_000_000_000);
             order(h, 999, CoreOrderSide.SELL, 100, 256);
             for (long user = 1000; user < 1256; user++) {
@@ -54,7 +54,7 @@ public class LifecyclePaginationBenchmark {
     private static void order(LinearPerpetualBenchmarkSupport.Harness h, long user,
                               CoreOrderSide side, long price, long quantity) {
         h.execute(h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, user,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "PAGE", 1,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "PAGE",
                         side, price, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
     }
@@ -75,7 +75,7 @@ public class LifecyclePaginationBenchmark {
         while (true) {
             var response = harness.execute(harness.command(CoreMessageType.APPLY_FUNDING,
                     CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeApplyFunding(
-                            new ApplyFundingCommand(10, "PAGE", 1, 100_000, cursor, 16))));
+                            new ApplyFundingCommand(10, "PAGE", 100_000, cursor, 16))));
             var progress = CoreFundingProgressCodec.decode(response.data());
             cursor = progress.nextCursorUserId();
             if (++pages > 17) throw new IllegalStateException("funding failed to converge");
@@ -83,7 +83,7 @@ public class LifecyclePaginationBenchmark {
                 if (restoreEachPage) assertFundingPositionFence();
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "PAGE", 1, 200, 2, harness.nextCommandTimestamp()))));
+                                "PAGE", 200, 2, harness.nextCommandTimestamp()))));
             }
             if (restoreEachPage) {
                 var checkpoint = harness.snapshotTemplate(4);
@@ -99,7 +99,7 @@ public class LifecyclePaginationBenchmark {
     private void assertFundingPositionFence() {
         long before = harness.state().tradingState().businessStateHash();
         var response = harness.state().apply(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, 1000,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), "PAGE", 1,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), "PAGE",
                         CoreOrderSide.BUY, 100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
         if (response.status() != ResponseStatus.REJECTED || response.resultCode() != CoreResultCode.LIFECYCLE_IN_PROGRESS
@@ -114,7 +114,7 @@ public class LifecyclePaginationBenchmark {
         do {
             var result = harness.execute(harness.command(CoreMessageType.SETTLE_INSTRUMENT,
                     CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeSettleInstrument(
-                            new SettleInstrumentCommand(10, "PAGE", 1, 120, 0,
+                            new SettleInstrumentCommand(10, "PAGE", 120, 0,
                                     userCursor, 16, orderCursor, 16))));
             var progress = CoreSettlementProgressCodec.decode(result.data());
             orderCursor = progress.nextCursorOrderId();

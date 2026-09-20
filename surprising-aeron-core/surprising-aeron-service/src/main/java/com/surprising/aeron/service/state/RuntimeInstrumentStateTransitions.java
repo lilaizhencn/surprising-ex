@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Owns instrument configuration and maintenance transitions in runtime state. */
@@ -11,32 +11,13 @@ final class RuntimeInstrumentStateTransitions {
     private RuntimeInstrumentStateTransitions() {
     }
 
-    static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                       UpsertInstrumentCommand command) {
+    static void register(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                         RegisterInstrumentCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument update");
         }
         runtime.assertOwner();
-        CoreInstrumentState instrument = CoreInstrumentState.from(runtime.productLine(), command);
-        CoreInstrumentState current = runtime.instrument(instrument.symbol());
-        if (current != null && instrument.lastChangeId() <= current.lastChangeId()) {
-            if (instrument.withMaintenance(current.maintenance()).equals(current)) return;
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "instrument audit id must increase");
-        }
-        if (current != null && instrument.changeId() == current.changeId()) {
-            var statusUpdate = current.withStatus(instrument.status(), instrument.lastChangeId());
-            if (!instrument.withMaintenance(current.maintenance()).equals(statusUpdate)) {
-                throw new CoreStateRejectedException("INVALID_COMMAND",
-                        "calculation changes require a new audit reference");
-            }
-            runtime.putInstrument(statusUpdate);
-            runtime.incrementCommandRevision();
-            return;
-        }
-        if (current != null && instrument.changeId() < current.changeId()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
-                    "calculation audit id cannot decrease");
-        }
+        CoreInstrument instrument = CoreInstrument.from(runtime.productLine(), command);
         int symbolId = identities.symbolId(instrument.symbol());
         if (runtime.treasury().fundingProgress(symbolId) != null
                 || runtime.treasury().lifecycleProgress(symbolId) != null) {
@@ -45,11 +26,7 @@ final class RuntimeInstrumentStateTransitions {
         identities.assetId(instrument.baseAsset());
         identities.assetId(instrument.quoteAsset());
         identities.assetId(instrument.settleAsset());
-        if (current != null && runtime.hasPublishedInstrumentExposure(symbolId)) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_IN_USE",
-                    "cannot replace instrument version with open state");
-        }
-        runtime.putInstrument(current == null ? instrument : instrument.withMaintenance(current.maintenance()));
+        runtime.registerInstrument(instrument);
         runtime.incrementCommandRevision();
     }
 
@@ -59,7 +36,7 @@ final class RuntimeInstrumentStateTransitions {
             throw new IllegalArgumentException("invalid runtime instrument maintenance update");
         }
         runtime.assertOwner();
-        CoreInstrumentState instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -104,7 +81,7 @@ final class RuntimeInstrumentStateTransitions {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "finish the active lifecycle operation first");
         }
-        runtime.putInstrument(instrument.withMaintenance(after));
+        runtime.updateInstrumentMaintenance(instrument, after);
         runtime.incrementCommandRevision();
     }
 }

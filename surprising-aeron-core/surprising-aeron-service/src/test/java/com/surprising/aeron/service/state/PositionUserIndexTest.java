@@ -19,7 +19,7 @@ class PositionUserIndexTest {
     void updatesOnlyUsersChangedByTheAuthoritativeState() {
         CoreUserState positioned = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("BTC-USDT", new CorePositionState(
-                        "BTC-USDT", "USDT", 1, 1, 100, 100, 0, 10)), CorePositionMode.ONE_WAY);
+                        "BTC-USDT", "USDT", 1, 100, 100, 0, 10)), CorePositionMode.ONE_WAY);
         Map<Long, CoreUserState> beforeUsers = new TreeMap<>();
         beforeUsers.put(1L, positioned);
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, beforeUsers,
@@ -40,7 +40,7 @@ class PositionUserIndexTest {
     void updatesOpenInterestWithoutScanningUnchangedUsers() {
         CoreUserState positioned = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("BTC-USDT",
-                        new CorePositionState("BTC-USDT", "USDT", 1, -2, 100, 200, 0, 10)),
+                        new CorePositionState("BTC-USDT", "USDT", -2, 100, 200, 0, 10)),
                 CorePositionMode.ONE_WAY);
         Map<Long, CoreUserState> beforeUsers = new TreeMap<>();
         beforeUsers.put(1L, positioned);
@@ -65,8 +65,7 @@ class PositionUserIndexTest {
 
     @Test
     void returnsTheNextUserWithoutScanningBeforeTheCursor() {
-        CorePositionState position = new CorePositionState("BTC-USDT", "USDT", 1,
-                1, 100, 100, 0, 10);
+        CorePositionState position = new CorePositionState("BTC-USDT", "USDT", 1, 100, 100, 0, 10);
         TradingCoreState state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(2L, positionedUser(2, position), 7L, positionedUser(7, position),
                         11L, positionedUser(11, position)),

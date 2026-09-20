@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -53,9 +53,9 @@ public final class ClusterDerivativeSmokeMain {
                 productLine, hosts, egress, Duration.ofSeconds(10))) {
             if (!verify) {
                 applied(client, command(productLine, sourceId + 1_000_000, seed, 1,
-                        CoreMessageType.UPSERT_INSTRUMENT,
-                        TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
-                                "BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        CoreMessageType.REGISTER_INSTRUMENT,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                "BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))));
                 applied(client, command(productLine, sourceId, seed, longUser, CoreMessageType.ADJUST_BALANCE,
@@ -64,17 +64,17 @@ public final class ClusterDerivativeSmokeMain {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))));
                 applied(client, command(productLine, sourceId + 2_000_000, seed, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "BTC-USDT", 1, 100, seed, System.currentTimeMillis()))));
+                                "BTC-USDT", 100, seed, System.currentTimeMillis()))));
                 applied(client, command(productLine, sourceId, seed + 2, shortUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(sellOrder, CoreOrderSide.SELL)));
                 applied(client, command(productLine, sourceId, seed + 3, longUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(buyOrder, CoreOrderSide.BUY)));
                 applied(client, command(productLine, sourceId, seed + 4, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "BTC-USDT", 1, 100, seed + 1, System.currentTimeMillis()))));
+                                "BTC-USDT", 100, seed + 1, System.currentTimeMillis()))));
                 applied(client, command(productLine, sourceId, seed + 5, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                settlementId, "BTC-USDT", 1, 10_000))));
+                                settlementId, "BTC-USDT", 10_000))));
             }
 
             var longView = user(client, productLine, sourceId, longUser, seed + 10);
@@ -86,7 +86,7 @@ public final class ClusterDerivativeSmokeMain {
             if (!verify) {
                 rejected(client, command(productLine, sourceId, seed + 12, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                settlementId, "BTC-USDT", 1, 10_000))));
+                                settlementId, "BTC-USDT", 10_000))));
             }
 
             String label = verify ? "derivativeRecovery" : "derivativeSmoke";
@@ -96,7 +96,7 @@ public final class ClusterDerivativeSmokeMain {
     }
 
     private static byte[] derivativeOrder(long orderId, CoreOrderSide side) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private static void requirePosition(

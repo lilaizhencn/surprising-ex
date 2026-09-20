@@ -157,7 +157,7 @@ class ProjectedOrderQueryRepositoryTest {
     }
 
     private static byte[] rawOrder(long orderId) {
-        CoreOrderStateView view = new CoreOrderStateView(orderId, ProductLine.SPOT, 1001L, "BTC-USDT", 7L,
+        CoreOrderStateView view = new CoreOrderStateView(orderId, ProductLine.SPOT, 1001L, "BTC-USDT",
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 60_000L, 10L, 0L, 10L, false, "OPEN", 1L);
         return CoreStateQueryCodec.encodeOrderState(view);
     }

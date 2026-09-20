@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class InstrumentCoreSyncServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
-    void commitsConfigurationThenPauseAndConfirmsActualAppliedResponse(ProductLine line) {
+    void freezesTheStartupInstrumentAndIgnoresLaterConfigurationChanges(ProductLine line) {
         var cache=new InstrumentSnapshotCache(); var properties=new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         var gateway=mock(MaintenanceAeronGateway.class); var sequence=new AtomicLong();
         try(var state=new TradingCoreRuntime(line)) {
@@ -33,12 +33,14 @@ class InstrumentCoreSyncServiceTest {
             service.reconcile();
             assertThat(service.state("BTC-USDT",line).state()).isEqualTo("APPLIED");
             service.reconcile(); assertThat(sequence.get()).isEqualTo(1);
+            var startupInstrument=state.tradingState().instruments().get("BTC-USDT");
             var pause=row(line,2,InstrumentStatus.HALT);
             cache.apply(new InstrumentEvent("BTC-USDT",2,InstrumentStatus.HALT,InstrumentEventType.STATUS_CHANGED,Instant.now(),pause,line,2));
             service.reconcile();
-            assertThat(service.state("BTC-USDT",line).appliedChangeId()).isEqualTo("2");
-            assertThat(state.tradingState().instruments().get("BTC-USDT").status()).isEqualTo(InstrumentStatus.HALT);
-            assertThat(state.tradingState().instruments().get("BTC-USDT").changeId()).isEqualTo(1);
+            assertThat(sequence.get()).isEqualTo(1);
+            assertThat(service.state("BTC-USDT",line).state()).isEqualTo("APPLIED");
+            assertThat(state.tradingState().instruments().get("BTC-USDT")).isSameAs(startupInstrument);
+            assertThat(startupInstrument.maintenance().mode()).isEqualTo(CoreInstrumentMaintenance.Mode.TRADING);
         }
     }
     private InstrumentResponse row(ProductLine line,long audit,InstrumentStatus status) {

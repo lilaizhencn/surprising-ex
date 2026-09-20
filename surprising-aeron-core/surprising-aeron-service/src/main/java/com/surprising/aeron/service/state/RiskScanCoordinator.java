@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
@@ -23,7 +23,7 @@ public final class RiskScanCoordinator {
     private final int[] allocations;
     /** 当前币对片段的不可变输入，Lane 仅读。 */
     private RiskScanRuntime initial;
-    private CoreInstrumentState instrument;
+    private CoreInstrument instrument;
     private MarkPriceRuntime mark;
     private int settleAssetId;
     /** 参与集合、新增清算集合及下一轮起点，均由 owner 写入。 */

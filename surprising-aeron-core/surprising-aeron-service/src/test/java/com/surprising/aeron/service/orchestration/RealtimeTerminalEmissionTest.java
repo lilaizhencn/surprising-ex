@@ -17,8 +17,8 @@ class RealtimeTerminalEmissionTest {
             try(var state=new TradingCoreRuntime(line)) {
                 var type=ContractType.valueOf(line.contractTypeCode());
                 String asset=type.isInverse()?"BTC":"USDT";
-                send(state,line,CoreMessageType.UPSERT_INSTRUMENT,0,
-                        TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT",1,
+                send(state,line,CoreMessageType.REGISTER_INSTRUMENT,0,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",
                                 type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,
                                 100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                                 type.isOption()?0:-1,type.isOption()?100:0)),null,null,"setup");
@@ -27,8 +27,8 @@ class RealtimeTerminalEmissionTest {
                             TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(a,1_000_000)),null,null,"setup");
                 if(line!=ProductLine.SPOT)send(state,line,CoreMessageType.APPLY_MARK_PRICE,0,
                         TradingCommandCodec.encodeApplyMarkPrice(line==ProductLine.OPTION
-                                ?new ApplyMarkPriceCommand("BTC-USDT",1,100,100,100,1,TIME)
-                                :new ApplyMarkPriceCommand("BTC-USDT",1,100,1,TIME)),null,null,"setup");
+                                ?new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,TIME)
+                                :new ApplyMarkPriceCommand("BTC-USDT",100,1,TIME)),null,null,"setup");
                 var outbox=new RealtimeOutbox(1024,1_048_576);
                 var capture=state.attachRealtime(outbox);
                 place(state,line,7,201,CoreOrderSide.SELL,capture,outbox,"resting-open");
@@ -40,7 +40,7 @@ class RealtimeTerminalEmissionTest {
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(205)),capture,outbox,"cancel");
                 for(long user:new long[]{7,8}) {
                     var orders=new ArrayList<PlaceOrderCommand>();
-                    for(int i=0;i<20;i++)orders.add(new PlaceOrderCommand(1_000+user*100+i,"BTC-USDT",1,
+                    for(int i=0;i<20;i++)orders.add(new PlaceOrderCommand(1_000+user*100+i,"BTC-USDT",
                             user==7?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"batch-"+user+"-"+i));
                     send(state,line,CoreMessageType.PLACE_ORDER_BATCH,user,
@@ -53,7 +53,7 @@ class RealtimeTerminalEmissionTest {
     private static void place(TradingCoreRuntime state,ProductLine line,long user,long id,CoreOrderSide side,
                               RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
         send(state,line,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(
-                new PlaceOrderCommand(id,"BTC-USDT",1,side,100,2,false,CoreMarginMode.CROSS,
+                new PlaceOrderCommand(id,"BTC-USDT",side,100,2,false,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"audit-"+id)),capture,outbox,label);
     }
     private static void send(TradingCoreRuntime state,ProductLine line,CoreMessageType type,long user,byte[] payload,

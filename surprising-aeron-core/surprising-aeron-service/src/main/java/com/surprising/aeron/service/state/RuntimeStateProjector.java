@@ -5,6 +5,7 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
 import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
 import java.util.Map;
@@ -40,7 +41,7 @@ public final class RuntimeStateProjector {
             user.positions().forEach((positionKey, position) -> runtime.putPosition(
                     identities.positionKey(userId, positionKey), new PositionRuntime(userId,
                             identities.symbolId(position.symbol()), identities.assetId(position.marginAsset()),
-                            position.marginMode(), position.positionSide(), position.instrumentChangeId(),
+                            position.marginMode(), position.positionSide(), requireInstrument(source, position.symbol()),
                             position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                             position.realizedPnlUnits(), position.positionMarginUnits())));
         });
@@ -67,7 +68,7 @@ public final class RuntimeStateProjector {
         source.treasuryState().fundingProgress().forEach((symbol, progress) ->
                 runtime.treasury().setFundingProgress(identities.symbolId(symbol),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
-                                progress.instrumentChangeId(), progress.fundingRatePpm(),
+                                requireInstrument(source, symbol), progress.fundingRatePpm(),
                                 progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId(),
                                 progress.markPriceTicks(), progress.priceSequence())));
         source.treasuryState().lifecycleSettlements().forEach((symbol, settlementId) ->
@@ -75,21 +76,21 @@ public final class RuntimeStateProjector {
         source.treasuryState().lifecycleProgress().forEach((symbol, progress) ->
                 runtime.treasury().setLifecycleProgress(identities.symbolId(symbol),
                         new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
-                                progress.instrumentChangeId(), progress.settlementPriceTicks(),
+                                requireInstrument(source, symbol), progress.settlementPriceTicks(),
                                 progress.optionCashUnitsPerContract(), progress.ordersComplete(),
                                 progress.accountLaneId(), progress.nextCursorOrderId(),
                                 progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
         source.riskState().liquidations().forEach((liquidationId, liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.symbol()), liquidation.marginMode(),
-                        liquidation.positionSide(), liquidation.instrumentChangeId(),
+                        liquidation.positionSide(), requireInstrument(source, liquidation.symbol()),
                         liquidation.triggerPriceSequence(), liquidation.signedQuantitySteps(),
                         liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
                         liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
                         liquidation.liquidationFeeUnits(), liquidation.status(),
                         liquidation.nextCancelOrderId())));
         source.riskState().markPrices().forEach((symbol, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
-                identities.symbolId(symbol), mark.instrumentChangeId(), mark.markPriceTicks(),
+                identities.symbolId(symbol), requireInstrument(source, symbol), mark.markPriceTicks(),
                 mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis())));
         source.riskState().snapshots().forEach((key, risk) -> runtime.putRiskSnapshot(
@@ -109,7 +110,7 @@ public final class RuntimeStateProjector {
         runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
         runtime.setMarketRevision(source.riskState().marketRevision());
         source.orders().forEach((orderId, order) -> {
-            runtime.putOrder(toRuntimeOrder(order, identities));
+            runtime.putOrder(toRuntimeOrder(order, identities, requireInstrument(source, order.symbol())));
             if (!order.clientOrderId().isEmpty()) {
                 runtime.putClientOrder(order.userId(), identities.clientKey(order.userId(), order.clientOrderId()), orderId);
             }
@@ -134,9 +135,10 @@ public final class RuntimeStateProjector {
         }
     }
 
-    public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
+    public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
+                                              CoreInstrument instrument) {
         return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
-                identities.symbolId(order.symbol()), order.instrumentChangeId(), order.side(), order.priceTicks(),
+                identities.symbolId(order.symbol()), instrument, order.side(), order.priceTicks(),
                 order.matchingPriceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
@@ -149,7 +151,7 @@ public final class RuntimeStateProjector {
     static ReservationRuntime toRuntimeReservation(long userId, OrderReservation reservation,
                                                     RuntimeIdentityRegistry identities) {
         return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.symbol()),
-                reservation.instrumentChangeId(), reservation.kind(), identities.assetId(reservation.asset()),
+                reservation.kind(), identities.assetId(reservation.asset()),
                 reservation.reservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                 reservation.orderQuantitySteps());
     }
@@ -157,5 +159,11 @@ public final class RuntimeStateProjector {
     private static String positionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side) {
         String normalized = OrderReservation.normalizeSymbol(symbol);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
+    }
+
+    private static CoreInstrument requireInstrument(TradingCoreState source, String symbol) {
+        CoreInstrument instrument = source.instruments().get(OrderReservation.normalizeSymbol(symbol));
+        if (instrument == null) throw new IllegalStateException("instrument is not registered: " + symbol);
+        return instrument;
     }
 }

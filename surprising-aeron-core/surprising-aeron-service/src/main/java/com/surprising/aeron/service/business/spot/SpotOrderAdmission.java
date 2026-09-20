@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.business.spot;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
@@ -16,7 +16,7 @@ public final class SpotOrderAdmission {
     private SpotOrderAdmission() {
     }
 
-    public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
                                         long pendingQuantitySteps) {
         if (order.side() == CoreOrderSide.SELL) return order.quantitySteps();
@@ -32,7 +32,7 @@ public final class SpotOrderAdmission {
      */
     public static long reservationUnitsForState(
             TradingCoreState state,
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             CoreUserState user,
             ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {

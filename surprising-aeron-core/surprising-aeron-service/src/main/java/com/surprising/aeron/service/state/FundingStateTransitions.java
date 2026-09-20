@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
@@ -32,7 +32,7 @@ final class FundingStateTransitions {
         if (!state.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
+        CoreInstrument instrument = requireInstrument(state, command.symbol());
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         long previousSettlement = state.treasuryState().fundingSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
@@ -53,7 +53,6 @@ final class FundingStateTransitions {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
             }
             if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrumentChangeId() != command.instrumentChangeId()
                     || previousProgress.fundingRatePpm() != command.fundingRatePpm()
                     || previousProgress.nextCursorUserId() != command.cursorUserId())) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
@@ -128,7 +127,7 @@ final class FundingStateTransitions {
         } else {
             UUID progressCommandId = chunkCommandId == null ? new UUID(0, 0) : chunkCommandId;
             treasury = treasury.withFundingProgress(instrument.symbol(), new CoreTreasuryState.FundingProgress(
-                    command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
+                    command.settlementId(), command.fundingRatePpm(),
                     0, nextCursorUserId, progressCommandId, fundingMark, fundingPriceSequence));
         }
         CoreFundingProgressView progress = new CoreFundingProgressView(
@@ -147,13 +146,10 @@ final class FundingStateTransitions {
                 .toList();
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState state, String symbol, long version) {
-        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+    private static CoreInstrument requireInstrument(TradingCoreState state, String symbol) {
+        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

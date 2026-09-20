@@ -12,8 +12,8 @@ class LifecycleGuardTest {
     @Test
     void rejectsSameAssetSpotBeforeInstallingInstrument() {
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, ProductLine.SPOT)) {
-            var response = h.state().apply(h.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BAD", 1,
+            var response = h.state().apply(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BAD",
                             ContractType.SPOT.ordinal(), "BTC", "BTC", "BTC", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -31,23 +31,23 @@ class LifecycleGuardTest {
             boolean option = line == ProductLine.OPTION;
             ContractType type = inverse ? ContractType.INVERSE_DELIVERY
                     : option ? ContractType.VANILLA_OPTION : ContractType.LINEAR_DELIVERY;
-            h.execute(h.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("EXP", 1,
+            h.execute(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("EXP",
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             var early = h.state().apply(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "EXP", 1, 100, 0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "EXP", 100, 0))));
             assertThat(early.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().treasuryState().lifecycleSettlements()).isEmpty();
             h.advanceClockTo(2_000_000_000_000L);
             var expired = h.state().apply(h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, 1000,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "EXP", 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "EXP",
                             CoreOrderSide.BUY, 100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
             assertThat(expired.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().orders()).isEmpty();
             h.execute(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "EXP", 1, 100, 0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "EXP", 100, 0))));
             assertThat(h.state().tradingState().treasuryState().lifecycleSettlements()).containsEntry("EXP", 10L);
         }
     }

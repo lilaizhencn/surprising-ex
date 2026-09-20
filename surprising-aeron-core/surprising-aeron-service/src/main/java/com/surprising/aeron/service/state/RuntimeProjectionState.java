@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
@@ -33,7 +33,7 @@ public final class RuntimeProjectionState {
      */
     private final Map<Long, MutableUser> users = new HashMap<>();
     private final Map<Long, CoreOrderState> orders;
-    private final Map<String, CoreInstrumentState> instruments;
+    private final Map<String, CoreInstrument> instruments;
     private final Map<String, CoreMarkPriceState> marks;
     private final Map<String, CoreRiskSnapshot> riskSnapshots;
     private final Map<Long, CoreLiquidationState> liquidations;
@@ -83,7 +83,7 @@ public final class RuntimeProjectionState {
         this.fundsStateHash = fundsStateHash;
         initial.users().forEach((id, user) -> users.put(id, new MutableUser(user)));
         orders = new HashMap<>(initial.orders());
-        instruments = new HashMap<>(initial.instruments());
+        instruments = initial.instruments();
         marks = new HashMap<>(initial.riskState().markPrices());
         riskSnapshots = new HashMap<>(initial.riskState().snapshots());
         liquidations = new HashMap<>(initial.riskState().liquidations());
@@ -362,14 +362,13 @@ public final class RuntimeProjectionState {
             String symbol = identities.symbol(change.symbolId());
             MarkPriceRuntime value = change.after();
             inverse.putOrRemove(marks, symbol, value == null ? null : new CoreMarkPriceState(symbol,
-                    value.instrumentChangeId(), value.markPriceTicks(), value.indexPriceTicks(),
+                    value.markPriceTicks(), value.indexPriceTicks(),
                     value.forwardPriceTicks(), value.priceSequence(), value.generatedAtEpochMillis()));
         }
         for (RuntimeFactFrame.RiskScanChange change : global.riskScans()) {
             inverse.putOrRemove(riskScans, identities.symbol(change.symbolId()), change.after() == null
                     ? null : RuntimeStateMaterializer.riskScan(change.after(), identities));
         }
-        global.instruments().forEach(change -> inverse.putOrRemove(instruments, change.symbol(), change.after()));
         if (global.marketRevision() != null) inverse.setMarketRevision(global.marketRevision().after());
         if (global.nextLiquidationId() != null) {
             inverse.setNextLiquidationId(global.nextLiquidationId().after());

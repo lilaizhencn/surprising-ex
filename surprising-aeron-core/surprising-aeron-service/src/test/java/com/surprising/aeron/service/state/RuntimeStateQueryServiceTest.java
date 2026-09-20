@@ -30,16 +30,18 @@ class RuntimeStateQueryServiceTest {
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 7);
         int symbolId = identities.symbolId("BTC-USDT");
         int assetId = identities.assetId("USDT");
+        var instrument = CoreStateTestFixtures.runtimeInstrument();
+        runtime.registerInstrument(instrument);
         long clientKey = identities.clientKey(1001, "client-71");
         long positionKey = identities.positionKey(1001, "BTC-USDT");
         runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 1001, 3, CorePositionMode.ONE_WAY));
         runtime.putBalance(new BalanceRuntime(1001, assetId, 1_000, 150));
-        runtime.putReservation(new ReservationRuntime(71, 1001, symbolId, 1,
+        runtime.putReservation(new ReservationRuntime(71, 1001, symbolId,
                 ReservationKind.DERIVATIVE_MARGIN, assetId, 100, 0, 0, 2));
         runtime.putPosition(positionKey, new PositionRuntime(1001, symbolId, assetId, CoreMarginMode.CROSS,
-                CorePositionSide.NET, 1, 2, 60_000, 120_000, 7, 50));
+                CorePositionSide.NET, instrument, 2, 60_000, 120_000, 7, 50));
         runtime.putLeverage(new CoreLeverageKey(1001, "BTC-USDT", CoreMarginMode.CROSS), 5_000_000);
-        runtime.putOrder(new OrderRuntime(71, ProductLine.LINEAR_PERPETUAL, 1001, symbolId, 1,
+        runtime.putOrder(new OrderRuntime(71, ProductLine.LINEAR_PERPETUAL, 1001, symbolId, instrument,
                 CoreOrderSide.BUY, 60_000, 60_000, 2, 0, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-71",
                 UUID.fromString("10000000-0000-0000-0000-000000000071"), -10, 25, 0,

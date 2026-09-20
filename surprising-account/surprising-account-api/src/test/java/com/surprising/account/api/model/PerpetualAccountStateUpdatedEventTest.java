@@ -19,7 +19,7 @@ class PerpetualAccountStateUpdatedEventTest {
                 1, 11L, 7L, ProductLine.LINEAR_PERPETUAL, 1001L, "usdt_perpetual",
                 List.of(new PerpetualAccountStateUpdatedEvent.Balance("usdt", 90L, 10L)),
                 List.of(new PerpetualAccountStateUpdatedEvent.Deficit("usdt", 5L, 2L)),
-                List.of(new PerpetualAccountStateUpdatedEvent.Position("btc-usdt", 3L, MarginMode.CROSS,
+                List.of(new PerpetualAccountStateUpdatedEvent.Position("btc-usdt", MarginMode.CROSS,
                         PositionSide.NET, 2L, 100L, 200L, 0L, Instant.EPOCH)),
                 List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("btc-usdt", "usdt",
                         MarginMode.ISOLATED, PositionSide.NET, 20L)),
@@ -35,8 +35,8 @@ class PerpetualAccountStateUpdatedEventTest {
     @Test
     void rejectsIncompleteOpenPosition() {
         assertThatThrownBy(() -> new PerpetualAccountStateUpdatedEvent.Position(
-                "BTC-USDT", 0L, MarginMode.CROSS, PositionSide.NET,
-                1L, 100L, 100L, 0L, Instant.EPOCH))
+                "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                1L, 0L, 100L, 0L, Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("open position fields");
     }

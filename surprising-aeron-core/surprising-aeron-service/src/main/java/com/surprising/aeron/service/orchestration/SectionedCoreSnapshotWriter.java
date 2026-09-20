@@ -164,7 +164,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putInt(matcherSnapshot.bookStateHash())
                 .putLong(matcherSnapshot.symbolRegistryHash())
                 .putLong(matcherSnapshot.userRegistryHash())
-                .putLong(matcherSnapshot.instrumentRegistryHash())
                 .putLong(matcherSnapshot.activeOrderHash())
                 .putLong(image.sourceSequenceDigest())
                 .putLong(image.exportState().acknowledgedSequence())

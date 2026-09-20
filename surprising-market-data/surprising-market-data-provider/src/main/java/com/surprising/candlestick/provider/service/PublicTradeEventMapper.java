@@ -21,9 +21,8 @@ public class PublicTradeEventMapper {
     private static final int DISPLAY_SCALE = 18;
 
     private final InstrumentSnapshotCache snapshotCache;
-    private com.surprising.instrument.api.client.InstrumentRpcApi instrumentRpc;
     private final com.surprising.product.api.ProductLine productLine;
-    private final Map<InstrumentKey, InstrumentScale> scales = new ConcurrentHashMap<>();
+    private final Map<String, InstrumentScale> scales = new ConcurrentHashMap<>();
 
     public PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache) {
         this(snapshotCache, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
@@ -35,12 +34,6 @@ public class PublicTradeEventMapper {
                 properties == null || properties.getKafka() == null
                         ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
                         : properties.getKafka().getProductLine());
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public PublicTradeEventMapper(InstrumentSnapshotCache cache, CandlestickProperties properties,
-            com.surprising.instrument.api.client.InstrumentRpcApi rpc) {
-        this(cache,properties); this.instrumentRpc=rpc;
     }
 
     private PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache,
@@ -68,7 +61,7 @@ public class PublicTradeEventMapper {
             throw new IllegalArgumentException("public trade eventTime is required");
         }
 
-        InstrumentScale scale = scale(symbol, publicTrade.instrumentChangeId());
+        InstrumentScale scale = scales.computeIfAbsent(symbol, this::loadScale);
         BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
         BigDecimal quantity = toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
         return new TradeEvent(
@@ -83,23 +76,12 @@ public class PublicTradeEventMapper {
                 null);
     }
 
-    private InstrumentScale scale(String symbol, long instrumentChangeId) {
-        if (instrumentChangeId <= 0) {
-            throw new IllegalArgumentException("public trade instrument version must be positive");
-        }
-        return scales.computeIfAbsent(new InstrumentKey(symbol, instrumentChangeId), this::loadScale);
-    }
-
-    private InstrumentScale loadScale(InstrumentKey key) {
+    private InstrumentScale loadScale(String symbol) {
         if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(productLine, key.symbol(), key.instrumentChangeId()).orElse(null);
-        if (instrument==null) {
-            if (instrumentRpc==null) throw new IllegalArgumentException("committed trade audit encoding unavailable");
-            var units=instrumentRpc.tradeEncoding(productLine,key.symbol(),key.instrumentChangeId());
-            return new InstrumentScale(units.priceTickUnits(),units.quantityStepUnits(),units.baseScaleUnits(),units.quoteScaleUnits());
-        }
+        var instrument = snapshotCache.current(productLine, symbol)
+                .orElseThrow(() -> new IllegalArgumentException("committed trade encoding unavailable: " + symbol));
         long baseScaleUnits = snapshotCache.scale(productLine, instrument.baseAsset())
                 .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));
         long quoteScaleUnits = snapshotCache.scale(productLine, instrument.quoteAsset())
@@ -127,9 +109,6 @@ public class PublicTradeEventMapper {
         } catch (IllegalArgumentException ex) {
             return TradeSide.UNKNOWN;
         }
-    }
-
-    private record InstrumentKey(String symbol, long instrumentChangeId) {
     }
 
     private record InstrumentScale(long priceTickUnits,

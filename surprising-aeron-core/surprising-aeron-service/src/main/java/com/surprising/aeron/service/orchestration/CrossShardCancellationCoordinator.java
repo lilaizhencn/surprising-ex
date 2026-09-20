@@ -48,7 +48,7 @@ final class CrossShardCancellationCoordinator {
             var command = progress.command;
             var aggregate = owner.matchingAdapter.aggregateCancellationResults(progress.orders, progress.results);
             var evidenced = owner.matchingAdapter.executeControlWithEvidenceSync(
-                    command.sequence(), command.command().header().commandId(), 0, 0,
+                    command.sequence(), command.command().header().commandId(), 0,
                     command.command().header().submittedAtEpochMillis(), () -> aggregate);
             pending.removeFirst();
             command.crossShardCancellationStarted = false;

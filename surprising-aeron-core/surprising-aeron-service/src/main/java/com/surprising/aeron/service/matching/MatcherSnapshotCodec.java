@@ -25,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -66,7 +66,6 @@ public final class MatcherSnapshotCodec {
                 output.writeLong(snapshot.symbolRegistryHash());
                 output.writeLong(snapshot.symbolRouteHash());
                 output.writeLong(snapshot.userRegistryHash());
-                output.writeLong(snapshot.instrumentRegistryHash());
                 output.writeLong(snapshot.activeOrderHash());
                 writeText(output, snapshot.forkGitSha());
                 writeText(output, snapshot.artifactSha256());
@@ -149,7 +148,6 @@ public final class MatcherSnapshotCodec {
             long symbolHash = input.readLong();
             long symbolRouteHash = input.readLong();
             long userHash = input.readLong();
-            long instrumentHash = input.readLong();
             long activeOrderHash = input.readLong();
             String forkGitSha = readText(input);
             String artifactSha256 = readText(input);
@@ -198,7 +196,7 @@ public final class MatcherSnapshotCodec {
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
             return new MatcherSnapshot(productLine, coreShardId, routeVersion, topology, snapshotId, coreSequence,
                     matcherSequence, matcherShardProgress, businessHash, engineHash, bookHash,
-                    symbolHash, symbolRouteHash, userHash, instrumentHash,
+                    symbolHash, symbolRouteHash, userHash,
                     activeOrderHash, forkGitSha, artifactSha256, configHash, symbols, users, modules);
         } catch (EOFException exception) {
             throw new ProtocolException("matcher snapshot is truncated: " + exception.getMessage());

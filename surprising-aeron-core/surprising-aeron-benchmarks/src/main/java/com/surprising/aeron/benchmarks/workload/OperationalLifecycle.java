@@ -33,8 +33,8 @@ final class OperationalLifecycle implements AutoCloseable {
         return Math.addExact(3*ClusterMixedCapacityMain.BALANCE,Math.multiplyExact(cycles,125));
     }
     void setup() {
-        for(String symbol:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.UPSERT_INSTRUMENT,0,
-                TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(symbol,1,
+        for(String symbol:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
                         ContractType.LINEAR_PERPETUAL.ordinal(),"OPS","USDT","USDT",1,1,1,
                         100_000,50_000,0,0,0,-1,0)));
         for(long account:new long[]{maker,user,riskMaker})deposit(account,ClusterMixedCapacityMain.BALANCE);
@@ -48,12 +48,12 @@ final class OperationalLifecycle implements AutoCloseable {
     private void price(String symbol,long value) {
         long seq=symbol.equals(ACTIVE)?++activeSequence:++riskSequence;
         endpoint.command(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol,1,value,seq,GeneratedPriceClock.timestamp())));
+                new ApplyMarkPriceCommand(symbol,value,seq,GeneratedPriceClock.timestamp())));
     }
     private void place(long account,String symbol,CoreOrderSide side,long price,long quantity,
                        CoreTimeInForce tif,boolean reduceOnly) {
         endpoint.command(CoreMessageType.PLACE_ORDER,account,TradingCommandCodec.encodePlaceOrder(
-                new PlaceOrderCommand(++id,symbol,1,side,price,quantity,reduceOnly,CoreMarginMode.CROSS,
+                new PlaceOrderCommand(++id,symbol,side,price,quantity,reduceOnly,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,"ops-"+id)));
     }
     void cycle() {
@@ -64,7 +64,7 @@ final class OperationalLifecycle implements AutoCloseable {
         do {
             var response=endpoint.command(CoreMessageType.APPLY_FUNDING,0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            fundingId,ACTIVE,1,100_000,cursor,controlPageSize == 0 ? 64 : controlPageSize)));
+                            fundingId,ACTIVE,100_000,cursor,controlPageSize == 0 ? 64 : controlPageSize)));
             cursor=CoreFundingProgressCodec.decode(response.data()).nextCursorUserId();
         }while(cursor!=0);
         fundingId++;
@@ -80,7 +80,7 @@ final class OperationalLifecycle implements AutoCloseable {
         var state=new CoreTriggerOrderStateView(trigger,ProductLine.LINEAR_PERPETUAL,user,"ops-trigger-"+trigger,
                 "",ACTIVE,CoreOrderSide.SELL,CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,
                 100,0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,100,1,CoreMarginMode.CROSS,
-                CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"","ops",0,0,0,0,1,1,0,0);
+                CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"","ops",0,0,0,0,1,0,0);
         endpoint.command(CoreMessageType.PLACE_TRIGGER_ORDER,user,CoreTriggerOrderCodec.encodeState(state));
         var pending=CoreTriggerOrderCodec.decodeList(endpoint.query(CoreMessageType.TRIGGER_ORDER_QUERY,0,
                 CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0,ACTIVE,0,1000,CoreTriggerOrderStatus.PENDING))).data());

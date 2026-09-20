@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -101,14 +101,14 @@ class RuntimeCommandProcessorTest {
     @Test
     void upsertsInstrumentDirectlyInRuntime() {
         TradingCoreState before = TradingCoreState.empty(ProductLine.SPOT);
-        UpsertInstrumentCommand command = new UpsertInstrumentCommand(
-                "BTC-USDT", 1, ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand(
+                "BTC-USDT", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
-        TradingCoreState expected = new TradingCoreReducer().upsertInstrument(before, command);
+        TradingCoreState expected = new TradingCoreReducer().registerInstrument(before, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeCommandProcessor.upsertInstrument(runtime, identities, command);
+        RuntimeCommandProcessor.registerInstrument(runtime, identities, command);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }
@@ -130,9 +130,9 @@ class RuntimeCommandProcessorTest {
     @Test
     void updatesLeverageDirectlyInRuntime() {
         TradingCoreReducer reference = new TradingCoreReducer();
-        TradingCoreState before = reference.upsertInstrument(
+        TradingCoreState before = reference.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0));
         UpdateLeverageCommand command = new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000);

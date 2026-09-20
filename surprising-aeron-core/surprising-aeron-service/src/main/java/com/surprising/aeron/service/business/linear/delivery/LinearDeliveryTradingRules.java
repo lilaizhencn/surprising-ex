@@ -5,7 +5,7 @@ import com.surprising.aeron.service.state.math.CoreContractMath;
 
 import com.surprising.aeron.service.business.derivative.FuturesOrderAdmission;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
@@ -17,25 +17,25 @@ public final class LinearDeliveryTradingRules implements ProductTradingRules {
     public ProductLine productLine() { return ProductLine.LINEAR_DELIVERY; }
     public ContractType contractType() { return ContractType.LINEAR_DELIVERY; }
     @Override
-    public void validateLifecycleSettlementProductRule(CoreInstrumentState instrument,
+    public void validateLifecycleSettlementProductRule(CoreInstrument instrument,
                                                         SettleInstrumentCommand command) {
         // Delivery settlement is admitted by the shared maintenance validation.
     }
-    public long realizedPnlUnits(CoreInstrumentState instrument, long quantity, long entry, long execution) {
+    public long realizedPnlUnits(CoreInstrument instrument, long quantity, long entry, long execution) {
         requireInstrument(instrument);
         return CoreContractMath.pnlUnits(instrument, quantity, entry, execution);
     }
-    public long lifecycleCashDeltaUnits(CoreInstrumentState instrument, long quantity, long entry, long settlement) {
+    public long lifecycleCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
         requireInstrument(instrument);
         return CoreContractMath.pnlUnits(instrument, quantity, entry, settlement);
     }
     @Override
-    public long lifecycleSettlementCashDeltaUnits(CoreInstrumentState instrument,
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
                                                   long quantity, long entry, long settlement) {
         return lifecycleCashDeltaUnits(instrument, quantity, entry, settlement);
     }
     @Override
-    public long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {
         return FuturesOrderAdmission.reservationUnits(

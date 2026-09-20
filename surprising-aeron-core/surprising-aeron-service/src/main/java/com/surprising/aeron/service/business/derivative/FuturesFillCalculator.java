@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.business.derivative;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
@@ -10,7 +10,7 @@ public final class FuturesFillCalculator {
     private FuturesFillCalculator() {
     }
 
-    public static long openingMarginForFill(CoreInstrumentState instrument,
+    public static long openingMarginForFill(CoreInstrument instrument,
                                             long projectedQuantitySteps,
                                             long signedFillSteps,
                                             long openSteps,

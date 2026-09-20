@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 
@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 
 public record ResolvedPlaceOrder(
         PlaceOrderCommand intent,
-        CoreInstrumentState instrument,
+        CoreInstrument instrument,
         int symbolId,
         long matchingPriceTicks,
         long reservationPriceTicks,
@@ -37,7 +37,7 @@ public record ResolvedPlaceOrder(
         reservationAsset = AssetBalance.normalizeAsset(reservationAsset);
     }
 
-    public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrumentState instrument, int symbolId,
+    public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
                               long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
                               long markPriceSequence, ReservationKind reservationKind, String reservationAsset,
                               long makerFeeRatePpm, long takerFeeRatePpm, long feePolicyVersion) {
@@ -48,7 +48,6 @@ public record ResolvedPlaceOrder(
 
     public long orderId() { return intent.orderId(); }
     public String symbol() { return intent.symbol(); }
-    public long instrumentChangeId() { return intent.instrumentChangeId(); }
     public com.surprising.aeron.protocol.CoreOrderSide side() { return intent.side(); }
     public long limitPriceTicks() { return intent.limitPriceTicks(); }
     public long quantitySteps() { return intent.quantitySteps(); }

@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -24,7 +24,7 @@ final class ReducerDerivativeSettlement {
     static DerivativeFillResult applyDerivativeFill(
             CoreUserState user,
             CoreOrderState order,
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             CoreMarkPriceState riskMark,
             long fillPriceTicks,
             long fillQuantitySteps,
@@ -140,7 +140,7 @@ final class ReducerDerivativeSettlement {
         }
         long nextMargin = Math.addExact(remainingMargin, marginIncrease);
         CorePositionState position = new CorePositionState(order.symbol(), reservation.asset(), order.marginMode(),
-                order.positionSide(), nextQuantity == 0 ? 0 : order.instrumentChangeId(), nextQuantity,
+                order.positionSide(), nextQuantity,
                 nextEntryPrice, nextEntryValue,
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl), nextMargin);
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());

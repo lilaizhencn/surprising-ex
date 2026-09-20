@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.math.*;
@@ -65,7 +65,7 @@ public final class DerivativeAccountCommandProcessor {
             throw new IllegalArgumentException("invalid runtime leverage update");
         if (!runtime.productLine().isDerivative())
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "leverage requires derivative product line");
-        CoreInstrumentState instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.symbol());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         if (instrument.contractType().isOption())
             throw new CoreStateRejectedException("OPTION_LEVERAGE_UNSUPPORTED", "non-portfolio option margin is not leverage based");
@@ -135,7 +135,7 @@ public final class DerivativeAccountCommandProcessor {
                     Math.addExact(balance.availableUnits(), units), balance.lockedUnits() - units);
         }
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), position.instrumentChangeId(), position.signedQuantitySteps(),
+                position.marginMode(), position.positionSide(), position.instrument(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin);
         UserRuntime user = runtime.requireUser(userId);
         UserRuntime nextUser = new UserRuntime(user.productLine(), userId,

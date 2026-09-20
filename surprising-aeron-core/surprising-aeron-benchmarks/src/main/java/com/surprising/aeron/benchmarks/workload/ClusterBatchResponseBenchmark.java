@@ -41,13 +41,13 @@ public class ClusterBatchResponseBenchmark {
                 List.of(System.getProperty("surprising.aeron.hostnames").split(",")), "127.0.0.1",
                 Duration.ofSeconds(30), "batch-response", UUID.randomUUID().toString(),
                 ClusterMixedCapacityMain.commandCapacity(256, 256));
-        applied(send(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                new UpsertInstrumentCommand(SYMBOL, 1, type.ordinal(), "BTC", "USDT", asset, 1, 1, 1,
+        applied(send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", asset, 1, 1, 1,
                         100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? System.currentTimeMillis() + 3_600_000 : 0,
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))).join());
         applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                ? new ApplyMarkPriceCommand(SYMBOL, 1, 100, 100, 100, 1, System.currentTimeMillis())
-                : new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1, System.currentTimeMillis()))).join());
+                ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
+                : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis()))).join());
         for (int i = 0; i < USERS; i++) applied(send(CoreMessageType.ADJUST_BALANCE, user(i),
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, FUNDS))).join());
     }
@@ -75,7 +75,7 @@ public class ClusterBatchResponseBenchmark {
                 long[] ids = new long[batchSize];
                 for (int n = 0; n < batchSize; n++) {
                     ids[n] = ++orderId;
-                    orders.add(new PlaceOrderCommand(ids[n], SYMBOL, 1, CoreOrderSide.BUY, 80, 1, false,
+                    orders.add(new PlaceOrderCommand(ids[n], SYMBOL, CoreOrderSide.BUY, 80, 1, false,
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, clientId(ids[n])));
                 }

@@ -119,7 +119,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public com.surprising.product.api.ProductLine productLine() { return responseItem.resultOrder.productLine(); }
     public long userId() { return responseItem.resultOrder.userId(); }
     public String symbol() { return responseItem.resultOrderSymbol; }
-    public long instrumentChangeId() { return responseItem.resultOrder.instrumentChangeId(); }
     public com.surprising.aeron.protocol.CoreOrderSide side() { return responseItem.resultOrder.side(); }
     public long priceTicks() { return responseItem.resultOrder.priceTicks(); }
     public long quantitySteps() { return responseItem.resultOrder.quantitySteps(); }

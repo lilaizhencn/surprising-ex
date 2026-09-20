@@ -2,7 +2,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.account.TransferRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.settlement.FundsDelta;
@@ -196,8 +196,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
     /** 手续费、保险、清算等全局资金状态，按提交边界合并。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
-    /** 当前产品线的币对配置，以运行时生效状态为准。 */
-    final Map<String, CoreInstrumentState> instruments = new HashMap<>();
+    /** 启动注册阶段创建的币对对象；同一 symbol 注册后不再替换。 */
+    final Map<String, CoreInstrument> instruments = new HashMap<>();
+    /** 第一条非注册业务命令到达后冻结，恢复出的非空 registry 也直接冻结。 */
+    private boolean instrumentRegistrySealed;
     /** 用户自动撤单定时器状态。 */
     final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     /** 用户手续费策略状态，参与持久化与恢复。 */
@@ -261,8 +263,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             new RuntimeChangeBuffer<>();
     /** 当前提交范围内变化的风险扫描；与提交/回滚边界同步维护。 */
     final IntHashSet changedRiskScans = new IntHashSet();
-    /** 当前提交范围内变化的币对；与提交/回滚边界同步维护。 */
-    final HashSet<String> changedInstruments = new HashSet<>();
     /** 当前提交范围内变化的杠杆；与提交/回滚边界同步维护。 */
     final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
     /** 当前提交范围内变化的算法单；与提交/回滚边界同步维护。 */
@@ -318,9 +318,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 回滚需要的变更前风险扫描；与提交/回滚边界同步维护。 */
     ConcurrentHashMap<Integer, PatchBefore<RiskScanRuntime>> patchRiskScansBefore =
             new ConcurrentHashMap<>();
-    /** 回滚需要的变更前币对；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<String, PatchBefore<CoreInstrumentState>> patchInstrumentsBefore =
-            new ConcurrentHashMap<>();
+    /** 启动注册命令失败时仅需移除本命令新增的 symbol，不保存 canonical instrument 副本。 */
+    final HashSet<String> patchRegisteredInstruments = new HashSet<>();
+    /** 维护命令回滚只保留原值引用，不复制 canonical instrument。 */
+    ConcurrentHashMap<String, com.surprising.aeron.protocol.CoreInstrumentMaintenance>
+            patchInstrumentMaintenanceBefore = new ConcurrentHashMap<>();
     /** 回滚需要的变更前待完成转账；与提交/回滚边界同步维护。 */
     ConcurrentHashMap<Long, PatchBefore<TransferRuntime>> patchPendingTransfersBefore =
             new ConcurrentHashMap<>();
@@ -2747,7 +2749,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !changedReservations.isEmpty() || !changedPositions.isEmpty()
                 || !changedLiquidations.isEmpty() || !changedMarkPrices.isEmpty()
                 || !changedRiskSnapshots.isEmpty() || !changedRiskScans.isEmpty()
-                || !changedInstruments.isEmpty() || !changedLeverages.isEmpty()
+                || !changedLeverages.isEmpty()
                 || !changedAlgoOrders.isEmpty() || !changedCancelAllAfterTimers.isEmpty()
                 || !changedTriggerOrders.isEmpty() || !changedFeePolicies.isEmpty()
                 || hasCapturedUsers() || hasCapturedBalances()
@@ -2756,7 +2758,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !patchLeveragesBefore.isEmpty() || !patchAlgoOrdersBefore.isEmpty()
                 || !patchTriggerOrdersBefore.isEmpty() || hasCapturedClientOrders()
                 || !patchTimersBefore.isEmpty() || !patchMarkPricesBefore.isEmpty()
-                || !patchRiskScansBefore.isEmpty() || !patchInstrumentsBefore.isEmpty()
+                || !patchRiskScansBefore.isEmpty() || !patchRegisteredInstruments.isEmpty()
+                || !patchInstrumentMaintenanceBefore.isEmpty()
                 || !patchPendingTransfersBefore.isEmpty() || !patchFeePoliciesBefore.isEmpty()
                 || patchMarketRevisionChanged || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
     }
@@ -3065,7 +3068,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchTimersBefore.forEach((key, before) -> putOrRemove(cancelAllAfterTimers, key, before.value()));
         patchMarkPricesBefore.forEach((id, before) -> putOrRemove(markPrices, id, before.value()));
         patchRiskScansBefore.forEach((id, before) -> putOrRemove(riskScans, id, before.value()));
-        patchInstrumentsBefore.forEach((symbol, before) -> putOrRemove(instruments, symbol, before.value()));
+        patchRegisteredInstruments.forEach(instruments::remove);
+        patchInstrumentMaintenanceBefore.forEach((symbol, maintenance) -> {
+            CoreInstrument instrument = instruments.get(symbol);
+            if (instrument != null) instrument.updateMaintenance(maintenance);
+        });
         patchPendingTransfersBefore.forEach((id, before) -> putOrRemove(pendingTransfers, id, before.value()));
         patchFeePoliciesBefore.forEach((id, before) -> putOrRemove(feePolicies, id, before.value()));
         if (patchNextLiquidationIdChanged) nextLiquidationId = patchNextLiquidationIdBefore;
@@ -3493,23 +3500,42 @@ public final class TradingRuntimeState implements AutoCloseable {
         return treasury;
     }
 
-    public CoreInstrumentState instrument(String symbol) {
+    public CoreInstrument instrument(String symbol) {
         assertOwner();
-        CoreInstrumentState known = symbol == null ? null : instruments.get(symbol);
+        CoreInstrument known = symbol == null ? null : instruments.get(symbol);
         if (known != null) return known;
         return instruments.get(OrderReservation.normalizeSymbol(symbol));
     }
 
-    void putInstrument(CoreInstrumentState instrument) {
+    public void sealInstrumentRegistry() {
         assertOwner();
-        rejectUnsupportedOrderBatchMutation("instrument state");
-        if (instrument == null) {
-            throw new IllegalArgumentException("invalid runtime instrument");
+        instrumentRegistrySealed = true;
+    }
+
+    void registerInstrument(CoreInstrument instrument) {
+        assertOwner();
+        rejectUnsupportedOrderBatchMutation("instrument registry");
+        if (instrumentRegistrySealed) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument registry is sealed");
         }
-        patchInstrumentsBefore.computeIfAbsent(instrument.symbol(),
-                symbol -> new PatchBefore<>(instruments.get(symbol)));
+        if (instrument == null || instruments.containsKey(instrument.symbol())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is already registered");
+        }
+        patchRegisteredInstruments.add(instrument.symbol());
         instruments.put(instrument.symbol(), instrument);
-        changedInstruments.add(instrument.symbol());
+    }
+
+    void updateInstrumentMaintenance(
+            CoreInstrument instrument,
+            com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
+        assertOwner();
+        rejectUnsupportedOrderBatchMutation("instrument operation");
+        if (instrument == null || maintenance == null || instruments.get(instrument.symbol()) != instrument) {
+            throw new IllegalArgumentException("invalid canonical instrument operation");
+        }
+        patchInstrumentMaintenanceBefore.computeIfAbsent(
+                instrument.symbol(), symbol -> instrument.maintenance());
+        instrument.updateMaintenance(maintenance);
     }
 
     public Long leverage(CoreLeverageKey key) {
@@ -3657,7 +3683,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    Map<String, CoreInstrumentState> instrumentsForRuntime() {
+    Map<String, CoreInstrument> instrumentsForRuntime() {
         assertOwner();
         return instruments;
     }
@@ -3838,7 +3864,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public CoreFeeRate resolveFee(long userId, String symbol, long clusterTimestamp,
-                                  CoreInstrumentState instrument) {
+                                  CoreInstrument instrument) {
         assertOwner();
         String normalizedSymbol = instrument.symbol().equals(symbol)
                 ? instrument.symbol() : OrderReservation.normalizeSymbol(symbol);
@@ -3861,6 +3887,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
         instruments.putAll(source.instruments());
+        instrumentRegistrySealed = !instruments.isEmpty();
         publishedAlgoOrders.clear();
         publishedTriggerOrders.clear();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -4161,7 +4188,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Same operation with the symbol identity supplied explicitly for a newly opened position. */
     PositionRuntime updatePositionInLane(long positionKey, long userId, int symbolId, int assetId,
-                                         long instrumentChangeId, long signedQuantitySteps,
+                                         CoreInstrument instrument, long signedQuantitySteps,
                                          long entryPriceTicks, long entryValueTicks,
                                          long realizedPnlUnits, long positionMarginUnits,
                                          CoreMarginMode marginMode, CorePositionSide positionSide) {
@@ -4173,7 +4200,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         PositionRuntime current = lane.positions.get(positionKey);
         if (current == null) {
             PositionRuntime created = new PositionRuntime(userId, symbolId, assetId, marginMode, positionSide,
-                    instrumentChangeId, signedQuantitySteps, entryPriceTicks, entryValueTicks,
+                    instrument, signedQuantitySteps, entryPriceTicks, entryValueTicks,
                     realizedPnlUnits, positionMarginUnits);
             lane.positions.put(positionKey, created.laneValue());
             indexPosition(lane, positionKey, created);
@@ -4182,7 +4209,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         boolean wasOpen = current.signedQuantitySteps() != 0;
         int oldSymbol = current.symbolId();
-        current.applyInPlace(instrumentChangeId, signedQuantitySteps, entryPriceTicks, entryValueTicks,
+        current.applyInPlace(instrument, signedQuantitySteps, entryPriceTicks, entryValueTicks,
                 realizedPnlUnits, positionMarginUnits);
         boolean isOpen = current.signedQuantitySteps() != 0;
         if (wasOpen && (!isOpen || oldSymbol != current.symbolId()))
@@ -4861,7 +4888,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Reuse the position delta's existing key index to retain each identity once per Lane output. */
     void retainDirectPositionIdentity(AccountLaneState lane, RuntimeIdentityRegistry identities,
-                                      CoreInstrumentState instrument, OrderRuntime order) {
+                                      CoreInstrument instrument, OrderRuntime order) {
         if (!productLine().isDerivative()) return;
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         if (changes == null || !changes.directPositionIdentities || laneCommandScope.get() != lane)
@@ -5031,7 +5058,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         clearChanged(changedMarkPrices);
         changedRiskSnapshots.clear();
         clearChanged(changedRiskScans);
-        changedInstruments.clear();
         changedLeverages.clear();
         clearChanged(changedAlgoOrders);
         changedCancelAllAfterTimers.clear();
@@ -5052,7 +5078,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchTimersBefore = clearCapturedChanges(patchTimersBefore);
         patchMarkPricesBefore = clearCapturedChanges(patchMarkPricesBefore);
         patchRiskScansBefore = clearCapturedChanges(patchRiskScansBefore);
-        patchInstrumentsBefore = clearCapturedChanges(patchInstrumentsBefore);
+        patchRegisteredInstruments.clear();
+        patchInstrumentMaintenanceBefore = clearCapturedChanges(patchInstrumentMaintenanceBefore);
         patchPendingTransfersBefore = clearCapturedChanges(patchPendingTransfersBefore);
         patchFeePoliciesBefore = clearCapturedChanges(patchFeePoliciesBefore);
         patchNextLiquidationIdChanged = false;
@@ -5171,17 +5198,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         return riskScans;
     }
 
-    public void reserveOrder(long orderId, long userId, long clientKey, int symbolId,
-                             long quantitySteps, int assetId, long reservedUnits) {
-        reserveOrder(new OrderRuntime(orderId, userId, symbolId, quantitySteps),
-                new ReservationRuntime(orderId, userId, assetId, reservedUnits), clientKey, reservedUnits);
-    }
-
     /** Installs the prepared immutable values once, within the same reservation/capture boundary. */
     void reserveOrder(OrderRuntime order, ReservationRuntime reservation, long clientKey) {
         if (order == null || reservation == null || order.orderId() != reservation.orderId()
                 || order.userId() != reservation.userId() || order.symbolId() != reservation.symbolId()
-                || order.instrumentChangeId() != reservation.instrumentChangeId()
                 || order.quantitySteps() != reservation.orderQuantitySteps() || clientKey < 0) {
             throw new IllegalArgumentException("invalid prepared reservation");
         }
@@ -5240,11 +5260,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId,
             long timestamp, long position) {
         return new OrderRuntime(command.orderId(), productLine, userId, symbolId,
-                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.instrument(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                timestamp, timestamp, position, CoreOrderStatus.OPEN, 1);
+                0, timestamp, timestamp, position, CoreOrderStatus.OPEN, 1);
     }
 
     void placeOrderInLane(AccountLaneState lane, long userId, ResolvedPlaceOrder command,
@@ -5274,7 +5294,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         OrderRuntime order = prepared == null ? preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position)
                 : prepared;
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
+                command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
         UserRuntime advanced = new UserRuntime(productLine, userId,
                 Math.incrementExact(user.revision()), user.positionMode());

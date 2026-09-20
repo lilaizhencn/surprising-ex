@@ -22,26 +22,34 @@ public class InstrumentPauseAdmissionBenchmark {
         @Setup(Level.Trial) public void initialize() {
             var type=ContractType.valueOf(productLine.contractTypeCode());
             try(var state=new TradingCoreRuntime(productLine)) {
-                var config=new UpsertInstrumentCommand("BTC-USDT",1,type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
+                var config=new RegisterInstrumentCommand("BTC-USDT",type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
                         1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                         type.isOption()?0:-1,type.isOption()?100:0);
-                var paused=new UpsertInstrumentCommand(config.symbol(),config.instrumentChangeId(),config.contractTypeCode(),config.baseAsset(),
+                var paused=new RegisterInstrumentCommand(config.symbol(),config.contractTypeCode(),config.baseAsset(),
                         config.quoteAsset(),config.settleAsset(),config.notionalMultiplierUnits(),config.priceTickUnits(),config.settleScaleUnits(),
                         config.initialMarginRatePpm(),config.maintenanceMarginRatePpm(),config.makerFeeRatePpm(),config.takerFeeRatePpm(),
                         config.expiryEpochMillis(),config.optionTypeCode(),config.strikePriceTicks(),config.maxLeveragePpm(),config.maxPositionNotionalUnits(),
-                        config.userOpenInterestLimitRatePpm(),config.userOpenInterestLimitFloorUnits(),config.riskLimitBrackets(),2,2);
-                requireApplied(state.apply(message(productLine,1,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(paused))));
-                requireApplied(state.apply(message(productLine,2,CoreMessageType.ADJUST_BALANCE,
+                        config.userOpenInterestLimitRatePpm(),config.userOpenInterestLimitFloorUnits(),config.riskLimitBrackets());
+                requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused))));
+                if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
+                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                ? new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,1_700_000_000_002L)
+                                : new ApplyMarkPriceCommand("BTC-USDT",100,1,1_700_000_000_002L)))));
+                requireApplied(state.apply(message(productLine,3,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",0,
+                                new CoreInstrumentMaintenance(1,CoreInstrumentMaintenance.Mode.HALTED,0))))));
+                requireApplied(state.apply(message(productLine,4,CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",20_000)))));
                 snapshot=state.snapshot(777);
             }
-            order=message(productLine,3,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
-                    new PlaceOrderCommand(100,"BTC-USDT",1,CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
+            order=message(productLine,5,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
+                    new PlaceOrderCommand(100,"BTC-USDT",CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"pause-benchmark")));
         }
         @Setup(Level.Invocation) public void restore() {
             core=TradingCoreRuntime.fromSnapshot(productLine,snapshot);
-            if(core.tradingState().instruments().get("BTC-USDT").status()!=com.surprising.instrument.api.model.InstrumentStatus.HALT)
+            if(core.tradingState().instruments().get("BTC-USDT").maintenance().mode()
+                    !=CoreInstrumentMaintenance.Mode.HALTED)
                 throw new IllegalStateException("pause lost on recovery");
             funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(core.tradingState());
         }

@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.math;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrumentState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import static com.surprising.aeron.service.state.math.CoreArithmetic.*;
 import java.math.BigInteger;
@@ -9,7 +9,7 @@ public final class LinearContractMath {
     private LinearContractMath() {}
 
     public static long weightedEntryPrice(
-            CoreInstrumentState instrument,
+            CoreInstrument instrument,
             long currentAbs,
             long currentPrice,
             long addedAbs,
