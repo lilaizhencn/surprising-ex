@@ -190,8 +190,13 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 : CoreResultCode.INVALID_COMMAND;
         target.admissionReceipt(order.orderId(), admittedAccountVersion, reservedAmount,
                 rejection == null, resultCode.wireCode());
+        // Capture the callback target before publishing consumption. The Owner may observe the
+        // volatile flag immediately, clear this pooled event and null runtime before this Matcher
+        // thread performs the wake-up. No event field may be read after matcherConsumed becomes
+        // visible.
+        TradingRuntimeState completionRuntime = runtime;
         matcherConsumed = true;
-        runtime.signalOwnerCompletion();
+        completionRuntime.signalOwnerCompletion();
     }
 
     public boolean matcherConsumed() { return !matcherWaitRequired || matcherConsumed; }
