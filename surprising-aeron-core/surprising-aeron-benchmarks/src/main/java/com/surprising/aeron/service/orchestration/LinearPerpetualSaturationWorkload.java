@@ -92,6 +92,11 @@ final class LinearPerpetualSaturationWorkload {
             throw new IllegalArgumentException("targetOperationsPerSecond must be positive");
         }
         var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot());
+        if (harness.state().laneTopology().matchingEngineCount() != 1) {
+            harness.close();
+            throw new IllegalStateException("saturation acceptance requires exactly one matcher");
+        }
+        harness.useClusterMatchingPipeline();
         int openingActiveOrders = activeOrderCount(harness.state());
         int openingClientIdentities = harness.state().runtimeClientIdentityCount();
         int symbolCount = template.symbols().size();
@@ -186,7 +191,11 @@ final class LinearPerpetualSaturationWorkload {
                 if (latencySamples != operationsPerRun) {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
-                return harness.state().snapshotBusinessStateHash();
+                // The throughput invocation ends at terminal drain. Full state materialization and
+                // funds/order invariants belong to verify() after measurement; hashing the complete
+                // runtime here serializes every invocation on all Lane snapshots and measures the
+                // diagnostic boundary instead of sustained trading.
+                return runSequence ^ terminalCoreMessages ^ terminalTrades;
             }
 
             private void refreshMarkPricesIfRequired() {
@@ -207,7 +216,10 @@ final class LinearPerpetualSaturationWorkload {
             }
 
             private int completeReady(LinearPerpetualBenchmarkSupport.Harness target) {
-                return target.awaitReadyMatching(completionBatchSize, this::record);
+                return target.pendingSubmissions() >= maxInFlight
+                        || scheduledOperations == operationsPerRun
+                        ? target.awaitReadyMatching(completionBatchSize, this::record)
+                        : target.pollReadyMatching(completionBatchSize, this::record);
             }
 
             private void prepareRun() {
@@ -226,6 +238,7 @@ final class LinearPerpetualSaturationWorkload {
             private int fillWindow(LinearPerpetualBenchmarkSupport.Harness target) {
                 int filled = 0;
                 while (readySize != 0 && scheduledOperations < operationsPerRun
+                        && filled < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE
                         && target.pendingSubmissions() <= maxInFlight - 2) {
                     int symbolIndex = dequeue();
                     long makerId = template.hftMakers().get(symbolIndex);

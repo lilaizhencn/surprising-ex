@@ -820,6 +820,9 @@ final class LinearPerpetualBenchmarkSupport {
         private final ArrayDeque<PendingCommand> submittedMatching = new ArrayDeque<>();
         private final IdentityHashMap<CoreMessage, Integer> batchOperationWeights = new IdentityHashMap<>();
         private boolean deferBatchResponseValidation;
+        /** Saturation runs use the same asynchronous command scope as Cluster ingress. */
+        private boolean clusterMatchingPipeline;
+        private ClusterCommandWindow clusterCommandWindow;
         private CoreResponse deferredBatchResponse;
         private int deferredBatchOperationWeight;
         private OpenLoopBusinessLatencyRecorder businessLatencies;
@@ -942,6 +945,11 @@ final class LinearPerpetualBenchmarkSupport {
             submitCommand(command, scheduledEntryNanos);
         }
 
+        void useClusterMatchingPipeline() {
+            clusterMatchingPipeline = true;
+            clusterCommandWindow = new ClusterCommandWindow(256);
+        }
+
         private PendingCommand submitCommand(CoreMessage command) {
             return submitCommand(command, 0);
         }
@@ -956,10 +964,25 @@ final class LinearPerpetualBenchmarkSupport {
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
             int pendingBefore = state.pendingMatchingCount();
-            CoreResponse response = state.apply(command);
+            ClusterCommandWindow.Entry windowEntry = null;
+            CoreResponse response;
+            if (clusterMatchingPipeline
+                    && TradingCoreRuntime.isMatchingCommand(command.header().messageType())) {
+                if (!state.prepareClusterPipelineScope(command, clusterCommandWindow)
+                        || clusterCommandWindow.conflictingPrefixSize() != 0) {
+                    throw new IllegalStateException("saturation command is not independently pipelineable");
+                }
+                windowEntry = clusterCommandWindow.add(null, command,
+                        command.header().submittedAtEpochMillis(), command.header().correlationId());
+                response = state.applyClusterCommand(command, command.header().submittedAtEpochMillis(),
+                        command.header().correlationId(), clusterCommandWindow.decoded(command));
+            } else {
+                response = state.apply(command);
+            }
             if (businessLatencies != null) businessLatencies.accepted(businessLatency);
             long acceptedAtNanos = submittedAtNanos == 0 ? 0 : System.nanoTime();
             long sequence = state.matchingSequence(command.header().commandId());
+            if (windowEntry != null) clusterCommandWindow.bindSequence(windowEntry, sequence);
             boolean indirectSequence = false;
             if (sequence == 0 && pendingBefore == 0 && state.pendingMatchingCount() != 0) {
                 sequence = state.firstPendingMatchingSequence();
@@ -974,6 +997,7 @@ final class LinearPerpetualBenchmarkSupport {
                 maxMatchingBacklog = Math.max(maxMatchingBacklog, submittedMatching.size());
             } else {
                 validateTerminal(command, response, operationWeight, "");
+                if (windowEntry != null) retireClusterWindowCommand();
                 terminalMessages = Math.addExact(terminalMessages, operationWeight);
                 terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                 if (businessLatencies != null) businessLatencies.terminal(businessLatency);
@@ -1047,6 +1071,7 @@ final class LinearPerpetualBenchmarkSupport {
                         && pending.response.resultCode() != CoreResultCode.MATCHING_PENDING;
             } while (!matchingCompleted);
             submittedMatching.removeFirst();
+            retireClusterWindowCommand();
             validateTerminal(pending.command, pending.response, pending.operationWeight, nativeMatchingResult);
             terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
             terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
@@ -1070,6 +1095,13 @@ final class LinearPerpetualBenchmarkSupport {
             return commitReadyMatching(maxCompletions, true, completionConsumer);
         }
 
+        int pollReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
+            if (maxCompletions <= 0 || completionConsumer == null) {
+                throw new IllegalArgumentException("matching batch requires a positive limit and consumer");
+            }
+            return commitReadyMatching(maxCompletions, false, completionConsumer);
+        }
+
         private int commitReadyMatching(int maxCompletions, boolean awaitFirst,
                                         MatchingCompletionConsumer completionConsumer) {
             int completed = state.commits.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
@@ -1085,6 +1117,7 @@ final class LinearPerpetualBenchmarkSupport {
                         }
                         pending.response = response;
                         submittedMatching.removeFirst();
+                        retireClusterWindowCommand();
                         validateTerminal(pending.command, response, pending.operationWeight, "");
                         terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
                         terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
@@ -1094,6 +1127,10 @@ final class LinearPerpetualBenchmarkSupport {
                                 pending.submittedAtNanos, pending.acceptedAtNanos, terminalAtNanos);
                     });
             return completed;
+        }
+
+        private void retireClusterWindowCommand() {
+            if (clusterCommandWindow != null) clusterCommandWindow.removePrefix(1);
         }
 
         @FunctionalInterface
