@@ -29,8 +29,10 @@ final class PendingMatchingRing {
     private int tail = -1;
     private int dispatchHead = -1;
     private int size;
-    /** Owner 派发顺序的失效标记：队列、分区或已派发前缀改变后必须重新检查依赖。 */
+    /** Owner 调度进度标记：队列变化或异步完成后重新尝试派发。 */
     private long dispatchRevision;
+    /** 派发候选拓扑标记：仅队列、分区或已派发前缀变化时重新扫描。 */
+    private long partitionRevision;
     /** Ready partition cursor: one primitive slot per matcher shard plus a ready bitmask. */
     private final int[] readyDispatchSlots;
     private long readyPartitionMask;
@@ -39,9 +41,12 @@ final class PendingMatchingRing {
 
     long dispatchRevision() { return dispatchRevision; }
 
-    void partitionDependenciesChanged() { dispatchRevision++; }
+    void partitionDependenciesChanged() {
+        dispatchRevision++;
+        partitionRevision++;
+    }
 
-    /** Completion and admission notifications share the same owner-side wake-up revision. */
+    /** Completion and admission notifications wake the Owner without invalidating partition cursors. */
     void progressChanged() { dispatchRevision++; }
 
     PendingMatchingRing(int requestedCapacity, int matcherShardCount, int laneCount) {
@@ -89,7 +94,7 @@ final class PendingMatchingRing {
             if (contexts.required(pending.sequence()) != pending)
                 throw new IllegalStateException("command must use its claimed slot");
             addIndexes(pending);
-            dispatchRevision++;
+            partitionDependenciesChanged();
             return;
         }
         if (size == contexts.capacity()) {
@@ -107,7 +112,7 @@ final class PendingMatchingRing {
         if (dispatchHead == -1) dispatchHead = index;
         addIndexes(pending);
         size++;
-        dispatchRevision++;
+        partitionDependenciesChanged();
     }
 
     CommandSlot acquire(long sequence, CommandSlot.Operation operation, CoreMessage command,
@@ -174,7 +179,7 @@ final class PendingMatchingRing {
         advanceDispatchedHead();
         removeIndexes(removed);
         size--;
-        dispatchRevision++;
+        partitionDependenciesChanged();
         if (contexts.claimed(sequence)) {
             CommandSlot context = contexts.required(sequence);
             if (context.complete()) contexts.release(sequence);
@@ -201,7 +206,7 @@ final class PendingMatchingRing {
         }
         settlementDispatched[index] = true;
         advanceDispatchedHead();
-        dispatchRevision++;
+        partitionDependenciesChanged();
     }
 
     private void advanceDispatchedHead() {
@@ -216,7 +221,7 @@ final class PendingMatchingRing {
      * or allocates a candidate array on every completion pump.
      */
     long readyPartitionMask(long throughSequence) {
-        if (readyPartitionRevision == dispatchRevision && readyPartitionThrough == throughSequence) {
+        if (readyPartitionRevision == partitionRevision && readyPartitionThrough == throughSequence) {
             return readyPartitionMask;
         }
         java.util.Arrays.fill(readyDispatchSlots, -1);
@@ -246,7 +251,7 @@ final class PendingMatchingRing {
             earlierLanes |= laneMask;
         }
         readyPartitionMask = candidates;
-        readyPartitionRevision = dispatchRevision;
+        readyPartitionRevision = partitionRevision;
         readyPartitionThrough = throughSequence;
         return candidates;
     }
@@ -282,7 +287,7 @@ final class PendingMatchingRing {
         }
         settlementDispatched[index] = true;
         advanceDispatchedHead();
-        dispatchRevision++;
+        partitionDependenciesChanged();
     }
 
     void registerSubmission(long sequence, int matcherShard) {
@@ -302,7 +307,7 @@ final class PendingMatchingRing {
         if (tailSlot < 0) submissionHeads[matcherShard] = index;
         else nextSubmissionSlots[tailSlot] = index;
         submissionTails[matcherShard] = index;
-        dispatchRevision++;
+        partitionDependenciesChanged();
     }
 
     boolean isSubmissionHead(long sequence, int matcherShard) {
