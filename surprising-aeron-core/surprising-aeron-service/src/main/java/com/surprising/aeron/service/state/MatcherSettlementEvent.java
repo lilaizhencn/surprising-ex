@@ -990,7 +990,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (lane.orders.get(replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
             throw new IllegalStateException("accepted replacement did not cancel original order");
         long allocationsBefore = lane.clientIdentityAllocations;
-        long clientKey = identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()).key();
+        long clientKey = RuntimeIdentityRegistry.clientKeyValue(
+                identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
         replacementIdentityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         runtime.captureBalanceBefore(userId, replacementAssetId);
         runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,

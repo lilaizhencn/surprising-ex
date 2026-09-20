@@ -87,12 +87,12 @@ public final class RuntimeDerivativeMatchProcessor {
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
         validateMatches(runtime, taker, matches);
         CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        identities.positionKey(taker.userId(), positionKey(instrument.symbol(), taker.positionSide()));
+        identities.positionKey(taker.userId(), instrument, taker.positionSide());
         for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
-            identities.positionKey(maker.userId(), positionKey(instrument.symbol(), maker.positionSide()));
+            identities.positionKey(maker.userId(), instrument, maker.positionSide());
         }
     }
 
@@ -380,12 +380,6 @@ public final class RuntimeDerivativeMatchProcessor {
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         }
         return order;
-    }
-
-    private static String positionKey(String symbol,
-                                      com.surprising.aeron.protocol.CorePositionSide positionSide) {
-        return positionSide == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? symbol : symbol + ':' + positionSide.name();
     }
 
     private static OrderRuntime terminal(OrderRuntime order) {

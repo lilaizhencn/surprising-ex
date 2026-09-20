@@ -649,9 +649,7 @@ public final class MatcherSettlementPlan {
                                                 CoreInstrument instrument, long userId,
                                                 com.surprising.aeron.protocol.CorePositionSide positionSide) {
         if (!runtime.productLine().isDerivative()) return;
-        String positionIdentity = positionSide == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? instrument.symbol() : instrument.symbol() + ':' + positionSide.name();
-        identities.positionKey(userId, positionIdentity);
+        identities.positionKey(userId, instrument, positionSide);
     }
 
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {

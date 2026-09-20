@@ -439,10 +439,10 @@ final class MatchingCommandAdmission {
         var user = owner.runtimeState.user(userId);
         if (user == null) return List.of();
         String symbol = placement.symbol();
-        String positionKey = placement.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? symbol : symbol + ':' + placement.positionSide().name();
-        Long runtimePositionKey = owner.identities.findPositionKey(userId, positionKey);
-        var position = runtimePositionKey == null ? null : owner.runtimeState.position(runtimePositionKey);
+        var instrument = owner.runtimeState.instrument(symbol);
+        long runtimePositionKey = owner.identities.findPositionKeyValue(
+                userId, instrument, placement.positionSide());
+        var position = runtimePositionKey == 0 ? null : owner.runtimeState.position(runtimePositionKey);
         if (position == null || position.signedQuantitySteps() == 0
                 || (position.signedQuantitySteps() > 0)
                 == (placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {

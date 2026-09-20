@@ -183,8 +183,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
             CoreInstrument instrument = advance || obsolete ? null : requireInstrument(runtime,
                     identities.symbol(liquidation.symbolId()));
             int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
-            long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
-                    positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
+            long positionKey = instrument == null ? 0 : identities.positionKey(
+                    liquidation.userId(), instrument, liquidation.positionSide());
             if (reuse == null) return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance,
                     obsolete, runtime, liquidation, instrument, assetId, positionKey);
             reuse.reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
@@ -422,8 +422,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         CoreInstrument instrument = runtime.instrument(symbol);
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
-        long positionKey = identities.positionKey(liquidation.userId(),
-                positionKey(symbol, liquidation.positionSide()));
+        long positionKey = identities.positionKey(
+                liquidation.userId(), instrument, liquidation.positionSide());
         PositionRuntime position = runtime.position(positionKey);
         RiskSnapshotRuntime risk = runtime.riskSnapshot(positionKey);
         return position != null && position.instrument() == liquidation.instrument()
@@ -458,10 +458,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 current.marginMode(), current.positionSide(), current.instrument(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 deficit, priceTicks, feeRatePpm, feeUnits, status, 0);
-    }
-
-    private static String positionKey(String symbol, CorePositionSide side) {
-        return side == CorePositionSide.NET ? symbol : symbol + ':' + side.name();
     }
 
     private static long proportional(long units, long part, long total) {

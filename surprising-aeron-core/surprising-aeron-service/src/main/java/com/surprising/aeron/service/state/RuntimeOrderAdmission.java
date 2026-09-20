@@ -57,15 +57,12 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
-        String symbol = order.instrument().symbol();
-        String positionIdentity = order.positionSide() == CorePositionSide.NET
-                ? symbol : symbol + ':' + order.positionSide().name();
         int symbolId = order.symbolId();
         boolean lifecycleSettled = symbolId >= 0
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0;
         return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
                 symbolId,
-                identities.findPositionKeyValue(userId, positionIdentity), lifecycleSettled,
+                identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()), lifecycleSettled,
                 symbolId >= 0 && runtime.treasury().fundingProgress(symbolId) != null);
     }
 

@@ -756,12 +756,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     long runtimePositionQuantity(long userId, String symbol) {
         long quantity = 0;
+        var instrument = runtimeState.instrument(symbol);
+        if (instrument == null) return 0;
         for (com.surprising.aeron.protocol.CorePositionSide side
                 : com.surprising.aeron.protocol.CorePositionSide.values()) {
-            String key = side == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? symbol : symbol + ':' + side.name();
-            Long positionKey = identities.findPositionKey(userId, key);
-            if (positionKey == null) continue;
+            long positionKey = identities.findPositionKeyValue(userId, instrument, side);
+            if (positionKey == 0) continue;
             com.surprising.aeron.service.state.PositionRuntime position =
                     runtimeState.position(positionKey);
             if (position != null) quantity = Math.addExact(quantity, position.signedQuantitySteps());
@@ -1302,11 +1302,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
                         runtimeState, userId, resolved, openInterestSteps, activeOrderIndex, admissionIdentity);
                 RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
-                        commandId, requiredReservation, preparedClientKey.key(), symbolId, assetId);
+                        commandId, requiredReservation,
+                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),
+                        symbolId, assetId);
                 runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
                 return null;
             } catch (RuntimeException | Error failure) {
-                if (preparedClientKey.allocated()) {
+                if (preparedClientKey != 0) {
                     identities.rollbackClientKeyInCurrentLane(
                             userId, resolved.clientOrderId(), preparedClientKey);
                 }

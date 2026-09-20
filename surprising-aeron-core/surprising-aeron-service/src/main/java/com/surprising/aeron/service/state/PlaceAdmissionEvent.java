@@ -14,7 +14,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private long openInterestSteps;
     private boolean lifecycleSettled;
     private boolean fundingInProgress;
-    private RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
+    private long preparedClientKey;
     private int symbolId;
     private int matcherShard;
     private int assetId;
@@ -49,7 +49,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.openInterestSteps = openInterestSteps;
         this.lifecycleSettled = lifecycleSettled;
         this.fundingInProgress = fundingInProgress;
-        this.preparedClientKey = null;
+        this.preparedClientKey = 0;
         this.identities = identities;
         identityAllocations = 0;
         this.symbolId = symbolId;
@@ -70,7 +70,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         commandId = null;
         lifecycleSettled = false;
         fundingInProgress = false;
-        preparedClientKey = null;
+        preparedClientKey = 0;
         runtime = null;
         identities = null;
         admittedAccountVersion = 0;
@@ -89,24 +89,24 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         try {
             runtime.enterLaneCommandScope(lane);
             try {
-                preparedClientKey = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
-                String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                        ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
-                long positionKey = identities.findPositionKeyValueInLane(lane, userId, positionIdentity);
+                preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
+                        identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
+                long positionKey = identities.findPositionKeyValueInLane(
+                        lane, userId, order.instrument(), order.positionSide());
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, userId, order, openInterestSteps,
-                        lane.admissionOrderIndex(symbolId), preparedClientKey.key(), symbolId, positionKey,
+                        lane.admissionOrderIndex(symbolId), preparedClientKey, symbolId, positionKey,
                         lifecycleSettled, fundingInProgress);
                 reservedAmount = requiredReservation;
                 runtime.placeOrderInLane(lane, userId, order, commandId,
-                        requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
+                        requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedAccountVersion = lane.users.get(userId).revision();
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             identities.rollbackClientKeyInLane(lane, userId, order.clientOrderId(), preparedClientKey);
-            preparedClientKey = null;
+            preparedClientKey = 0;
             rejection = failure;
         }
         identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
@@ -140,7 +140,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         commandId = null;
         lifecycleSettled = false;
         fundingInProgress = false;
-        preparedClientKey = null;
+        preparedClientKey = 0;
         runtime = null;
         identities = null;
         admittedAccountVersion = 0;
@@ -161,7 +161,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public int laneId() { return laneId; }
     public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
-    public long clientKey() { return preparedClientKey.key(); }
+    public long clientKey() { return preparedClientKey; }
     public ResolvedPlaceOrder resolvedOrder() {
         if (!complete() || order == null || rejection != null) {
             throw new IllegalStateException("place admission is not accepted");

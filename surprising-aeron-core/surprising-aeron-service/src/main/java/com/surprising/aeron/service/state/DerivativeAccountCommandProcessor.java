@@ -105,8 +105,9 @@ public final class DerivativeAccountCommandProcessor {
         if (command.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.ISOLATED || command.amountUnits() == 0)
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID", "only isolated position margin can be adjusted");
         String symbol = OrderReservation.normalizeSymbol(command.symbol());
-        String identity = command.positionSide().hedgeSide() ? symbol + ':' + command.positionSide().name() : symbol;
-        return identities.positionKey(userId, identity);
+        CoreInstrument instrument = runtime.instrument(symbol);
+        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
+        return identities.positionKey(userId, instrument, command.positionSide());
     }
 
     /** 在同一账户 Lane 内原子地转移可用资金与逐仓保证金，写入前完成全部算术校验。 */

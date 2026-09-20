@@ -76,8 +76,8 @@ public final class RuntimeAdlExecution {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
         }
 
-        long positionKey = identities.positionKey(command.targetUserId(),
-                positionKey(command.symbol(), command.positionSide()));
+        long positionKey = identities.positionKey(
+                command.targetUserId(), instrument, command.positionSide());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         int targetLane = runtime.topology().accountLaneId(command.targetUserId());
         long mask = (1L << targetLane) | runtime.topology().accountLaneMask(liquidation.userId());
@@ -227,10 +227,6 @@ public final class RuntimeAdlExecution {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
         return instrument;
-    }
-
-    private static String positionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side) {
-        return side == com.surprising.aeron.protocol.CorePositionSide.NET ? symbol : symbol + ':' + side.name();
     }
 
     private static long proportional(long units, long part, long total) {

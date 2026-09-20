@@ -58,17 +58,19 @@ class RuntimeIdentityRegistryTest {
         var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
         var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
         registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        registry.releaseClientKeyInLane(lane, user, first.key());
-        assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(first.key());
-        registry.releaseClientKeyInLane(lane, user, first.key());
+        long firstKey = RuntimeIdentityRegistry.clientKeyValue(first);
+        registry.releaseClientKeyInLane(lane, user, firstKey);
+        assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(firstKey);
+        registry.releaseClientKeyInLane(lane, user, firstKey);
         assertThat(registry.clientIdentityCount()).isZero();
         var recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
         var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
-        restored.releaseClientKeyInLane(lane, user, recreated.key());
+        long recreatedKey = RuntimeIdentityRegistry.clientKeyValue(recreated);
+        restored.releaseClientKeyInLane(lane, user, recreatedKey);
         assertThat(restored.clientIdentityCount()).isZero();
         assertThat(registry.clientIdentityCount()).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
-                new AccountLaneState(lane.laneId() + 1, 16), user, recreated.key()))
+                new AccountLaneState(lane.laneId() + 1, 16), user, recreatedKey))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -102,7 +104,8 @@ class RuntimeIdentityRegistryTest {
         var lane = new AccountLaneState(topology.accountLaneId(userId), 16);
         var first = identities.prepareClientKeyInLane(lane, userId, "客户😀");
         var duplicate = identities.prepareClientKeyInLane(lane, userId, "客户😀");
-        assertThat(duplicate.key()).isEqualTo(first.key());
+        assertThat(RuntimeIdentityRegistry.clientKeyValue(duplicate))
+                .isEqualTo(RuntimeIdentityRegistry.clientKeyValue(first));
         assertThat(lane.clientIdentityAllocations).isEqualTo(1);
         identities.rollbackClientKeyInLane(lane, userId, "客户😀", duplicate);
         assertThat(identities.clientIdentityCount()).isEqualTo(1);
@@ -257,10 +260,10 @@ class RuntimeIdentityRegistryTest {
         var first = identities.prepareClientKey(1001, "client-1");
         var reused = identities.prepareClientKey(1001, "client-1");
 
-        identities.releaseClientKey(1001, first.key());
+        identities.releaseClientKey(1001, first);
 
         assertThat(identities.clientIdentityCount()).isOne();
-        assertThat(identities.clientOrderId(1001, reused.key())).isEqualTo("client-1");
+        assertThat(identities.clientOrderId(1001, reused)).isEqualTo("client-1");
 
         identities.rollbackPreparedClientKey(1001, "client-1", reused);
         assertThat(identities.clientIdentityCount()).isZero();

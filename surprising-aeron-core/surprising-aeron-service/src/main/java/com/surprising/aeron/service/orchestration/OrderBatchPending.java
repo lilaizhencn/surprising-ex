@@ -194,7 +194,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 本批准入分配的客户单号，失败时按逆序回滚；数组槽位跨批复用，避免逐项 record 分配。 */
     final long[] preparedClientUsers;
     final String[] preparedClientIds;
-    final com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[] preparedClientKeys;
+    final long[] preparedClientKeys;
     int preparedClientKeyCount;
     /** 本批已收集的国库变化，随最终提交合并。 */
     com.surprising.aeron.service.state.RuntimeTreasuryDelta treasuryDelta;
@@ -241,8 +241,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 本批预备的 Orders 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ResolvedPlaceOrder[] preparedOrders;
     /** 本批预备的 ClientKeyValues 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[]
-            preparedClientKeyValues;
+    final long[] preparedClientKeyValues;
     /** 本批预备的 OpenInterestSteps 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final long[] preparedOpenInterestSteps;
     /** 本批准入生命周期旗标；用 primitive 数组避免每项创建中间身份对象。 */
@@ -330,11 +329,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         pipelinedMatchingResults = new CoreMatchingResult[capacity];
         preparedClientUsers = new long[capacity];
         preparedClientIds = new String[capacity];
-        preparedClientKeys = new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
+        preparedClientKeys = new long[capacity];
         preparedOrders = new ResolvedPlaceOrder[capacity];
         preparedDecisions = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
-        preparedClientKeyValues =
-                new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
+        preparedClientKeyValues = new long[capacity];
         preparedOpenInterestSteps = new long[capacity];
         preparedLifecycleSettled = new boolean[capacity];
         preparedFundingInProgress = new boolean[capacity];
@@ -382,7 +380,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(deferredSettlementItemIndexes, 0, deferredSettlementCount, 0);
         deferredSettlementCount = 0;
         java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
-        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, null);
+        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
         preparedClientKeyCount = 0;
         if (treasuryDelta != null) treasuryDelta.clear();
 
@@ -409,7 +407,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
         java.util.Arrays.fill(preparedLifecycleSettled, 0, preparedCount, false);
         java.util.Arrays.fill(preparedFundingInProgress, 0, preparedCount, false);
-        java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, 0);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
         preparedSymbols.clear();
@@ -440,14 +438,14 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
 
     void retainPreparedClientKey(
             long userId, String clientOrderId,
-        com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey prepared) {
-        if (prepared != null && prepared.allocated()) {
+            long preparedKey) {
+        if (preparedKey != 0) {
             if (preparedClientKeyCount >= preparedClientKeys.length) {
                 throw new IllegalStateException("prepared client key capacity is exhausted");
             }
             preparedClientUsers[preparedClientKeyCount] = userId;
             preparedClientIds[preparedClientKeyCount] = clientOrderId;
-            preparedClientKeys[preparedClientKeyCount++] = prepared;
+            preparedClientKeys[preparedClientKeyCount++] = preparedKey;
         }
     }
 
@@ -458,7 +456,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
                     preparedClientKeys[index]);
         }
         java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
-        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, null);
+        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
         preparedClientKeyCount = 0;
     }
 

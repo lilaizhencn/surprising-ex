@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.CorePositionSide;
 
 import java.util.Collections;
@@ -61,13 +62,13 @@ public final class RuntimeIdentityRegistry {
     }
 
     /** Reuse the current control task; never dispatch or wait for another Lane task. */
-    public PreparedClientKey prepareClientKeyInCurrentLane(long userId, String name) {
+    public long prepareClientKeyInCurrentLane(long userId, String name) {
         if (clientRuntime == null || clientRuntime.laneCommandScope.get() == null)
             throw new IllegalStateException("client identity requires the current Account Lane");
         return prepareClientKeyInLane(clientRuntime.laneCommandScope.get(), userId, name);
     }
 
-    public void rollbackClientKeyInCurrentLane(long userId, String name, PreparedClientKey key) {
+    public void rollbackClientKeyInCurrentLane(long userId, String name, long key) {
         if (clientRuntime == null || clientRuntime.laneCommandScope.get() == null)
             throw new IllegalStateException("client identity requires the current Account Lane");
         rollbackClientKeyInLane(clientRuntime.laneCommandScope.get(), userId, name, key);
@@ -246,22 +247,25 @@ public final class RuntimeIdentityRegistry {
         return key;
     }
 
-    public PreparedClientKey prepareClientKey(long userId, String clientOrderId) {
+    public long prepareClientKey(long userId, String clientOrderId) {
         assertOwner();
-        PreparedClientKey prepared = mutateClient(userId, () -> prepareClientKey(userId, clientOrderId, null));
-        recordLaneClientAllocations(prepared.newIdentity() ? 1 : 0);
+        long prepared = mutateClient(userId, () -> prepareClientKey(userId, clientOrderId, null));
+        if (prepared < 0) {
+            recordLaneClientAllocations(1);
+            return -prepared;
+        }
         return prepared;
     }
 
-    PreparedClientKey prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
+    long prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
         return prepareClientKey(userId, clientOrderId, lane);
     }
 
-    private PreparedClientKey prepareClientKey(long userId, String clientOrderId, AccountLaneState lane) {
+    private long prepareClientKey(long userId, String clientOrderId, AccountLaneState lane) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
+        if (clientOrderId == null || clientOrderId.isBlank()) return 0;
         long key = deterministicKey(userId, clientOrderId);
         ClientIdentityEntry existing = clients.get(clientLookup(key));
         if (existing != null) {
@@ -269,7 +273,7 @@ public final class RuntimeIdentityRegistry {
                 throw new IllegalStateException("deterministic client identity collision");
             }
             existing.references = Math.incrementExact(existing.references);
-            return new PreparedClientKey(key, true);
+            return key;
         }
         ClientIdentityEntry collision = clients.putIfAbsent(new ClientMapKey(key), new ClientIdentityEntry(userId, clientOrderId));
         if (collision != null) {
@@ -277,10 +281,13 @@ public final class RuntimeIdentityRegistry {
                 throw new IllegalStateException("deterministic client identity collision");
             }
             collision.references = Math.incrementExact(collision.references);
-            return new PreparedClientKey(key, true);
+            return key;
         }
         if (lane != null) lane.clientIdentityAllocations = Math.incrementExact(lane.clientIdentityAllocations);
-        return new PreparedClientKey(key, true, true);
+        // The collector needs one allocation bit to advance the dictionary version.
+        // Deterministic keys are strictly positive, so the signed return carries that bit
+        // without allocating a wrapper; Lane callers account through clientIdentityAllocations.
+        return -key;
     }
 
     private void releaseClientKeyReference(long userId, String clientOrderId, long clientKey) {
@@ -293,19 +300,27 @@ public final class RuntimeIdentityRegistry {
     }
 
     public void rollbackPreparedClientKey(
-            long userId, String clientOrderId, PreparedClientKey prepared) {
+            long userId, String clientOrderId, long preparedKey) {
         assertOwner();
-        if (userId <= 0 || clientOrderId == null || prepared == null || !prepared.allocated()) {
+        if (userId <= 0 || clientOrderId == null || preparedKey == 0) {
             throw new IllegalArgumentException("invalid prepared client key rollback");
         }
-        mutateClient(userId, () -> { releaseClientKeyReference(userId, clientOrderId, prepared.key()); return null; });
+        long key = clientKeyValue(preparedKey);
+        mutateClient(userId, () -> { releaseClientKeyReference(userId, clientOrderId, key); return null; });
     }
 
-    void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, PreparedClientKey prepared) {
+    void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, long preparedKey) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
-        if (prepared != null && prepared.allocated()) releaseClientKeyReference(userId, clientOrderId, prepared.key());
+        if (preparedKey != 0) releaseClientKeyReference(userId, clientOrderId, clientKeyValue(preparedKey));
     }
+
+    /** Prepared keys encode a newly allocated identity in the sign bit; map keys remain positive. */
+    public static long clientKeyValue(long preparedKey) {
+        return preparedKey < 0 ? Math.negateExact(preparedKey) : preparedKey;
+    }
+
+    public static boolean newClientIdentity(long preparedKey) { return preparedKey < 0; }
 
     Long findPositionKeyInLane(AccountLaneState lane, long userId, String key) {
         lane.assertOwner();
@@ -316,6 +331,16 @@ public final class RuntimeIdentityRegistry {
     long findPositionKeyValueInLane(AccountLaneState lane, long userId, String key) {
         Long value = findPositionKeyInLane(lane, userId, key);
         return value == null ? 0 : value;
+    }
+
+    long findPositionKeyValueInLane(AccountLaneState lane, long userId,
+                                    CoreInstrument instrument, CorePositionSide side) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId)
+                || instrument == null || side == null) {
+            throw new IllegalStateException("position identity crossed account Lane");
+        }
+        return findPositionKeyValue(userId, instrument.symbol(), side);
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -376,6 +401,40 @@ public final class RuntimeIdentityRegistry {
             throw new IllegalStateException("deterministic position identity collision");
         }
         PositionEntry retained = collision == null ? entry : collision;
+        ensurePositionIdentityRegistered(retained, key);
+        recordPositionAllocation(key, retained);
+        return key;
+    }
+
+    public long positionKey(long userId, CoreInstrument instrument, CorePositionSide side) {
+        if (instrument == null) {
+            throw new IllegalArgumentException("invalid position identity");
+        }
+        return positionKey(userId, instrument.symbol(), side);
+    }
+
+    public long positionKey(long userId, String symbol, CorePositionSide side) {
+        assertOwner();
+        if (userId <= 0 || symbol == null || symbol.isBlank() || side == null) {
+            throw new IllegalArgumentException("invalid position identity");
+        }
+        long key = positionIdentityKey(userId, symbol, side);
+        PositionEntry existing = positionEntry(key);
+        if (existing != null) {
+            if (existing.identity.userId() != userId
+                    || !positionNameEquals(existing.identity.positionKey(), symbol, side)) {
+                throw new IllegalStateException("deterministic position identity collision");
+            }
+            return key;
+        }
+        String name = side == CorePositionSide.NET ? symbol : symbol + ':' + side.name();
+        PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
+        PositionEntry collision = positions.putIfAbsent(new PositionMapKey(key), created);
+        if (collision != null && (collision.identity.userId() != userId
+                || !positionNameEquals(collision.identity.positionKey(), symbol, side))) {
+            throw new IllegalStateException("deterministic position identity collision");
+        }
+        PositionEntry retained = collision == null ? created : collision;
         ensurePositionIdentityRegistered(retained, key);
         recordPositionAllocation(key, retained);
         return key;
@@ -473,6 +532,19 @@ public final class RuntimeIdentityRegistry {
     long findPositionKeyValue(long userId, String positionKey) {
         Long value = findPositionKey(userId, positionKey);
         return value == null ? 0 : value;
+    }
+
+    public long findPositionKeyValue(long userId, CoreInstrument instrument, CorePositionSide side) {
+        assertOwner();
+        if (userId <= 0 || instrument == null || side == null) return 0;
+        return findPositionKeyValue(userId, instrument.symbol(), side);
+    }
+
+    private long findPositionKeyValue(long userId, String symbol, CorePositionSide side) {
+        long key = positionIdentityKey(userId, symbol, side);
+        PositionEntry entry = positionEntry(key);
+        return entry != null && entry.identity.userId() == userId
+                && positionNameEquals(entry.identity.positionKey(), symbol, side) ? key : 0;
     }
 
     public long positionCheckpoint() {
@@ -711,15 +783,6 @@ public final class RuntimeIdentityRegistry {
         public int compareTo(ClientIdentity other) {
             int result = Long.compare(userId, other.userId);
             return result != 0 ? result : clientOrderId.compareTo(other.clientOrderId);
-        }
-    }
-
-    public record PreparedClientKey(long key, boolean allocated, boolean newIdentity) {
-        public PreparedClientKey(long key, boolean allocated) { this(key, allocated, false); }
-        public PreparedClientKey {
-            if (key < 0 || (key == 0 && allocated) || (newIdentity && !allocated)) {
-                throw new IllegalArgumentException("invalid prepared client key");
-            }
         }
     }
 

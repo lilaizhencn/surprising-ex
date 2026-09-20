@@ -17,7 +17,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private long[] openInterestSteps;
     private boolean[] lifecycleSettled;
     private boolean[] fundingInProgress;
-    private RuntimeIdentityRegistry.PreparedClientKey[] clientKeys;
+    private long[] clientKeys;
     private int[] symbolIds;
     private int[] assetIds;
     private OrderRuntime[] admittedOrders;
@@ -36,7 +36,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, ResolvedPlaceOrder[] orders,
             long[] openInterestSteps, boolean[] lifecycleSettled, boolean[] fundingInProgress,
-            RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
+            long[] clientKeys,
             int[] symbolIds, int[] assetIds,
             OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
@@ -106,11 +106,11 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         openInterestSteps[index] = decision.openInterestSteps();
                     }
                     ResolvedPlaceOrder order = orders[index];
-                    var key = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
+                    long key = RuntimeIdentityRegistry.clientKeyValue(
+                            identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
                     clientKeys[index] = key;
-                    String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                            ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
-                    long positionKey = identities.findPositionKeyValueInLane(lane, userId, positionIdentity);
+                    long positionKey = identities.findPositionKeyValueInLane(
+                            lane, userId, order.instrument(), order.positionSide());
                     if (source != null && runtime.productLine().isDerivative() && positionKey != 0) {
                         var position = lane.positions.get(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
@@ -124,10 +124,10 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     }
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, userId, order, openInterestSteps[index],
-                            lane.admissionOrderIndex(symbolIds[index]), key.key(), symbolIds[index], positionKey,
+                            lane.admissionOrderIndex(symbolIds[index]), key, symbolIds[index], positionKey,
                             lifecycleSettled[index], fundingInProgress[index]);
                     runtime.placeOrderInLane(lane, userId, order, commandId,
-                            requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
+                            requiredReservation, clientKeys[index], symbolIds[index], assetIds[index],
                             coreSequence, null, timestamp, position);
                     // Matcher/Owner receive admission versions, never mutable Lane aliases.
                     admittedOrders[index] = lane.orders.get(order.orderId()).publicationValue();
@@ -143,7 +143,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     lane, userId, coreSequence, orders, clientKeys, admittedCount, userBefore);
             for (int i = 0; i < itemCount; i++) {
                 if (orders[i] != null) identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
-                clientKeys[i] = null;
+                clientKeys[i] = 0;
             }
             admittedCount = 0;
             rejection = failure;

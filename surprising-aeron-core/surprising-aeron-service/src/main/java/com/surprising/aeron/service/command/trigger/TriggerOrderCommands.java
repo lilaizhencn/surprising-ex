@@ -699,16 +699,17 @@ public final class TriggerOrderCommands {
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
                 RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
-                        commandId, childSequence, openInterest, identity, key.key(), assetId);
+                        commandId, childSequence, openInterest, identity,
+                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key), assetId);
                 return key;
             } catch (CoreStateRejectedException rejected) {
-                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
+                if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
                 RuntimeTriggerOrderStateTransitions.complete(owner.runtimeState(), triggerId, false, 0,
                         rejected.code(), triggeredAt);
                 return null;
             } catch (RuntimeException | Error failure) {
-                if (key.allocated()) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
+                if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
                 throw failure;
             }
@@ -716,11 +717,12 @@ public final class TriggerOrderCommands {
 
         @Override public boolean getAsBoolean() {
             if (!owner.runtimeState().pollControlLanes()) return false;
-            var clientKey = (com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey)
-                    owner.runtimeState().controlLaneResult(laneId);
-            if (clientKey != null) owner.identities().recordLaneClientAllocations(clientKey.newIdentity() ? 1 : 0);
+            var result = owner.runtimeState().controlLaneResult(laneId);
+            long clientKey = result == null ? 0 : (Long) result;
+            if (com.surprising.aeron.service.state.RuntimeIdentityRegistry.newClientIdentity(clientKey))
+                owner.identities().recordLaneClientAllocations(1);
             owner.requestCommitPublication();
-            if (clientKey != null) {
+            if (result != null) {
                 owner.runtimeState().collectControlReservation(trigger.userId(), order.orderId(), childSequence);
                 owner.markUserChanged(trigger.userId());
                 owner.markOrderChanged(order.orderId());

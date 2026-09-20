@@ -151,10 +151,8 @@ public final class RuntimeTriggerOrderStateTransitions {
     public static long positionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
                             long userId, CoreTriggerOrderStateView view) {
         if (!productLine.isDerivative()) return 0;
-        String positionIdentity = view.positionSide().hedgeSide()
-                ? OrderReservation.normalizeSymbol(view.symbol()) + ':' + view.positionSide().name()
-                : OrderReservation.normalizeSymbol(view.symbol());
-        return identities.positionKey(userId, positionIdentity);
+        return identities.positionKey(userId, OrderReservation.normalizeSymbol(view.symbol()),
+                view.positionSide());
     }
 
     public static CoreTriggerOrderState prepareMatchedCompletion(

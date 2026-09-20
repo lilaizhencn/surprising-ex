@@ -2045,7 +2045,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             long coreSequence, long userId, java.util.UUID commandId,
             ResolvedPlaceOrder[] orders, long[] openInterestSteps,
             boolean[] lifecycleSettled, boolean[] fundingInProgress,
-            RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
+            long[] clientKeys, int[] symbolIds, int[] assetIds,
             OrderRuntime[] admittedOrders, int itemCount,
             int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
             long timestamp, long position) {
@@ -2134,7 +2134,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void rollbackPlaceBatchAdmissionInLane(
             AccountLaneState lane, long userId, long coreSequence, ResolvedPlaceOrder[] orders,
-            RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
+            long[] clientKeys,
             int admittedCount, UserRuntime userBefore) {
         lane.assertOwner();
         for (int index = admittedCount - 1; index >= 0; index--) {
@@ -2144,8 +2144,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 throw new IllegalStateException("batch admission rollback reservation is missing");
             }
             lane.completePendingReservation(orderId, coreSequence);
-            if (clientKeys[index].key() != 0) {
-                removeClientOrderIndex(lane, userId, clientKeys[index].key());
+            if (clientKeys[index] != 0) {
+                removeClientOrderIndex(lane, userId, clientKeys[index]);
             }
             lane.reservations.remove(orderId);
             removeUserEntityKeepingContainer(lane.reservationIdsByUser, userId, orderId);

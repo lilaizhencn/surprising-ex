@@ -422,20 +422,23 @@ final class OrderBatchExecutor {
             var key = owner.identities.prepareClientKeyInCurrentLane(userId, resolved.clientOrderId());
             try {
                 RuntimeOrderStateTransitions.reserveBatchOrderInLane(owner.runtimeState, userId, resolved,
-                        commandId, required, key.key(), assetId, sequence);
+                        commandId, required,
+                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key),
+                        assetId, sequence);
                 return key;
             } catch (RuntimeException | Error failure) {
-                if (key.allocated()) owner.identities.rollbackClientKeyInCurrentLane(userId, resolved.clientOrderId(), key);
+                if (key != 0) owner.identities.rollbackClientKeyInCurrentLane(userId, resolved.clientOrderId(), key);
                 throw failure;
             }
         });
         return () -> {
             if (!owner.runtimeState.pollControlLanes()) return false;
-            var key = (com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey)
-                    owner.runtimeState.controlLaneResult(laneId);
-            owner.identities.recordLaneClientAllocations(key.newIdentity() ? 1 : 0);
+            long key = (Long) owner.runtimeState.controlLaneResult(laneId);
+            if (com.surprising.aeron.service.state.RuntimeIdentityRegistry.newClientIdentity(key))
+                owner.identities.recordLaneClientAllocations(1);
             owner.runtimeState.collectControlReservation(userId, resolved.orderId(), sequence);
-            batch.retainPreparedClientKey(userId, resolved.clientOrderId(), key);
+            batch.retainPreparedClientKey(userId, resolved.clientOrderId(),
+                    com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key));
             owner.commits.requestCommitPublication();
             return true;
         };
@@ -824,12 +827,12 @@ final class OrderBatchExecutor {
 
     long batchPositionQuantityBefore(long userId, String symbol) {
         long quantity = 0;
+        var instrument = owner.runtimeState.instrument(symbol);
+        if (instrument == null) return 0;
         for (com.surprising.aeron.protocol.CorePositionSide side
                 : com.surprising.aeron.protocol.CorePositionSide.values()) {
-            String key = side == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? symbol : symbol + ':' + side.name();
-            Long positionKey = owner.identities.findPositionKey(userId, key);
-            if (positionKey == null) continue;
+            long positionKey = owner.identities.findPositionKeyValue(userId, instrument, side);
+            if (positionKey == 0) continue;
             com.surprising.aeron.service.state.PositionRuntime position =
                     owner.runtimeState.currentPatchPositionBefore(positionKey);
             if (position != null) quantity = Math.addExact(quantity, position.signedQuantitySteps());
