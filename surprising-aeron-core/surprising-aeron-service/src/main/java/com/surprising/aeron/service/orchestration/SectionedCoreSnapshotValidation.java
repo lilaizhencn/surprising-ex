@@ -9,7 +9,6 @@ import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.List;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
@@ -26,17 +25,14 @@ final class SectionedCoreSnapshotValidation {
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
         }
-        int shardCode = Byte.toUnsignedInt(header.get());
-        int routeVersion = header.getInt();
         LaneTopology topology;
         try {
-            topology = new LaneTopology(routeVersion, header.getInt(), header.getInt(), header.getInt(),
+            topology = new LaneTopology(LaneTopology.ROUTE_VERSION,
+                    header.getInt(), header.getInt(), header.getInt(),
                     header.getInt(), header.getLong(), header.getInt(), header.getInt(), header.getInt());
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
         }
-        long topologyHash = header.getLong();
-        long symbolRouteHash = header.getLong();
         long appliedCommandCount = header.getLong();
         long probeValue = header.getLong();
         long snapshotId = header.getLong();
@@ -46,44 +42,25 @@ final class SectionedCoreSnapshotValidation {
         long accountLaneDigest = header.getLong();
         long clusterTimestamp = header.getLong();
         long clusterPosition = header.getLong();
-        long matcherSequence = header.getLong();
         long businessStateHash = header.getLong();
         long globalFundsHash = header.getLong();
         long auditBusinessStateHash = header.getLong();
         long auditFundsStateHash = header.getLong();
-        int engineStateHash = header.getInt();
-        int bookStateHash = header.getInt();
-        long symbolRegistryHash = header.getLong();
-        long userRegistryHash = header.getLong();
-        long activeOrderHash = header.getLong();
         long sourceSequenceDigest = header.getLong();
-        long matcherConfigHash = header.getLong();
-        String forkGitSha = readFixedAscii(header, SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
-        String artifactSha256 = readFixedAscii(header, SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
         if (header.hasRemaining()) throw new ProtocolException("snapshot header section has trailing garbage");
-        if (shardCode != 0) throw new ProtocolException("snapshot core shard mismatch");
-        if (routeVersion != MatcherSnapshot.ROUTE_VERSION) {
-            throw new ProtocolException("snapshot route mismatch");
-        }
-        if (topologyHash != topology.topologyHash()) {
-            throw new ProtocolException("snapshot topology mismatch");
-        }
         if (snapshotId <= 0) throw new ProtocolException("snapshot id mismatch");
         if (projectionSequenceComplement != ~projectionSequence) {
             throw new ProtocolException("snapshot projection sequence mismatch");
         }
-        if (appliedCommandCount < 0 || coreSequence < 0 || projectionSequence < 0 || matcherSequence < 0
+        if (appliedCommandCount < 0 || coreSequence < 0 || projectionSequence < 0
                 || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new ProtocolException("invalid snapshot sequence or position");
         }
-        return new HeaderManifest(productLine, routeVersion, topology, topologyHash, symbolRouteHash,
-                snapshotId, coreSequence, projectionSequence, accountLaneDigest,
-                clusterTimestamp, clusterPosition, appliedCommandCount, probeValue, matcherSequence,
+        return new HeaderManifest(productLine, topology, snapshotId, coreSequence,
+                projectionSequence, accountLaneDigest,
+                clusterTimestamp, clusterPosition, appliedCommandCount, probeValue,
                 businessStateHash, globalFundsHash, auditBusinessStateHash, auditFundsStateHash,
-                engineStateHash, bookStateHash,
-                symbolRegistryHash, userRegistryHash,
-                activeOrderHash, sourceSequenceDigest, forkGitSha, artifactSha256,
-                matcherConfigHash);
+                sourceSequenceDigest);
     }
 
     static void validatePairing(
@@ -95,30 +72,17 @@ final class SectionedCoreSnapshotValidation {
             Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
-        requireMatch(manifest.routeVersion() == matcherSnapshot.routeVersion(), "route");
-        requireMatch(manifest.topology().equals(matcherSnapshot.topology())
-                && manifest.topologyHash() == matcherSnapshot.topologyHash(), "topology");
-        requireMatch(manifest.symbolRouteHash() == matcherSnapshot.symbolRouteHash(), "symbol route");
+        requireMatch(manifest.topology().equals(matcherSnapshot.topology()), "topology");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
-        requireMatch(manifest.matcherSequence() == matcherSnapshot.matcherSequence(), "matcher sequence");
         requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
                         tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
                 == com.surprising.aeron.service.state.FundsStateHash.compute(tradingState), "funds hash");
-        requireMatch(manifest.engineStateHash() == matcherSnapshot.engineStateHash(), "engine state hash");
-        requireMatch(manifest.bookStateHash() == matcherSnapshot.bookStateHash(), "book state hash");
-        requireMatch(manifest.symbolRegistryHash() == matcherSnapshot.symbolRegistryHash(), "symbol registry hash");
-        requireMatch(manifest.userRegistryHash() == matcherSnapshot.userRegistryHash(), "user registry hash");
-        requireMatch(manifest.activeOrderHash() == matcherSnapshot.activeOrderHash()
-                && manifest.activeOrderHash() == MatcherSnapshot.activeOrderHash(tradingState), "active order hash");
         requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
-        requireMatch(manifest.matcherConfigHash() == matcherSnapshot.matcherConfigHash(), "matcher config");
-        requireMatch(manifest.forkGitSha().equals(matcherSnapshot.forkGitSha()), "fork identity");
-        requireMatch(manifest.artifactSha256().equals(matcherSnapshot.artifactSha256()), "artifact identity");
     }
 
     static void validateAccountLanes(HeaderManifest manifest, List<AccountLaneSnapshot> lanes) {
@@ -144,26 +108,16 @@ final class SectionedCoreSnapshotValidation {
         return (hash ^ value) * 0x100000001b3L;
     }
 
-    private static String readFixedAscii(ByteBuffer buffer, int length) {
-        byte[] encoded = new byte[length];
-        buffer.get(encoded);
-        return new String(encoded, StandardCharsets.US_ASCII);
-    }
-
     private static void requireMatch(boolean matches, String field) {
         if (!matches) throw new ProtocolException("snapshot " + field + " mismatch");
     }
 
     record HeaderManifest(
-            ProductLine productLine, int routeVersion, LaneTopology topology, long topologyHash,
-            long symbolRouteHash, long snapshotId, long coreSequence,
+            ProductLine productLine, LaneTopology topology, long snapshotId, long coreSequence,
             long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
-            long matcherSequence, long businessStateHash, long globalFundsHash,
+            long businessStateHash, long globalFundsHash,
             long auditBusinessStateHash, long auditFundsStateHash,
-            int engineStateHash, int bookStateHash,
-            long symbolRegistryHash, long userRegistryHash, long activeOrderHash,
-            long sourceSequenceDigest, String forkGitSha, String artifactSha256,
-            long matcherConfigHash) {
+            long sourceSequenceDigest) {
     }
 }

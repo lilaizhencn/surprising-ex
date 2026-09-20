@@ -25,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 7;
+    private static final int VERSION = 8;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -40,8 +40,6 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(MAGIC);
                 output.writeInt(VERSION);
                 output.writeInt(ProductLineWireCode.encode(snapshot.productLine()));
-                writeText(output, snapshot.coreShardId());
-                output.writeInt(snapshot.routeVersion());
                 output.writeInt(snapshot.topology().matchingEngineCount());
                 output.writeInt(snapshot.topology().riskEngineCount());
                 output.writeInt(snapshot.topology().matcherShardMask());
@@ -50,7 +48,6 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(snapshot.topology().matcherWindowSize());
                 output.writeInt(snapshot.topology().matchingCompletionCapacity());
                 output.writeInt(snapshot.topology().accountLaneQueueCapacity());
-                output.writeLong(snapshot.topologyHash());
                 output.writeLong(snapshot.snapshotId());
                 output.writeLong(snapshot.coreSequence());
                 output.writeLong(snapshot.matcherSequence());
@@ -61,14 +58,6 @@ public final class MatcherSnapshotCodec {
                 }
                 output.writeLong(snapshot.coreBusinessStateHash());
                 output.writeInt(snapshot.engineStateHash());
-                output.writeInt(snapshot.bookStateHash());
-                output.writeLong(snapshot.symbolRegistryHash());
-                output.writeLong(snapshot.symbolRouteHash());
-                output.writeLong(snapshot.userRegistryHash());
-                output.writeLong(snapshot.activeOrderHash());
-                writeText(output, snapshot.forkGitSha());
-                writeText(output, snapshot.artifactSha256());
-                output.writeLong(snapshot.matcherConfigHash());
                 output.writeInt(snapshot.symbols().size());
                 for (Map.Entry<String, Integer> entry : snapshot.symbols().entrySet()) {
                     writeText(output, entry.getKey());
@@ -122,13 +111,9 @@ public final class MatcherSnapshotCodec {
             int version = input.readInt();
             if (version != VERSION) throw new ProtocolException("unsupported matcher snapshot version: " + version);
             ProductLine productLine = ProductLineWireCode.decode(input.readInt());
-            String coreShardId = readText(input);
-            int routeVersion = input.readInt();
-            LaneTopology topology = new LaneTopology(routeVersion, input.readInt(), input.readInt(), input.readInt(),
+            LaneTopology topology = new LaneTopology(LaneTopology.ROUTE_VERSION,
+                    input.readInt(), input.readInt(), input.readInt(),
                     input.readInt(), input.readLong(), input.readInt(), input.readInt(), input.readInt());
-            if (input.readLong() != topology.topologyHash()) {
-                throw new ProtocolException("matcher topology hash mismatch");
-            }
             long snapshotId = input.readLong();
             long coreSequence = input.readLong();
             long matcherSequence = input.readLong();
@@ -142,14 +127,6 @@ public final class MatcherSnapshotCodec {
             }
             long businessHash = input.readLong();
             int engineHash = input.readInt();
-            int bookHash = input.readInt();
-            long symbolHash = input.readLong();
-            long symbolRouteHash = input.readLong();
-            long userHash = input.readLong();
-            long activeOrderHash = input.readLong();
-            String forkGitSha = readText(input);
-            String artifactSha256 = readText(input);
-            long configHash = input.readLong();
             int symbolCount = readCount(input, "symbol registry");
             Map<String, Integer> symbols = new LinkedHashMap<>();
             Set<Integer> symbolIds = new LinkedHashSet<>();
@@ -192,10 +169,8 @@ public final class MatcherSnapshotCodec {
                         SerializedModuleType.values()[typeOrdinal], instanceId, data));
             }
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
-            return new MatcherSnapshot(productLine, coreShardId, routeVersion, topology, snapshotId, coreSequence,
-                    matcherSequence, matcherShardProgress, businessHash, engineHash, bookHash,
-                    symbolHash, symbolRouteHash, userHash,
-                    activeOrderHash, forkGitSha, artifactSha256, configHash, symbols, users, modules);
+            return new MatcherSnapshot(productLine, topology, snapshotId, coreSequence,
+                    matcherSequence, matcherShardProgress, businessHash, engineHash, symbols, users, modules);
         } catch (EOFException exception) {
             throw new ProtocolException("matcher snapshot is truncated: " + exception.getMessage());
         } catch (IOException | IllegalArgumentException exception) {

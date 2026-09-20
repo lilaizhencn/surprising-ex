@@ -1,8 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import java.util.Map;
-import java.util.TreeMap;
-
 /**
  * 产品 Core 内的执行路由。撮合按订单簿划分，账户按用户整体划分。
  * 同一产品账户的全部资产、全仓/逐仓持仓、冻结及风险状态必须留在同一 Lane；
@@ -76,29 +73,6 @@ public record LaneTopology(
         return 1L << accountLaneId(userId);
     }
 
-    public long topologyHash() {
-        long hash = offset();
-        hash = mix(hash, routeVersion);
-        hash = mix(hash, matchingEngineCount);
-        hash = mix(hash, riskEngineCount);
-        hash = mix(hash, matcherShardMask);
-        hash = mix(hash, accountLaneCount);
-        hash = mix(hash, accountLaneSeed);
-        hash = mix(hash, matcherWindowSize);
-        hash = mix(hash, matchingCompletionCapacity);
-        return mix(hash, accountLaneQueueCapacity);
-    }
-
-    public long symbolRouteHash(Map<String, Integer> symbols) {
-        long hash = mix(offset(), topologyHash());
-        for (Map.Entry<String, Integer> entry : new TreeMap<>(symbols).entrySet()) {
-            hash = mix(hash, entry.getKey());
-            hash = mix(hash, entry.getValue());
-            hash = mix(hash, matcherShardId(entry.getValue()));
-        }
-        return hash;
-    }
-
     private static void requirePowerOfTwo(int value, int minimum, int maximum, String name) {
         if (value < minimum || value > maximum || (value & (value - 1)) != 0) {
             throw new IllegalArgumentException(name + " must be a power of two in [" + minimum + ',' + maximum + ']');
@@ -112,25 +86,4 @@ public record LaneTopology(
         return mixed ^ (mixed >>> 31);
     }
 
-    private static long offset() {
-        return 0xcbf29ce484222325L;
-    }
-
-    private static long mix(long hash, long value) {
-        long mixed = hash;
-        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-            mixed ^= (value >>> shift) & 0xff;
-            mixed *= 0x100000001b3L;
-        }
-        return mixed;
-    }
-
-    private static long mix(long hash, String value) {
-        long mixed = hash;
-        for (int index = 0; index < value.length(); index++) {
-            mixed ^= value.charAt(index);
-            mixed *= 0x100000001b3L;
-        }
-        return mixed;
-    }
 }

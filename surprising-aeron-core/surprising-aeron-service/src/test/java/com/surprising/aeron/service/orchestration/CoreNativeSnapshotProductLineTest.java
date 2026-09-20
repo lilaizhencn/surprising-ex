@@ -22,8 +22,7 @@ class CoreNativeSnapshotProductLineTest {
         CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
         try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
             assertThat(manifest.productLine()).isEqualTo(productLine);
-            assertThat(manifest.coreShardId()).isEqualTo("default");
-            assertThat(manifest.routeVersion()).isEqualTo(3);
+            assertThat(manifest.topology().routeVersion()).isEqualTo(3);
             assertThat(restored.productLine()).isEqualTo(productLine);
             assertThat(restored.matchingStateHashAsync().join()).isEqualTo(bookHash);
         }

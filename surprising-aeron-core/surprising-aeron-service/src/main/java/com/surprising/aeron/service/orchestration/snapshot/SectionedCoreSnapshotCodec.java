@@ -22,14 +22,12 @@ public final class SectionedCoreSnapshotCodec {
     /** 快照文件格式魔数。 */
     public static final int MAGIC = 0x5358534E;
     /** 当前快照格式版本。 */
-    public static final int VERSION = 24;
+    public static final int VERSION = 25;
     /** 快照封套长度。 */
     public static final int ENVELOPE_LENGTH = 12;
     /** 每个分片头的长度。 */
     public static final int SECTION_HEADER_LENGTH = 8;
-    public static final int FORK_GIT_SHA_LENGTH = 40;
-    public static final int ARTIFACT_SHA256_LENGTH = 64;
-    public static final int HEADER_LENGTH = 322;
+    public static final int HEADER_LENGTH = 149;
     public static final int SOURCE_SEQUENCE_LENGTH = 24;
     public static final int RESULT_FIXED_LENGTH = 76;
     public static final int FOOTER_LENGTH = Long.BYTES;

@@ -243,13 +243,7 @@ class SectionedCoreSnapshotCodecTest {
             CoreSnapshotManifest restoredMatcherManifest = SectionedCoreSnapshotCodec.manifest(
                     restored.snapshot(44), ProductLine.SPOT);
             assertThat(restoredMatcherManifest.engineStateHash()).isEqualTo(originalManifest.engineStateHash());
-            assertThat(restoredMatcherManifest.bookStateHash()).isEqualTo(originalManifest.bookStateHash());
-            assertThat(restoredMatcherManifest.symbolRegistryHash()).isEqualTo(originalManifest.symbolRegistryHash());
-            assertThat(restoredMatcherManifest.userRegistryHash()).isEqualTo(originalManifest.userRegistryHash());
-            assertThat(restoredMatcherManifest.activeOrderHash()).isEqualTo(originalManifest.activeOrderHash());
-            assertThat(restoredMatcherManifest.forkGitSha()).isEqualTo(originalManifest.forkGitSha());
-            assertThat(restoredMatcherManifest.artifactSha256()).isEqualTo(originalManifest.artifactSha256());
-            assertThat(restoredMatcherManifest.matcherConfigHash()).isEqualTo(originalManifest.matcherConfigHash());
+            assertThat(restoredMatcherManifest.topology()).isEqualTo(originalManifest.topology());
         } finally {
             if (restored != null) restored.close();
             original.close();
@@ -338,10 +332,7 @@ class SectionedCoreSnapshotCodecTest {
             assertThat(manifest.sourceSequenceDigest()).isNotZero();
             assertThat(manifest.matcherSequence()).isNotNegative();
             assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
-            assertThat(manifest.forkGitSha()).isEqualTo(MatcherSnapshot.FORK_GIT_SHA);
-            assertThat(manifest.artifactSha256()).isEqualTo(MatcherSnapshot.ARTIFACT_SHA256);
-            assertThat(manifest.matcherConfigHash())
-                    .isEqualTo(MatcherSnapshot.matcherConfigHash(state.laneTopology()));
+            assertThat(manifest.topology()).isEqualTo(state.laneTopology());
         }
     }
 
@@ -358,25 +349,14 @@ class SectionedCoreSnapshotCodecTest {
 
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
-        mismatches.put("route", mutateHeaderInt(snapshot, 2));
-        mismatches.put("topology", mutateHeaderLong(snapshot, 42));
-        mismatches.put("symbol route", mutateHeaderLong(snapshot, 50));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 58));
-        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 74));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 82));
-        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 90));
-        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 130));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 138));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 146));
-        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 170));
-        mismatches.put("book state hash", mutateHeaderInt(snapshot, 174));
-        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 178));
-        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 186));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 194));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 202));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 210));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 218));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 258));
+        mismatches.put("topology", mutateHeaderLong(snapshot, 17));
+        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 37));
+        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 53));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 61));
+        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 69));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 109));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 117));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 141));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> SectionedCoreSnapshotCodec.decode(mutated, ProductLine.SPOT));
@@ -419,10 +399,10 @@ class SectionedCoreSnapshotCodecTest {
         }
 
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 114), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 93), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 122), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 101), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 
@@ -453,12 +433,6 @@ class SectionedCoreSnapshotCodecTest {
         return new CoreMatchingOrder(1, "BTC-USDT", CoreOrderSide.BUY,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, 100, 2);
-    }
-
-    private static byte[] mutateHeaderByte(byte[] snapshot, int fieldOffset) {
-        byte[] mutated = snapshot.clone();
-        mutated[HEADER_PAYLOAD_OFFSET + fieldOffset] ^= 1;
-        return rewriteOuterChecksum(mutated);
     }
 
     private static byte[] mutateHeaderProductLine(byte[] snapshot) {

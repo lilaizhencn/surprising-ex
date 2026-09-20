@@ -740,7 +740,7 @@ class SurprisingClusteredServiceTest {
             byte[] snapshot = before.snapshot(75);
             ByteBuffer manifest = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
             int snapshotIdOffset = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 74;
+                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 53;
             manifest.putLong(snapshotIdOffset, manifest.getLong(snapshotIdOffset) + 1);
             CRC32C checksum = new CRC32C();
             checksum.update(snapshot, 0, snapshot.length - 16);

@@ -213,8 +213,8 @@ class RuntimeCommitRecoveryTest {
             byte[] corruptChecksum = snapshot.clone();
             corruptChecksum[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
                     + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 20] ^= 1;
-            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 138, 1);
-            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 90, 1);
+            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 109, 1);
+            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 69, 1);
             byte[] corruptMatcherPayload = mutateLongInSection(snapshot, 4, Long.BYTES, 1);
 
             assertThatThrownBy(() -> published.set(SectionedCoreSnapshotCodec.decode(
@@ -1160,7 +1160,7 @@ class RuntimeCommitRecoveryTest {
             int length = buffer.getInt();
             int payloadOffset = buffer.position();
             if (sectionId == 1) {
-                buffer.putLong(payloadOffset + 106, digest);
+                buffer.putLong(payloadOffset + 85, digest);
                 rewriteChecksum(mutated);
                 return mutated;
             }

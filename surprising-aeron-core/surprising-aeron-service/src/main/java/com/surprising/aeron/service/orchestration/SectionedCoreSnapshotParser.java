@@ -228,14 +228,10 @@ final class SectionedCoreSnapshotParser {
         CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
             return new CoreSnapshotManifest(productLine, SectionedCoreSnapshotCodec.VERSION,
-                    matcherSnapshot.coreShardId(), manifest.routeVersion(), manifest.snapshotId(),
-                    manifest.coreSequence(), manifest.clusterTimestamp(), manifest.clusterPosition(),
-                    appliedCommandCount, manifest.matcherSequence(), manifest.businessStateHash(),
-                    manifest.engineStateHash(), manifest.bookStateHash(), manifest.symbolRegistryHash(),
-                    manifest.userRegistryHash(), manifest.activeOrderHash(),
-                    manifest.sourceSequenceDigest(), manifest.forkGitSha(), manifest.artifactSha256(),
-                    manifest.matcherConfigHash(), manifest.topology(), manifest.topologyHash(),
-                    manifest.symbolRouteHash(), manifest.globalFundsHash(), checksum);
+                    manifest.snapshotId(), manifest.coreSequence(), manifest.clusterTimestamp(),
+                    manifest.clusterPosition(), appliedCommandCount, matcherSnapshot.matcherSequence(),
+                    manifest.businessStateHash(), matcherSnapshot.engineStateHash(),
+                    manifest.sourceSequenceDigest(), manifest.topology(), manifest.globalFundsHash(), checksum);
         }
 
         private void requireProductLine(ProductLine expectedProductLine) {

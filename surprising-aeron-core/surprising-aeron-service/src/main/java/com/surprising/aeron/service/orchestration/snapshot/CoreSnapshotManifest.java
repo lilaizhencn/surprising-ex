@@ -6,8 +6,6 @@ import com.surprising.aeron.service.state.LaneTopology;
 public record CoreSnapshotManifest(
         ProductLine productLine,
         int schemaVersion,
-        String coreShardId,
-        int routeVersion,
         long snapshotId,
         long coreSequence,
         long clusterTimestamp,
@@ -16,60 +14,18 @@ public record CoreSnapshotManifest(
         long matcherSequence,
         long businessStateHash,
         int engineStateHash,
-        int bookStateHash,
-        long symbolRegistryHash,
-        long userRegistryHash,
-        long activeOrderHash,
         long sourceSequenceDigest,
-        String forkGitSha,
-        String artifactSha256,
-        long matcherConfigHash,
         LaneTopology topology,
-        long topologyHash,
-        long symbolRouteHash,
         long globalFundsHash,
         long checksum) {
 
     public CoreSnapshotManifest {
         if (productLine == null || schemaVersion <= 0 || appliedCommandCount < 0
-                || coreShardId == null || coreShardId.isBlank() || routeVersion <= 0
                 || snapshotId < 0 || coreSequence < 0 || clusterTimestamp < 0 || clusterPosition < 0
                 || coreSequence != appliedCommandCount || matcherSequence < 0
-                || forkGitSha == null || forkGitSha.isBlank()
-                || artifactSha256 == null || artifactSha256.isBlank()
-                || topology == null || topology.routeVersion() != routeVersion
-                || topologyHash != topology.topologyHash() || symbolRouteHash == 0 || globalFundsHash == 0
+                || topology == null || globalFundsHash == 0
                 || checksum < 0) {
             throw new IllegalArgumentException("invalid core snapshot manifest");
         }
-    }
-
-    public CoreSnapshotManifest(
-            ProductLine productLine,
-            int schemaVersion,
-            String coreShardId,
-            int routeVersion,
-            long appliedCommandCount,
-            long matcherSequence,
-            long businessStateHash,
-            int engineStateHash,
-            int bookStateHash,
-            long symbolRegistryHash,
-            long userRegistryHash,
-            long activeOrderHash,
-            String forkGitSha,
-            String artifactSha256,
-            long matcherConfigHash,
-            LaneTopology topology,
-            long topologyHash,
-            long symbolRouteHash,
-            long globalFundsHash,
-            long checksum) {
-        this(productLine, schemaVersion, coreShardId, routeVersion,
-                0, appliedCommandCount, 0, 0, appliedCommandCount, matcherSequence,
-                businessStateHash, engineStateHash, bookStateHash, symbolRegistryHash,
-                userRegistryHash, activeOrderHash, 0,
-                forkGitSha, artifactSha256, matcherConfigHash, topology, topologyHash,
-                symbolRouteHash, globalFundsHash, checksum);
     }
 }

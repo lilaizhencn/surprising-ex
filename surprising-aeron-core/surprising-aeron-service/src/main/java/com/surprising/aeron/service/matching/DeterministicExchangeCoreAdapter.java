@@ -222,8 +222,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (activatedShardCount.incrementAndGet() == topology.matchingEngineCount()) {
             if (restoredSnapshot != null) {
                 StateHashes hashes = aggregateStateHashes(List.of(restoredShardHashes));
-                if (hashes.engineHash() != restoredSnapshot.engineStateHash()
-                        || hashes.bookHash() != restoredSnapshot.bookStateHash()) {
+                if (hashes.engineHash() != restoredSnapshot.engineStateHash()) {
                     throw new FatalMatchingDivergenceException("matcher restore", restoredCoreSequence,
                             restoredSnapshot.snapshotId(), "restored exchange-core state hash mismatch");
                 }
@@ -240,14 +239,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         start(snapshot);
         reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
         StateHashes restoredHashes = currentStateHashesAsync().join();
-        if (restoredHashes.engineHash() != snapshot.engineStateHash()
-                || restoredHashes.bookHash() != snapshot.bookStateHash()) {
+        if (restoredHashes.engineHash() != snapshot.engineStateHash()) {
             throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
                     snapshot.snapshotId(), "restored exchange-core state hash mismatch"
                             + " (expectedEngine=" + snapshot.engineStateHash()
-                            + ", actualEngine=" + restoredHashes.engineHash()
-                            + ", expectedBook=" + snapshot.bookStateHash()
-                            + ", actualBook=" + restoredHashes.bookHash() + ')');
+                            + ", actualEngine=" + restoredHashes.engineHash() + ')');
         }
     }
 
@@ -1130,13 +1126,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long matcherSequence = modules.stream()
                     .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence).max().orElseThrow();
             Set<Long> userSnapshot = snapshotUsers();
-            return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
-                    MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
-                    matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(), hashes.bookHash(),
-                    MatcherSnapshot.symbolRegistryHash(symbols), topology.symbolRouteHash(symbols),
-                    MatcherSnapshot.userRegistryHash(userSnapshot),
-                    MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
-                    MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
+            return new MatcherSnapshot(state.productLine(), topology, snapshotId, coreSequence, matcherSequence,
+                    matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(),
                     symbols, userSnapshot, modules);
         } finally {
             serializationProcessor.removeSnapshot(snapshotId);
@@ -1196,15 +1187,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
                                             .max().orElseThrow();
                                     Set<Long> userSnapshot = snapshotUsers();
-                                    return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
-                                            MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
+                                    return new MatcherSnapshot(state.productLine(), topology,
+                                            snapshotId, coreSequence, matcherSequence,
                                             matcherEvidence.snapshot(), businessStateHash,
-                                            hashes.engineHash(), hashes.bookHash(),
-                                            MatcherSnapshot.symbolRegistryHash(symbols),
-                                            topology.symbolRouteHash(symbols),
-                                            MatcherSnapshot.userRegistryHash(userSnapshot),
-                                            MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
-                                            MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
+                                            hashes.engineHash(),
                                             symbols, userSnapshot, modules);
                                 } finally {
                                     serializationProcessor.removeSnapshot(snapshotId);

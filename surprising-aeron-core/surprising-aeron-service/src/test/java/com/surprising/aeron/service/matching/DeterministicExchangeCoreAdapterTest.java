@@ -364,6 +364,7 @@ class DeterministicExchangeCoreAdapterTest {
     void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook() {
         TradingCoreState state = stateWithOpenBid(100);
         MatcherSnapshot snapshot;
+        int bookHash;
         CoreMatchingResult beforeSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             beforeSnapshot = adapter.executeWithEvidence(
@@ -372,6 +373,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = adapter.snapshotAsync(
                     91, 1, state.businessStateHash(), state, activeOrders(state)).join();
+            bookHash = adapter.orderBooksStateHashAsync().join();
         }
 
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
@@ -395,7 +397,7 @@ class DeterministicExchangeCoreAdapterTest {
 
         try (DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
-            assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(snapshot.bookStateHash());
+            assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(bookHash);
             CoreMatchingResult afterRestore = restored.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000101"),
                     101, 1_001, () -> restored.placeAsync(8, bid(101, 90))).join();
@@ -453,14 +455,10 @@ class DeterministicExchangeCoreAdapterTest {
         }
         TradingCoreState divergent = stateWithOpenBid(101);
         MatcherSnapshot divergentManifest = new MatcherSnapshot(
-                snapshot.productLine(), snapshot.coreShardId(), snapshot.routeVersion(), snapshot.topology(),
-                snapshot.snapshotId(),
+                snapshot.productLine(), snapshot.topology(), snapshot.snapshotId(),
                 snapshot.coreSequence(), snapshot.matcherSequence(), snapshot.matcherShardProgress(),
                 divergent.businessStateHash(),
-                snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(),
-                snapshot.symbolRouteHash(), snapshot.userRegistryHash(),
-                MatcherSnapshot.activeOrderHash(divergent),
-                snapshot.forkGitSha(), snapshot.artifactSha256(), snapshot.matcherConfigHash(),
+                snapshot.engineStateHash(),
                 snapshot.symbols(), snapshot.users(), snapshot.modules());
 
         assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(

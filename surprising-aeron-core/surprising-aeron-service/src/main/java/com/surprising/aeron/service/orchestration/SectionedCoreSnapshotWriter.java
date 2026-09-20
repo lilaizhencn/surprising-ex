@@ -10,7 +10,6 @@ import com.surprising.aeron.service.state.snapshot.CoreFeePolicySnapshotCodec;
 import com.surprising.aeron.service.state.snapshot.CoreTransferSnapshotCodec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
@@ -130,8 +129,6 @@ public final class SectionedCoreSnapshotWriter {
         ByteBuffer buffer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.HEADER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .put((byte) ProductLineWireCode.encode(image.productLine()))
-                .put((byte) 0)
-                .putInt(MatcherSnapshot.ROUTE_VERSION)
                 .putInt(matcherSnapshot.matchingEngineCount())
                 .putInt(matcherSnapshot.riskEngineCount())
                 .putInt(matcherSnapshot.matcherShardMask())
@@ -140,8 +137,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putInt(matcherSnapshot.topology().matcherWindowSize())
                 .putInt(matcherSnapshot.topology().matchingCompletionCapacity())
                 .putInt(matcherSnapshot.topology().accountLaneQueueCapacity())
-                .putLong(matcherSnapshot.topologyHash())
-                .putLong(matcherSnapshot.symbolRouteHash())
                 .putLong(image.appliedCommandCount())
                 .putLong(image.probeValue())
                 .putLong(image.snapshotId())
@@ -151,20 +146,11 @@ public final class SectionedCoreSnapshotWriter {
                 .putLong(SectionedCoreSnapshotValidation.accountLaneDigest(image.accountLanes()))
                 .putLong(image.clusterTimestamp())
                 .putLong(image.clusterPosition())
-                .putLong(matcherSnapshot.matcherSequence())
                 .putLong(image.businessStateHash())
                 .putLong(image.fundsStateHash())
                 .putLong(image.auditBusinessStateHash())
                 .putLong(image.auditFundsStateHash())
-                .putInt(matcherSnapshot.engineStateHash())
-                .putInt(matcherSnapshot.bookStateHash())
-                .putLong(matcherSnapshot.symbolRegistryHash())
-                .putLong(matcherSnapshot.userRegistryHash())
-                .putLong(matcherSnapshot.activeOrderHash())
-                .putLong(image.sourceSequenceDigest())
-                .putLong(matcherSnapshot.matcherConfigHash());
-        putFixedAscii(buffer, matcherSnapshot.forkGitSha(), SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
-        putFixedAscii(buffer, matcherSnapshot.artifactSha256(), SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
+                .putLong(image.sourceSequenceDigest());
         return buffer.array();
     }
 
@@ -177,12 +163,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putLong(lane.localFundsHash()).putInt(lane.userIds().size());
         lane.userIds().forEach(buffer::putLong);
         return buffer.array();
-    }
-
-    private static void putFixedAscii(ByteBuffer buffer, String value, int expectedLength) {
-        byte[] encoded = value.getBytes(StandardCharsets.US_ASCII);
-        if (encoded.length != expectedLength) throw new IllegalArgumentException("invalid snapshot identity length");
-        buffer.put(encoded);
     }
 
     private static byte[] sources(Map<TradingCoreRuntime.SourceKey, Long> sourceSequences) {
