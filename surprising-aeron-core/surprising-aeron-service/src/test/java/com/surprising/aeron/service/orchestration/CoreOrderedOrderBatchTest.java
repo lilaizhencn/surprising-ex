@@ -13,7 +13,6 @@ import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -154,7 +153,6 @@ class CoreOrderedOrderBatchTest {
             byte[] checkpoint = state.snapshot();
             long committedBefore = state.committedCoreSequence();
             long projectionBefore = state.snapshotProjectionSequence();
-            var exportBefore = state.exportState().snapshot();
             var amend = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
                             new AmendOrderCommand(84_001, 84_002, "fault-replacement", 1_100L, 1L,
@@ -181,7 +179,6 @@ class CoreOrderedOrderBatchTest {
                     .hasRootCauseInstanceOf(ArithmeticException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
-            assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
             assertThat(state.commandResults()).doesNotContainKey(amend.header().commandId());
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 7))).isInstanceOf(RuntimeException.class);
             assertThatThrownBy(state::snapshot).isInstanceOf(RuntimeException.class);
@@ -559,7 +556,6 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
-            assertThat(duplicate.requiredExportSequence()).isEqualTo(deferred.requiredExportSequence());
             assertThat(duplicate.stateHash()).isEqualTo(deferred.stateHash());
             assertThat(state.pendingMatching()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
@@ -594,8 +590,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatchingCount()).isZero();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrder(9_101L, 9_102L, 9_103L);
-            assertThat(deferred.requiredExportSequence()).isZero();
-            assertThat(lastDeferred.requiredExportSequence()).isZero();
         }
     }
 
@@ -630,7 +624,6 @@ class CoreOrderedOrderBatchTest {
 
             CoreResponse replay = state.apply(batch);
             assertThat(replay.status()).isEqualTo(ResponseStatus.DUPLICATE);
-            assertThat(replay.requiredExportSequence()).isEqualTo(response.requiredExportSequence());
             assertThat(replay.data()).containsExactly(response.data());
             var stateAfterBatch = state.tradingState();
             CoreResponse conflict = state.apply(command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
@@ -639,14 +632,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(conflict.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
             assertThat(state.tradingState()).isEqualTo(stateAfterBatch);
-            CoreResponse exportQuery = state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 3),
-                    CoreExportCodec.encodeBatchQuery(256)));
-            assertThat(exportQuery.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(exportQuery.resultCode()).isEqualTo(CoreResultCode.INVALID_MESSAGE);
-            assertThat(response.requiredExportSequence()).isZero();
-            assertThat(state.exportState().pending()).isEmpty();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrderElementsOf(orders.stream()
                             .map(PlaceOrderCommand::orderId).toList());
@@ -798,9 +783,7 @@ class CoreOrderedOrderBatchTest {
             RuntimeIdentityRegistry identities = field(state, "identities");
             int quoteAssetId = identities.assetId("USDT");
             long[] matcherBeforeFatal = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
-            long[] matcherPrefixBeforeFatal = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             long committedBeforeFatal = state.committedCoreSequence();
-            var exportBeforeFatal = state.exportState().snapshot();
             // A duplicate later item selects ordered partial-success admission. Pipelined fatal
             // handling is covered separately; it has no second per-item matcher callback.
             CoreMessage fatalBatch = command(CoreMessageType.PLACE_ORDER_BATCH, fatalId, 3,
@@ -817,9 +800,7 @@ class CoreOrderedOrderBatchTest {
             CommandSlotRing contexts = field(state, "laneCommandContexts");
             CommandSlot claimedContext = contexts.required(fatalSequence);
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
-            long[] matcherPrefixAfterFirst = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
-            assertThat(matcherPrefixAfterFirst).isNotEqualTo(matcherPrefixBeforeFatal);
             assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
                     .isPositive();
             assertThat((long) invoke(runtime, "pendingReservedUnits",
@@ -848,10 +829,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
-            assertThat((long[]) field(state.commits, "appliedMatcherPrefixDigests"))
-                    .containsExactly(matcherPrefixAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(state.exportState().snapshot()).isEqualTo(exportBeforeFatal);
             assertThat(identities.findClientKey(1001, "fatal-fourth")).isNotNull();
         }
     }
@@ -1038,7 +1016,6 @@ class CoreOrderedOrderBatchTest {
             TradingCoreState before = state.tradingState();
             long appliedBefore = state.appliedCommandCount();
             long stateHashBefore = state.stateHash();
-            int exportEventsBefore = state.exportState().pendingCount();
             UUID commandId = UUID.randomUUID();
             CoreMessage mixed = command(CoreMessageType.CANCEL_ORDER_BATCH, commandId, 5,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
@@ -1052,7 +1029,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();
-            assertThat(state.exportState().pendingCount()).isEqualTo(exportEventsBefore);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.tradingState().order(13_001).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
@@ -1139,7 +1115,6 @@ class CoreOrderedOrderBatchTest {
             long fundsBefore = state.snapshotFundsStateHash();
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
-            var exportBefore = state.exportState().snapshot();
             UUID commandId = UUID.randomUUID();
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1159,7 +1134,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsBefore);
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
         }
     }
@@ -1186,7 +1160,6 @@ class CoreOrderedOrderBatchTest {
             long fundsBefore = state.snapshotFundsStateHash();
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
-            var exportBefore = state.exportState().snapshot();
             UUID fatalId = UUID.randomUUID();
             CoreMessage fatalBatch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
                     fatalId, 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1211,11 +1184,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
             long[] observedSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
-            long[] observedPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(java.util.Arrays.stream(observedSequences).anyMatch(value -> value > 0)).isTrue();
-            assertThat(java.util.Arrays.stream(observedPrefixes).anyMatch(value -> value
-                    != com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest()))
-                    .isTrue();
             Long takerPositionKey = identities.findPositionKey(1001, "BTC-USDT");
             Long makerPositionKey = identities.findPositionKey(1002, "BTC-USDT");
             assertThat(takerPositionKey).isNotNull();
@@ -1229,7 +1198,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.reservation(15_302)).isNull();
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
             assertThat(state.takeMatchingResult(sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,
                     CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), 5,
@@ -1254,7 +1222,6 @@ class CoreOrderedOrderBatchTest {
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
         finishCurrentItemSettlement(state, sequence, 2_000, 3);
         long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
-        long[] matcherPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
         Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
                 sequence, new com.surprising.aeron.service.matching.CoreMatchingResult(
                         false, "EXCHANGE_CORE_FAILURE"), 2_001, 4));
@@ -1267,10 +1234,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(state.snapshotHasPendingCommands()).isFalse();
         assertThat(journal.metrics().reservedEntries()).isZero();
         assertThat(journal.metrics().reservedBytes()).isZero();
-        assertThat(state.exportState().metrics().reservedEvents()).isZero();
-        assertThat(state.exportState().metrics().reservedBytes()).isZero();
         assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherSequences);
-        assertThat((long[]) field(state.commits, "appliedMatcherPrefixDigests")).containsExactly(matcherPrefixes);
         assertThat(state.takeMatchingResult(sequence)).isNull();
     }
 
@@ -1281,7 +1245,6 @@ class CoreOrderedOrderBatchTest {
             TradingCoreState before = state.tradingState();
             long appliedBefore = state.appliedCommandCount();
             long stateHashBefore = state.stateHash();
-            int exportEventsBefore = state.exportState().pendingCount();
             UUID commandId = UUID.randomUUID();
             CoreMessage crossLine = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
                     commandId, 2, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1295,7 +1258,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();
-            assertThat(state.exportState().pendingCount()).isEqualTo(exportEventsBefore);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
         }
     }
@@ -1368,7 +1330,7 @@ class CoreOrderedOrderBatchTest {
 
     private static CoreResponse completeEventually(
             TradingCoreRuntime state, long sequence,
-            com.surprising.aeron.service.matching.CoreMatchingResult matching,
+            com.surprising.aeron.service.matching.MatchingResult matching,
             long clusterTimestamp, long clusterPosition) {
         CoreResponse completed = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
@@ -1380,9 +1342,9 @@ class CoreOrderedOrderBatchTest {
         return completed;
     }
 
-    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matching.MatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
-        com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+        com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());

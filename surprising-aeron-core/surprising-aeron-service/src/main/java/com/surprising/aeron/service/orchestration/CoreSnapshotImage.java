@@ -30,7 +30,6 @@ record CoreSnapshotImage(
         TradingCoreState tradingState,
         Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
         Map<UUID, CommandResultLedger.StoredResult> commandResults,
-        CoreExportState.Snapshot exportState,
         Map<Long, CoreFeePolicyState> feePolicies,
         Map<Long, TransferRuntime> pendingTransfers,
         TerminalStateRetention terminalRetention,
@@ -46,7 +45,7 @@ record CoreSnapshotImage(
                 || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
                 || businessStateHash == 0 || fundsStateHash == 0
                 || auditBusinessStateHash == 0 || auditFundsStateHash == 0
-                || matcherSnapshot == null || tradingState == null || exportState == null
+                || matcherSnapshot == null || tradingState == null
                 || terminalRetention == null || tradingState.productLine() != productLine) {
             throw new IllegalArgumentException("invalid core snapshot image");
         }

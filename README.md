@@ -29,7 +29,7 @@ Surprising 是一个正在开发和验证中的多产品线交易系统。本仓
 
 Lane 终态合并时，`LanePublication.publish` 对路由删除 ID 只在删除集合遍历中应用一次，
 包括没有 after-image 的订单/冻结删除；变更 ID 的首次出现顺序不变。
-`TradingRuntimeState.LaneDelta` 的终态收据只按 count 读取，复用时保留原语数组、重置 count，
+`TradingRuntimeState.LaneCommitDelta` 的终态收据只按 count 读取，复用时保留原语数组、重置 count，
 清空客户号和订单对象引用；终态保留索引的幂等查找仍保留。
 
 诊断时通过 `core.settlementLatencyDiagnostics=true` 和 `owner-commit-profile.jfc` 启用稀疏 JFR：
@@ -57,6 +57,13 @@ Lane 后续原地成交不能修改 Owner 已接收的版本。`MatcherSettlemen
 不在结算 Lane 再复制一次。收据槽发布沿用 release/acquire 屏障，消费后先清空引用再允许复用，
 因此 Owner 可以独立回收准入事件。终态记录与 Lane 清理同遍执行；Owner 删除持仓时在发布遍历内
 先捕获旧持仓再删除，保留实时推送失败处理。已有订单变更不额外查 Lane 订单表，Map drain 不重复清零。
+
+Matcher 的普通、撤单、改单和批量直达路径把 exchange-core 生成的不可变 `MatcherResult` 直接写入
+既有 `MatcherSettlementEvent`，Lane 从该事件消费成交事实，不再为跨线程交接复制一层撮合结果。
+撮合恢复游标只保存每个 shard 的严格递增 sequence；已删除热路径 rolling hash/prefix digest，避免维护
+第二套非业务权威状态。快照整体仍保留 CRC32C 传输校验，资金、订单终态、FIFO 和 shard 顺序校验不变。
+对应 matcher 快照格式为 v7，命令结果协议为 v5，Core 响应协议为 v6，分片快照格式为 v23；
+项目未上线，不兼容读取旧格式。
 
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 

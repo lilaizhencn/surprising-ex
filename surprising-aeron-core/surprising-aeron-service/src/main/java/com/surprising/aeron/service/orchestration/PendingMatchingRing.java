@@ -201,21 +201,6 @@ final class PendingMatchingRing {
     }
 
     /**
-     * 只跨越通过账户/订单簿依赖检查的命令。资金共享账户不可能经此绕过其前序命令。
-     * 检查范围限于有界在途窗口，不访问或扫描账户/订单状态。
-     */
-    CommandSlot partitionDispatchHead(int shard) {
-        if (shard < 0 || shard >= readyDispatchSlots.length) return null;
-        // This compatibility accessor is also used by tests and recovery helpers that mutate
-        // the reusable CommandSlot metadata directly.  The Owner hot path calls readyPartitionMask
-        // after every lifecycle mutation and keeps the cached cursor.
-        readyPartitionRevision = Long.MIN_VALUE;
-        readyPartitionMask(Long.MAX_VALUE);
-        int index = readyDispatchSlots[shard];
-        return index < 0 ? null : pendingAt(index);
-    }
-
-    /**
      * Computes dispatchable partitions once per queue revision.  The Owner consumes the
      * resulting bitmask and primitive cursor slots; it no longer performs an all-partition scan
      * or allocates a candidate array on every completion pump.
@@ -269,7 +254,7 @@ final class PendingMatchingRing {
      *
      * <p>The returned array is caller-owned scratch storage and is cleared before use.  A
      * non-independent head remains the only candidate for its own partition and blocks all
-     * later partitions, matching {@link #partitionDispatchHead(int)} semantics.</p>
+     * later partitions.</p>
      */
     void collectPartitionDispatchHeads(long throughSequence, CommandSlot[] heads) {
         if (heads == null || heads.length != submissionHeads.length) {
@@ -277,14 +262,6 @@ final class PendingMatchingRing {
         }
         readyPartitionMask(throughSequence);
         for (int shard = 0; shard < heads.length; shard++) heads[shard] = readyPartitionHead(shard);
-    }
-
-    void completePartitionDispatch(long sequence, int shard) {
-        CommandSlot first = partitionDispatchHead(shard);
-        if (first == null || first.sequence() != sequence) {
-            throw new IllegalStateException("partition settlement dispatch is out of order");
-        }
-        completePartitionDispatchKnown(sequence, shard);
     }
 
     /** Marks a head already validated by collectPartitionDispatchHeads as dispatched. */

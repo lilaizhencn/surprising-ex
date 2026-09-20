@@ -2,8 +2,6 @@ package com.surprising.aeron.service.orchestration;
 
 
 
-import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
@@ -17,7 +15,6 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import java.util.zip.CRC32C;
 
@@ -64,7 +61,7 @@ public final class SectionedCoreSnapshotWriter {
                 state.snapshotBusinessAuditBaseHash(), state.snapshotFundsStateHash(),
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
-                state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
+                state.feePolicies(), state.pendingTransfers(),
                 state.terminalRetention().copy(),
                 state.accountLaneSnapshots(coreSequence, snapshotState));
     }
@@ -78,7 +75,6 @@ public final class SectionedCoreSnapshotWriter {
         payloads.add(header(image));
         payloads.add(sources(image.sourceSequences()));
         payloads.add(results(image.commandResults()));
-        payloads.add(outbox(image.exportState()));
         payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot));
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
@@ -98,7 +94,7 @@ public final class SectionedCoreSnapshotWriter {
             requireSectionLength(payload.length);
             totalLength = Math.addExact(totalLength, payload.length);
         }
-        if (totalLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES) {
+        if (totalLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES) {
             throw new IllegalArgumentException("core snapshot exceeds maximum size");
         }
 
@@ -166,10 +162,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putLong(matcherSnapshot.userRegistryHash())
                 .putLong(matcherSnapshot.activeOrderHash())
                 .putLong(image.sourceSequenceDigest())
-                .putLong(image.exportState().acknowledgedSequence())
-                .putLong(image.exportState().nextSequence())
-                .putInt(image.exportState().pendingCount())
-                .putLong(image.exportState().pendingDigest())
                 .putLong(matcherSnapshot.matcherConfigHash());
         putFixedAscii(buffer, matcherSnapshot.forkGitSha(), SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
         putFixedAscii(buffer, matcherSnapshot.artifactSha256(), SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
@@ -219,26 +211,6 @@ public final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    private static byte[] outbox(CoreExportState.Snapshot exportState) {
-        long length = SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH;
-        for (CoreMessage event : exportState.pendingEvents()) {
-            length = Math.addExact(length,
-                    Math.addExact(Integer.BYTES * 2, CoreMessageCodec.encodedLength(event)));
-        }
-        requireSectionLength(Math.toIntExact(length));
-        ByteBuffer buffer = ByteBuffer.allocate(Math.toIntExact(length)).order(ByteOrder.LITTLE_ENDIAN)
-                .putLong(exportState.acknowledgedSequence())
-                .putLong(exportState.nextSequence())
-                .putInt(exportState.pendingCount());
-        for (int index = 0; index < exportState.pendingCount(); index++) {
-            CoreMessage event = exportState.pendingEvents().get(index);
-            byte[] encoded = CoreMessageCodec.encode(event);
-            buffer.putInt(exportState.pendingReservedLengths().get(index));
-            buffer.putInt(encoded.length).put(encoded);
-        }
-        return buffer.array();
-    }
-
     private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLedger.StoredResult result) {
         byte[] responseData = result.responseData();
         buffer.putInt(resultEntryLength(result));
@@ -248,7 +220,6 @@ public final class SectionedCoreSnapshotWriter {
         buffer.putInt(result.status().wireCode());
         buffer.putInt(result.resultCode().wireCode());
         buffer.putLong(result.appliedCommandCount());
-        buffer.putLong(result.requiredExportSequence());
         buffer.putLong(result.stateHash());
         buffer.putLong(result.retentionSequence());
         buffer.putInt(responseData.length);
@@ -256,7 +227,7 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     private static int resultEntryLength(CommandResultLedger.StoredResult result) {
-        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
+        return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
     }
 
     private static byte[] sectionHeader(int id, int payloadLength) {

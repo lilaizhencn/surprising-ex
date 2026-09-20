@@ -369,7 +369,7 @@ class OrderServiceTest {
                     requests.stream().map(CancelOrderRequest::orderId).toList(),
                     new CoreCommandOutcome.Terminal(new CoreResponse(
                             ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                            1L, 1L, 17L, new byte[0])),
+                            1L, 17L, new byte[0])),
                     AeronOrderCommandService.CommandKind.CANCEL_BATCH);
         });
         when(aeronOrders.receipt(any(AeronOrderCommandService.CommandExecution.class)))
@@ -385,7 +385,7 @@ class OrderServiceTest {
                     OrderBatchResponse aggregate = new OrderBatchResponse(items.size(), items.size(), 0, items);
                     return new OrderCommandReceipt(execution.commandId(), "TERMINAL", "NONE", "completed",
                             OrderCommandReceipt.commandResultUrl(execution.commandId()),
-                            execution.prospectiveOrderIds(), 1L, aggregate, null);
+                            execution.prospectiveOrderIds(), aggregate, null);
                 });
     }
 

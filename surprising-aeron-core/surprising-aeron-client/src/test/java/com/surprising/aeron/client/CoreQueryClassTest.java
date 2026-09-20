@@ -19,8 +19,6 @@ class CoreQueryClassTest {
                 .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
         assertThat(CoreQueryClass.classify(CoreMessageType.LIQUIDATION_WORK_QUERY))
                 .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
-        assertThat(CoreQueryClass.classify(CoreMessageType.EXPORT_STATUS_QUERY))
-                .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
         assertThat(CoreQueryClass.classify(CoreMessageType.BOOK_STATE_QUERY))
                 .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
         assertThat(CoreQueryClass.classify(CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY))

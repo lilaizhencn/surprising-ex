@@ -11,7 +11,6 @@ public record OrderCommandReceipt(
         String message,
         String commandResultUrl,
         List<Long> prospectiveOrderIds,
-        Long requiredExportSequence,
         OrderCommandResult result,
         Long rawOfferResult) {
 

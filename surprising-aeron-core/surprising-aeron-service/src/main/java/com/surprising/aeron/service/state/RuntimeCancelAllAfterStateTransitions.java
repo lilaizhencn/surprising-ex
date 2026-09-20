@@ -7,12 +7,12 @@ import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 
 /** Owns runtime cancel-all-after timer lifecycle and revision checks. */
-final class RuntimeCancelAllAfterStateTransitions {
+public final class RuntimeCancelAllAfterStateTransitions {
 
     private RuntimeCancelAllAfterStateTransitions() {
     }
 
-    static void update(TradingRuntimeState runtime, long userId, CoreCancelAllAfterCommand command) {
+    public static void update(TradingRuntimeState runtime, long userId, CoreCancelAllAfterCommand command) {
         if (runtime == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime cancel-all-after update");
         }

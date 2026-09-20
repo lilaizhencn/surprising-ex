@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 
 /** Owner 同步读取的批量结算输入；事件仅持有构建后的计划，不保留调用方可复用列表。 */
 public interface SettlementBatchInput {
@@ -8,5 +8,5 @@ public interface SettlementBatchInput {
     long settlementOrderId(int index);
     default OrderRuntime settlementOrder(int index) { return null; }
     long settlementLaneMask(int index);
-    CoreMatchingResult settlementResult(int index);
+    MatchingResult settlementResult(int index);
 }

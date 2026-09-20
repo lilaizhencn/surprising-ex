@@ -71,7 +71,7 @@ final class CoreTestCompletion {
                     response = owner.commits.completeRejectedMatching(sequence);
                 } else {
                     CommandSlot pending = owner.pendingMatching.get(sequence);
-                    com.surprising.aeron.service.matching.CoreMatchingResult matching =
+                    com.surprising.aeron.service.matching.MatchingResult matching =
                             pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                                     || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
                                     ? pending.orderBatch.lastMatchingResult
@@ -105,12 +105,12 @@ final class CoreTestCompletion {
         }
     }
 
-    static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
+    static com.surprising.aeron.service.matching.MatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence) {
         return awaitMatchingResult(state, sequence, TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
-    static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
+    static com.surprising.aeron.service.matching.MatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence, long timeoutNanos) {
         if (state.fatalFailure != null) return null;
         if (timeoutNanos <= 0) return null;
@@ -130,7 +130,7 @@ final class CoreTestCompletion {
             state.drainMatchingCompletions();
             if (state.hasPendingMatchingRejection(sequence)) return null;
             CommandSlot context = state.laneCommandContexts.required(sequence);
-            com.surprising.aeron.service.matching.CoreMatchingResult result = context.matchingResult();
+            com.surprising.aeron.service.matching.MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result == null) {
                 var active = state.pendingMatching.get(sequence);

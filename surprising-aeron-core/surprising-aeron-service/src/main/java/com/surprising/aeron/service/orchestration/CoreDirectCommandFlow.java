@@ -104,7 +104,7 @@ final class CoreDirectCommandFlow {
                         ? java.util.List.of() : runtime.resultBuilder.commandChangedOrderIds;
                 try {
                     if (runtime.runtimeState.asynchronousCommands()) {
-                        com.surprising.aeron.service.state.RuntimeCommandProcessor.validateOrderStampInputs(
+                        com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
                                 clusterTimestamp, clusterPosition, changedOrderIds);
                     } else {
                         runtime.stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
@@ -148,7 +148,6 @@ final class CoreDirectCommandFlow {
                 ? runtime.currentBusinessStateHash() : runtime.cachedBusinessStateHash;
         runtime.appliedCommandCount = nextAppliedCommandCount;
         runtime.refreshCommittedCoreSequence();
-        long requiredExportSequence = 0;
         runtime.cachedBusinessStateHash = businessStateHash;
         runtime.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         runtime.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
@@ -156,16 +155,15 @@ final class CoreDirectCommandFlow {
                 && status == ResponseStatus.APPLIED) {
             runtime.terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
         }
-        long stateHash = runtime.stateHash(businessStateHash, message.header().commandId(), status,
-                resultCode, runtime.appliedCommandCount);
+        long stateHash = businessStateHash;
         byte[] responseData = runtime.resultBuilder.commandResultData();
         int responseOffset = runtime.resultBuilder.responseDataOffset();
         int responseLength = runtime.resultBuilder.responseDataLength();
         runtime.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
-                runtime.appliedCommandCount, requiredExportSequence, stateHash, responseData,
+                runtime.appliedCommandCount, stateHash, responseData,
                 responseOffset, responseLength);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, runtime.appliedCommandCount,
-                requiredExportSequence, stateHash, responseData, responseOffset, responseLength);
+                stateHash, responseData, responseOffset, responseLength);
         runtime.resultBuilder.transferResponseOwnership();
         return finishContext(response);
     }

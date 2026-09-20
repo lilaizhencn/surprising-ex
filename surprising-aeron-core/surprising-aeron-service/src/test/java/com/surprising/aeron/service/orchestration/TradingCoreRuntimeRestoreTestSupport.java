@@ -19,8 +19,7 @@ final class TradingCoreRuntimeRestoreTestSupport {
             long probeValue,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
-            TradingCoreState snapshotState,
-            CoreExportState exportState) {
+            TradingCoreState snapshotState) {
         if (!snapshotState.orders().isEmpty()) {
             throw new IllegalArgumentException("matcher snapshot is required for restored open orders");
         }
@@ -30,7 +29,7 @@ final class TradingCoreRuntimeRestoreTestSupport {
                     snapshotState.businessStateHash(), snapshotState, List.of()).join();
         }
         return restore(productLine, appliedCommandCount, probeValue, commandResults, lastSourceSequences,
-                snapshotState, exportState, matcherSnapshot);
+                snapshotState, matcherSnapshot);
     }
 
     static TradingCoreRuntime restore(
@@ -40,10 +39,9 @@ final class TradingCoreRuntimeRestoreTestSupport {
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
-            CoreExportState exportState,
             MatcherSnapshot matcherSnapshot) {
         TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
-                commandResults, lastSourceSequences, snapshotState, exportState, new TerminalStateRetention(),
+                commandResults, lastSourceSequences, snapshotState, new TerminalStateRetention(),
                 matcherSnapshot, appliedCommandCount, Map.of(), Map.of(), 0, 0);
         try {
             long projectionSequence = candidate.snapshotProjectionSequence();

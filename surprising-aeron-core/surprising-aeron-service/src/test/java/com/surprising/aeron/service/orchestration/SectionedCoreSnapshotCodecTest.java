@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,7 +48,7 @@ import java.util.zip.CRC32C;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
-class CoreStateSnapshotCodecTest {
+class SectionedCoreSnapshotCodecTest {
 
     private static final int ENVELOPE_LENGTH = 12;
     private static final int SECTION_HEADER_LENGTH = 8;
@@ -64,18 +63,16 @@ class CoreStateSnapshotCodecTest {
                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
         });
         CommandResultLedger.StoredResult stored = new CommandResultLedger.StoredResult(
-                fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 17, 77, response, 4);
+                fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 77, response, 4);
         TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1, 0,
                 Map.of(commandId, stored), Map.of(),
-                com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
-                new CoreExportState());
+                com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT));
 
         TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot());
 
         assertThat(restored.commandResults().get(commandId).responseData()).containsExactly(response);
         assertThat(restored.commandResults().get(commandId).fingerprint()).isEqualTo(fingerprint);
         assertThat(restored.commandResults().get(commandId).appliedCommandCount()).isEqualTo(1);
-        assertThat(restored.commandResults().get(commandId).requiredExportSequence()).isEqualTo(17);
         assertThat(restored.commandResults().get(commandId).stateHash()).isEqualTo(77);
         assertThat(restored.commandResults().get(commandId).retentionSequence()).isEqualTo(4);
     }
@@ -89,16 +86,18 @@ class CoreStateSnapshotCodecTest {
 
             assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES)))
                     .isEqualTo(SectionedCoreSnapshotCodec.VERSION);
-            assertThat(buffer.getInt(8)).isEqualTo(14);
+            int expectedSectionCount = SectionedCoreSnapshotCodec.sectionCount(4);
+            assertThat(buffer.getInt(8)).isEqualTo(expectedSectionCount);
             buffer.position(ENVELOPE_LENGTH);
-            int[] sectionIds = new int[14];
+            int[] sectionIds = new int[expectedSectionCount];
             for (int index = 0; index < sectionIds.length; index++) {
                 sectionIds[index] = buffer.getInt();
                 int sectionLength = buffer.getInt();
-                assertThat(sectionLength).isBetween(1, CoreStateSnapshotCodec.MAX_SECTION_BYTES);
+                assertThat(sectionLength).isBetween(1, SectionedCoreSnapshotCodec.MAX_SECTION_BYTES);
                 buffer.position(Math.addExact(buffer.position(), sectionLength));
             }
-            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+            assertThat(sectionIds).containsExactly(
+                    java.util.stream.IntStream.rangeClosed(1, expectedSectionCount).toArray());
             assertThat(buffer.hasRemaining()).isFalse();
         } finally {
             state.close();
@@ -114,28 +113,28 @@ class CoreStateSnapshotCodecTest {
             ByteBuffer.wrap(invalidCount).order(ByteOrder.LITTLE_ENDIAN).putInt(8, 8);
             byte[] invalidLength = snapshot.clone();
             ByteBuffer.wrap(invalidLength).order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(ENVELOPE_LENGTH + Integer.BYTES, CoreStateSnapshotCodec.MAX_SECTION_BYTES + 1);
+                    .putInt(ENVELOPE_LENGTH + Integer.BYTES, SectionedCoreSnapshotCodec.MAX_SECTION_BYTES + 1);
             byte[] shortHeader = snapshot.clone();
             ByteBuffer.wrap(shortHeader).order(ByteOrder.LITTLE_ENDIAN)
                     .putInt(ENVELOPE_LENGTH + Integer.BYTES, 1);
             byte[] checksumMismatch = snapshot.clone();
             checksumMismatch[checksumMismatch.length - SECTION_HEADER_LENGTH - Long.BYTES - 1] ^= 1;
 
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
                     Arrays.copyOf(snapshot, snapshot.length - 1), ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class);
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                    new byte[CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES + 1], ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
+                    new byte[SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES + 1], ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("maximum size");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(invalidCount, ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(invalidCount, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("section count");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(invalidLength, ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(invalidLength, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("section length");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(shortHeader, ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(shortHeader, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("section length");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(checksumMismatch, ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(checksumMismatch, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
                     Arrays.copyOf(snapshot, snapshot.length + 1), ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("trailing");
         } finally {
@@ -157,12 +156,12 @@ class CoreStateSnapshotCodecTest {
 
                 byte[] mutated = snapshot.clone();
                 mutated[payloadOffset] ^= 1;
-                assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT))
+                assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(mutated, ProductLine.SPOT))
                         .as("mutation in section %s", expectedSectionId)
                         .isInstanceOf(ProtocolException.class);
 
                 byte[] truncated = Arrays.copyOf(snapshot, payloadOffset + sectionLength - 1);
-                assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(truncated, ProductLine.SPOT))
+                assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(truncated, ProductLine.SPOT))
                         .as("truncation in section %s", expectedSectionId)
                         .isInstanceOf(ProtocolException.class);
                 layout.position(payloadOffset + sectionLength);
@@ -173,24 +172,24 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void onlyVersionNineteenSectionedDecoderAcceptsRecoveryInput() {
+    void onlyCurrentSectionedDecoderAcceptsRecoveryInput() {
         byte[] unsupported;
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             unsupported = state.snapshot(47);
         }
-        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 18);
+        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 22);
         UnsafeBuffer encoded = new UnsafeBuffer(unsupported);
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(unsupported, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(unsupported, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 18");
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(unsupported, ProductLine.SPOT))
+                .hasMessageContaining("unsupported snapshot version: 22");
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.manifest(unsupported, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 18");
+                .hasMessageContaining("unsupported snapshot version: 22");
         SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
         assertThatThrownBy(() -> recovery.accept(encoded, 0, unsupported.length))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 18");
+                .hasMessageContaining("unsupported snapshot version: 22");
     }
 
     @Test
@@ -200,22 +199,23 @@ class CoreStateSnapshotCodecTest {
             snapshot = state.snapshot(49);
         }
         byte[] duplicate = mutateSectionId(snapshot, 11, 10);
-        byte[] misrouted = mutateSectionPayloadInt(snapshot, 10, 0, 1);
+        byte[] misrouted = mutateSectionPayloadInt(snapshot, 10, 0, 0);
         byte[] missing = snapshot.clone();
-        ByteBuffer.wrap(missing).order(ByteOrder.LITTLE_ENDIAN).putInt(8, 13);
+        ByteBuffer.wrap(missing).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(8, SectionedCoreSnapshotCodec.sectionCount(4) - 1);
         missing = rewriteOuterChecksum(missing);
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(duplicate, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(duplicate, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("section");
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(misrouted, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(misrouted, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("lane");
         byte[] missingSection = missing;
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(missingSection, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(missingSection, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("section");
     }
 
     @Test
-    void byteExactRoundTripPreservesStateHashOpenOrdersAndOutbox() {
+    void byteExactRoundTripPreservesStateHashAndOpenOrders() {
         TradingCoreState tradingState = stateWithOpenBid();
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
@@ -224,27 +224,24 @@ class CoreStateSnapshotCodecTest {
                     43, 1, tradingState.businessStateHash(), tradingState,
                     new ActiveOrderIndex(tradingState).orders()).join();
         }
-        TradingCoreRuntime outboxSource = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT);
         CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                 UUID.fromString("00000000-0000-0000-0000-000000000043"), ProductLine.SPOT,
                 CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), CoreProtocol.probePayload(3));
-        assertThat(outboxSource.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(source.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
         TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1, 3,
-                outboxSource.commandResults(), outboxSource.lastSourceSequences(), tradingState,
-                outboxSource.exportState(), matcherSnapshot);
+                source.commandResults(), source.lastSourceSequences(), tradingState, matcherSnapshot);
         TradingCoreRuntime restored = null;
         try {
-            byte[] first = CoreStateSnapshotCodec.encode(original, matcherSnapshot);
-            restored = CoreStateSnapshotCodec.decode(first, ProductLine.SPOT);
-            byte[] second = CoreStateSnapshotCodec.encode(restored, matcherSnapshot);
+            byte[] first = SectionedCoreSnapshotCodec.encode(original, matcherSnapshot).toByteArray();
+            restored = SectionedCoreSnapshotCodec.decode(first, ProductLine.SPOT);
+            byte[] second = SectionedCoreSnapshotCodec.encode(restored, matcherSnapshot).toByteArray();
 
             assertThat(second).containsExactly(first);
             assertThat(restored.stateHash()).isEqualTo(original.stateHash());
             assertThat(restored.tradingState().orders()).containsExactlyEntriesOf(original.tradingState().orders());
-            assertThat(restored.exportState().status()).isEqualTo(original.exportState().status());
-            assertThat(restored.exportState().pending()).isEqualTo(original.exportState().pending());
-            CoreSnapshotManifest originalManifest = CoreStateSnapshotCodec.manifest(first, ProductLine.SPOT);
-            CoreSnapshotManifest restoredMatcherManifest = CoreStateSnapshotCodec.manifest(
+            CoreSnapshotManifest originalManifest = SectionedCoreSnapshotCodec.manifest(first, ProductLine.SPOT);
+            CoreSnapshotManifest restoredMatcherManifest = SectionedCoreSnapshotCodec.manifest(
                     restored.snapshot(44), ProductLine.SPOT);
             assertThat(restoredMatcherManifest.engineStateHash()).isEqualTo(originalManifest.engineStateHash());
             assertThat(restoredMatcherManifest.bookStateHash()).isEqualTo(originalManifest.bookStateHash());
@@ -257,7 +254,7 @@ class CoreStateSnapshotCodecTest {
         } finally {
             if (restored != null) restored.close();
             original.close();
-            outboxSource.close();
+            source.close();
         }
     }
 
@@ -267,7 +264,7 @@ class CoreStateSnapshotCodecTest {
         long threadsBefore = recoveryConsumerThreadCount();
         byte[] corrupted = mutateSectionPayloadInt(control, 5, 0, Integer.MAX_VALUE);
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(corrupted, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(corrupted, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class);
         assertThat(recoveryConsumerThreadCount()).isEqualTo(threadsBefore);
     }
@@ -278,7 +275,7 @@ class CoreStateSnapshotCodecTest {
         AtomicReference<CoreFaults.ActivationState> beforeActivation = new AtomicReference<>();
         CoreFaults.beforeActivation(state ->
                 beforeActivation.set(CoreFaults.activationState(state)));
-        try (TradingCoreRuntime restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
+        try (TradingCoreRuntime restored = SectionedCoreSnapshotCodec.decode(control, ProductLine.SPOT)) {
             assertThat(beforeActivation.get()).isNotNull();
             assertThat(beforeActivation.get().allPassive()).isTrue();
             assertThat(CoreFaults.activationState(restored).allActivated()).isTrue();
@@ -297,7 +294,7 @@ class CoreStateSnapshotCodecTest {
             throw new IllegalStateException("injected passive candidate failure");
         });
         try {
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(control, ProductLine.SPOT))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(control, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("injected passive candidate failure");
             assertThat(candidate.get()).isNotNull();
@@ -340,10 +337,6 @@ class CoreStateSnapshotCodecTest {
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
             assertThat(manifest.clusterPosition()).isEqualTo(5_678);
             assertThat(manifest.sourceSequenceDigest()).isNotZero();
-            assertThat(manifest.outboxAcknowledgedSequence()).isZero();
-            assertThat(manifest.outboxNextSequence()).isEqualTo(1);
-            assertThat(manifest.outboxPendingCount()).isZero();
-            assertThat(manifest.outboxPendingDigest()).isZero();
             assertThat(manifest.matcherSequence()).isNotNegative();
             assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             assertThat(manifest.forkGitSha()).isEqualTo(MatcherSnapshot.FORK_GIT_SHA);
@@ -382,12 +375,12 @@ class CoreStateSnapshotCodecTest {
         mismatches.put("user registry hash", mutateHeaderLong(snapshot, 186));
         mismatches.put("active order hash", mutateHeaderLong(snapshot, 194));
         mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 202));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 238));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 246));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 286));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 210));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 218));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 258));
 
         mismatches.forEach((field, mutated) -> {
-            Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));
+            Throwable failure = catchThrowable(() -> SectionedCoreSnapshotCodec.decode(mutated, ProductLine.SPOT));
             assertThat(failure).as(field).isInstanceOf(ProtocolException.class);
             assertThat(failure).as(field).hasMessageContaining(field);
         });
@@ -414,7 +407,7 @@ class CoreStateSnapshotCodecTest {
         }
         byte[] rejected = rewriteOuterChecksum(mismatched);
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(rejected, ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(rejected, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
                 .hasMessage("snapshot product line mismatch: OPTION");
     }
@@ -426,11 +419,11 @@ class CoreStateSnapshotCodecTest {
             snapshot = state.snapshot(76);
         }
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 86), ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
+                mutateHeaderLongWithoutChecksum(snapshot, 114), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 94), ProductLine.SPOT))
+        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
+                mutateHeaderLongWithoutChecksum(snapshot, 122), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 

@@ -7,12 +7,12 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 
 /** Owns runtime risk-scan control and the persisted scan cursor projection. */
-final class RuntimeRiskStateTransitions {
+public final class RuntimeRiskStateTransitions {
 
     private RuntimeRiskStateTransitions() {
     }
 
-    static void updateScanControl(TradingRuntimeState runtime, UpdateRiskScanControlCommand command,
+    public static void updateScanControl(TradingRuntimeState runtime, UpdateRiskScanControlCommand command,
                                   long updatedAtEpochMillis) {
         if (runtime == null || command == null) {
             throw new IllegalArgumentException("invalid runtime risk scan control update");
@@ -30,7 +30,7 @@ final class RuntimeRiskStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    static void replaceScan(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void replaceScan(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                             CoreRiskState.RiskScan scan) {
         if (runtime == null || identities == null || scan == null) {
             throw new IllegalArgumentException("invalid runtime risk scan");
@@ -46,7 +46,7 @@ final class RuntimeRiskStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    static void replaceScan(TradingRuntimeState runtime, RiskScanRuntime scan) {
+    public static void replaceScan(TradingRuntimeState runtime, RiskScanRuntime scan) {
         if (runtime == null || scan == null) {
             throw new IllegalArgumentException("invalid runtime risk scan");
         }

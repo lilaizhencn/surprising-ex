@@ -9,12 +9,12 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
 /** Owns runtime account balances and the pending cross-product transfer lifecycle. */
-final class RuntimeAccountStateTransitions {
+public final class RuntimeAccountStateTransitions {
 
     private RuntimeAccountStateTransitions() {
     }
 
-    static void adjustBalance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void adjustBalance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                               long userId, BalanceAdjustmentCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime balance adjustment");
@@ -45,7 +45,7 @@ final class RuntimeAccountStateTransitions {
         else runtime.replaceBalance(nextBalance);
     }
 
-    static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                long userId, TransferFundsCommand command) {
         if (identities == null) throw new IllegalArgumentException("transfer identities are required");
         TransferRuntime transfer = prepareTransferOut(runtime, userId, command);
@@ -92,7 +92,7 @@ final class RuntimeAccountStateTransitions {
         runtime.replaceBalance(debited);
     }
 
-    static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                            long userId, TransferFundsCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime transfer in");
@@ -105,7 +105,7 @@ final class RuntimeAccountStateTransitions {
                 new BalanceAdjustmentCommand(command.asset(), command.amountUnits()));
     }
 
-    static boolean completeTransfer(TradingRuntimeState runtime, long userId, long transferId) {
+    public static boolean completeTransfer(TradingRuntimeState runtime, long userId, long transferId) {
         if (runtime == null || userId <= 0 || transferId <= 0) {
             throw new IllegalArgumentException("invalid runtime transfer completion");
         }

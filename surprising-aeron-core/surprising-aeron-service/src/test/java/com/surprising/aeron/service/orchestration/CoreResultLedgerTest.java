@@ -2,7 +2,6 @@ package com.surprising.aeron.service.orchestration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -12,7 +11,6 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.product.api.ProductLine;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -60,13 +58,13 @@ class CoreResultLedgerTest {
         var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(probe(first, 1, 1));
         byte[] originalBytes = {1, 2};
         ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 0, 7, originalBytes);
+                1, 7, originalBytes);
         var original = ledger.get(first);
         ledger.storeOwnedResult(second, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                2, 0, 8, new byte[]{3});
+                2, 8, new byte[]{3});
         byte[] replacementBytes = {4};
         ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                3, 0, 9, replacementBytes);
+                3, 9, replacementBytes);
         assertThat(original.responseDataUnsafe()).isSameAs(originalBytes);
         assertThat(original.responseData()).containsExactly(1, 2);
         assertThat(ledger.get(first).responseDataUnsafe()).isSameAs(replacementBytes);
@@ -136,8 +134,7 @@ class CoreResultLedgerTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRuntimeRestoreTestSupport.restore(
                         ProductLine.SPOT, 70, 0, results, Map.of(),
-                        com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
-                        new CoreExportState()))
+                        com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("result ledger");
     }
@@ -164,8 +161,7 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults()).containsKeys(second, third);
             try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(),
-                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
-                    state.exportState())) {
+                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
         }
@@ -202,33 +198,9 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
             try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(),
-                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
-                    state.exportState())) {
+                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
-        }
-    }
-
-    @Test
-    void rejectedExportAckDoesNotAdvanceCommandProgress() {
-        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            state.apply(probe(UUID.randomUUID(), 1, 1));
-            CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
-                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 0,
-                    2_000, 81), CoreExportCodec.encodeAck(new AckExportCommand(1)));
-            long hashBefore = state.stateHash();
-            long countBefore = state.appliedCommandCount();
-            CoreResponse rejected = state.apply(ack);
-            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INVALID_MESSAGE);
-            assertThat(state.stateHash()).isEqualTo(hashBefore);
-            assertThat(state.appliedCommandCount()).isEqualTo(countBefore);
-            assertThat(state.commandResults()).doesNotContainKey(ack.header().commandId());
-
-            CoreResponse response = state.apply(probe(UUID.randomUUID(), 2, 2));
-            assertThat(response.appliedCommandCount()).isEqualTo(2);
-            assertThat(response.requiredExportSequence()).isZero();
-            assertThat(response.requiredExportSequence()).isNotEqualTo(response.appliedCommandCount());
         }
     }
 
@@ -242,14 +214,14 @@ class CoreResultLedgerTest {
             ResponseStatus status,
             CoreResultCode resultCode,
             long appliedCommandCount,
-            long requiredExportSequence,
+            long resultIdentity,
             byte[] response,
             long retentionSequence) {
         long sourceSequence = Math.max(1, appliedCommandCount);
-        CoreMessage command = probe(new UUID(appliedCommandCount, requiredExportSequence), sourceSequence, 1);
+        CoreMessage command = probe(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
         return new CommandResultLedger.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
-                appliedCommandCount, requiredExportSequence, 0, response, retentionSequence);
+                appliedCommandCount, 0, response, retentionSequence);
     }
 
     private static CoreMessage commandResultQuery(UUID commandId) {

@@ -1,9 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -66,12 +64,6 @@ public final class CoreInMemoryBenchmark {
                         11L + index * 2,
                         TradingCommandCodec.encodeCancelOrder(new com.surprising.aeron.protocol.CancelOrderCommand(orderId)));
                 if (measured) latencies[index] = System.nanoTime() - operationStarted;
-                if ((index & 255) == 255 || index == orderCount - 1) {
-                    long throughSequence = 2L + (index + 1L) * 4L;
-                    applied(state, CoreMessageType.ACK_EXPORT, CommandSource.OPERATIONS,
-                            operationsSequence++, 2_000_000L + index,
-                            CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
-                }
             }
             return new Result(orderCount, System.nanoTime() - started, latencies);
         }
@@ -89,8 +81,8 @@ public final class CoreInMemoryBenchmark {
     private static void applied(TradingCoreRuntime state, CoreMessageType type, CommandSource source,
                                 long sourceSequence, long correlationId, byte[] payload) {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
-                source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, type == CoreMessageType.ACK_EXPORT
-                        ? 0 : USER_ID, 1_000, correlationId), payload);
+                source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, USER_ID,
+                1_000, correlationId), payload);
         int pendingBefore = state.pendingMatchingCount();
         ResponseStatus status = state.apply(message).status();
         if (status != ResponseStatus.APPLIED && status != ResponseStatus.OK) {
@@ -98,7 +90,7 @@ public final class CoreInMemoryBenchmark {
         }
         while (state.pendingMatchingCount() > pendingBefore) {
             long sequence = state.firstPendingMatchingSequence();
-            com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+            com.surprising.aeron.service.matching.MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
             while (matching == null && System.nanoTime() < deadline) {
                 matching = state.takeMatchingResult(sequence);

@@ -57,10 +57,6 @@ final class SectionedCoreSnapshotValidation {
         long userRegistryHash = header.getLong();
         long activeOrderHash = header.getLong();
         long sourceSequenceDigest = header.getLong();
-        long outboxAcknowledgedSequence = header.getLong();
-        long outboxNextSequence = header.getLong();
-        int outboxPendingCount = header.getInt();
-        long outboxPendingDigest = header.getLong();
         long matcherConfigHash = header.getLong();
         String forkGitSha = readFixedAscii(header, SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
         String artifactSha256 = readFixedAscii(header, SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
@@ -80,25 +76,19 @@ final class SectionedCoreSnapshotValidation {
                 || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new ProtocolException("invalid snapshot sequence or position");
         }
-        if (outboxAcknowledgedSequence < 0 || outboxNextSequence <= outboxAcknowledgedSequence
-                || outboxPendingCount < 0 || outboxPendingCount > CoreExportState.MAX_PENDING_EVENTS) {
-            throw new ProtocolException("invalid snapshot outbox metadata");
-        }
         return new HeaderManifest(productLine, routeVersion, topology, topologyHash, symbolRouteHash,
                 snapshotId, coreSequence, projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount, probeValue, matcherSequence,
                 businessStateHash, globalFundsHash, auditBusinessStateHash, auditFundsStateHash,
                 engineStateHash, bookStateHash,
                 symbolRegistryHash, userRegistryHash,
-                activeOrderHash, sourceSequenceDigest, outboxAcknowledgedSequence,
-                outboxNextSequence, outboxPendingCount, outboxPendingDigest, forkGitSha, artifactSha256,
+                activeOrderHash, sourceSequenceDigest, forkGitSha, artifactSha256,
                 matcherConfigHash);
     }
 
     static void validatePairing(
             HeaderManifest manifest,
             Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
-            CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies,
@@ -126,13 +116,6 @@ final class SectionedCoreSnapshotValidation {
                 && manifest.activeOrderHash() == MatcherSnapshot.activeOrderHash(tradingState), "active order hash");
         requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
-        if (exportState.enabled()) {
-            requireMatch(manifest.outboxAcknowledgedSequence() == exportState.acknowledgedSequence(),
-                    "outbox acknowledged sequence");
-            requireMatch(manifest.outboxNextSequence() == exportState.nextSequence(), "outbox next sequence");
-            requireMatch(manifest.outboxPendingCount() == exportState.pendingCount(), "outbox pending count");
-            requireMatch(manifest.outboxPendingDigest() == exportState.pendingDigest(), "outbox pending digest");
-        }
         requireMatch(manifest.matcherConfigHash() == matcherSnapshot.matcherConfigHash(), "matcher config");
         requireMatch(manifest.forkGitSha().equals(matcherSnapshot.forkGitSha()), "fork identity");
         requireMatch(manifest.artifactSha256().equals(matcherSnapshot.artifactSha256()), "artifact identity");
@@ -180,8 +163,7 @@ final class SectionedCoreSnapshotValidation {
             long auditBusinessStateHash, long auditFundsStateHash,
             int engineStateHash, int bookStateHash,
             long symbolRegistryHash, long userRegistryHash, long activeOrderHash,
-            long sourceSequenceDigest, long outboxAcknowledgedSequence, long outboxNextSequence,
-            int outboxPendingCount, long outboxPendingDigest, String forkGitSha, String artifactSha256,
+            long sourceSequenceDigest, String forkGitSha, String artifactSha256,
             long matcherConfigHash) {
     }
 }

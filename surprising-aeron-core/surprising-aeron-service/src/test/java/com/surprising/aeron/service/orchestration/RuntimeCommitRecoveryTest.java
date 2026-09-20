@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -187,7 +186,6 @@ class RuntimeCommitRecoveryTest {
 
                 CoreMessage duplicateCommand = partialFill.getFirst();
                 long projectionBeforeDuplicate = firstRestore.snapshotProjectionSequence();
-                long exportBeforeDuplicate = firstRestore.exportState().nextSequence();
                 CoreResponse duplicate = firstRestore.apply(duplicateCommand);
                 assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(duplicate.resultCode()).isEqualTo(restoredPartial.responses().getFirst().resultCode());
@@ -195,13 +193,11 @@ class RuntimeCommitRecoveryTest {
                 assertThat(HexFormat.of().formatHex(duplicate.data()))
                         .isEqualTo(restoredPartial.responses().getFirst().data());
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
-                assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
                 CoreMessage changedRetry = new CoreMessage(duplicateCommand.header(),
                         place(202, CoreOrderSide.BUY, 100, 5, false));
                 assertThat(firstRestore.apply(changedRetry).resultCode())
                         .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
-                assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
             }
         }
     }
@@ -220,28 +216,28 @@ class RuntimeCommitRecoveryTest {
                     + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 20] ^= 1;
             byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 138, 1);
             byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 90, 1);
-            byte[] corruptExportSequence = mutateLongInSection(snapshot, 4, Long.BYTES, 1);
+            byte[] corruptMatcherPayload = mutateLongInSection(snapshot, 4, Long.BYTES, 1);
 
-            assertThatThrownBy(() -> published.set(CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> published.set(SectionedCoreSnapshotCodec.decode(
                     corruptLaneManifest, ProductLine.LINEAR_PERPETUAL)))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("user manifest differs from global state");
-            assertThatThrownBy(() -> published.set(CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> published.set(SectionedCoreSnapshotCodec.decode(
                     corruptChecksum, ProductLine.LINEAR_PERPETUAL)))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("checksum");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
                     corruptBusinessHash, ProductLine.LINEAR_PERPETUAL))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("business state hash");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
                     corruptProjectionSequence, ProductLine.LINEAR_PERPETUAL))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("projection sequence");
-            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                    corruptExportSequence, ProductLine.LINEAR_PERPETUAL))
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
+                    corruptMatcherPayload, ProductLine.LINEAR_PERPETUAL))
                     .isInstanceOf(ProtocolException.class)
-                    .hasMessageContaining("Core-Fact exporter state is no longer supported");
+                    .hasMessageContaining("matcher snapshot checksum mismatch");
             assertThat(original.stateHash()).isEqualTo(stateHash);
             assertThat(original.snapshotProjectionSequence()).isEqualTo(projectionSequence);
             assertThat(published.get()).isSameAs(original);
@@ -268,8 +264,6 @@ class RuntimeCommitRecoveryTest {
             BatchReplay replayed = completeBatch(recovered, batch);
 
             assertThat(replayed.response()).isEqualTo(reference.response());
-            assertThat(replayed.encodedV10Facts()).isEqualTo(reference.encodedV10Facts());
-            assertThat(replayed.acknowledgedSequence()).isEqualTo(reference.acknowledgedSequence());
             assertBatchRecoveryParity(recovered.state(), uninterrupted.state());
             var items = TradingOrderBatchCodec.decodeResult(
                     HexFormat.of().parseHex(replayed.response().data())).items();
@@ -298,13 +292,11 @@ class RuntimeCommitRecoveryTest {
             assertThat(recovered.state().tradingState().treasuryState().feeBalances().get("USDT")).isPositive();
             assertThat(economicUsdt(recovered.state().tradingState())).isEqualTo(4_000);
             long projectionBeforeDuplicate = recovered.state().snapshotProjectionSequence();
-            List<String> factsBeforeDuplicate = encodedV10OutboxFacts(recovered.state());
             CoreResponse referenceDuplicate = replayClusterCommand(uninterrupted, batch).response();
             CoreResponse recoveredDuplicate = replayClusterCommand(recovered, batch).response();
             assertThat(response(recoveredDuplicate)).isEqualTo(response(referenceDuplicate));
             assertThat(recoveredDuplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(recovered.state().snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
-            assertThat(encodedV10OutboxFacts(recovered.state())).isEqualTo(factsBeforeDuplicate);
             assertBatchRecoveryParity(recovered.state(), uninterrupted.state());
         } finally {
             uninterrupted.state().close();
@@ -642,14 +634,9 @@ class RuntimeCommitRecoveryTest {
                 source, sourceId, sourceSequence, userId, 1_000 + sourceSequence, sourceSequence), payload);
     }
 
-    private static List<String> encodedV10OutboxFacts(TradingCoreRuntime state) {
-        return state.exportState().snapshot().pendingEvents().stream()
-                .map(CoreMessageCodec::encode).map(HexFormat.of()::formatHex).toList();
-    }
-
     private static ResponseView response(CoreResponse response) {
         return new ResponseView(response.status(), response.commandStatus(), response.resultCode(),
-                response.appliedCommandCount(), response.requiredExportSequence(), response.stateHash(),
+                response.appliedCommandCount(), response.stateHash(),
                 HexFormat.of().formatHex(response.data()));
     }
 
@@ -661,7 +648,7 @@ class RuntimeCommitRecoveryTest {
             return response;
         }
         long sequence = state.matchingSequence(command.header().commandId());
-        com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+        com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             matching = state.takeMatchingResult(sequence);
@@ -727,8 +714,6 @@ class RuntimeCommitRecoveryTest {
     private static void assertParity(TradingCoreRuntime actualState, TradingCoreRuntime expectedState,
                                      ReplayResult actual, ReplayResult expected) {
         assertThat(actual.responses()).isEqualTo(expected.responses());
-        assertThat(actualState.exportState().enabled()).isFalse();
-        assertThat(actualState.exportState().pending()).isEmpty();
         assertThat(actualState.pendingMatchingCount()).isZero();
         assertThat(actualState.tradingState()).isEqualTo(expectedState.tradingState());
         assertThat(actualState.tradingState().users()).isEqualTo(expectedState.tradingState().users());
@@ -740,13 +725,10 @@ class RuntimeCommitRecoveryTest {
         assertThat(actualState.snapshotBusinessStateHash()).isEqualTo(expectedState.snapshotBusinessStateHash());
         assertThat(actualState.snapshotFundsStateHash()).isEqualTo(expectedState.snapshotFundsStateHash());
         assertThat(actualState.snapshotProjectionSequence()).isEqualTo(expectedState.snapshotProjectionSequence());
-        assertThat(actualState.exportState().nextSequence()).isEqualTo(expectedState.exportState().nextSequence());
         assertThat(actualState.commandResults()).isEqualTo(expectedState.commandResults());
         assertThat(actualState.lastSourceSequences()).isEqualTo(expectedState.lastSourceSequences());
         assertThat(actualState.feePolicies()).isEqualTo(expectedState.feePolicies());
         assertThat(actualState.pendingTransfers()).isEqualTo(expectedState.pendingTransfers());
-        assertThat(actualState.exportState().snapshot()).isEqualTo(expectedState.exportState().snapshot());
-        assertThat(encodedV10OutboxFacts(actualState)).isEqualTo(encodedV10OutboxFacts(expectedState));
     }
 
     private static BatchReplay completeBatch(SurprisingClusteredService service, CoreMessage batch) {
@@ -756,13 +738,12 @@ class RuntimeCommitRecoveryTest {
         assertThat(state.matchingSequence(batch.header().commandId())).isZero();
         CoreResponse response = replay.response();
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-        return new BatchReplay(response(response), encodedV10OutboxFacts(state),
-                state.exportState().snapshot().acknowledgedSequence());
+        return new BatchReplay(response(response));
     }
 
-    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matching.MatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
-        com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+        com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             matching = state.takeMatchingResult(sequence);
@@ -873,16 +854,11 @@ class RuntimeCommitRecoveryTest {
             SurprisingClusteredService reference, SurprisingClusteredService restored,
             CoreMessage command) throws Exception {
         long projectionBefore = reference.state().snapshotProjectionSequence();
-        long exportBefore = reference.state().exportState().nextSequence();
-        List<String> factsBefore = encodedV10OutboxFacts(reference.state());
         ReplayResult referenceDuplicate = replayClustered(reference, List.of(command));
         ReplayResult restoredDuplicate = replayClustered(restored, List.of(command));
         assertThat(restoredDuplicate).isEqualTo(referenceDuplicate);
         assertThat(referenceDuplicate.responses()).allMatch(value -> value.status() == ResponseStatus.DUPLICATE);
-        assertThat(reference.state().exportState().pending()).isEmpty();
         assertThat(reference.state().snapshotProjectionSequence()).isEqualTo(projectionBefore);
-        assertThat(reference.state().exportState().nextSequence()).isEqualTo(exportBefore);
-        assertThat(encodedV10OutboxFacts(reference.state())).isEqualTo(factsBefore);
         assertBatchRecoveryParity(restored.state(), reference.state());
     }
 
@@ -957,8 +933,6 @@ class RuntimeCommitRecoveryTest {
         assertThat(recovered.stateHash()).isEqualTo(reference.stateHash());
         assertThat(recovered.commandResults()).isEqualTo(reference.commandResults());
         assertThat(recovered.lastSourceSequences()).isEqualTo(reference.lastSourceSequences());
-        assertThat(recovered.exportState().snapshot()).isEqualTo(reference.exportState().snapshot());
-        assertThat(encodedV10OutboxFacts(recovered)).isEqualTo(encodedV10OutboxFacts(reference));
         long fence = recovered.appliedCommandCount();
         var recoveredLanes = recovered.accountLaneSnapshots(fence, recovered.tradingState());
         assertThat(recoveredLanes).isEqualTo(reference.accountLaneSnapshots(fence, reference.tradingState()));
@@ -973,8 +947,6 @@ class RuntimeCommitRecoveryTest {
         assertIndexesEqualCanonicalRebuild(reference);
         assertThat((long[]) field(recovered.commits, "appliedMatcherSequences"))
                 .containsExactly((long[]) field(reference.commits, "appliedMatcherSequences"));
-        assertThat((long[]) field(recovered.commits, "appliedMatcherPrefixDigests"))
-                .containsExactly((long[]) field(reference.commits, "appliedMatcherPrefixDigests"));
     }
 
     private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
@@ -985,8 +957,6 @@ class RuntimeCommitRecoveryTest {
         state.runtimeState.requireSnapshotFenceReady();
         assertThat(state.runtimeProjectionJournal.projectedSequence())
                 .isEqualTo(state.runtimeProjectionJournal.publishedSequence());
-        assertThat(state.exportState().metrics().reservedEvents()).isZero();
-        assertThat(state.exportState().metrics().reservedBytes()).isZero();
     }
 
     private static Object field(Object target, String name) throws Exception {
@@ -1092,8 +1062,7 @@ class RuntimeCommitRecoveryTest {
     private record ReplayResult(List<ResponseView> responses) {
     }
 
-    private record BatchReplay(ResponseView response,
-                               List<String> encodedV10Facts, long acknowledgedSequence) {
+    private record BatchReplay(ResponseView response) {
     }
 
     private record ClusterReplay(List<byte[]> responses) {
@@ -1138,7 +1107,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private record ResponseView(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
-                                long appliedCommandCount, long requiredExportSequence, long stateHash, String data) {
+                                long appliedCommandCount, long stateHash, String data) {
     }
 
     private static byte[] mutateLongInSection(byte[] source, int sectionId, int payloadOffset, long delta) {
@@ -1212,7 +1181,7 @@ class RuntimeCommitRecoveryTest {
             int sectionId = buffer.getInt();
             int length = buffer.getInt();
             int payloadOffset = buffer.position();
-            if (sectionId >= 10) {
+            if (sectionId >= 9) {
                 hash = mix(hash, buffer.getInt());
                 for (int index = 0; index < 5; index++) hash = mix(hash, buffer.getLong());
                 int userCount = buffer.getInt();

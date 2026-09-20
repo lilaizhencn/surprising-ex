@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
 import com.surprising.aeron.service.state.AccountTransferOut;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RuntimeCommandProcessor;
+import com.surprising.aeron.service.state.RuntimeAccountStateTransitions;
 
 /**
  * 余额调整与资金转入转出命令；维护转账幂等状态。
@@ -30,7 +30,7 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
                     owner.runtimeState(), owner.identities(), userId, command);
             owner.deferBalanceAdjustmentControl(work);
         } else {
-            RuntimeCommandProcessor.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
+            RuntimeAccountStateTransitions.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
             owner.requestCommitPublication();
         }
     }
@@ -43,7 +43,7 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
                     owner.identities(), message.header().userId(), command);
             owner.deferTransferOutControl(work);
         } else {
-            RuntimeCommandProcessor.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
+            RuntimeAccountStateTransitions.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
             completeTransferPublication();
         }
     }
@@ -64,7 +64,7 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
     }
 
     public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
-        RuntimeCommandProcessor.completeTransfer(owner.runtimeState(), message.header().userId(),
+        RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(),
                 TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId());
         owner.refreshTransferHash();
         owner.requestCommitPublication();

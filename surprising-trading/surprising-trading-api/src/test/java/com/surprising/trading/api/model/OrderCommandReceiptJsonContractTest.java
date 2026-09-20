@@ -23,7 +23,7 @@ class OrderCommandReceiptJsonContractTest {
     void realObjectMapperRoundTripPreservesMutationResultType(
             String mutation, OrderCommandResult result, Class<?> resultType, String wireType) throws Exception {
         OrderCommandReceipt receipt = new OrderCommandReceipt(COMMAND_ID, "TERMINAL", "NONE", "completed",
-                OrderCommandReceipt.commandResultUrl(COMMAND_ID), List.of(42L), 17L, result, null);
+                OrderCommandReceipt.commandResultUrl(COMMAND_ID), List.of(42L), result, null);
 
         String json = objectMapper.writeValueAsString(receipt);
         OrderCommandReceipt decoded = objectMapper.readValue(json, OrderCommandReceipt.class);
@@ -35,7 +35,6 @@ class OrderCommandReceiptJsonContractTest {
         assertThat(decoded.message()).isEqualTo("completed");
         assertThat(decoded.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(COMMAND_ID));
         assertThat(decoded.prospectiveOrderIds()).containsExactly(42L);
-        assertThat(decoded.requiredExportSequence()).isEqualTo(17L);
         assertThat(decoded.result()).as(mutation).isExactlyInstanceOf(resultType).isEqualTo(result);
     }
 

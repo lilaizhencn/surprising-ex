@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.aeron.service.orchestration.realtime.TradingRealtimeBoundary;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
@@ -658,7 +658,7 @@ public final class TradingCoreOwner {
     /** 在累积 Aeron 快照片段前校验共享的快照大小上限。 */
     public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         if (currentLength < 0 || fragmentLength < 0
-                || currentLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
+                || currentLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
             throw new IllegalStateException("Aeron core snapshot exceeds maximum size");
         }
     }

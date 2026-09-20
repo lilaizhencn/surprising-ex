@@ -50,11 +50,11 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         }
     }
 
-    public void submit(int shardId, long coreSequence, Supplier<CoreMatchingResult> command) {
+    public void submit(int shardId, long coreSequence, Supplier<?> command) {
         submit(shardId, coreSequence, command, null);
     }
 
-    public void submit(int shardId, long coreSequence, Supplier<CoreMatchingResult> command,
+    public void submit(int shardId, long coreSequence, Supplier<?> command,
                 com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
         if (coreSequence <= 0 || command == null) throw new IllegalArgumentException("invalid matcher submission");
         MatcherCommandPipeline shard = shard(shardId);

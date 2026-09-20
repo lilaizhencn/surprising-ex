@@ -161,7 +161,7 @@ class MatcherPipelineGroupTest {
             var reused = contexts.claim(5);
             assertThat(reused.submittedMatcherShard()).isEqualTo(-1);
             pipelines.submit(0, 5, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "REUSED"));
-            assertThat(await(pipelines, 5, TimeUnit.SECONDS.toNanos(5)).nativeCommand().coreSequence()).isEqualTo(5);
+            assertThat(await(pipelines, 5, TimeUnit.SECONDS.toNanos(5)).nativeCoreSequence()).isEqualTo(5);
         }
     }
 

@@ -25,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 6;
+    private static final int VERSION = 7;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -58,7 +58,6 @@ public final class MatcherSnapshotCodec {
                 for (MatcherShardProgress progress : snapshot.matcherShardProgress()) {
                     output.writeInt(progress.matcherShardId());
                     output.writeLong(progress.matcherSequence());
-                    output.writeLong(progress.prefixDigest());
                 }
                 output.writeLong(snapshot.coreBusinessStateHash());
                 output.writeInt(snapshot.engineStateHash());
@@ -139,8 +138,7 @@ public final class MatcherSnapshotCodec {
             }
             List<MatcherShardProgress> matcherShardProgress = new ArrayList<>(progressCount);
             for (int index = 0; index < progressCount; index++) {
-                matcherShardProgress.add(new MatcherShardProgress(
-                        input.readInt(), input.readLong(), input.readLong()));
+                matcherShardProgress.add(new MatcherShardProgress(input.readInt(), input.readLong()));
             }
             long businessHash = input.readLong();
             int engineHash = input.readInt();

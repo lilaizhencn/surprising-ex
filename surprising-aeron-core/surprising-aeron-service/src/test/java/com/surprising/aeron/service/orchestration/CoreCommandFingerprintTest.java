@@ -30,7 +30,6 @@ class CoreCommandFingerprintTest {
         assertThat(conflict.resultCode().name()).isEqualTo("IDEMPOTENCY_CONFLICT");
         assertThat(state.probeValue()).isEqualTo(7);
         assertThat(state.appliedCommandCount()).isOne();
-        assertThat(state.exportState().nextSequence()).isEqualTo(1);
         assertThat(state.lastSourceSequences())
                 .containsEntry(new TradingCoreRuntime.SourceKey(CommandSource.GATEWAY, 7), 1L);
     }
@@ -44,7 +43,6 @@ class CoreCommandFingerprintTest {
         TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot);
         long stateHash = restored.stateHash();
         long appliedCommandCount = restored.appliedCommandCount();
-        long exportSequence = restored.exportState().nextSequence();
         Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = restored.lastSourceSequences();
 
         CoreResponse replay = restored.apply(new CoreMessage(
@@ -56,12 +54,10 @@ class CoreCommandFingerprintTest {
         assertThat(replay.commandStatus()).isEqualTo(original.commandStatus());
         assertThat(replay.resultCode()).isEqualTo(original.resultCode());
         assertThat(replay.appliedCommandCount()).isEqualTo(original.appliedCommandCount());
-        assertThat(replay.requiredExportSequence()).isEqualTo(original.requiredExportSequence());
         assertThat(replay.stateHash()).isEqualTo(original.stateHash());
         assertThat(replay.data()).containsExactly(original.data());
         assertThat(restored.stateHash()).isEqualTo(stateHash);
         assertThat(restored.appliedCommandCount()).isEqualTo(appliedCommandCount);
-        assertThat(restored.exportState().nextSequence()).isEqualTo(exportSequence);
         assertThat(restored.lastSourceSequences()).isEqualTo(sourceSequences);
     }
 

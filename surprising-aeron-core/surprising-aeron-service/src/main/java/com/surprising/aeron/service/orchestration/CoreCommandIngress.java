@@ -62,11 +62,6 @@ final class CoreCommandIngress {
                 && message.header().messageType() != CoreMessageType.REGISTER_INSTRUMENT) {
             runtime.runtimeState.sealInstrumentRegistry();
         }
-        if (message.header().messageType() == CoreMessageType.ACK_EXPORT
-                || message.header().messageType() == CoreMessageType.EXPORT_BATCH_QUERY
-                || message.header().messageType() == CoreMessageType.EXPORT_STATUS_QUERY) {
-            return runtime.rejected(CoreResultCode.INVALID_MESSAGE);
-        }
         if (message.header().kind() == WireMessageKind.QUERY
                 && TradingCoreRuntime.accountLaneReadQuery(message.header().messageType())) {
             if (TradingCoreRuntime.singleUserLaneQuery(message.header().messageType())
@@ -86,7 +81,7 @@ final class CoreCommandIngress {
 
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
         return switch (message.header().messageType()) {
-            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER, ACK_EXPORT -> false;
+            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER -> false;
             case UPSERT_ALGO_ORDER, EXECUTE_TRIGGER_ORDER -> false;
             case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
                     UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
@@ -264,12 +259,12 @@ final class CoreCommandIngress {
             if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                         com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                        CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount, 0,
+                        CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
                         runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             }
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                    pendingDuplicate.sequence(), 0, pendingDuplicate.pendingStateHash(),
+                    pendingDuplicate.sequence(), pendingDuplicate.pendingStateHash(),
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
         if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
@@ -278,12 +273,12 @@ final class CoreCommandIngress {
                 if (!retained.equals(fingerprint)) {
                     return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount, 0,
+                            CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
                             runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
                 }
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                         com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
-                        runtime.appliedCommandCount, 0, runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                        runtime.appliedCommandCount, runtime.stateHash(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             }
             if (!runtime.terminalRetention.hasFundsCommandCapacity(message.header().commandId())) {
                 return runtime.rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);

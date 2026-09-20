@@ -25,7 +25,6 @@ final class CoreRuntimeLifecycle {
             owner.runtimeState.startAccountLanes();
             owner.matchingAdapter.activate();
             owner.runtimeProjectionJournal.activate();
-            owner.exportState.activate();
             owner.activated = true;
         } catch (RuntimeException failure) {
             try {
@@ -69,7 +68,6 @@ final class CoreRuntimeLifecycle {
         if (owner.commitPublicationFailure != null) throw owner.commitPublicationFailure;
         if (owner.runtimeState != null) owner.runtimeState.assertAccountLanesHealthy();
         owner.runtimeProjectionJournal.assertHealthy();
-        owner.exportState.assertHealthy();
         RuntimeException auditFailure = owner.snapshots.snapshotAuditFailure.get();
         if (auditFailure != null) throw auditFailure;
     }
@@ -105,7 +103,6 @@ final class CoreRuntimeLifecycle {
         owner.pendingMatching.clear();
         owner.crossShardCancellations.clear();
         owner.admissions.pendingLifecycleScopes.clear();
-        owner.exportState.close();
         owner.runtimeProjectionJournal.close();
         owner.runtimeState.close();
     }

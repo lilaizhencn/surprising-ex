@@ -5,12 +5,12 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 
 /** Owns runtime algorithm-order identity, intent and child-order revision changes. */
-final class RuntimeAlgoOrderStateTransitions {
+public final class RuntimeAlgoOrderStateTransitions {
 
     private RuntimeAlgoOrderStateTransitions() {
     }
 
-    static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                        long userId, CoreAlgoOrderView view) {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime algo order update");
@@ -18,7 +18,7 @@ final class RuntimeAlgoOrderStateTransitions {
         upsert(runtime, userId, view, identities.symbolId(view.symbol()));
     }
 
-    static void upsert(TradingRuntimeState runtime, long userId,
+    public static void upsert(TradingRuntimeState runtime, long userId,
                        CoreAlgoOrderView view, int symbolId) {
         if (runtime == null || view == null || userId <= 0 || symbolId < 0)
             throw new IllegalArgumentException("invalid prepared algo update");

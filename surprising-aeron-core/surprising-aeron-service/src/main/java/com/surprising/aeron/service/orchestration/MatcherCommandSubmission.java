@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import java.util.ArrayList;
@@ -20,7 +21,8 @@ final class MatcherCommandSubmission {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
-    Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> prepareMatchingCommand(CommandSlot pending) {
+    Supplier<?> prepareMatchingCommand(CommandSlot pending,
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingSubmitNanos.put(pending.sequence(), System.nanoTime());
         }
@@ -28,44 +30,58 @@ final class MatcherCommandSubmission {
             List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
                     preMatchingCancellationOrders(pending);
             long userId = pending.command().header().userId();
-            if (pending.operation() == CommandSlot.Operation.PLACE && preMatchingCancellations.isEmpty()) {
+            if (pending.operation() == CommandSlot.Operation.PLACE && direct != null) {
                 var command = pending.decodedCommand().placeOrder();
                 var admittedOrder = pending.admittedPlaceOrder();
                 int shard = owner.matcherShard(pending);
                 if (admittedOrder != null) {
-                    return pending.preparePlaceMatching(owner, shard, userId,
-                            admittedOrder, null);
+                    return directWithCancellations(pending, direct, preMatchingCancellations,
+                            command.orderId(), pending.preparePlaceMatching(owner, shard, userId,
+                                    admittedOrder, null, direct));
                 }
                 // Ordinary PLACE admissions run on the Account Lane and Matcher concurrently.
                 // Until the Lane publishes its mutable runtime object, use the immutable input
                 // captured by the admission event.
                 if (pending.placeAdmission() != null) {
-                    return pending.preparePlaceMatching(owner, shard, userId,
-                            pending.placeAdmission().matchingOrder(), null);
+                    return directWithCancellations(pending, direct, preMatchingCancellations,
+                            command.orderId(), pending.preparePlaceMatching(owner, shard, userId,
+                                    pending.placeAdmission().matchingOrder(), null, direct));
                 }
-                return pending.preparePlaceMatching(owner, shard, userId,
-                        null, owner.matchingOrder(command.orderId()));
+                return directWithCancellations(pending, direct, preMatchingCancellations,
+                        command.orderId(), pending.preparePlaceMatching(owner, shard, userId,
+                                null, owner.matchingOrder(command.orderId()), direct));
             }
-            if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
+            if (pending.operation() == CommandSlot.Operation.CANCEL && direct != null) {
                 var command = pending.decodedCommand().cancelOrder();
                 var order = owner.runtimeState.order(command.orderId());
                 if (order != null) {
                     String symbol = owner.identities.symbol(order.symbolId());
                     int shard = owner.matcherShard(pending);
-                    return pending.prepareCancelMatching(owner, shard, command.orderId(),
-                            userId, symbol);
+                    return directWithCancellations(pending, direct, preMatchingCancellations,
+                            command.orderId(), pending.prepareCancelMatching(owner, shard, command.orderId(),
+                                    userId, symbol, direct));
                 }
             }
             if ((pending.operation() == CommandSlot.Operation.REPLACE
                     || pending.operation() == CommandSlot.Operation.AMEND)
-                    && preMatchingCancellations.isEmpty()) {
+                    && direct != null) {
                 ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
                 owner.requireUnchangedAdmissionState(admission);
                 var order = owner.runtimeOrder(admission.originalOrderId());
                 String symbol = owner.runtimeOrderSymbol(order);
-                return pending.prepareReplaceMatching(owner, owner.matcherShard(pending),
-                        admission.resolved().orderId(), userId,
-                        admission.originalOrderId(), symbol, admission.matchingOrder());
+                return directWithCancellations(pending, direct, preMatchingCancellations,
+                        admission.resolved().orderId(), pending.prepareReplaceMatching(
+                                owner, owner.matcherShard(pending), admission.resolved().orderId(), userId,
+                                admission.originalOrderId(), symbol, admission.matchingOrder(), direct));
+            }
+            if (pending.operation() == CommandSlot.Operation.TRIGGER
+                    && direct != null) {
+                CoreMatchingOrder matchingOrder = pending.admittedMatchingOrder();
+                if (matchingOrder == null) throw new IllegalStateException("trigger matcher order is missing");
+                return directWithCancellations(pending, direct, preMatchingCancellations,
+                        matchingOrder.orderId(), pending.preparePlaceMatching(
+                                owner, owner.matcherShard(pending), userId,
+                                null, matchingOrder, direct));
             }
             MatchingSubmission matching = switch (pending.operation()) {
                 case PLACE -> {
@@ -158,6 +174,33 @@ final class MatcherCommandSubmission {
         return pending.operation() == CommandSlot.Operation.LIQUIDATION
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT;
+    }
+
+    Supplier<?> directWithCancellations(
+            CommandSlot pending,
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct,
+            List<DeterministicExchangeCoreAdapter.CancellationOrder> cancellations,
+            long logicalOrderId, Supplier<?> submission) {
+        if (cancellations.isEmpty()) return submission;
+        int shard = owner.matcherShard(pending);
+        return () -> {
+            for (int index = 0; index < cancellations.size(); index++) {
+                var cancellation = cancellations.get(index);
+                var result = owner.matchingAdapter.cancelDirectPrefix(
+                        pending.command().header().submittedAtEpochMillis(), cancellation.userId(),
+                        cancellation.orderId(), cancellation.symbol());
+                boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                        || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+                if (accepted) {
+                    direct.recordDirectPreCancellation(cancellation.orderId());
+                    continue;
+                }
+                return owner.matchingAdapter.publishDirectPrefixFailure(
+                        shard, pending.sequence(), pending.command().header().commandId(), logicalOrderId,
+                        pending.command().header().submittedAtEpochMillis(), result, direct);
+            }
+            return submission.get();
+        };
     }
 
     private Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> withEvidence(

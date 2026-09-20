@@ -17,6 +17,7 @@ import java.util.Objects;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 
 /**
@@ -142,10 +143,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     void transferLaneResponseOwnership() { laneResultTarget.transferResponseOwnership(); }
 
     /** Reuses one slot-owned gate instead of allocating a capturing lambda for each PLACE. */
-    java.util.function.Supplier<CoreMatchingResult> gateAdmission(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> gateAdmission(TradingCoreRuntime owner,
             int admissionLaneId, int matcherShard,
             com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
-            java.util.function.Supplier<CoreMatchingResult> original) {
+            java.util.function.Supplier<?> original) {
         admissionMatching.prepare(owner, admissionLaneId, matcherShard, settlement, original);
         return admissionMatching;
     }
@@ -155,26 +156,28 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
      * The matcher receives either the resolved Lane admission object or the immutable runtime
      * order snapshot already required by the existing path.
      */
-    java.util.function.Supplier<CoreMatchingResult> preparePlaceMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> preparePlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId,
-            ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder) {
-        placeMatching.prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder);
+            ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
+            MatcherSettlementEvent direct) {
+        placeMatching.prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder, direct);
         return placeMatching;
     }
 
     /** Reuses the command slot for the common cancellation path instead of allocating a lambda. */
-    java.util.function.Supplier<CoreMatchingResult> prepareCancelMatching(TradingCoreRuntime owner,
-            int matcherShard, long orderId, long userId, String symbol) {
-        cancelMatching.prepare(owner, matcherShard, orderId, userId, symbol);
+    java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
+            int matcherShard, long orderId, long userId, String symbol, MatcherSettlementEvent direct) {
+        cancelMatching.prepare(owner, matcherShard, orderId, userId, symbol, direct);
         return cancelMatching;
     }
 
     /** Reuses the command slot for a resolved replacement without intermediate submission objects. */
-    java.util.function.Supplier<CoreMatchingResult> prepareReplaceMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId,
-            long originalOrderId, String symbol, CoreMatchingOrder replacement) {
+            long originalOrderId, String symbol, CoreMatchingOrder replacement,
+            MatcherSettlementEvent direct) {
         replaceMatching.prepare(owner, matcherShard, orderId, userId,
-                originalOrderId, symbol, replacement);
+                originalOrderId, symbol, replacement, direct);
         return replaceMatching;
     }
 
@@ -604,7 +607,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private long expectedLaneMask;
     private long completedLaneMask;
     private volatile CoreMatchingResult completedMatchingResult;
-    private CoreMatchingResult matchingResult;
+    private MatchingResult matchingResult;
     /** Owner claims the route; Matcher releases it before publishing the result into this slot. */
     private volatile int submittedMatcherShard = -1;
 
@@ -648,7 +651,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     long coreSequence() { return claimed ? coreSequence : 0; }
     long expectedLaneMask() { return expectedLaneMask; }
     long completedLaneMask() { return completedLaneMask; }
-    CoreMatchingResult matchingResult() { return matchingResult; }
+    MatchingResult matchingResult() { return matchingResult; }
     /** Final write by the Matcher: subsequent Owner work reads this slot directly. */
     public void publishMatcherResult(int shardId, CoreMatchingResult result) {
         if (result == null || result.nativeCoreSequence() != coreSequence
@@ -753,7 +756,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return matchingRejection;
     }
 
-    void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
+    void result(MatchingResult result, long expectedMask, long validLaneMask) {
         if (result == null || result.nativeCoreSequence() != coreSequence
                 || (expectedMask & ~validLaneMask) != 0
                 || matchingResult != null) {
@@ -839,15 +842,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         replaceMatching.clear();
     }
 
-    private final class AdmissionMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+    private final class AdmissionMatchingContinuation implements java.util.function.Supplier<Object> {
         private TradingCoreRuntime owner;
         private int admissionLaneId;
         private int matcherShard;
         private MatcherSettlementEvent settlement;
-        private java.util.function.Supplier<CoreMatchingResult> original;
+        private java.util.function.Supplier<?> original;
 
         void prepare(TradingCoreRuntime owner, int admissionLaneId, int matcherShard,
-                     MatcherSettlementEvent settlement, java.util.function.Supplier<CoreMatchingResult> original) {
+                     MatcherSettlementEvent settlement, java.util.function.Supplier<?> original) {
             this.owner = Objects.requireNonNull(owner);
             this.admissionLaneId = admissionLaneId;
             this.matcherShard = matcherShard;
@@ -863,28 +866,31 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
 
         @Override
-        public CoreMatchingResult get() {
+        public Object get() {
             owner.runtimeState.awaitAdmissionReceipt(admissionLaneId, matcherShard, coreSequence, settlement);
             if (!settlement.admissionAccepted()) {
                 var place = decodedCommand.placeOrder();
-                return owner.matchingAdapter.rejectedPlaceWithEvidence(
+                owner.matchingAdapter.rejectedPlaceDirect(
                         matcherShard, coreSequence, command.header().commandId(), place.orderId(),
                         command.header().submittedAtEpochMillis(),
-                        settlement.admissionResultCode());
+                        settlement.admissionResultCode(), settlement);
+                return settlement;
             }
             return original.get();
         }
     }
 
-    private final class PlaceMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+    private final class PlaceMatchingContinuation implements java.util.function.Supplier<Object> {
         private TradingCoreRuntime owner;
         private int matcherShard;
         private long userId;
         private ResolvedPlaceOrder resolvedOrder;
         private CoreMatchingOrder matchingOrder;
+        private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
-                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder) {
+                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
+                     MatcherSettlementEvent direct) {
             if ((resolvedOrder == null) == (matchingOrder == null)) {
                 throw new IllegalArgumentException("exactly one ordinary PLACE order representation is required");
             }
@@ -893,6 +899,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.userId = userId;
             this.resolvedOrder = resolvedOrder;
             this.matchingOrder = matchingOrder;
+            this.direct = direct;
         }
 
         void clear() {
@@ -901,10 +908,21 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             userId = 0;
             resolvedOrder = null;
             matchingOrder = null;
+            direct = null;
         }
 
         @Override
-        public CoreMatchingResult get() {
+        public Object get() {
+            if (direct != null) {
+                if (resolvedOrder != null) {
+                    return owner.matchingAdapter.placeDirect(
+                            matcherShard, coreSequence, command.header().commandId(),
+                            command.header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
+                }
+                return owner.matchingAdapter.placeDirect(
+                        matcherShard, coreSequence, command.header().commandId(),
+                        command.header().submittedAtEpochMillis(), userId, matchingOrder, direct);
+            }
             if (resolvedOrder != null) {
                 return owner.matchingAdapter.placeWithEvidence(
                         matcherShard, coreSequence, command.header().commandId(),
@@ -916,20 +934,22 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
     }
 
-    private final class CancelMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+    private final class CancelMatchingContinuation implements java.util.function.Supplier<Object> {
         private TradingCoreRuntime owner;
         private int matcherShard;
         private long orderId;
         private long userId;
         private String symbol;
+        private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, String symbol) {
+                     long userId, String symbol, MatcherSettlementEvent direct) {
             this.owner = Objects.requireNonNull(owner);
             this.matcherShard = matcherShard;
             this.orderId = orderId;
             this.userId = userId;
             this.symbol = Objects.requireNonNull(symbol);
+            this.direct = direct;
         }
 
         void clear() {
@@ -938,17 +958,23 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             orderId = 0;
             userId = 0;
             symbol = null;
+            direct = null;
         }
 
         @Override
-        public CoreMatchingResult get() {
+        public Object get() {
+            if (direct != null) {
+                return owner.matchingAdapter.cancelDirect(
+                        matcherShard, coreSequence, command.header().commandId(), orderId,
+                        command.header().submittedAtEpochMillis(), userId, symbol, direct);
+            }
             return owner.matchingAdapter.cancelWithEvidence(
                     matcherShard, coreSequence, command.header().commandId(), orderId,
                     command.header().submittedAtEpochMillis(), userId, symbol);
         }
     }
 
-    private final class ReplaceMatchingContinuation implements java.util.function.Supplier<CoreMatchingResult> {
+    private final class ReplaceMatchingContinuation implements java.util.function.Supplier<Object> {
         private TradingCoreRuntime owner;
         private int matcherShard;
         private long orderId;
@@ -956,9 +982,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private long originalOrderId;
         private String symbol;
         private CoreMatchingOrder replacement;
+        private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, long originalOrderId, String symbol, CoreMatchingOrder replacement) {
+                     long userId, long originalOrderId, String symbol, CoreMatchingOrder replacement,
+                     MatcherSettlementEvent direct) {
             this.owner = Objects.requireNonNull(owner);
             this.matcherShard = matcherShard;
             this.orderId = orderId;
@@ -966,6 +994,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.originalOrderId = originalOrderId;
             this.symbol = Objects.requireNonNull(symbol);
             this.replacement = Objects.requireNonNull(replacement);
+            this.direct = direct;
         }
 
         void clear() {
@@ -976,10 +1005,17 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             originalOrderId = 0;
             symbol = null;
             replacement = null;
+            direct = null;
         }
 
         @Override
-        public CoreMatchingResult get() {
+        public Object get() {
+            if (direct != null) {
+                return owner.matchingAdapter.replaceDirect(
+                        matcherShard, coreSequence, command.header().commandId(), orderId,
+                        command.header().submittedAtEpochMillis(), userId,
+                        originalOrderId, symbol, replacement, direct);
+            }
             return owner.matchingAdapter.replaceWithEvidence(
                     matcherShard, coreSequence, command.header().commandId(), orderId,
                     command.header().submittedAtEpochMillis(), userId,
@@ -1048,7 +1084,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private final String[] symbols = new String[2];
         private int count;
         private boolean prepared;
-        private com.surprising.aeron.service.matching.CoreMatchingResult matcherResult;
+        private com.surprising.aeron.service.matching.MatchingResult matcherResult;
         private byte[] response;
         private int responseLength;
         private ResponseArena responseArena;
@@ -1085,28 +1121,19 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             symbols[index] = symbol;
         }
         @Override public boolean includeTerminalAfterImage() { return true; }
-        @Override public void matcherResult(com.surprising.aeron.service.matching.CoreMatchingResult result) {
+        @Override public void matcherResult(com.surprising.aeron.service.matching.MatchingResult result) {
             matcherResult = result;
         }
         @Override public void prepareResponse() {
             prepared = true;
             if (count != 1 || orders[0] == null || matcherResult == null) return;
-            long prefixBefore = matcherResult.matcherPrefixBefore();
-            long prefixAfter = matcherResult.matcherPrefixAfter();
-            if (prefixBefore == 0 || prefixAfter == 0
-                    || matcherResult.nativeOrderId() <= 0
-                    || matcherResult.nativeMatcherSequence() <= 0) return;
             try {
                 int length = com.surprising.aeron.protocol.CoreCommandResultCodec
                         .encodedSingleOrderLength(source);
                 responseSlot = responseArena.acquireSlot(length);
                 response = responseSlot.storage;
-                responseLength = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(
-                        matcherResult.nativeCoreSequence(), matcherResult.nativeCommandIdMostSignificantBits(),
-                        matcherResult.nativeCommandIdLeastSignificantBits(),
-                        matcherResult.nativeOrderId(),
-                        matcherResult.nativeMatcherSequence(), prefixBefore, prefixAfter, source,
-                        response, 0);
+                responseLength = com.surprising.aeron.protocol.CoreCommandResultCodec
+                        .encodeSingleOrderInto(source, response, 0);
                 responseSlot.length = responseLength;
             } catch (IllegalArgumentException ignored) {
                 if (responseSlot != null) responseArena.release(responseSlot);

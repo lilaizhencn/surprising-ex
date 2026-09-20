@@ -6,12 +6,12 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Owns instrument configuration and maintenance transitions in runtime state. */
-final class RuntimeInstrumentStateTransitions {
+public final class RuntimeInstrumentStateTransitions {
 
     private RuntimeInstrumentStateTransitions() {
     }
 
-    static void register(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void register(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                          RegisterInstrumentCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument update");
@@ -30,7 +30,7 @@ final class RuntimeInstrumentStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    static void updateMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void updateMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                    CoreMaintenanceCodec.Command command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument maintenance update");

@@ -85,11 +85,11 @@ final class TradingCoreQueryRouter {
                 if (result == null) {
                     return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, runtime.appliedCommandCount,
-                            0, runtime.cachedBusinessStateHash, runtime.EMPTY_RESPONSE_DATA);
+                            runtime.cachedBusinessStateHash, runtime.EMPTY_RESPONSE_DATA);
                 }
                 runtime.responseArena.retain(result.responseDataUnsafe());
                 return CoreResponse.owned(ResponseStatus.OK, result.status(), result.resultCode(),
-                        result.appliedCommandCount(), result.requiredExportSequence(), result.stateHash(),
+                        result.appliedCommandCount(), result.stateHash(),
                         result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);

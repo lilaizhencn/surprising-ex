@@ -1,10 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -20,7 +18,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import exchange.core2.core.common.MatcherEventType;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -105,7 +103,6 @@ public final class CorePerpetualEndToEndBenchmark {
                               boolean measured) {
         long[] latencies = measured ? new long[Math.multiplyExact(cycles, makerDepth + 1)] : new long[0];
         long started = System.nanoTime();
-        long lastExportSequence = 0;
         long matchedQuantity = 0;
         int latencyIndex = 0;
         for (int index = 0; index < cycles; index++) {
@@ -114,20 +111,14 @@ public final class CorePerpetualEndToEndBenchmark {
             CoreOrderSide takerSide = reverse ? CoreOrderSide.SELL : CoreOrderSide.BUY;
             for (int maker = 0; maker < makerDepth; maker++) {
                 long commandStarted = System.nanoTime();
-                lastExportSequence = placeAndComplete(state, sequences, MAKER_USER_ID, makerSide,
-                        CoreTimeInForce.GTC, 1).exportSequence();
+                placeAndComplete(state, sequences, MAKER_USER_ID, makerSide, CoreTimeInForce.GTC, 1);
                 if (measured) latencies[latencyIndex++] = System.nanoTime() - commandStarted;
             }
             long commandStarted = System.nanoTime();
             Completion taker = placeAndComplete(state, sequences, TAKER_USER_ID, takerSide,
                     CoreTimeInForce.IOC, makerDepth);
-            lastExportSequence = taker.exportSequence();
             matchedQuantity = Math.addExact(matchedQuantity, taker.matchedQuantity());
             if (measured) latencies[latencyIndex++] = System.nanoTime() - commandStarted;
-            if ((index & 255) == 255) {
-                apply(state, sequences, CoreMessageType.ACK_EXPORT, CommandSource.OPERATIONS, 0,
-                        CoreExportCodec.encodeAck(new AckExportCommand(lastExportSequence)));
-            }
         }
         return new Result(cycles, makerDepth, System.nanoTime() - started, latencies, matchedQuantity);
     }
@@ -142,7 +133,7 @@ public final class CorePerpetualEndToEndBenchmark {
         }
         long sequence = state.firstPendingMatchingSequence();
         if (sequence == 0) throw new IllegalStateException("matching was not queued");
-        CoreMatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
+        MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
         if (matching == null) throw new IllegalStateException("matching timed out");
         CoreResponse completed = null;
         long completionDeadline = System.nanoTime() + 30_000_000_000L;
@@ -156,7 +147,7 @@ public final class CorePerpetualEndToEndBenchmark {
         long matchedQuantity = matching.matcherEvents().stream()
                 .filter(event -> event.eventType() == MatcherEventType.TRADE)
                 .mapToLong(exchange.core2.core.common.MatcherResult.MatcherEvent::size).sum();
-        return new Completion(completed.requiredExportSequence(), matchedQuantity);
+        return new Completion(matchedQuantity);
     }
 
     private static CoreResponse apply(TradingCoreRuntime state, Sequences sequences, CoreMessageType type,
@@ -212,7 +203,7 @@ public final class CorePerpetualEndToEndBenchmark {
         private long orderId = 1_000_000L;
     }
 
-    private record Completion(long exportSequence, long matchedQuantity) {
+    private record Completion(long matchedQuantity) {
     }
 
     private record Result(int cycles, int makerDepth, long elapsedNanos, long[] latencies,

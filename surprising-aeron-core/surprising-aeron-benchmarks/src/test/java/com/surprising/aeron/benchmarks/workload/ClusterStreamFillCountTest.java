@@ -3,7 +3,6 @@ package com.surprising.aeron.benchmarks.workload;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -14,8 +13,7 @@ class ClusterStreamFillCountTest {
                 executed == 0 ? "OPEN" : "FILLED", 1);
     }
     private static CoreCommandResultView result(CoreOrderStateView... orders) {
-        var result = new CoreCommandResultView(1, new UUID(0, 10), 10, 1, 11, 12,
-                List.of(orders), List.of());
+        var result = new CoreCommandResultView(List.of(orders), List.of());
         return CoreCommandResultCodec.decode(CoreCommandResultCodec.encode(result));
     }
     @Test void emptyExecutionDetailsStillCountTheNewOrdersActualFillOnce() {

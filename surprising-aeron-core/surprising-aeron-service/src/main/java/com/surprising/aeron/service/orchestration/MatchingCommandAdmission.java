@@ -33,14 +33,6 @@ final class MatchingCommandAdmission {
 
     MatchingCommandAdmission(TradingCoreRuntime owner) { this.owner = owner; }
 
-    /** Compatibility view for diagnostics/tests; it is not a storage map. */
-    final DeferredMatchingView deferredMatching = new DeferredMatchingView();
-
-    final class DeferredMatchingView {
-        int size() { return owner.pendingMatching.deferredCount(); }
-        boolean isEmpty() { return size() == 0; }
-    }
-
     /** 在途清算或交割的资源范围，防止真实资金依赖交错。 */
     LongObjectHashMap<List<LifecycleScope>> pendingLifecycleScopes;
 
@@ -247,7 +239,6 @@ final class MatchingCommandAdmission {
         }
         owner.commits.completeCommitPublicationBatch();
         long businessStateHash = tradingStateChanged ? owner.currentBusinessStateHash() : owner.cachedBusinessStateHash;
-        long requiredExportSequence = 0;
         CommandSlot pending = deferredPending == null
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, beforeProjection,
@@ -268,8 +259,7 @@ final class MatchingCommandAdmission {
             owner.refreshCommittedCoreSequence();
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         }
-        long stateHash = owner.stateHash(owner.cachedBusinessStateHash, message.header().commandId(), ResponseStatus.OK,
-                TradingCoreRuntime.matchingPendingCode(), sequence);
+        long stateHash = owner.cachedBusinessStateHash;
         byte[] responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
         pending.withPendingStateHash(stateHash);
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
@@ -282,7 +272,7 @@ final class MatchingCommandAdmission {
         // collects the Lane admission only when both facts are ready.
         owner.submitMatching(pending);
         return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, requiredExportSequence, stateHash, responseData);
+                sequence, stateHash, responseData);
     }
 
     CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
@@ -304,24 +294,21 @@ final class MatchingCommandAdmission {
         owner.appliedCommandCount = sequence;
         owner.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-        long stateHash = owner.stateHash(owner.cachedBusinessStateHash, message.header().commandId(), ResponseStatus.OK,
-                TradingCoreRuntime.matchingPendingCode(), sequence);
+        long stateHash = owner.cachedBusinessStateHash;
         pending.withPendingStateHash(stateHash);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, 0, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {
         owner.commitMatchingSequence(pending.sequence());
-        long requiredExportSequence = 0;
-        long stateHash = owner.stateHash(owner.cachedBusinessStateHash, pending.command().header().commandId(),
-                ResponseStatus.REJECTED, resultCode, pending.sequence());
+        long stateHash = owner.cachedBusinessStateHash;
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
-                ResponseStatus.REJECTED, resultCode, pending.sequence(), requiredExportSequence, stateHash,
+                ResponseStatus.REJECTED, resultCode, pending.sequence(), stateHash,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         owner.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                pending.sequence(), requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                pending.sequence(), stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     void validatePendingCancel(CoreMessage message, DecodedMatchingCommand decodedCommand) {

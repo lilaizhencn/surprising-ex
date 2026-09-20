@@ -5,6 +5,7 @@ import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreOrderStateSource;
@@ -93,7 +94,7 @@ final class CommandResultBuilder {
     /** 当前命令变化的订单 ID，保持 primitive 收集直到返回边界。 */
     PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
     /** Lane settlement already supplied the exact primitive user keys for this command. */
-    private boolean laneDeltaIdsSeeded;
+    private boolean laneCommitIdsSeeded;
 
     /** 复用批量订单响应的去重集合和临时视图缓冲；List.copyOf 在边界创建稳定结果。 */
     private final PrimitiveLongChangeSet commandViewOrderIds = new PrimitiveLongChangeSet();
@@ -176,17 +177,17 @@ final class CommandResultBuilder {
         owner.commandFundsAccumulator.clear();
         changedUserIds.clear();
         changedOrderIds.clear();
-        laneDeltaIdsSeeded = false;
+        laneCommitIdsSeeded = false;
     }
 
-    void markLaneDeltaIdsSeeded() { laneDeltaIdsSeeded = true; }
+    void markLaneCommitIdsSeeded() { laneCommitIdsSeeded = true; }
 
     void materializeChangeAccumulators() {
         owner.seedChangeAccumulators();
-        // A matcher settlement has already copied its LaneDelta user keys into the primitive
+        // A matcher settlement has already copied its LaneCommitDelta user keys into the primitive
         // set. Scanning the Owner-wide changed-user index again only duplicates probes and can
         // accidentally include an earlier command's users while a commit is suspended.
-        if (!laneDeltaIdsSeeded) owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
+        if (!laneCommitIdsSeeded) owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
         commandChangedUserIds = changedUserIds.toImmutableList();
         commandChangedOrderIds = changedOrderIds.toImmutableList();
     }
@@ -369,7 +370,7 @@ final class CommandResultBuilder {
 
     byte[] commandResultData(
             CommandSlot pending,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+            MatchingResult matchingResult) {
         if (commandRiskScanControl != null) {
             return setResponse(CoreRiskScanControlCodec.encodeView(commandRiskScanControl));
         }
@@ -400,55 +401,33 @@ final class CommandResultBuilder {
         if (pending == null || matchingResult == null) {
             return setResponse(EMPTY_RESULT);
         }
-        long matcherPrefixBefore = matchingResult.matcherPrefixBefore();
-        long matcherPrefixAfter = matchingResult.matcherPrefixAfter();
-        long nativeOrderId = matchingResult.nativeOrderId();
-        long nativeMatcherSequence = matchingResult.nativeMatcherSequence();
-        if (matchingResult.nativeCoreSequence() != pending.sequence()
-                || !matchingResult.nativeMatches(pending.command().header().commandId())
-                || nativeOrderId <= 0
-                || nativeMatcherSequence <= 0 || matcherPrefixBefore == 0 || matcherPrefixAfter == 0) {
-            return setResponse(EMPTY_RESULT);
-        }
         try {
             if (commandSingleOrder != null) {
                 commandSingleOrderSource.set(commandSingleOrder, owner.runtimeOrderSymbol(commandSingleOrder));
                 int length = CoreCommandResultCodec.encodedSingleOrderLength(commandSingleOrderSource);
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
-                        pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeMatcherSequence,
-                        matcherPrefixBefore, matcherPrefixAfter, commandSingleOrderSource,
-                        destination, responseOffset);
+                        commandSingleOrderSource, destination, responseOffset);
                 return destination;
             }
             if (commandOrderViews.size() == 1) {
                 int length = CoreCommandResultCodec.encodedSingleOrderLength(commandOrderViews.get(0));
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
-                        pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeMatcherSequence,
-                        matcherPrefixBefore, matcherPrefixAfter, commandOrderViews.get(0),
-                        destination, responseOffset);
+                        commandOrderViews.get(0), destination, responseOffset);
                 return destination;
             }
             if (!commandOrderSources.isEmpty()) {
                 int length = CoreCommandResultCodec.encodedLength(commandOrderSources, List.of());
                 byte[] destination = prepareResponseStorage(length);
                 responseLength = CoreCommandResultCodec.encodeInto(
-                        pending.sequence(), pending.command().header().commandId(),
-                        nativeOrderId, nativeMatcherSequence,
-                        matcherPrefixBefore, matcherPrefixAfter, commandOrderSources, List.of(),
-                        destination, responseOffset);
+                        commandOrderSources, List.of(), destination, responseOffset);
                 return destination;
             }
             int length = CoreCommandResultCodec.encodedLength(commandOrderViews, List.of());
             byte[] destination = prepareResponseStorage(length);
             responseLength = CoreCommandResultCodec.encodeInto(
-                    pending.sequence(), pending.command().header().commandId(),
-                    nativeOrderId, nativeMatcherSequence,
-                    matcherPrefixBefore, matcherPrefixAfter, commandOrderViews, List.of(),
-                    destination, responseOffset);
+                    commandOrderViews, List.of(), destination, responseOffset);
             return destination;
         } catch (IllegalArgumentException exception) {
             return setResponse(EMPTY_RESULT);

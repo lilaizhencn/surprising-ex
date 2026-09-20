@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
 import java.io.BufferedInputStream;
@@ -68,7 +68,7 @@ public final class OfflineReplayMain {
     private static void drainMatching(TradingCoreRuntime state, int pendingBefore, CoreMessage message) {
         while (state.pendingMatchingCount() > pendingBefore) {
             long sequence = state.firstPendingMatchingSequence();
-            CoreMatchingResult matching = null;
+            MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
             while (matching == null && System.nanoTime() < deadline) {
                 matching = state.takeMatchingResult(sequence);

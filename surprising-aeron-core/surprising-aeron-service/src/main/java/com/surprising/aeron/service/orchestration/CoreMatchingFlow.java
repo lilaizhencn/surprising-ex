@@ -13,6 +13,7 @@ import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
@@ -60,24 +61,22 @@ final class CoreMatchingFlow {
             owner.pendingMatching.completeSubmission(sequence);
             owner.appliedCommandCount = sequence;
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-            long stateHash = owner.stateHash(owner.cachedBusinessStateHash, message.header().commandId(),
-                    ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), sequence);
+            long stateHash = owner.cachedBusinessStateHash;
             pending.withPendingStateHash(stateHash);
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
-                    TradingCoreRuntime.matchingPendingCode(), sequence, 0, stateHash,
+                    TradingCoreRuntime.matchingPendingCode(), sequence, stateHash,
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
         owner.appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
         owner.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        long stateHash = owner.stateHash(owner.cachedBusinessStateHash, message.header().commandId(),
-                ResponseStatus.REJECTED, resultCode, sequence);
+        long stateHash = owner.cachedBusinessStateHash;
         owner.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint,
-                ResponseStatus.REJECTED, resultCode, sequence, 0, stateHash,
+                ResponseStatus.REJECTED, resultCode, sequence, stateHash,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, 0, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CommandSlot removePendingMatching(long sequence) {
@@ -196,14 +195,14 @@ final class CoreMatchingFlow {
                 return;
             }
             owner.matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), owner.matcherCommands.prepareMatchingCommand(pending));
+                    pending.sequence(), owner.matcherCommands.prepareMatchingCommand(pending, null));
             pending.matchingSubmitted();
             matchingSubmissionCompleted(pending);
             return;
         }
-        var command = owner.matcherCommands.prepareMatchingCommand(pending);
         var direct = owner.directMatcherSettlements.prepareForMatching(pending);
-        java.util.function.Supplier<CoreMatchingResult> matcherSubmission = command;
+        var command = owner.matcherCommands.prepareMatchingCommand(pending, direct);
+        java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {
             int admissionLaneId = pending.placeAdmission().laneId();
             matcherSubmission = pending.gateAdmission(owner, admissionLaneId, matcherShard(pending),
@@ -351,7 +350,7 @@ final class CoreMatchingFlow {
         return value;
     }
 
-    CoreMatchingResult takeMatchingResult(long sequence) {
+    MatchingResult takeMatchingResult(long sequence) {
         if (owner.fatalFailure != null || !owner.pendingMatching.contains(sequence)) return null;
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null) return null;

@@ -13,7 +13,7 @@ public final class CoreInputEventCodec {
 
     public static byte[] encode(CoreInputEvent event) {
         byte[] payload = event.commandPayload();
-        if (payload.length > CoreExportCodec.MAX_COMMAND_PAYLOAD) {
+        if (payload.length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("core input payload is too large");
         }
         return ByteBuffer.allocate(FIXED_LENGTH + payload.length).order(ByteOrder.LITTLE_ENDIAN)

@@ -3,6 +3,7 @@ package com.surprising.aeron.service.orchestration;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.model.CoreOrderState;
@@ -120,7 +121,7 @@ final class CoreSnapshotLifecycle {
             while (!owner.pendingMatching.isEmpty()) {
                 long sequence = owner.firstPendingMatchingSequence();
                 CommandSlot pending = owner.pendingMatching.get(sequence);
-                com.surprising.aeron.service.matching.CoreMatchingResult result =
+                MatchingResult result =
                         pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null)
                                 ? owner.laneCommandContexts.required(sequence).matchingResult()
                                 : owner.laneCommandContexts.required(sequence).takeMatchingCompletion();
@@ -218,7 +219,7 @@ final class CoreSnapshotLifecycle {
         long deadlineNanos;
         /** 快照所覆盖的已完成命令序号。 */
         long coreSequence = -1;
-        /** 快照所覆盖的导出提交水位。 */
+        /** 快照所覆盖的运行时投影发布水位。 */
         long projectionSequence = -1;
         /** 快照边界物化的状态，只在快照生命周期内持有。 */
         TradingCoreState snapshotState;

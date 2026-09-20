@@ -108,7 +108,7 @@ class CoreLifecycleWorkTest {
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(), Map.of(), Map.of("BTC-USDT", instrument), risk, treasury);
         return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
-                Map.of(), Map.of(), trading, new CoreExportState());
+                Map.of(), Map.of(), trading);
     }
 
     private static CoreLiquidationState liquidation(long id, long userId, long deficit,

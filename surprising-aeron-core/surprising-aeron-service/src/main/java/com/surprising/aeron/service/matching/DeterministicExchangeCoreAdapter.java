@@ -305,6 +305,190 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
+    /** Hot path: publish the native immutable result into the already-owned settlement event. */
+    public exchange.core2.core.common.MatcherResult placeDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
+            long userId, ResolvedPlaceOrder command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher command");
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+                    aeronTimestamp, placeNative(userId, command), target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult placeDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
+            long userId, CoreMatchingOrder command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher command");
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+                    aeronTimestamp, placeNative(userId, command), target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult cancelDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long userId, String symbol,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || symbol == null || symbol.isBlank() || target == null)
+            throw new IllegalArgumentException("invalid direct matcher cancellation");
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            return publishNativeMatcherResult(shardId, coreSequence, commandId, orderId,
+                    aeronTimestamp, cancelNative(userId, orderId, symbol), target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult replaceDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long userId, long originalOrderId, String symbol,
+            CoreMatchingOrder replacement,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || symbol == null || symbol.isBlank() || replacement == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher replacement");
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            exchange.core2.core.common.MatcherResult cancellation =
+                    cancelNative(userId, originalOrderId, symbol);
+            exchange.core2.core.common.MatcherResult result = nativeAccepted(cancellation)
+                    ? placeNative(userId, replacement) : cancellation;
+            int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
+            if (nativeShard != shardId)
+                throw new IllegalStateException("native matcher replacement crossed its evidence partition");
+            return matcherEvidence.publishReplacement(coreSequence, commandId, orderId, aeronTimestamp,
+                    matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+                    cancellation, result, target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult placeDirectBatchItem(
+            int shardId, int index, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
+            long userId, ResolvedPlaceOrder command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
+                || command == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher batch item");
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            exchange.core2.core.common.MatcherResult result = placeNative(userId, command);
+            int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
+            if (nativeShard >= 0 && nativeShard != shardId)
+                throw new IllegalStateException("native matcher batch crossed its evidence partition");
+            return matcherEvidence.publishBatchItem(coreSequence, commandId, command.orderId(),
+                    aeronTimestamp, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+                    result, index, target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult cancelDirectBatchItem(
+            int shardId, int index, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long userId, String symbol,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
+                || symbol == null || symbol.isBlank() || target == null)
+            throw new IllegalArgumentException("invalid direct matcher cancellation item");
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            exchange.core2.core.common.MatcherResult result = cancelNative(userId, orderId, symbol);
+            int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
+            if (nativeShard != shardId)
+                throw new IllegalStateException("native matcher cancellation crossed its evidence partition");
+            return matcherEvidence.publishBatchItem(coreSequence, commandId, orderId,
+                    aeronTimestamp, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+                    result, index, target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
+        return result.resultCode() == CommandResultCode.SUCCESS
+                || result.resultCode() == CommandResultCode.ACCEPTED;
+    }
+
+    private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        Throwable poison = matcherFailure.get();
+        if (poison != null)
+            throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
+        int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
+        if (nativeShard >= 0 && nativeShard != shardId)
+            throw new IllegalStateException("native matcher result crossed its evidence partition");
+        return matcherEvidence.publishNative(coreSequence, commandId, orderId, aeronTimestamp,
+                matcherEvidence.nextSequence(shardId), shardId, nativeShard, result, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult cancelDirectPrefix(
+            long aeronTimestamp, long userId, long orderId, String symbol) {
+        if (symbol == null || symbol.isBlank())
+            throw new IllegalArgumentException("invalid direct matcher cancellation prefix");
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            return cancelNative(userId, orderId, symbol);
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public exchange.core2.core.common.MatcherResult publishDirectPrefixFailure(
+            int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId,
+            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        return publishNativeMatcherResult(shardId, coreSequence, commandId, logicalOrderId,
+                aeronTimestamp, result, target);
+    }
+
     /** Ordinary Lane admission already owns the resolved order; avoid rebuilding a matcher DTO. */
     public CoreMatchingResult placeWithEvidence(
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp, long userId, ResolvedPlaceOrder command) {
@@ -325,21 +509,19 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    /**
-     * Advances the Matcher evidence stream for a Lane-rejected PLACE without touching the order
-     * book.  The Owner still owns the business rejection; this keeps the optimistic direct
-     * submission transactionally harmless when the Account Lane rejects the reservation.
-     */
-    public CoreMatchingResult rejectedPlaceWithEvidence(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, String resultCode) {
+    public void rejectedPlaceDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, String resultCode,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
-                || resultCode == null || resultCode.isBlank())
-            throw new IllegalArgumentException("invalid rejected matcher command");
+                || resultCode == null || resultCode.isBlank() || target == null)
+            throw new IllegalArgumentException("invalid rejected direct matcher command");
         validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
-        CoreMatchingResult result = new CoreMatchingResult(false, resultCode);
-        long sequence = matcherEvidence.nextSequence(shardId);
-        return bindMatcherEvidence(coreSequence, commandId, orderId,
-                aeronTimestamp, sequence, shardId, result);
+        Throwable poison = matcherFailure.get();
+        if (poison != null)
+            throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
+        matcherEvidence.publishRejection(coreSequence, commandId, orderId,
+                matcherEvidence.nextSequence(shardId), shardId, resultCode, target);
     }
 
     public CoreMatchingResult cancelWithEvidence(
@@ -631,7 +813,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private void poisonIfFatal(CoreMatchingResult result) {
-        if (result.outcome() == CoreMatchingResult.Outcome.FATAL_DIVERGENCE) {
+        if (result.outcome() == MatchingResult.Outcome.FATAL_DIVERGENCE) {
             matcherFailure.compareAndSet(null,
                     new IllegalStateException("fatal matcher result: " + result.resultCode()));
         }
@@ -745,8 +927,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 Math.addExact(cancellations.successfulPrefixCount(), result.successfulPrefixCount()),
                 cancellations.matcherStateChanged() || result.matcherStateChanged()
                         || !cancellations.cancellations().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, nativeSequence, 0, 0, -1),
-                new CoreMatchingResult.MatcherPrefix(0, 0), result.nativeMatcherResult(), events,
+                0, 0, 0, 0, nativeSequence, 0, 0, -1,
+                result.nativeMatcherResult(), events,
                 result.marketData());
     }
 
@@ -793,8 +975,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 : failure == null ? "SUCCESS" : failure.resultCode();
         return new CoreMatchingResult(accepted, resultCode, cancellations,
                 outcome.successfulPrefix().size(), !accepted && !outcome.successfulPrefix().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, nativeSequence, 0, 0, -1),
-                new CoreMatchingResult.MatcherPrefix(0, 0), null, events,
+                0, 0, 0, 0, nativeSequence, 0, 0, -1,
+                null, events,
                 new exchange.core2.core.common.MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
 
@@ -858,7 +1040,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                                 cancelResult.matcherEvents(), result.matcherEvents());
                                 return new CoreMatchingResult(result.accepted(), result.resultCode(),
                                         cancellations, 1, !result.accepted(),
-                                        result.nativeCommand(), new CoreMatchingResult.MatcherPrefix(0, 0),
+                                        result.nativeCoreSequence(), result.nativeCommandIdMostSignificantBits(),
+                                        result.nativeCommandIdLeastSignificantBits(), result.nativeOrderId(),
+                                        result.nativeSequence(), result.nativeMatcherSequence(),
+                                        result.nativeAeronTimestamp(), result.nativeMatcherShardId(),
                                         result.nativeMatcherResult(), events, result.marketData());
                             });
                         });
@@ -876,7 +1061,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
                 CoreMatchingResult.concatenateEvents(cancelled.matcherEvents(), placed.matcherEvents());
         return new CoreMatchingResult(placed.accepted(), placed.resultCode(), cancellations, 1,
-                !placed.accepted(), placed.nativeCommand(), new CoreMatchingResult.MatcherPrefix(0, 0),
+                !placed.accepted(), placed.nativeCoreSequence(), placed.nativeCommandIdMostSignificantBits(),
+                placed.nativeCommandIdLeastSignificantBits(), placed.nativeOrderId(), placed.nativeSequence(),
+                placed.nativeMatcherSequence(), placed.nativeAeronTimestamp(), placed.nativeMatcherShardId(),
                 placed.nativeMatcherResult(), events, placed.marketData());
     }
 

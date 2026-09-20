@@ -7,13 +7,13 @@ package com.surprising.aeron.service.state;
  * 然后立即清空槽位。发布表只由 Owner 访问，不再需要二阶段 visible/commit 状态。</p>
  */
 final class LanePublication {
-    /** Settlement publication borrows the already-populated LaneDelta buffers. */
-    private TradingRuntimeState.LaneDelta delta;
+    /** Settlement publication borrows the already-populated Lane commit buffers. */
+    private TradingRuntimeState.LaneCommitDelta delta;
     private TradingRuntimeState runtime;
     private static final LanePublishedMap<?>[] NO_MAPS = new LanePublishedMap<?>[0];
     private static final long[] NO_KEYS = new long[0];
     private static final Object[] NO_VALUES = new Object[0];
-    // 结算直接借用LaneDelta；只有准入发布才需要自己的槽数组。
+    // 结算直接借用 Lane commit buffer；只有准入发布才需要自己的槽数组。
     private LanePublishedMap<?>[] maps = NO_MAPS;
     private long[] keys = NO_KEYS;
     private Object[] values = NO_VALUES;
@@ -28,7 +28,7 @@ final class LanePublication {
         size++;
     }
 
-    void bind(TradingRuntimeState runtime, TradingRuntimeState.LaneDelta delta) {
+    void bind(TradingRuntimeState runtime, TradingRuntimeState.LaneCommitDelta delta) {
         if (runtime == null || delta == null || size != 0 || this.delta != null) {
             throw new IllegalStateException("invalid Lane settlement publication");
         }
@@ -54,7 +54,7 @@ final class LanePublication {
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders,
                  OwnerSettlementMergeEvent timing) {
         if (delta != null) {
-            TradingRuntimeState.LaneDelta changes = delta;
+            TradingRuntimeState.LaneCommitDelta changes = delta;
             TradingRuntimeState owner = runtime;
             long started = timing == null ? 0 : System.nanoTime();
             changes.users.drainTo((id, value) -> {

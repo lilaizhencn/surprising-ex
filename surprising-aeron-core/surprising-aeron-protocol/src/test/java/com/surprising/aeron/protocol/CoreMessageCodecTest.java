@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "5845585305000102010001004c000300"
+    private static final String CURRENT_GOLDEN = "5845585306000102010001004c000300"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"
@@ -35,7 +35,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("cc5e1b3d4cd67b7ab5cf4d70a44a9794ee4ac577cadaa7f61c5d6def889e5639");
+                .isEqualTo("24bb7c3e3a45125df3eb55188505225c5b71641b9171f066c0fe72398fd85747");
     }
 
     @Test
@@ -56,7 +56,7 @@ class CoreMessageCodecTest {
         CoreMessageHeader header = command(UUID.randomUUID(), 42, 99, 7).header()
                 .response(CoreMessageType.COMMAND_RESULT);
         CoreResponse response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, CoreRoute.DEFAULT.version(), 11, 12, 13, 14,
+                CoreResultCode.NONE, CoreRoute.DEFAULT.version(), 11, 12, 14,
                 new byte[]{3, 5, 8, 13});
         byte[] destination = new byte[CoreMessageCodec.encodedResponseLength(response) + 1];
         destination[destination.length - 1] = 0x5a;
@@ -86,7 +86,6 @@ class CoreMessageCodecTest {
         assertThat(restoredQuery.header().route()).isEqualTo(CoreRoute.DEFAULT);
         assertThat(restoredCommand.header().response(CoreMessageType.COMMAND_RESULT).route())
                 .isEqualTo(CoreRoute.DEFAULT);
-        assertThat(restoredCommand.header().exportEvent(44).route()).isEqualTo(CoreRoute.DEFAULT);
         assertThat(CoreProtocol.HEADER_LENGTH).isEqualTo(76);
     }
 

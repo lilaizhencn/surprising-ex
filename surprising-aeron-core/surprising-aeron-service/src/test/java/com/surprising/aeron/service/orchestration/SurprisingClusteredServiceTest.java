@@ -1,5 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
@@ -11,7 +10,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -83,7 +81,7 @@ class SurprisingClusteredServiceTest {
                             public Long get(int index) {
                                 if (StackWalker.getInstance().walk(frames -> frames.anyMatch(
                                         frame -> (frame.getMethodName().equals("stampChangedOrdersByLane")
-                                                || frame.getMethodName().equals("validateOrderStampInputs")))))
+                                                || frame.getMethodName().equals("validateStampInputs")))))
                                     throw new IllegalStateException("injected terminal metadata failure");
                                 return Long.MAX_VALUE;
                             }
@@ -642,10 +640,6 @@ class SurprisingClusteredServiceTest {
             assertThat(state.tradingState().order(906).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
             assertThat(responses).hasSize(2);
-            var facts = state.exportState().pending().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .toList();
-            assertThat(facts).extracting(fact -> fact.exportSequence()).isSorted();
         } finally {
             service.onTerminate(null);
         }
@@ -707,10 +701,10 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
-        SurprisingClusteredService.ensureSnapshotCapacity(CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
+        SurprisingClusteredService.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
 
         assertThatThrownBy(() -> SurprisingClusteredService.ensureSnapshotCapacity(
-                CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 2))
+                SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 2))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Aeron core snapshot exceeds maximum size");
     }
@@ -1016,7 +1010,8 @@ class SurprisingClusteredServiceTest {
         com.surprising.aeron.service.matching.CoreMatchingResult result = null;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (result == null && System.nanoTime() < deadline) {
-            result = state.takeMatchingResult(sequence);
+            var matching = state.takeMatchingResult(sequence);
+            if (matching instanceof com.surprising.aeron.service.matching.CoreMatchingResult core) result = core;
             if (result == null) Thread.onSpinWait();
         }
         return result;

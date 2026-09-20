@@ -1416,3 +1416,40 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 性能没有退回“只能 3 万”：当前真实网络/Archive 满载为 31.1k–35.2k Core/s、32.6万–36.8万 business/s；纯内存 Owner/Lane JMH 约 54.2k Core/s。要继续提升并压低 p99，下一项应单独重构 `OrderRuntime.snapshot()`/`ReservationRuntime.snapshot()` 的发布表示，再处理 `CoreMatchingResult` 固定 window slot；instrument 路径已不是下一瓶颈。
 - 证据 SHA-256：main1/main2/main3/JFR summary 分别为 `07b21c63e303ee9ff6d00ca0875c458772909635bd00434287d8b0d12e089002`、`37cdec1a2eafdedd156db7be21d82eaedad068d4101f59bf52f041be93c697a0`、`5fc9e995b5e978eba288683d4c54f4ae676d350a638a6e83bac7fbc0849edc18`、`4ee18438d71a4467e770c1ed72001b6133eafd04262dbd5343d519266fecc86f`；node JFR `425f06002bc0d403dd805381b9cf547a7170e25d89a1cf7c39fd0a753ff9aeda`；JMH main/GC JSON `4ddf02919677ee06697f84f5bc95f700228ac96f3a99cf7137352f1424009a7c` / `c9ad20d76560467120ad584fa6f5e8bcbe37f3ea75e35d6dbf3b7994e83131c6`。
 - 本轮全部 Java/Aeron/JMH 进程已退出；5 个真实集群 run（含一个启动功能检查作废轮）和 2 份 JMH JSON 共约 12 GiB 已移动到 `/Users/atomex/.Trash/surprising-ex-canonical-instrument-20260920/`，可恢复，未移动或删除其他轮次。清理后 swap used 仍为 128.5 MiB、磁盘约 271 GiB 可用。
+
+## 2026-09-20 Core 兼容层与导出链删除后的本机验证（core-cleanup-20260920）
+
+### 采集前锁定计划
+
+- 本轮仅验证当前 `master=49647e0e70bcb60be7c990b3997e5ec8bc5ba19c` 加工作区未提交改动，工作区状态 SHA-256 为 `d8764969eab2fc25e44c8cd318ed3eb88dd5005f3a8c87d3e4eb25d8aa81cb37`；不检出旧版本，对照 commit 不适用。主要改动为删除 matcher prefix/hash 与 evidence 包装、Core export/ACK/query/snapshot 链、`RuntimeCommandProcessor`、旧 snapshot/cursor/Lane 别名及 Core 回执导出序号，并升级相关协议格式。
+- 问题与门槛：先确认协议、快照、撮合及交易调用方能够构建并通过受影响测试，再验证真实单成员 Aeron 满载运行是否存在正确性或明显性能问题。探索门槛沿用当前口径：稳定窗 terminal business throughput 不低于 300,000/s、terminal Core throughput 不低于 30,000/s，分业务最大 p99 不高于 30ms；accepted=terminal、unfinished=0、期末 backlog=0、资金差0、快照/恢复一致且无业务错误/超时。任一正确性失败判失败；swap/page-in 增长、磁盘不足、进程异常或测量窗错位使性能证据无效。
+- 环境：本机 macOS 26.7 x86_64，Intel Core i9-9880H，16 logical CPU、16GiB；HotSpot Corretto JDK 27.0.0.33.1、Maven 3.9.16、G1；磁盘采集前可用约270GiB。无CPU绑核或物理独占，不外推三节点生产容量；采集前确认没有既有 Java/Aeron 压测进程。
+- 业务场景：单真实 Aeron Cluster 成员，网络与 Archive 保留；LINEAR_PERPETUAL、MIXED batch20、128 symbols、既有固定种子和做市初始化；4 Account Lane、1 matcher；全局/session/owner in-flight 固定256；Owner、matcher pipeline、settlement 均 BUSY_SPIN。持续异步发压，30s预热、60s稳定测量、排空单列。
+- 执行顺序：先运行受影响 reactor 的编译与测试，并构建 benchmarks shaded artifacts；失败则停止，不产生性能结论。通过后只运行一次无 profiler 主轮 `core-cleanup-20260920-main1`，完整命令为 `ASYNC_RUN_ID=core-cleanup-20260920-main1 ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。
+- 采样与有效性：本轮用户要求“一次压测”，因此只给单轮当前代码结果，不声称稳定容量或回归幅度；无 profiler 主轮用于吞吐和业务尾延迟，脚本同时保存 NMT、线程、GC日志、窗口/队列与完成性指标。分配只能使用脚本现有 GC/NMT 证据，若需要精确 B/business 需另跑独立 `-prof gc`，本轮不以缺失值填零。完成后停止本轮进程，只清理确认属于本轮的 Archive/JFR/log/report，并把结果、偏差与清理状态追加到本节。
+
+### 构建、满载故障与修复
+
+- JDK 27 受影响 reactor 首轮暴露出本次删除未闭环：通用 `MatchingResult` 迁移未覆盖工具/benchmark，快照 inspect 仍调用已删除的 export 状态；已删除这些旧类型/API 依赖，benchmark reactor `-DskipTests package` 通过。service 完整测试 936 项中仍有 5 个失败：4 个为 snapshot/hash 删除后的恢复断言或校验行为未同步，1 个为 fault-injection 终态准备失败仍返回 APPLIED；因此当前工作区不能标记为完整正确性通过。
+- `core-cleanup-20260920-main1` 在预热满载时失败，结果无效：window high-water 254、pending 61 时，Owner 将 direct 槽中的原生 `exchange-core MatcherResult` 当普通 `CoreMatchingResult` 消费，cluster 终止，客户端出现 `ResultUnknownException`，无吞吐/p99 数据。
+- 两次短诊断稳定复现到竞态：`completedMatchingSequence()` 先调用 `skipReadyDirectSlots()`，若 matcher 恰在扫描后、completed-position 读取前发布 direct 槽，旧代码会直接暴露其 token，后续 `poll()` 进入错误类型分支。修复是在暴露 token 前重检槽位并继续退休 direct 槽，不新增线程、队列、barrier 或业务状态。Matcher pipeline/group、批量顺序定向测试通过；修复后 5s/10s 诊断轮 PASS，347451.835 business/s、33206.926 Core/s、最大 p99 29.081 ms、unfinished=0。
+
+### 单轮正式结果
+
+| run | 稳态秒 | business/s | Core/s | 最大业务 p99 | drain | window blocked | gate |
+|---|---:|---:|---:|---:|---:|---:|---|
+| main2 | 60.028610 | 291681.916 | 27895.165 | 37.289 ms | 7.003 ms | 48.623 s | PASS |
+
+- 正式轮达到 in-flight 256，context/matcher/completion high-water 为 255/211/200，Lane high-water 48–60；offered=terminal、unfinished=0、pending=0，未再出现 matcher 类型竞态或集群错误。四条 Lane 有效执行占比 46.65%–46.92%，不是 Lane 算力打满。
+- 本轮低于探索门槛：business -2.77%、Core -7.02%，最大 p99 高 7.289 ms；相对 canonical instrument 三轮均值 344291.154/32905.629 约低 15.28%。但只有一轮且本机 swap used 全程为 96.5 MiB，不能声称形成稳定回归幅度，也不能与历史零 swap 轮作严格 A/B。
+- 分业务 p99：PLACE 17.989 ms、CANCEL 15.884 ms、MARK 19.857 ms、PLACE_BATCH 21.757 ms、CANCEL_BATCH 37.289 ms；尾延迟主要由批量撤单拉高。window 阻塞约占稳态 81.00%，仍是严格窗口/完成 cadence 下的强背压。
+- 本轮未启用 JFR/`-prof gc`，不能从 NMT 给出精确 B/business；分配结论保持“未测”，不能用此前约 2.2 KiB/business 代替当前代码。summary SHA-256：正式轮 `3936ae42677a81828ce4d8615c3ee9b1acd76fa4febe30719b9f9bb4803df0a9`，通过诊断轮 `de0894218feceafb6807af07acc29147cc6172ecafb9477eca49ee62b1505e2c`。
+- 本轮 Java/Aeron/JMH 进程均已退出，磁盘约 269 GiB 可用，`git diff --check` 通过。保留本轮报告用于继续分析，未删除其他数据。
+
+### 重启后同口径复测
+
+- 用户重启本机后，采集前 swap total/used 均为 0，无遗留 Java/Aeron 进程；JDK 27、Maven 3.9.16、master 分支和压测参数均与 main2 相同。执行 `core-cleanup-20260920-main3-reboot`，30 秒预热、60 秒稳态，无 profiler。
+- 结果为 **385746.464 business/s、36853.928 Core/s、最大业务 p99 25.821 ms**，drain 6.173 ms；in-flight 峰值 256，offered=terminal、unfinished=0、pending=0，client/saturation gate PASS。分业务 p99：PLACE 13.402 ms、CANCEL 11.124 ms、MARK 18.333 ms、PLACE_BATCH 16.490 ms、CANCEL_BATCH 25.821 ms。
+- 相比重启前 main2，business/Core 吞吐均提高约 32.25%，最大 p99 从 37.289 ms 降至 25.821 ms；同一代码已超过 300k/30k/30ms 门槛，并高于 canonical instrument 三轮均值。证据不支持“代码修改导致稳定容量降至 29 万”；低轮主要受重启前本机状态影响。重启同时清除了 swap、冷页/热状态及潜在调度干扰，因此不能把改善单独归因于 swap 数字。
+- 四条 Lane 有效执行占比仍约 46.44%–46.79%，matcher/completion/context high-water 为 211/206/255，说明业务结构和满载点未改变；提升来自单位时间完成 cadence 恢复，不是压测未打满或降低了工作量。正式 summary SHA-256 为 `9088bbbfcbd35bfd48daaa1cbe89e1412b8177c916f11b1e92f2d564adfc751b`。轮后 swap 仍为 0，所有压测进程已退出；本轮报告、日志、Archive 等生成物已移至 `/Users/atomex/.Trash/surprising-ex-core-cleanup-reboot-20260920/`，可恢复，未移动其他轮次。
+- 该结论只回答吞吐低值归因；前述 service 完整测试的 5 个正确性失败仍需独立修复，不能因性能门槛通过而视为可发布。

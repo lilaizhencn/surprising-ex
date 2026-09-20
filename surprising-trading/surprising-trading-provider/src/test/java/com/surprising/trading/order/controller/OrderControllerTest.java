@@ -176,6 +176,6 @@ class OrderControllerTest {
                 "RESULT_UNKNOWN".equals(outcome) || "TERMINAL".equals(outcome)
                         || "MATCHING_PENDING".equals(outcome)
                         ? OrderCommandReceipt.commandResultUrl(commandId) : null,
-                List.of(91L), "TERMINAL".equals(outcome) ? 17L : null, null, null);
+                List.of(91L), null, null);
     }
 }

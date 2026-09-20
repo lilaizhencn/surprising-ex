@@ -29,8 +29,8 @@ class MatcherSettlementPlanTest {
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectCancellation(1, original, id, 0, identities, 10, 20);
             var result = new CoreMatchingResult(false, "MATCHING_UNKNOWN_ORDER_ID", List.of(), 0, false,
-                    new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 0),
-                    new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(), fill(1).marketData());
+                    1, 1, 2, 11, 1, 1, 1, 0,
+                    null, List.of(), fill(1).marketData());
             event.publishDirectResult(result);
             event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
             assertThat(event.complete()).isTrue();
@@ -59,8 +59,8 @@ class MatcherSettlementPlanTest {
             assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
             assertThat(event.direct()).isTrue();
             var result = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
-                    new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 0),
-                    new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(), fill(1).marketData());
+                    1, 1, 2, 11, 1, 1, 1, 0,
+                    null, List.of(), fill(1).marketData());
             boolean[] routeReleased = {false};
             event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
             event.beginMatcherPublication();
@@ -147,8 +147,8 @@ class MatcherSettlementPlanTest {
             var events = new java.util.ArrayList<exchange.core2.core.common.MatcherResult.MatcherEvent>();
             for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
             var deep = new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
-                    new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, 0, 0, -1),new CoreMatchingResult.MatcherPrefix(0,0),null,
-                    events,new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequence(1);
+                    0, 0, 0, 0, 0, 0, 0, -1, null,
+                    events,new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(1);
             var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
             MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),deep,runtime,identities,scratch,slot);
             int makerLane = topology.accountLaneId(20), count = 0;
@@ -264,8 +264,8 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
             var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
                     new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
-                            new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 0),
-                            new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(),
+                            1, 1, 2, 11, 1, 1, 1, 0,
+                            null, List.of(),
                             new MatcherResult.MarketData(List.of(), List.of(), 0, 0)), runtime, identities);
             var cancellations = List.of(new com.surprising.aeron.service.matching.CoreCancellationResult(13, true, "CANCELLED"),
                     new com.surprising.aeron.service.matching.CoreCancellationResult(12, false, "NOT_FOUND"),
@@ -291,7 +291,7 @@ class MatcherSettlementPlanTest {
             assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
                     fill(4), runtime, identities)).isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
             var repeated = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
-                    fill(1).nativeCommand(), fill(1).matcherPrefix(), null,
+                    1, 0, 0, 0, 0, 0, 0, -1, null,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
                             MatcherEventFixtures.trade(10, 20, 100, 2, false, false)), fill(1).marketData());
             assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
@@ -310,9 +310,9 @@ class MatcherSettlementPlanTest {
     private static CoreMatchingResult fill(long quantity) { return fill(quantity, 1); }
     private static CoreMatchingResult fill(long quantity, long sequence) {
         return new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
-                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, 0, 0, -1),new CoreMatchingResult.MatcherPrefix(0,0),null,
+                0, 0, 0, 0, 0, 0, 0, -1, null,
                 List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false)),
-                new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequence(sequence);
+                new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(sequence);
     }
     private static CoreInstrument instrument() {
         return INSTRUMENT;

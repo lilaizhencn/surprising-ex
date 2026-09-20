@@ -17,7 +17,10 @@ public interface LaneOrderResultTarget {
     void prepareResponse();
 
     /** Matcher proof supplied before the Lane captures its immutable order after-image. */
-    default void matcherResult(com.surprising.aeron.service.matching.CoreMatchingResult result) { }
+    default void matcherResult(com.surprising.aeron.service.matching.MatchingResult result) { }
+
+    /** Batch item outcome published before the final Matcher-to-Lane release boundary. */
+    default void matcherResult(int index, boolean accepted) { }
 
     /** Optional response bytes prepared by the Lane; null means the Owner must use its fallback. */
     default byte[] preparedResponse() { return null; }
@@ -33,7 +36,7 @@ public interface LaneOrderResultTarget {
     default boolean includeTerminalAfterImage() { return false; }
 
     /** 直接消费本次 Lane 变更中的不可变 OrderRuntime，不查询全局发布表。 */
-    static void capture(LaneOrderResultTarget target, TradingRuntimeState.LaneDelta changes,
+    static void capture(LaneOrderResultTarget target, TradingRuntimeState.LaneCommitDelta changes,
                         RuntimeIdentityRegistry identities, AccountLaneState lane) {
         for (int i = 0; i < target.resultCount(); i++) {
             long id = target.resultOrderId(i);

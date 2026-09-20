@@ -29,7 +29,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.LaneTopology;
@@ -1037,7 +1037,7 @@ final class LinearPerpetualBenchmarkSupport {
                             + " pendingCount=" + state.pendingMatchingCount()
                             + " submittedCount=" + submittedMatching.size());
                 }
-                CoreMatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
+                MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
                 if (matching == null) continue;
                 nativeMatchingResult = matching.resultCode();
                 pending.response = state.completeMatching(pending.sequence, matching,

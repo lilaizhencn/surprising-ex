@@ -1,9 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -51,19 +49,12 @@ public final class CoreAcceptFreezeBenchmark {
                         10L + index, TradingCommandCodec.encodePlaceOrder(place(1_000_000L + index)));
             }
             long started = System.nanoTime();
-            long lastExportSequence = 0;
             for (int index = 0; index < orders; index++) {
                 CoreResponse response = apply(state, CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
                         gatewaySequence++, 1_000_000L + index,
                         TradingCommandCodec.encodePlaceOrder(place(10_000_000L + index)));
                 if (response.status() != ResponseStatus.OK) {
                     throw new IllegalStateException("order was not accepted: " + response.status());
-                }
-                lastExportSequence = response.requiredExportSequence();
-                if ((index & 255) == 255) {
-                    apply(state, CoreMessageType.ACK_EXPORT, CommandSource.OPERATIONS, operationsSequence++,
-                            2_000_000L + index,
-                            CoreExportCodec.encodeAck(new AckExportCommand(lastExportSequence)));
                 }
             }
             long elapsed = System.nanoTime() - started;

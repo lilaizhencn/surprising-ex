@@ -15,7 +15,7 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 
-class RuntimeCommandProcessorTest {
+class RuntimeStateTransitionsTest {
 
     @Test
     void productTransferUsesOnlyBoundedRuntimeState() {
@@ -28,14 +28,14 @@ class RuntimeCommandProcessorTest {
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
                 "transfer-91", "product allocation");
 
-        assertThat(RuntimeCommandProcessor.transferOut(runtime, identities, 7L, transfer)).isTrue();
+        assertThat(RuntimeAccountStateTransitions.transferOut(runtime, identities, 7L, transfer)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNotNull();
         assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
-        assertThat(RuntimeCommandProcessor.transferOut(runtime, identities, 7L, transfer)).isFalse();
+        assertThat(RuntimeAccountStateTransitions.transferOut(runtime, identities, 7L, transfer)).isFalse();
 
-        assertThat(RuntimeCommandProcessor.completeTransfer(runtime, 7L, 91L)).isTrue();
+        assertThat(RuntimeAccountStateTransitions.completeTransfer(runtime, 7L, 91L)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNull();
-        assertThat(RuntimeCommandProcessor.completeTransfer(runtime, 7L, 91L)).isFalse();
+        assertThat(RuntimeAccountStateTransitions.completeTransfer(runtime, 7L, 91L)).isFalse();
     }
 
     @Test
@@ -47,7 +47,7 @@ class RuntimeCommandProcessorTest {
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
                 "transfer-91", "product allocation");
 
-        RuntimeCommandProcessor.transferIn(runtime, identities, 7L, transfer);
+        RuntimeAccountStateTransitions.transferIn(runtime, identities, 7L, transfer);
 
         assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(250L);
     }
@@ -62,7 +62,7 @@ class RuntimeCommandProcessorTest {
             RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
             TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-            RuntimeCommandProcessor.adjustBalance(runtime, identities, 7, command);
+            RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7, command);
 
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .as(productLine.name())
@@ -77,7 +77,7 @@ class RuntimeCommandProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThatThrownBy(() -> RuntimeCommandProcessor.adjustBalance(
+        assertThatThrownBy(() -> RuntimeAccountStateTransitions.adjustBalance(
                 runtime, identities, 7, new BalanceAdjustmentCommand("USDT", -11)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
@@ -93,7 +93,7 @@ class RuntimeCommandProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeCommandProcessor.updateRiskScanControl(runtime, command, 123);
+        RuntimeRiskStateTransitions.updateScanControl(runtime, command, 123);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }
@@ -108,7 +108,7 @@ class RuntimeCommandProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeCommandProcessor.registerInstrument(runtime, identities, command);
+        RuntimeInstrumentStateTransitions.register(runtime, identities, command);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }

@@ -3,12 +3,10 @@ package com.surprising.aeron.protocol;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
-import java.util.UUID;
 
 public final class CoreCommandResultCodec {
 
-    private static final int VERSION = 3;
-    private static final int IDENTITY_LENGTH = Long.BYTES * 7;
+    private static final int VERSION = 5;
     private static final int EXECUTION_LENGTH = Long.BYTES * 6;
     private static final int MAX_ITEMS = 100_000;
 
@@ -19,18 +17,14 @@ public final class CoreCommandResultCodec {
         if (result == null) {
             throw new IllegalArgumentException("command result is required");
         }
-        return encode(result.coreSequence(), result.commandId(), result.orderId(),
-                result.matcherSequence(), result.matcherPrefixBefore(), result.matcherPrefixAfter(),
-                result.orders(), result.executions());
+        return encode(result.orders(), result.executions());
     }
 
-    public static byte[] encode(long coreSequence, UUID commandId, long orderId,
-                                long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
-                                List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions) {
+    public static byte[] encode(List<? extends CoreOrderStateSource> orders,
+                                List<CoreExecutionView> executions) {
         int length = encodedLength(orders, executions);
         byte[] result = new byte[length];
-        encodeInto(coreSequence, commandId, orderId, matcherSequence,
-                matcherPrefixBefore, matcherPrefixAfter, orders, executions, result, 0);
+        encodeInto(orders, executions, result, 0);
         return result;
     }
 
@@ -47,17 +41,16 @@ public final class CoreCommandResultCodec {
         for (CoreOrderStateSource order : orders) {
             ordersLength = Math.addExact(ordersLength, CoreStateQueryCodec.encodedOrderStateLength(order));
         }
-        int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
+        int length = Math.addExact(Integer.BYTES * 2, ordersLength);
         length = Math.addExact(length, Integer.BYTES);
         return Math.addExact(length, Math.multiplyExact(executions.size(), EXECUTION_LENGTH));
     }
 
     /** Writes a result into caller-owned storage and returns the number of bytes written. */
-    public static int encodeInto(long coreSequence, UUID commandId, long orderId,
-                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
-                                 List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions,
+    public static int encodeInto(List<? extends CoreOrderStateSource> orders,
+                                 List<CoreExecutionView> executions,
                                  byte[] destination, int offset) {
-        if (commandId == null || destination == null || offset < 0) {
+        if (destination == null || offset < 0) {
             throw new IllegalArgumentException("command result fields are required");
         }
         int length = encodedLength(orders, executions);
@@ -70,13 +63,6 @@ public final class CoreCommandResultCodec {
         }
         ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
-        buffer.putLong(coreSequence);
-        buffer.putLong(commandId.getMostSignificantBits());
-        buffer.putLong(commandId.getLeastSignificantBits());
-        buffer.putLong(orderId);
-        buffer.putLong(matcherSequence);
-        buffer.putLong(matcherPrefixBefore);
-        buffer.putLong(matcherPrefixAfter);
         buffer.putInt(ordersLength);
         buffer.putInt(1);
         buffer.putInt(orders.size());
@@ -96,14 +82,10 @@ public final class CoreCommandResultCodec {
      * Hot path for the usual single-order response. It keeps the response
      * format identical to the list overload without allocating a singleton List.
      */
-    public static byte[] encodeSingleOrder(long coreSequence, UUID commandId, long orderId,
-                                           long matcherSequence,
-                                           long matcherPrefixBefore, long matcherPrefixAfter,
-                                           CoreOrderStateSource order) {
+    public static byte[] encodeSingleOrder(CoreOrderStateSource order) {
         int length = encodedSingleOrderLength(order);
         byte[] result = new byte[length];
-        encodeSingleOrderInto(coreSequence, commandId, orderId, matcherSequence,
-                matcherPrefixBefore, matcherPrefixAfter, order, result, 0);
+        encodeSingleOrderInto(order, result, 0);
         return result;
     }
 
@@ -111,28 +93,12 @@ public final class CoreCommandResultCodec {
         if (order == null) throw new IllegalArgumentException("command result order is required");
         int orderStateLength = CoreStateQueryCodec.encodedOrderStateLength(order);
         int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
-        int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
+        int length = Math.addExact(Integer.BYTES * 2, ordersLength);
         return Math.addExact(length, Integer.BYTES);
     }
 
-    public static int encodeSingleOrderInto(long coreSequence, UUID commandId, long orderId,
-                                            long matcherSequence,
-                                            long matcherPrefixBefore, long matcherPrefixAfter,
-                                            CoreOrderStateSource order, byte[] destination, int offset) {
-        if (commandId == null || order == null || destination == null || offset < 0) {
-            throw new IllegalArgumentException("command result fields are required");
-        }
-        return encodeSingleOrderInto(coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, matcherSequence,
-                matcherPrefixBefore, matcherPrefixAfter, order, destination, offset);
-    }
-
-    /** Allocation-free identity overload for Lane-owned response encoders. */
-    public static int encodeSingleOrderInto(long coreSequence, long commandIdMostSignificantBits,
-                                            long commandIdLeastSignificantBits, long orderId,
-                                            long matcherSequence,
-                                            long matcherPrefixBefore, long matcherPrefixAfter,
-                                            CoreOrderStateSource order, byte[] destination, int offset) {
+    public static int encodeSingleOrderInto(
+            CoreOrderStateSource order, byte[] destination, int offset) {
         if (order == null || destination == null || offset < 0) {
             throw new IllegalArgumentException("command result fields are required");
         }
@@ -144,13 +110,6 @@ public final class CoreCommandResultCodec {
         int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
         ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
-        buffer.putLong(coreSequence);
-        buffer.putLong(commandIdMostSignificantBits);
-        buffer.putLong(commandIdLeastSignificantBits);
-        buffer.putLong(orderId);
-        buffer.putLong(matcherSequence);
-        buffer.putLong(matcherPrefixBefore);
-        buffer.putLong(matcherPrefixAfter);
         buffer.putInt(ordersLength);
         buffer.putInt(1);
         buffer.putInt(1);
@@ -169,13 +128,7 @@ public final class CoreCommandResultCodec {
         if (version != VERSION) {
             throw new ProtocolException("unsupported Core protocol version: " + version);
         }
-        requireRemaining(buffer, IDENTITY_LENGTH + Integer.BYTES);
-        long coreSequence = buffer.getLong();
-        UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
-        long orderId = buffer.getLong();
-        long matcherSequence = buffer.getLong();
-        long matcherPrefixBefore = buffer.getLong();
-        long matcherPrefixAfter = buffer.getLong();
+        requireRemaining(buffer, Integer.BYTES);
         int ordersLength = buffer.getInt();
         if (ordersLength < 0 || ordersLength > buffer.remaining() - Integer.BYTES) {
             throw new ProtocolException("invalid command result orders length: " + ordersLength);
@@ -194,8 +147,7 @@ public final class CoreCommandResultCodec {
             executions.add(new CoreExecutionView(buffer.getLong(), buffer.getLong(), buffer.getLong(),
                     buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
-        return new CoreCommandResultView(coreSequence, commandId, orderId, matcherSequence,
-                matcherPrefixBefore, matcherPrefixAfter, orderViews, executions);
+        return new CoreCommandResultView(orderViews, executions);
     }
 
     private static void requireRemaining(ByteBuffer buffer, int length) {

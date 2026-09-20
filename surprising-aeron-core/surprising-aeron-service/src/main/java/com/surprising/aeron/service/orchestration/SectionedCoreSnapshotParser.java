@@ -4,13 +4,10 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.orchestration.SectionedCoreSnapshotValidation.HeaderManifest;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
@@ -41,48 +38,41 @@ final class SectionedCoreSnapshotParser {
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
         Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
         Map<UUID, CommandResultLedger.StoredResult> commandResults = parseResults(payloads[2]);
-        OutboxSnapshot outbox = parseOutbox(payloads[3]);
-        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[4]);
-        TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[5], manifest.productLine());
-        Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[6]);
-        Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[7]);
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[8]);
+        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[3]);
+        TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[4], manifest.productLine());
+        Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[5]);
+        Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[6]);
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
         int laneSectionCount = payloads.length - SectionedCoreSnapshotCodec.BASE_SECTION_COUNT;
         if (laneSectionCount != manifest.topology().accountLaneCount()) {
             throw new ProtocolException("snapshot account lane section count mismatch");
         }
         List<AccountLaneSnapshot> accountLanes = new ArrayList<>(laneSectionCount);
         for (int index = 0; index < laneSectionCount; index++) {
-            accountLanes.add(parseAccountLane(payloads[9 + index], manifest));
+            accountLanes.add(parseAccountLane(payloads[8 + index], manifest, index));
         }
         SectionedCoreSnapshotValidation.validateAccountLanes(manifest, accountLanes);
-        CoreExportState exportState = null;
-        try {
-            exportState = CoreExportState.restore(expectedProductLine,
-                    outbox.acknowledgedSequence(), outbox.nextSequence(), outbox.events(),
-                    outbox.reservedLengths());
-            SectionedCoreSnapshotValidation.validatePairing(
-                    manifest, sourceSequences, exportState, matcherSnapshot, tradingState,
-                    feePolicies, pendingTransfers);
-            CoreSnapshotImage.verifyMatcherState(matcherSnapshot, tradingState,
-                    manifest.appliedCommandCount(), manifest.businessStateHash());
-            long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
-                    .order(ByteOrder.LITTLE_ENDIAN).getLong();
-            return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
-                    commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies,
-                    pendingTransfers, retention, accountLanes, manifest, checksum);
-        } catch (RuntimeException failure) {
-            if (exportState != null) exportState.close();
-            throw failure;
-        }
+        SectionedCoreSnapshotValidation.validatePairing(
+                manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers);
+        CoreSnapshotImage.verifyMatcherState(matcherSnapshot, tradingState,
+                manifest.appliedCommandCount(), manifest.businessStateHash());
+        long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
+                .order(ByteOrder.LITTLE_ENDIAN).getLong();
+        return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
+                commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
+                pendingTransfers, retention, accountLanes, manifest, checksum);
     }
 
-    private static AccountLaneSnapshot parseAccountLane(byte[] payload, HeaderManifest manifest) {
+    private static AccountLaneSnapshot parseAccountLane(
+            byte[] payload, HeaderManifest manifest, int expectedLaneId) {
         ByteBuffer lane = wrap(payload);
         if (lane.remaining() < Integer.BYTES * 2 + Long.BYTES * 5) {
             throw new ProtocolException("truncated account lane section");
         }
         int laneId = lane.getInt();
+        if (laneId != expectedLaneId) {
+            throw new ProtocolException("account lane section route mismatch");
+        }
         long revision = lane.getLong();
         long appliedSequence = lane.getLong();
         long committedSequence = lane.getLong();
@@ -142,40 +132,10 @@ final class SectionedCoreSnapshotParser {
         return commandResults;
     }
 
-    private static OutboxSnapshot parseOutbox(byte[] payload) {
-        ByteBuffer outbox = wrap(payload);
-        if (outbox.remaining() < SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH) {
-            throw new ProtocolException("truncated snapshot outbox");
-        }
-        long acknowledgedSequence = outbox.getLong();
-        long nextSequence = outbox.getLong();
-        int eventCount = readCount(outbox, CoreExportState.MAX_PENDING_EVENTS, "outbox event");
-        ArrayList<CoreMessage> events = new ArrayList<>(eventCount);
-        ArrayList<Integer> reservedLengths = new ArrayList<>(eventCount);
-        for (int index = 0; index < eventCount; index++) {
-            if (outbox.remaining() < Integer.BYTES * 2) {
-                throw new ProtocolException("truncated snapshot outbox event");
-            }
-            int reservedLength = outbox.getInt();
-            int eventLength = outbox.getInt();
-            if (eventLength <= 0 || eventLength > outbox.remaining()
-                    || reservedLength < eventLength || reservedLength > CoreExportState.maxReservedEventBytes()) {
-                throw new ProtocolException("invalid snapshot outbox event length");
-            }
-            byte[] event = new byte[eventLength];
-            outbox.get(event);
-            events.add(CoreMessageCodec.decode(event));
-            reservedLengths.add(reservedLength);
-        }
-        requireConsumed(outbox, "outbox");
-        return new OutboxSnapshot(acknowledgedSequence, nextSequence,
-                List.copyOf(events), List.copyOf(reservedLengths));
-    }
-
     private static SnapshotResult readResult(ByteBuffer source) {
         if (source.remaining() < Integer.BYTES) throw new ProtocolException("truncated snapshot command result");
         int encodedLength = source.getInt();
-        if (encodedLength < CoreStateSnapshotCodec.RESULT_FIXED_LENGTH || encodedLength > source.remaining()) {
+        if (encodedLength < SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH || encodedLength > source.remaining()) {
             throw new ProtocolException("invalid snapshot command result length");
         }
         int limit = source.limit();
@@ -186,11 +146,10 @@ final class SectionedCoreSnapshotParser {
         ResponseStatus status = ResponseStatus.fromWireCode(source.getInt());
         CoreResultCode resultCode = CoreResultCode.fromWireCode(source.getInt());
         long appliedCommandCount = source.getLong();
-        long requiredExportSequence = source.getLong();
         long stateHash = source.getLong();
         long retentionSequence = source.getLong();
         int responseLength = source.getInt();
-        if (appliedCommandCount < 0 || requiredExportSequence < 0 || retentionSequence <= 0
+        if (appliedCommandCount < 0 || retentionSequence <= 0
                 || responseLength < 0 || responseLength != source.remaining()) {
             throw new ProtocolException("invalid snapshot command result metadata");
         }
@@ -199,7 +158,7 @@ final class SectionedCoreSnapshotParser {
         source.limit(limit);
         return new SnapshotResult(commandId, new CommandResultLedger.StoredResult(
                 CommandFingerprint.fromBytes(fingerprint), status, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, responseData, retentionSequence));
+                stateHash, responseData, retentionSequence));
     }
 
     private static int readCount(ByteBuffer buffer, int maximum, String label) {
@@ -226,17 +185,12 @@ final class SectionedCoreSnapshotParser {
     private record SnapshotResult(UUID commandId, CommandResultLedger.StoredResult value) {
     }
 
-    private record OutboxSnapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> events,
-                                  List<Integer> reservedLengths) {
-    }
-
     record Components(
             ProductLine productLine,
             long appliedCommandCount,
             long probeValue,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
-            CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, CoreFeePolicyState> feePolicies,
@@ -253,7 +207,7 @@ final class SectionedCoreSnapshotParser {
                 com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
-                        commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot,
+                        commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers,
                         manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
@@ -263,12 +217,6 @@ final class SectionedCoreSnapshotParser {
                 if (candidate != null) {
                     try {
                         candidate.close();
-                    } catch (RuntimeException closeFailure) {
-                        exception.addSuppressed(closeFailure);
-                    }
-                } else {
-                    try {
-                        exportState.close();
                     } catch (RuntimeException closeFailure) {
                         exception.addSuppressed(closeFailure);
                     }
@@ -288,8 +236,7 @@ final class SectionedCoreSnapshotParser {
                     manifest.userRegistryHash(), manifest.activeOrderHash(),
                     manifest.sourceSequenceDigest(), manifest.forkGitSha(), manifest.artifactSha256(),
                     manifest.matcherConfigHash(), manifest.topology(), manifest.topologyHash(),
-                    manifest.symbolRouteHash(), manifest.globalFundsHash(), exportState.status(),
-                    manifest.outboxPendingDigest(), checksum);
+                    manifest.symbolRouteHash(), manifest.globalFundsHash(), checksum);
         }
 
         private void requireProductLine(ProductLine expectedProductLine) {

@@ -23,7 +23,7 @@ class SettlementChangesReuseTest {
 
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
-            var delta = new TradingRuntimeState.LaneDelta();
+            var delta = new TradingRuntimeState.LaneCommitDelta();
             long nextId = 1;
             for (int count : new int[]{65, 1, 0, 7, 0}) {
                 long firstId = nextId;
@@ -41,7 +41,7 @@ class SettlementChangesReuseTest {
                 delta.clear();
                 assertThat(delta.terminalOrderCount()).isZero();
                 assertThat(delta.orders.isEmpty()).isTrue();
-                var field = TradingRuntimeState.LaneDelta.class.getDeclaredField("terminalOrderClients");
+                var field = TradingRuntimeState.LaneCommitDelta.class.getDeclaredField("terminalOrderClients");
                 field.setAccessible(true);
                 assertThat((Object[]) field.get(delta)).containsOnlyNulls();
             }

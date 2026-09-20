@@ -23,7 +23,7 @@ final class OrderBatchItem {
     /** 本项撮合事件；完成交接后只读，终态时释放引用。 */
     List<MatcherEvent> executionEvents = List.of();
     /** 本项结果由批次项唯一持有，结算输入通过索引引用，避免第二个结果列表。 */
-    com.surprising.aeron.service.matching.CoreMatchingResult matchingResult;
+    com.surprising.aeron.service.matching.MatchingResult matchingResult;
     /** 延后批量结算的 Lane 路由；零表示尚未登记。 */
     long settlementLaneMask;
     /** 本项需要编码的成交数量。 */

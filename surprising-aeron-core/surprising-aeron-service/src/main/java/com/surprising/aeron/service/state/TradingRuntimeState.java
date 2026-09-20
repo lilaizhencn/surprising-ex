@@ -343,7 +343,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     final ThreadLocal<MatcherSettlementChanges> matcherSettlementChangesScope = new ThreadLocal<>();
     /**
      * 固定 LaneCommitDelta ring。每个活跃撮合结算占用一个预建槽位，Owner 收集完成后归还；
-     * 不再在提交压力下创建 MatcherSettlementChanges/LaneDelta 对象。
+     * 不再在提交压力下创建 MatcherSettlementChanges/LaneCommitDelta 对象。
      */
     final MatcherSettlementChanges[] matcherSettlementChangesRing;
     private final int[] freeMatcherSettlementChangeSlots;
@@ -1067,7 +1067,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    LaneDelta laneDelta(int laneId) {
+    LaneCommitDelta laneDelta(int laneId) {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         return changes == null ? laneDeltas[laneId] : changes.laneDeltas[laneId];
     }
@@ -1079,7 +1079,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void flushPublishedChanges(int laneId,
                                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
-        LaneDelta changes = laneDeltas[laneId];
+        LaneCommitDelta changes = laneDeltas[laneId];
         changes.recordRiskChanges(this);
         changes.publishTriggersToOwner(this);
         changes.drainTo(laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
@@ -1165,7 +1165,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         void applyUserRevisions(int laneId, AccountLaneState lane) {
             LongLongHashMap deltas = userRevisionDeltas[laneId];
             if (deltas.isEmpty()) return;
-            LaneDelta changes = laneDeltas[laneId];
+            LaneCommitDelta changes = laneDeltas[laneId];
             deltas.forEachKeyValue((userId, count) -> {
                 UserRuntime current = lane.users.get(userId);
                 if (current == null) {
@@ -1200,7 +1200,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime) {
             applyUserRevisions(laneId, lane);
-            LaneDelta changes = laneDeltas[laneId];
+            LaneCommitDelta changes = laneDeltas[laneId];
             // Freeze only the final value for each changed key. A single settlement can update
             // an order, reservation, or position several times before the Owner sees it.
             changes.orders.freezeValues(OrderRuntime::publicationValue);
@@ -1330,7 +1330,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    public static class LaneDelta {
+    public static final class LaneCommitDelta {
         /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
         LanePublication publication;
         private LanePublication publicationBuffer;
@@ -1363,7 +1363,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             if (publicationBuffer == null) publicationBuffer = new LanePublication();
             publication = publicationBuffer;
-            // Standalone/recovery LaneDelta callers do not pass through prepareLaneTerminal;
+            // Standalone/recovery callers do not pass through prepareLaneTerminal;
             // preserve their terminal callback contract without making the Owner rescan orders.
             if (terminalOrderCount == 0) {
                 orders.forEach((orderId, order) -> {
@@ -1641,22 +1641,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
         }
 
-    }
-
-    /**
-     * Fixed Lane handoff slot consumed by the Owner.  The legacy LaneDelta name remains as a
-     * source-compatible base type for recovery/unit fixtures, while all live account lanes use
-     * this concrete compact commit slot.
-     */
-    public static final class LaneCommitDelta extends LaneDelta {
-        // Keep the legacy reflective surface visible on the concrete ring slot.  These aliases
-        // point at the base storage; no second change buffer is allocated.
-        final RuntimeChangeBuffer<UserRuntime> users = super.users;
-        final RuntimeIndexedChangeBuffer<OrderRuntime, Void> orders = super.orders;
-        final RuntimeChangeBuffer<ReservationRuntime> reservations = super.reservations;
-        final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = super.positions;
-
-        public LaneCommitDelta() { }
     }
 
     @Override
@@ -2574,7 +2558,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         /** Compact Lane handoff; the Owner receives identity primitives, never a second order walk. */
         void accept(long orderId, long userId, String clientOrderId, long coreSequence);
 
-        default void acceptBatch(LaneDelta delta, long coreSequence) {
+        default void acceptBatch(LaneCommitDelta delta, long coreSequence) {
             for (int index = 0; index < delta.terminalOrderCount(); index++) {
                 accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
                         delta.terminalOrderClient(index), coreSequence);
@@ -6152,12 +6136,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
+            MatcherSettlementPlan plan, com.surprising.aeron.service.matching.MatchingResult matchingResult,
             RuntimeIdentityRegistry identities) { return settlements.dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence, commitTimestamp, commitClusterPosition, plan, matchingResult, identities); }
     public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
     public void discardMatcherSettlement(MatcherSettlementEvent event) { settlements.discardMatcherSettlement(event); }
     public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
-            long sequence, long laneMask, long orderId, CoreMatchingResult result,
+            long sequence, long laneMask, long orderId,
+            com.surprising.aeron.service.matching.MatchingResult result,
             RuntimeIdentityRegistry identities) {
         return settlements.dispatchOrderBatchMatcherSettlement(sequence, laneMask, orderId, result, identities);
     }

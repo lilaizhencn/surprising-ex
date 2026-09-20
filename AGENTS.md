@@ -6,7 +6,7 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 - 这是 Java / Maven 多模块项目，业务包括现货、永续、交割、期权。
 - 保持现有架构统一：ProductLine、instrument、Kafka topic、账户、撮合、风控、WebSocket、结算等边界不要随意重构。
-- 新逻辑优先沿用现有模块、事件模型、repository、outbox、Kafka topic 和 Maven 测试。
+- 遵循后端 mvc 开发模式,优先沿用现有模块、事件模型、repository、outbox、Kafka topic 和 Maven 测试。
 - 除非任务明确需要，交易后端测试不要启动 wallet 服务。
 - 产品未上线，不要在代码逻辑里 fallback，legacy
 

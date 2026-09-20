@@ -3,7 +3,7 @@ import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
-import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.matching.CoreCancellationResult;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -80,7 +80,7 @@ public final class MatcherSettlementPlan {
 
     /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
     void buildDirect(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                     CoreMatchingResult result, TradingRuntimeState runtime) {
+                     MatchingResult result, TradingRuntimeState runtime) {
         if (taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
@@ -92,7 +92,7 @@ public final class MatcherSettlementPlan {
 
     /** Build an accepted PLACE fact from immutable admission data; no detached runtime order. */
     void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
-                     CoreMatchingResult result, TradingRuntimeState runtime) {
+                     MatchingResult result, TradingRuntimeState runtime) {
         if (userId <= 0 || taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
@@ -105,7 +105,7 @@ public final class MatcherSettlementPlan {
     private void buildDirect(long sequence, long orderId, long userId,
                              com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
                              CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
-                             CoreInstrument instrument, CoreMatchingResult result,
+                             CoreInstrument instrument, MatchingResult result,
                              TradingRuntimeState runtime) {
         clearReferences();
         coreSequence = sequence; directTaker = taker; admittedTaker = taker;
@@ -149,7 +149,7 @@ public final class MatcherSettlementPlan {
     }
 
     /** 撤单只携带目标订单和撮合结论；不构建成交、持仓或 taker 拒单状态。 */
-    void buildDirectCancellation(long sequence, long userId, OrderRuntime order, CoreMatchingResult result,
+    void buildDirectCancellation(long sequence, long userId, OrderRuntime order, MatchingResult result,
                                  TradingRuntimeState runtime) {
         if (order == null || result == null || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != order.orderId())
@@ -175,13 +175,92 @@ public final class MatcherSettlementPlan {
         if (orderCount != 0) orderIds[0] = order.orderId();
     }
 
+    void buildDirectNative(long sequence, OrderRuntime taker, CoreInstrument instrument,
+                           exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+        if (taker == null || instrument == null || result == null || instrument != taker.instrument())
+            throw new IllegalArgumentException("invalid direct native matcher fact");
+        buildDirectNative(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
+                taker.instrument(), taker.remainingQuantitySteps(), taker, result, runtime);
+    }
+
+    void buildDirectNative(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
+                           exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+        if (userId <= 0 || taker == null || instrument == null || result == null
+                || instrument != taker.instrument())
+            throw new IllegalArgumentException("invalid direct native matcher fact");
+        buildDirectNative(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
+                taker.instrument(), taker.quantitySteps(), null, result, runtime);
+    }
+
+    private void buildDirectNative(long sequence, long orderId, long userId,
+                                   com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
+                                   CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
+                                   exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+        clearReferences();
+        coreSequence = sequence; directTaker = taker; admittedTaker = taker;
+        directTakerSide = side; directTakerSymbolId = symbolId; directTakerInstrument = takerInstrument;
+        takerOrderId = orderId; activeUserId = userId;
+        takerLaneId = runtime.topology().accountLaneId(activeUserId);
+        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        matcherEvents = result.events();
+        int capacity = Math.addExact(matcherEvents.size(), 1);
+        if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
+        LongHashSet keys = DIRECT_ORDER_KEYS.get();
+        keys.clear();
+        try {
+            orderCount = addUnique(keys, orderIds, 0, takerOrderId);
+            long remaining = remainingQuantity;
+            for (int index = 0; index < matcherEvents.size(); index++) {
+                MatcherEvent event = matcherEvents.get(index);
+                if (event == null) throw new IllegalArgumentException("missing matcher event");
+                if (event.eventType() != MatcherEventType.TRADE) continue;
+                if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
+                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
+                    throw new IllegalStateException("invalid direct fill identity or quantity");
+                remaining = Math.subtractExact(remaining, event.size());
+                if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
+                orderCount = addUnique(keys, orderIds, orderCount, event.matchedOrderId());
+                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
+                tradeCount++;
+            }
+            rejectTaker(!nativeAccepted(result));
+            indexLaneEvents(runtime);
+        } finally { keys.clear(); }
+    }
+
+    void buildDirectNativeCancellation(long sequence, long userId, OrderRuntime order,
+                                       exchange.core2.core.common.MatcherResult result,
+                                       TradingRuntimeState runtime) {
+        if (order == null || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
+        for (int index = 0; index < result.events().size(); index++) {
+            MatcherEvent event = result.events().get(index);
+            if (event == null || event.eventType() == MatcherEventType.TRADE)
+                throw new IllegalStateException("cancel result contains a trade");
+        }
+        clearReferences();
+        boolean accepted = nativeAccepted(result);
+        if (accepted && order.userId() != userId)
+            throw new IllegalStateException("matcher canceled another account order");
+        coreSequence = sequence; takerOrderId = order.orderId(); activeUserId = userId;
+        takerLaneId = runtime.topology().accountLaneId(activeUserId);
+        rejectedTaker = !accepted;
+        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        orderCount = accepted ? 1 : 0;
+        if (orderCount != 0) orderIds[0] = order.orderId();
+    }
+
+    private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
+        return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+    }
+
     /**
      * Rejection after a Lane admission does not have an order after-image.  Keep only the
      * routing facts needed to retire the direct event; constructing a synthetic OrderRuntime
      * here would add an allocation for every rejected admission.
      */
     void prepareRejectedDirect(long sequence, long userId, long orderId, long laneMask,
-                               CoreMatchingResult result) {
+                               MatchingResult result) {
         if (sequence <= 0 || userId <= 0 || orderId <= 0 || laneMask == 0 || result == null) {
             throw new IllegalArgumentException("invalid rejected direct matcher fact");
         }
@@ -194,6 +273,18 @@ public final class MatcherSettlementPlan {
         matcherEvents = result.matcherEvents();
         orderCount = 0;
         tradeCount = 0;
+    }
+
+    void prepareRejectedDirect(long sequence, long userId, long orderId, long laneMask) {
+        if (sequence <= 0 || userId <= 0 || orderId <= 0 || laneMask == 0)
+            throw new IllegalArgumentException("invalid rejected direct matcher fact");
+        clearReferences();
+        coreSequence = sequence;
+        takerOrderId = orderId;
+        activeUserId = userId;
+        requiredLaneMask = laneMask;
+        rejectedTaker = true;
+        orderCount = tradeCount = 0;
     }
 
     void omitUnplacedOrder() {
@@ -296,7 +387,7 @@ public final class MatcherSettlementPlan {
     }
 
     public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
-                                               long[] initialOrderIds, CoreMatchingResult result,
+                                               long[] initialOrderIds, MatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
         return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
@@ -306,7 +397,7 @@ public final class MatcherSettlementPlan {
     /** 调用方独占 target，全部 Lane 完成并消费结果之前不得再次构建或清理。 */
     public static MatcherSettlementPlan buildInto(MatcherSettlementPlan target,
             long sequence, long takerOrderId, long userId, long firstOrderId, long secondOrderId,
-            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (target == null) throw new IllegalArgumentException("settlement target is required");
         if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
         target.initialOrderScratch[0] = firstOrderId;
@@ -318,7 +409,7 @@ public final class MatcherSettlementPlan {
     /** Build from the immutable Lane admission receipt before the final Owner view is published. */
     public static MatcherSettlementPlan buildAdmittedInto(MatcherSettlementPlan target,
             long sequence, OrderRuntime taker, long firstOrderId, long secondOrderId,
-            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (target == null || taker == null) throw new IllegalArgumentException("admitted taker is required");
         if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
         target.initialOrderScratch[0] = firstOrderId;
@@ -334,7 +425,7 @@ public final class MatcherSettlementPlan {
      */
     public static MatcherSettlementPlan buildSingleInto(MatcherSettlementPlan target,
             long sequence, long takerOrderId, long userId,
-            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (target == null) throw new IllegalArgumentException("settlement target is required");
         if (target.initialOrderScratch == null || target.initialOrderScratch.length < 1)
             target.initialOrderScratch = new long[1];
@@ -360,14 +451,14 @@ public final class MatcherSettlementPlan {
 
     /** 批量构建与累计数量校验共用一次成交遍历；scratch 只在本批 Owner 调用期间使用。 */
     static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                                                CoreMatchingResult result, TradingRuntimeState runtime,
+                                                MatchingResult result, TradingRuntimeState runtime,
                                                 RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
         return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
                 taker, instrument, scratch, target);
     }
 
     private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
-                                               long[] initialOrderIds, CoreMatchingResult result,
+                                               long[] initialOrderIds, MatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                                OrderRuntime preparedTaker, CoreInstrument preparedInstrument,
                                                BatchValidationScratch batch, MatcherSettlementPlan target) {
@@ -605,6 +696,24 @@ public final class MatcherSettlementPlan {
         }
         preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
         preCancellationSize = count;
+    }
+
+    void acceptedReplacementCancellation(long orderId) {
+        if (orderId <= 0) throw new IllegalArgumentException("replacement cancellation is required");
+        ensurePreCancellationCapacity(1);
+        preCancellationStorage[0] = orderId;
+        preCancellationOrderIds = preCancellationStorage;
+        preCancellationSize = 1;
+    }
+
+    void acceptedPreCancellations(long[] orderIds, int count) {
+        if (count < 0 || count != 0 && (orderIds == null || count > orderIds.length))
+            throw new IllegalArgumentException("accepted cancellations are invalid");
+        if (count == 0) return;
+        ensurePreCancellationCapacity(preCancellationSize + count);
+        System.arraycopy(orderIds, 0, preCancellationStorage, preCancellationSize, count);
+        preCancellationSize += count;
+        preCancellationOrderIds = preCancellationStorage;
     }
 
     /**

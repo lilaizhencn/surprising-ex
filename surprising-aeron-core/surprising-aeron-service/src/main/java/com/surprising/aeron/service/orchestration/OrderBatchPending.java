@@ -3,6 +3,7 @@ import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.OrderBatchKind;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -46,6 +47,12 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     @Override public boolean resultPrepared(int index) {
         return items.get(index).laneResultPrepared;
     }
+    @Override public void matcherResult(int index, boolean accepted) {
+        int itemIndex = kind == OrderBatchKind.CANCEL ? cancellationChunkStart + index : index;
+        OrderBatchItem item = items.get(itemIndex);
+        item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+        item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+    }
     /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
     byte[] preparedResponse;
     int preparedResponseLength;
@@ -88,7 +95,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         return items.get(deferredSettlementItemIndexes[index]).admittedOrder;
     }
     public long settlementLaneMask(int index) { return items.get(deferredSettlementItemIndexes[index]).settlementLaneMask; }
-    public CoreMatchingResult settlementResult(int index) {
+    public MatchingResult settlementResult(int index) {
         return items.get(deferredSettlementItemIndexes[index]).matchingResult;
     }
 
@@ -197,7 +204,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     int nextIndex;
     /** 撮合结果接收时累计，终态编码不重复汇总。 */
     long tradeCount;
-    /** 当前跨分片撤单切片的结束位置。 */
+    /** 当前跨分片撤单切片的起止位置。 */
+    int cancellationChunkStart;
     int cancellationChunkEnd;
     /** 本批关联的全局命令序号。 */
     long sequence;
@@ -262,7 +270,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     java.util.function.BooleanSupplier itemAdmission;
     long itemAdmissionRevision;
     com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
-    com.surprising.aeron.service.matching.CoreMatchingResult lastMatchingResult;
+    MatchingResult lastMatchingResult;
     /** 本批准入订单增量索引，供后续批量项检查前面项目产生的订单依赖。 */
     BatchAdmissionOrderIndex admissionOrderIndex;
 
@@ -388,7 +396,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedResponseSlot = null;
         preparedResponse = null;
         preparedResponseLength = 0;
-        cancellationChunkEnd = 0;
+        cancellationChunkStart = cancellationChunkEnd = 0;
         sequence = 0;
         currentPreMatchingCancellationOrderIds = List.of();
         commitState = COMMIT_WAITING;
@@ -473,7 +481,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     void collectChangedOrderIds(
             OrderBatchItem item,
             long takerUserId,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+            MatchingResult matchingResult) {
         changedUserIds.add(takerUserId);
         itemChangedOrderIds.clear();
         itemChangedOrderIds.add(item.orderId());
@@ -499,6 +507,29 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             for (int index = 0; index < itemChangedOrderIds.size(); index++) {
                 runtimeChangedOrderIds.add(itemChangedOrderIds.valueAt(index));
             }
+        }
+        changedOrderIds.addAll(itemChangedOrderIds);
+    }
+
+    void collectChangedOrderIds(OrderBatchItem item, long takerUserId,
+                                exchange.core2.core.common.MatcherResult result) {
+        changedUserIds.add(takerUserId);
+        itemChangedOrderIds.clear();
+        itemChangedOrderIds.add(item.orderId());
+        if (item.originalOrderId() > 0) itemChangedOrderIds.add(item.originalOrderId());
+        if (item.replacementOrderId() > 0) itemChangedOrderIds.add(item.replacementOrderId());
+        for (int index = 0; index < result.events().size(); index++) {
+            MatcherEvent event = result.events().get(index);
+            if (event.eventType() == MatcherEventType.TRADE) {
+                changedUserIds.add(event.matchedOrderUid());
+                itemChangedOrderIds.add(event.matchedOrderId());
+            }
+        }
+        boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+        if (kind == OrderBatchKind.PLACE || accepted) {
+            for (int index = 0; index < itemChangedOrderIds.size(); index++)
+                runtimeChangedOrderIds.add(itemChangedOrderIds.valueAt(index));
         }
         changedOrderIds.addAll(itemChangedOrderIds);
     }

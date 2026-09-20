@@ -100,11 +100,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         awaitStartup();
     }
 
-    public void submit(long coreSequence, Supplier<CoreMatchingResult> command) {
+    public void submit(long coreSequence, Supplier<?> command) {
         submit(coreSequence, command, null);
     }
 
-    public void submit(long coreSequence, Supplier<CoreMatchingResult> command,
+    public void submit(long coreSequence, Supplier<?> command,
                 MatcherSettlementEvent settlement) {
         if (coreSequence <= 0 || command == null) {
             throw new IllegalArgumentException("matcher pipeline command is invalid");
@@ -112,7 +112,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         submitInternal(coreSequence, command, settlement);
     }
 
-    void submit(long coreSequence, Supplier<CoreMatchingResult> command,
+    void submit(long coreSequence, Supplier<?> command,
                 MatcherSettlementEvent settlement,
                 CommandSlot resultTarget) {
         if (coreSequence <= 0 || resultTarget == null || settlement != null && settlement.direct())
@@ -187,7 +187,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         Object result = pollResult(expectedCoreSequence);
         if (result == null) return null;
         if (result instanceof CoreMatchingResult matchingResult) return matchingResult;
-        throw new IllegalStateException("matcher pipeline returned an invalid matching result");
+        throw new IllegalStateException("matcher pipeline returned an invalid matching result: "
+                + result.getClass().getName());
     }
 
     /**
@@ -196,12 +197,18 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      * to drain completed matching work without probing every pending Core sequence.
      */
     public long completedMatchingSequence() {
-        rethrowPublicationFailure();
-        skipReadyDirectSlots();
-        long position = consumedPosition.value;
-        if (position >= completedPosition.value) return 0;
-        long token = slots[(int) position & mask].token;
-        return token > 0 ? token : 0;
+        while (true) {
+            rethrowPublicationFailure();
+            skipReadyDirectSlots();
+            long position = consumedPosition.value;
+            if (position >= completedPosition.value) return 0;
+            Slot slot = slots[(int) position & mask];
+            // Matcher may publish a direct completion between skipReadyDirectSlots() and
+            // the completed-position read above. Re-check the cell before exposing its token;
+            // direct native results belong to the event/Lane path, not the ordinary result path.
+            if (slot.token > 0 && slot.directSettlement) continue;
+            return slot.token > 0 ? slot.token : 0;
+        }
     }
 
     private Object pollResult(long expectedToken) {
@@ -348,8 +355,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     // already in its slot; publish that same result into the command slot.
                     slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
                             ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
-                    if (settlement != null && !settlement.resultPrepared())
-                        settlement.publishDirectResult((CoreMatchingResult) slot.result);
+                    if (settlement != null && !settlement.resultPrepared()) {
+                        if (slot.result instanceof CoreMatchingResult matchingResult)
+                            settlement.publishDirectResult(matchingResult);
+                        else throw new IllegalStateException("direct matcher did not publish its native result");
+                    }
                 } catch (Throwable failure) {
                     if (settlement != null) settlement.failDirect(failure);
                     slot.failure = failure;

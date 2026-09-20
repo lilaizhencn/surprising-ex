@@ -23,7 +23,7 @@ class CommandSlotRingTest {
         var ring = new CommandSlotRing(2, 1);
         var context = ring.claim(1);
         context.claimMatcherSubmission(0);
-        context.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1), 1, 1);
+        context.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1), 1, 1);
         context.completeLanes(1);
         assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> context.releaseMatcherSubmission(1)).isInstanceOf(IllegalStateException.class);
@@ -40,7 +40,7 @@ class CommandSlotRingTest {
         var other = ring.claim(2).settlementPlanBuffer();
         assertThat(other).isNotSameAs(buffer);
         buffer.preCancellations(new long[]{7});
-        first.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1), 1, 1);
+        first.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1), 1, 1);
         assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
         assertThat(buffer.preCancellationCount()).isOne();
         first.completeLanes(1);
@@ -94,7 +94,7 @@ class CommandSlotRingTest {
         var ring=new CommandSlotRing(4,4);
         var context=ring.claim(1);
         assertThatThrownBy(()->context.includeControlLanes(2,15)).isInstanceOf(IllegalStateException.class);
-        context.result(new CoreMatchingResult(true,"ACCEPTED").withCoreSequence(1),1,15);
+        context.result(new CoreMatchingResult(true,"ACCEPTED").withCoreSequenceInPlace(1),1,15);
         context.includeControlLanes(2,15);
         assertThat(context.expectedLaneMask()).isEqualTo(3);
         assertThatThrownBy(()->context.includeControlLanes(16,15)).isInstanceOf(IllegalStateException.class);
@@ -117,7 +117,7 @@ class CommandSlotRingTest {
     void aggregatesExactlyOneAckPerExpectedLaneAndReleasesTheResultReference() {
         CommandSlotRing ring = new CommandSlotRing(4, 4);
         CommandSlot context = ring.claim(1);
-        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
+        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1);
         context.result(result, 0b101, 0b1111);
 
         context.completeLanes(0b001);
@@ -136,8 +136,8 @@ class CommandSlotRingTest {
     void storesSynchronousMatchingResultAndKeepsTheFirstCompletion() {
         CommandSlotRing ring = new CommandSlotRing(4, 4);
         CommandSlot context = ring.claim(3);
-        CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequence(3);
-        CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequence(3);
+        CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequenceInPlace(3);
+        CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequenceInPlace(3);
 
         context.publishMatchingCompletion(first);
         context.publishMatchingCompletion(duplicate);
@@ -151,7 +151,7 @@ class CommandSlotRingTest {
     @Test
     void failsClosedForDuplicateUnexpectedOrOutOfRangeAck() {
         CommandSlot context = new CommandSlotRing(4, 4).claim(1);
-        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
+        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1);
         context.result(result, 0b11, 0b1111);
         context.completeLanes(0b01);
 

@@ -3,8 +3,7 @@ package com.surprising.aeron.protocol;
 public enum WireMessageKind {
     COMMAND(1),
     RESPONSE(2),
-    QUERY(3),
-    EXPORT_EVENT(4);
+    QUERY(3);
 
     private static final WireMessageKind[] BY_WIRE_CODE;
 

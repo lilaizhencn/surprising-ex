@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
-import com.surprising.aeron.service.state.RuntimeCommandProcessor;
+import com.surprising.aeron.service.state.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;
 
 /** 衍生品标记价、风险续扫和风险扫描控制命令。 */
@@ -67,7 +67,7 @@ public final class RiskCommands {
 
     public void executeUpdateRiskScanControl(CoreMessage message, long clusterTimestamp) {
         var command = CoreRiskScanControlCodec.decodeCommand(message.payloadUnsafe());
-        RuntimeCommandProcessor.updateRiskScanControl(owner.runtimeState(), command, clusterTimestamp);
+        RuntimeRiskStateTransitions.updateScanControl(owner.runtimeState(), command, clusterTimestamp);
         owner.requestCommitPublication();
         owner.setCommandRiskScanControl(owner.runtimeState().riskScanControl());
     }

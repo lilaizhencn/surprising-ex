@@ -24,7 +24,7 @@ class CoreResponseTest {
     void ownedStorageAndDecodeKeepWireBytesAndDoNotExposeInputBuffers() {
         byte[] encodedData = {3, 5, 8};
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, 7, 9, 11, encodedData);
+                CoreResultCode.NONE, 7, 11, encodedData);
         assertThat(response.dataUnsafe()).isSameAs(encodedData);
         response.data()[0] = 99;
         byte[] wire = CoreProtocol.responsePayload(response);
@@ -40,7 +40,7 @@ class CoreResponseTest {
     void ownedSliceEncodesOnlyItsLogicalBytes() {
         byte[] storage = {99, 3, 5, 8, 99};
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, 7, 9, 11, storage, 1, 3);
+                CoreResultCode.NONE, 7, 11, storage, 1, 3);
         assertThat(response.data()).containsExactly(3, 5, 8);
         CoreResponse decoded = CoreProtocol.decodeResponse(CoreProtocol.responsePayload(response));
         assertThat(decoded.data()).containsExactly(3, 5, 8);

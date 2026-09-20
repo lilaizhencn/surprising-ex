@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.MatchingResult;
 import java.util.List;
 
 import static com.surprising.aeron.service.state.TradingRuntimeState.*;
@@ -210,7 +211,7 @@ final class MatcherSettlementDispatcher {
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
+            MatcherSettlementPlan plan, MatchingResult matchingResult,
             RuntimeIdentityRegistry identities) {
         return dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence,
                 commitTimestamp, commitClusterPosition, plan, matchingResult, identities, false);
@@ -219,7 +220,7 @@ final class MatcherSettlementDispatcher {
     MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
+            MatcherSettlementPlan plan, MatchingResult matchingResult,
             RuntimeIdentityRegistry identities, boolean captureIsolatedChanges) {
         owner.assertOwner();
         long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
@@ -286,7 +287,7 @@ final class MatcherSettlementDispatcher {
 
     public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long takerOrderId,
-            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities) {
+            MatchingResult matchingResult, RuntimeIdentityRegistry identities) {
         owner.assertOwner();
         if (!owner.orderBatchMutationScope) {
             throw new IllegalStateException("item settlement requires an order batch");
@@ -336,7 +337,9 @@ final class MatcherSettlementDispatcher {
             public int settlementCount() { return takerOrderIds.length; }
             public long settlementOrderId(int index) { return takerOrderIds[index]; }
             public long settlementLaneMask(int index) { return expectedLaneMasks[index]; }
-            public CoreMatchingResult settlementResult(int index) { return matchingResults.get(index); }
+            public com.surprising.aeron.service.matching.MatchingResult settlementResult(int index) {
+                return matchingResults.get(index);
+            }
         }, identities, commitTimestamp, commitClusterPosition);
     }
 
@@ -362,7 +365,7 @@ final class MatcherSettlementDispatcher {
             for (int index = 0; index < batch.settlementCount(); index++) {
                 long takerOrderId = batch.settlementOrderId(index);
                 long expectedLaneMask = batch.settlementLaneMask(index);
-                CoreMatchingResult matchingResult = batch.settlementResult(index);
+                com.surprising.aeron.service.matching.MatchingResult matchingResult = batch.settlementResult(index);
                 if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
                         || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");

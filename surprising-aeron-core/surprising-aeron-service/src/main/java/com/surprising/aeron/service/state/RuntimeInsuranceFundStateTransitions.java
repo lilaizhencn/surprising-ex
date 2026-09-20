@@ -4,12 +4,12 @@ import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 /** Owns direct runtime treasury insurance-fund adjustments. */
-final class RuntimeInsuranceFundStateTransitions {
+public final class RuntimeInsuranceFundStateTransitions {
 
     private RuntimeInsuranceFundStateTransitions() {
     }
 
-    static void adjust(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void adjust(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                        AdjustInsuranceFundCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime insurance adjustment");

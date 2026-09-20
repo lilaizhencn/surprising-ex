@@ -2,12 +2,12 @@ package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 /** 独立基准边界等待适配器，不进入生产服务包。 */
 final class BenchmarkMatchingAwait {
-    static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
+    static com.surprising.aeron.service.matching.MatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence) {
         return awaitMatchingResult(state, sequence, TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
-    static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
+    static com.surprising.aeron.service.matching.MatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence, long timeoutNanos) {
         if (state.fatalFailure != null) return null;
         if (timeoutNanos <= 0) return null;

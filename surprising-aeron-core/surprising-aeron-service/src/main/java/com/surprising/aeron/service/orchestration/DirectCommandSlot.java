@@ -18,7 +18,8 @@ import com.surprising.aeron.service.state.AccountPositionMarginAdjustment;
 import com.surprising.aeron.service.state.AccountPositionModeChange;
 import com.surprising.aeron.service.state.AccountTransferOut;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
-import com.surprising.aeron.service.state.RuntimeCommandProcessor;
+import com.surprising.aeron.service.state.RuntimeTriggerOrderStateTransitions;
+import com.surprising.aeron.service.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimeAdlExecution;
 import com.surprising.aeron.service.state.RuntimeLiquidationResolution;
@@ -521,22 +522,22 @@ final class DirectCommandSlot {
             var runtime = owner.runtimeState();
             return switch (kind) {
                 case MUTATION -> switch (mutation) {
-                    case CANCEL -> RuntimeCommandProcessor.cancelTriggerOrder(runtime, userId, triggerOrderId);
-                    case CLAIM -> RuntimeCommandProcessor.claimTriggerOrder(runtime, triggerOrderId, arg1, arg2, arg3);
-                    case COMPLETE -> RuntimeCommandProcessor.completeTriggerOrder(runtime, triggerOrderId,
+                    case CANCEL -> RuntimeTriggerOrderStateTransitions.cancel(runtime, userId, triggerOrderId);
+                    case CLAIM -> RuntimeTriggerOrderStateTransitions.claim(runtime, triggerOrderId, arg1, arg2, arg3);
+                    case COMPLETE -> RuntimeTriggerOrderStateTransitions.complete(runtime, triggerOrderId,
                             flag, arg1, text == null ? "" : text, arg2);
-                    case TRAILING -> RuntimeCommandProcessor.updateTriggerTrailing(runtime, triggerOrderId,
+                    case TRAILING -> RuntimeTriggerOrderStateTransitions.updateTrailing(runtime, triggerOrderId,
                             arg1, arg2, arg3);
-                    case EXPIRE -> RuntimeCommandProcessor.expireTriggerOrder(runtime, triggerOrderId, arg1);
-                    case RETRY -> RuntimeCommandProcessor.retryTriggerOrder(runtime, triggerOrderId, arg1, arg2);
+                    case EXPIRE -> RuntimeTriggerOrderStateTransitions.expire(runtime, triggerOrderId, arg1);
+                    case RETRY -> RuntimeTriggerOrderStateTransitions.retry(runtime, triggerOrderId, arg1, arg2);
                 };
                 case TRIGGER_UPSERT -> {
-                    RuntimeCommandProcessor.upsertTriggerOrder(runtime, userId, trigger, symbolId,
+                    RuntimeTriggerOrderStateTransitions.upsert(runtime, userId, trigger, symbolId,
                             positionKey, instrumentSettled);
                     yield null;
                 }
                 case ALGO_UPSERT -> {
-                    RuntimeCommandProcessor.upsertAlgoOrder(runtime, userId, algo, symbolId);
+                    RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, algo, symbolId);
                     yield runtime.algoOrder(algo.algoOrderId());
                 }
                 default -> throw new IllegalStateException("unknown trigger continuation");

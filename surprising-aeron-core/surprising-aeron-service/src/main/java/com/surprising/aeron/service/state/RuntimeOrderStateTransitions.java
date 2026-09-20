@@ -9,7 +9,7 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.UUID;
 
 /** Owns runtime order creation, cancellation, rejection and reservation handoff. */
-final class RuntimeOrderStateTransitions {
+public final class RuntimeOrderStateTransitions {
 
     private RuntimeOrderStateTransitions() {
     }
@@ -29,7 +29,7 @@ final class RuntimeOrderStateTransitions {
                 clientKey, symbolId, assetId);
     }
 
-    static void placePrepared(
+    public static void placePrepared(
             TradingRuntimeState runtime, long userId, ResolvedPlaceOrder command, UUID commandId,
             long requiredReservation, long clientKey, int symbolId, int assetId) {
         if (runtime == null || command == null || commandId == null || userId <= 0
@@ -64,7 +64,7 @@ final class RuntimeOrderStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
+    public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
             AdmissionIdentity identity, long clientKey, int assetId) {
         AccountLaneState lane = runtime.laneCommandScope.get();
@@ -76,7 +76,7 @@ final class RuntimeOrderStateTransitions {
         runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
     }
 
-    static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
+    public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
             long clientKey, int assetId, long coreSequence) {
         AccountLaneState lane = runtime.laneCommandScope.get();

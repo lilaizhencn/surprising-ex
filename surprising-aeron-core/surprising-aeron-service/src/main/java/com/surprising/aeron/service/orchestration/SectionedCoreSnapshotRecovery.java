@@ -2,7 +2,6 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
@@ -34,6 +33,9 @@ public final class SectionedCoreSnapshotRecovery {
     public void accept(DirectBuffer source, int offset, int length) {
         if (source == null || offset < 0 || length < 0 || offset > source.capacity() - length) {
             throw new ProtocolException("invalid snapshot fragment");
+        }
+        if (length > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - totalLength) {
+            throw new ProtocolException("core snapshot exceeds maximum size");
         }
         int cursor = offset;
         int remaining = length;
@@ -126,8 +128,7 @@ public final class SectionedCoreSnapshotRecovery {
         int minimumLength = switch (sectionIndex) {
             case 0 -> SectionedCoreSnapshotCodec.HEADER_LENGTH;
             case 1, 2 -> Integer.BYTES;
-            case 3 -> SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH;
-            case 4, 5, 6, 7, 8 -> 1;
+            case 3, 4, 5, 6, 7 -> 1;
             default -> sectionIndex == sectionCount - 1
                     ? SectionedCoreSnapshotCodec.FOOTER_LENGTH
                     : Integer.BYTES * 2 + Long.BYTES * 5;
@@ -181,7 +182,7 @@ public final class SectionedCoreSnapshotRecovery {
 
     private void ensureTotalCapacity(int additionalLength) {
         if (additionalLength < 0
-                || totalLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - additionalLength) {
+                || totalLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - additionalLength) {
             throw new ProtocolException("core snapshot exceeds maximum size");
         }
     }

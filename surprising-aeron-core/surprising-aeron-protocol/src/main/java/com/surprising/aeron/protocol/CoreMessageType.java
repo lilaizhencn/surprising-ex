@@ -15,7 +15,6 @@ public enum CoreMessageType {
     EXECUTE_LIQUIDATION(24, WireMessageKind.COMMAND),
     RESOLVE_LIQUIDATION(25, WireMessageKind.COMMAND),
     CONTINUE_RISK_SCAN(26, WireMessageKind.COMMAND),
-    ACK_EXPORT(27, WireMessageKind.COMMAND),
     UPDATE_POSITION_MODE(28, WireMessageKind.COMMAND),
     ADJUST_POSITION_MARGIN(29, WireMessageKind.COMMAND),
     ADJUST_INSURANCE_FUND(30, WireMessageKind.COMMAND),
@@ -47,8 +46,6 @@ public enum CoreMessageType {
     ORDER_STATE_HASH_QUERY(103, WireMessageKind.QUERY),
     USER_STATE_QUERY(104, WireMessageKind.QUERY),
     ORDER_STATE_QUERY(105, WireMessageKind.QUERY),
-    EXPORT_BATCH_QUERY(106, WireMessageKind.QUERY),
-    EXPORT_STATUS_QUERY(107, WireMessageKind.QUERY),
     CLIENT_ORDER_STATE_QUERY(108, WireMessageKind.QUERY),
     TREASURY_STATE_QUERY(109, WireMessageKind.QUERY),
     ADL_CANDIDATE_QUERY(110, WireMessageKind.QUERY),
@@ -93,8 +90,7 @@ public enum CoreMessageType {
     ORDER_BOOK_BOOTSTRAP_RESULT(220, WireMessageKind.RESPONSE),
     PENDING_TRANSFER_RESULT(221, WireMessageKind.RESPONSE),
     LANE_METRICS_RESULT(222, WireMessageKind.RESPONSE),
-    INSTRUMENT_MAINTENANCE_RESULT(223, WireMessageKind.RESPONSE),
-    CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
+    INSTRUMENT_MAINTENANCE_RESULT(223, WireMessageKind.RESPONSE);
 
     private static final CoreMessageType[] BY_WIRE_CODE;
 

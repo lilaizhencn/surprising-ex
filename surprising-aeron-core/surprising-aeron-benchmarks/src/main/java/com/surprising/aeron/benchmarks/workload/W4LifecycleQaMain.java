@@ -584,7 +584,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
             String identityResponse = acceptedResponse.contains("\"prospectiveOrderIds\":[]")
                     ? response : acceptedResponse;
             spotOrders.add(new SpotOrder(userId, jsonLong(identityResponse, "\"prospectiveOrderIds\":[", ']'),
-                    symbol, jsonLong(response, "\"requiredExportSequence\":", ',')));
+                    symbol));
         }
         providerBoundaryObserved = true;
     }
@@ -901,8 +901,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
             boolean allFilled = true;
             for (SpotOrder order : spotOrders) {
                 String path = "/api/v1/trading/orders/history?userId=" + order.userId()
-                        + "&symbol=" + order.symbol() + "&limit=100&orderId=" + order.orderId()
-                        + "&minExportSequence=" + order.requiredExportSequence();
+                        + "&symbol=" + order.symbol() + "&limit=100&orderId=" + order.orderId();
                 try {
                     String response = request("command", "GET", path, null, Map.of());
                     int orderStart = response.indexOf("\"orderId\":" + order.orderId());
@@ -1036,7 +1035,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         }
     }
 
-    private record SpotOrder(long userId, long orderId, String symbol, long requiredExportSequence) {
+    private record SpotOrder(long userId, long orderId, String symbol) {
     }
 
     private void command(CoreMessageType type, long userId, byte[] payload) {

@@ -12,12 +12,12 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.product.api.ProductLine;
 
 /** Owns runtime trigger-order lifecycle and derivative position-capacity checks. */
-final class RuntimeTriggerOrderStateTransitions {
+public final class RuntimeTriggerOrderStateTransitions {
 
     private RuntimeTriggerOrderStateTransitions() {
     }
 
-    static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                        long userId, CoreTriggerOrderStateView view) {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime trigger order update");
@@ -28,7 +28,7 @@ final class RuntimeTriggerOrderStateTransitions {
         upsert(runtime, userId, view, symbolId, positionKey, instrumentSettled);
     }
 
-    static void upsert(TradingRuntimeState runtime, long userId,
+    public static void upsert(TradingRuntimeState runtime, long userId,
                        CoreTriggerOrderStateView view, int symbolId,
                        long positionKey, boolean instrumentSettled) {
         if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
@@ -62,7 +62,7 @@ final class RuntimeTriggerOrderStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    static boolean cancel(TradingRuntimeState runtime, long userId, long triggerOrderId) {
+    public static boolean cancel(TradingRuntimeState runtime, long userId, long triggerOrderId) {
         requireInput(runtime, userId, triggerOrderId);
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.userId() != userId) {
@@ -89,7 +89,7 @@ final class RuntimeTriggerOrderStateTransitions {
                 current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
     }
 
-    static boolean claim(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
+    public static boolean claim(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
                          long triggeredPriceTicks, long triggeredAtEpochMillis) {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
@@ -98,7 +98,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return true;
     }
 
-    static boolean complete(TradingRuntimeState runtime, long triggerOrderId, boolean success,
+    public static boolean complete(TradingRuntimeState runtime, long triggerOrderId, boolean success,
                             long placedOrderId, String rejectReason, long completedAtEpochMillis) {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.TRIGGERING) return false;
@@ -108,7 +108,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return true;
     }
 
-    static boolean updateTrailing(TradingRuntimeState runtime, long triggerOrderId,
+    public static boolean updateTrailing(TradingRuntimeState runtime, long triggerOrderId,
                                   long highestPriceTicks, long lowestPriceTicks,
                                   long activatedAtEpochMillis) {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
@@ -129,7 +129,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return true;
     }
 
-    static boolean expire(TradingRuntimeState runtime, long triggerOrderId, long expiredAtEpochMillis) {
+    public static boolean expire(TradingRuntimeState runtime, long triggerOrderId, long expiredAtEpochMillis) {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
                 || current.expiresAtEpochMillis() > expiredAtEpochMillis) return false;
@@ -138,7 +138,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return true;
     }
 
-    static boolean retry(TradingRuntimeState runtime, long triggerOrderId,
+    public static boolean retry(TradingRuntimeState runtime, long triggerOrderId,
                          long staleBeforeEpochMillis, long retryAtEpochMillis) {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.TRIGGERING
@@ -148,7 +148,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return true;
     }
 
-    static long positionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
+    public static long positionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
                             long userId, CoreTriggerOrderStateView view) {
         if (!productLine.isDerivative()) return 0;
         String positionIdentity = view.positionSide().hedgeSide()
@@ -157,7 +157,7 @@ final class RuntimeTriggerOrderStateTransitions {
         return identities.positionKey(userId, positionIdentity);
     }
 
-    static CoreTriggerOrderState prepareMatchedCompletion(
+    public static CoreTriggerOrderState prepareMatchedCompletion(
             CoreTriggerOrderState current, long placedOrderId, long updatedAt) {
         if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING || placedOrderId <= 0)
             throw new IllegalStateException("invalid matched trigger completion");
@@ -165,7 +165,7 @@ final class RuntimeTriggerOrderStateTransitions {
                 current.triggerSequence(), current.triggeredPriceTicks(), "", updatedAt);
     }
 
-    static CoreTriggerOrderState prepareRejectedCompletion(
+    public static CoreTriggerOrderState prepareRejectedCompletion(
             CoreTriggerOrderState current, String reason, long updatedAt) {
         if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING)
             throw new IllegalStateException("invalid rejected trigger completion");

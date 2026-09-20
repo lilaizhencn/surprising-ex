@@ -210,13 +210,10 @@ class CoreMatchingStateTest {
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
             var result = CoreCommandResultCodec.decode(completed.data());
-            assertThat(result.commandId()).isEqualTo(order.header().commandId());
-            assertThat(result.coreSequence()).isEqualTo(completed.appliedCommandCount());
             assertThat(orderIn(completed, 202).status()).isEqualTo("OPEN");
             assertThat(orderIn(completed, 202).remainingQuantitySteps()).isEqualTo(2);
             assertThat(result.executions()).isEmpty();
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isEqualTo(200);
-            assertThat(state.exportState().pending()).isEmpty();
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
         }
     }
@@ -703,7 +700,6 @@ class CoreMatchingStateTest {
             assertThat(total(state, "BTC")).isEqualTo(2);
             assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(180);
             assertThat(state.tradingState().user(22).totalUnits("USDT")).isZero();
-            assertThat(state.exportState().pending()).isEmpty();
         }
     }
 
@@ -951,7 +947,7 @@ class CoreMatchingStateTest {
 
     private static CoreResponse completeUntilTerminalOrFailure(
             TradingCoreRuntime state, long sequence,
-            com.surprising.aeron.service.matching.CoreMatchingResult result,
+            com.surprising.aeron.service.matching.MatchingResult result,
             long clusterTimestamp, long clusterPosition) {
         CoreResponse completed = null;
         long deadline = System.nanoTime() + 5_000_000_000L;

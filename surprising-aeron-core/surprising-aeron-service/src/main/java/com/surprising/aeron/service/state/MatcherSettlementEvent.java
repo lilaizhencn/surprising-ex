@@ -12,7 +12,8 @@ import java.lang.invoke.VarHandle;
  * Immutable matcher fact routed once to every Account Lane it touches.
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
-public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
+public final class MatcherSettlementEvent implements SettlementLaneWorker.Command,
+        com.surprising.aeron.service.matching.MatchingResult {
     /** Diagnostic only: no clocks or additional objects on the default trading path. */
     public static final boolean LATENCY_DIAGNOSTICS = Boolean.getBoolean("core.settlementLatencyDiagnostics");
     private long matcherPublishedNanos;
@@ -86,7 +87,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private java.util.UUID directCommandId;
     private int directShard;
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
-    private com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult, lastDirectResult;
+    private com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult;
+    /** Native immutable result used by the allocation-free ordinary Matcher handoff. */
+    private exchange.core2.core.common.MatcherResult directNativeResult;
+    private long directMatcherSequence;
+    private long directLastMatcherSequence;
+    private long directOrderId;
+    private int directNativeItemCount;
+    private long[] directAcceptedCancellations;
+    private int directAcceptedCancellationCount;
+    private boolean directNativeAccepted;
+    private boolean directNativeStateChanged;
+    private String directSyntheticResultCode;
+    private static final exchange.core2.core.common.MatcherResult.MarketData EMPTY_MARKET_DATA =
+            new exchange.core2.core.common.MatcherResult.MarketData(
+                    java.util.List.of(), java.util.List.of(), 0, 0);
     /** 已有序号上下文的路由；直达结果先释放路由，再通知 Lane。 */
     private MatcherCompletionRoute matcherCompletionRoute;
     private int matcherCompletionShard;
@@ -316,7 +331,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
     /** Matcher 自身用于区分结果已构建和已经允许 Lane 消费，不新增就绪状态。 */
-    public boolean resultPrepared() { return !direct || firstDirectResult != null || directFailure != null; }
+    public boolean resultPrepared() {
+        return !direct || firstDirectResult != null || directNativeResult != null
+                || directSyntheticResultCode != null || directFailure != null;
+    }
 
     /** Defer Owner wake-up while the Matcher still owns the slot and event reference. */
     public void beginMatcherPublication() {
@@ -337,42 +355,195 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public void publishDirectResult(com.surprising.aeron.service.matching.CoreMatchingResult result) {
         if (batchPlanCount != 1) throw new IllegalStateException("single result for a settlement batch");
         try {
-            buildDirectItem(0, result, null);
-            firstDirectResult = lastDirectResult = result;
+            buildDirectItem(0, result);
+            firstDirectResult = result;
             finishDirectPublication();
         } catch (Throwable failure) { failDirect(failure); throw failure; }
     }
 
-    /** Publish a fixed batch result buffer without creating a List view on the Matcher thread. */
-    public void publishDirectResults(
-            com.surprising.aeron.service.matching.CoreMatchingResult[] results, int count) {
+    /** Matcher writes its immutable native result directly into this already-owned pooled event. */
+    public void publishDirectNativeResult(exchange.core2.core.common.MatcherResult result,
+            long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!direct || directPublished || batchPlanCount != 1 || result == null
+                || coreSequence != directCoreSequence || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= 0) {
+            throw new IllegalStateException("direct native matcher result proof is inconsistent");
+        }
         try {
-            if (results == null || count != batchPlanCount || count <= 0 || count > results.length)
-                throw new IllegalStateException("direct matcher batch is incomplete");
-            com.surprising.aeron.service.matching.CoreMatchingResult previous = null;
-            for (int index = 0; index < count; index++) {
-                var result = results[index];
-                buildDirectItem(index, result, previous);
-                previous = result;
+            OrderRuntime admitted = batchStorage.admittedOrders[0];
+            if (cancellation) {
+                if (admitted == null || admitted.orderId() != orderId)
+                    throw new IllegalStateException("direct cancellation order is inconsistent");
+                batchPlans[0].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                        admitted, result, runtime);
+            } else if (admissionRequired && admissionAccepted) {
+                if (admissionOrder == null || admissionOrder.orderId() != orderId)
+                    throw new IllegalStateException("direct admission order is inconsistent");
+                batchPlans[0].buildDirectNative(directCoreSequence, admissionUserId, admissionOrder,
+                        batchInstruments[0], result, runtime);
+            } else {
+                if (admitted == null || admitted.orderId() != orderId)
+                    throw new IllegalStateException("direct matcher order is inconsistent");
+                batchPlans[0].buildDirectNative(directCoreSequence, admitted,
+                        batchInstruments[0], result, runtime);
             }
-            firstDirectResult = results[0]; lastDirectResult = previous;
+            directNativeResult = result;
+            directMatcherSequence = matcherSequence;
+            directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeItemCount = 1;
+            directNativeAccepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                    || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+            if (sourceTrigger != null) {
+                batchPlans[0].completeTrigger(directNativeAccepted
+                        ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
+                                batchStorage.admittedOrders[0].orderId(), triggeredAt)
+                        : RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(sourceTrigger,
+                                result.resultCode().name(), triggeredAt));
+            }
+            batchPlans[0].acceptedPreCancellations(
+                    directAcceptedCancellations, directAcceptedCancellationCount);
             finishDirectPublication();
         } catch (Throwable failure) { failDirect(failure); throw failure; }
     }
 
-    private void buildDirectItem(int index, com.surprising.aeron.service.matching.CoreMatchingResult result,
-                                 com.surprising.aeron.service.matching.CoreMatchingResult previous) {
+    public void publishDirectNativeBatchItem(exchange.core2.core.common.MatcherResult result,
+            int index, long coreSequence,
+            long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!direct || directPublished || result == null || batchPlanCount <= 0
+                || index != directNativeItemCount || index < 0 || index >= batchPlanCount
+                || coreSequence != directCoreSequence || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= directLastMatcherSequence) {
+            throw new IllegalStateException("direct native matcher batch proof is inconsistent");
+        }
+        try {
+            OrderRuntime admitted = batchStorage.admittedOrders[index];
+            if (admitted == null || admitted.orderId() != orderId)
+                throw new IllegalStateException("direct matcher batch order is inconsistent");
+            if (cancellation) {
+                batchPlans[index].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                        admitted, result, runtime);
+            } else {
+                batchPlans[index].buildDirectNative(directCoreSequence, admitted,
+                        batchInstruments[index], result, runtime);
+            }
+            if (index == 0) {
+                batchPlans[index].acceptedPreCancellations(
+                        directAcceptedCancellations, directAcceptedCancellationCount);
+                directNativeResult = result;
+                directMatcherSequence = matcherSequence;
+                directOrderId = orderId;
+                directNativeAccepted = nativeAccepted(result);
+            }
+            if (resultTarget != null) resultTarget.matcherResult(index, nativeAccepted(result));
+            directLastMatcherSequence = matcherSequence;
+            directNativeItemCount++;
+            if (directNativeItemCount == batchPlanCount) finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    public void publishDirectNativeReplacement(
+            exchange.core2.core.common.MatcherResult cancellation,
+            exchange.core2.core.common.MatcherResult result,
+            long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!direct || directPublished || replacement == null || batchPlanCount != 1
+                || cancellation == null || result == null || coreSequence != directCoreSequence
+                || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= 0
+                || replacement.resolved().orderId() != orderId) {
+            throw new IllegalStateException("direct native replacement proof is inconsistent");
+        }
+        try {
+            boolean cancellationAccepted = nativeAccepted(cancellation);
+            boolean placementAccepted = cancellationAccepted && nativeAccepted(result);
+            OrderRuntime admitted = batchStorage.admittedOrders[0];
+            if (admitted == null) throw new IllegalStateException("replacement order is missing");
+            batchPlans[0].buildDirectNative(directCoreSequence, admitted,
+                    batchInstruments[0], result, runtime);
+            if (cancellationAccepted) batchPlans[0].acceptedReplacementCancellation(replacement.originalOrderId());
+            batchPlans[0].acceptedPreCancellations(
+                    directAcceptedCancellations, directAcceptedCancellationCount);
+            if (!placementAccepted) batchPlans[0].omitUnplacedOrder();
+            directNativeResult = result;
+            directMatcherSequence = matcherSequence;
+            directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeItemCount = 1;
+            directNativeAccepted = placementAccepted;
+            directNativeStateChanged = cancellationAccepted && !placementAccepted;
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    public void publishDirectRejection(String resultCode, long coreSequence,
+            long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!direct || directPublished || !admissionRequired || admissionAccepted
+                || resultCode == null || resultCode.isBlank() || coreSequence != directCoreSequence
+                || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || orderId != admissionOrderId || matcherSequence <= 0 || matcherShard != directShard)
+            throw new IllegalStateException("direct matcher rejection proof is inconsistent");
+        try {
+            batchPlans[0].prepareRejectedDirect(
+                    directCoreSequence, admissionUserId, admissionOrderId, routedLaneMask);
+            directSyntheticResultCode = resultCode;
+            directMatcherSequence = directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeAccepted = false;
+            directNativeItemCount = 1;
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
+        return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+    }
+
+    public void recordDirectPreCancellation(long orderId) {
+        if (!direct || directPublished || orderId <= 0 || !authorizedCancellations.contains(orderId))
+            throw new IllegalStateException("unauthorized direct pre-cancellation");
+        if (directAcceptedCancellations == null)
+            directAcceptedCancellations = new long[Math.max(4, authorizedCancellations.size())];
+        if (directAcceptedCancellationCount == directAcceptedCancellations.length)
+            directAcceptedCancellations = java.util.Arrays.copyOf(
+                    directAcceptedCancellations, directAcceptedCancellations.length * 2);
+        directAcceptedCancellations[directAcceptedCancellationCount++] = orderId;
+    }
+
+    public boolean hasDirectNativeResult() { return directNativeResult != null; }
+    public exchange.core2.core.common.MatcherResult directNativeResult() {
+        requireDirectResult();
+        if (directNativeResult == null) throw new IllegalStateException("direct native result is missing");
+        return directNativeResult;
+    }
+    public boolean directNativeAccepted() { requireDirectResult(); return directNativeAccepted; }
+    public long directMatcherSequence() { return directMatcherSequence; }
+    public long directLastMatcherSequence() { return directLastMatcherSequence; }
+    public int directMatcherShard() { return directShard; }
+    public long directResultCoreSequence() { return directCoreSequence; }
+    public boolean directCommandMatches(java.util.UUID commandId) {
+        return directCommandId != null && directCommandId.equals(commandId);
+    }
+
+    private void buildDirectItem(int index, com.surprising.aeron.service.matching.CoreMatchingResult result) {
         if (!direct || directPublished || result == null) throw new IllegalStateException("invalid direct publication");
-        long prefixBefore = result.matcherPrefixBefore();
-        long prefixAfter = result.matcherPrefixAfter();
         if (result.nativeCoreSequence() != directCoreSequence || !result.nativeMatches(directCommandId)
-                || result.nativeMatcherShardId() != directShard || prefixBefore == 0 || prefixAfter == 0
-                || prefixAfter == prefixBefore
-                || previous != null && (prefixBefore != previous.matcherPrefixAfter()
-                || result.nativeMatcherSequence() <= previous.nativeMatcherSequence())
-                || result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.FATAL_DIVERGENCE)
+                || result.nativeMatcherShardId() != directShard
+                || result.outcome() == com.surprising.aeron.service.matching.MatchingResult.Outcome.FATAL_DIVERGENCE)
             throw new IllegalStateException("direct matcher result proof is inconsistent");
-        if (result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.KNOWN_PREFIX_APPLIED) {
+        if (result.outcome() == com.surprising.aeron.service.matching.MatchingResult.Outcome.KNOWN_PREFIX_APPLIED) {
             boolean containsTrade = false;
             var matcherEvents = result.matcherEvents();
             for (int eventIndex = 0; eventIndex < matcherEvents.size(); eventIndex++) {
@@ -485,15 +656,68 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (route != null) route.releaseMatcherSubmission(shard);
     }
 
-    public com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult() {
-        requireDirectResult(); return firstDirectResult;
+    public com.surprising.aeron.service.matching.MatchingResult firstDirectResult() {
+        requireDirectResult();
+        return hasEventOwnedResult() ? this : firstDirectResult;
     }
     /** A direct Matcher failure is prepared too, but has no result that can advance evidence. */
     public boolean directResultAvailable() {
-        return direct && directPublished && directFailure == null && firstDirectResult != null;
+        return direct && directPublished && directFailure == null
+                && (firstDirectResult != null || hasEventOwnedResult());
     }
-    public com.surprising.aeron.service.matching.CoreMatchingResult lastDirectResult() {
-        requireDirectResult(); return lastDirectResult;
+    @Override public boolean accepted() {
+        return hasEventOwnedResult() ? directNativeAccepted : firstDirectResult.accepted();
+    }
+    @Override public String resultCode() {
+        if (directSyntheticResultCode != null) return directSyntheticResultCode;
+        return directNativeResult == null ? firstDirectResult.resultCode() : directNativeResult.resultCode().name();
+    }
+    @Override public java.util.List<com.surprising.aeron.service.matching.CoreCancellationResult> cancellations() {
+        return hasEventOwnedResult() ? java.util.List.of() : firstDirectResult.cancellations();
+    }
+    @Override public int successfulPrefixCount() {
+        return hasEventOwnedResult() ? 0 : firstDirectResult.successfulPrefixCount();
+    }
+    @Override public boolean matcherStateChanged() {
+        return hasEventOwnedResult() ? directNativeStateChanged : firstDirectResult.matcherStateChanged();
+    }
+    @Override public com.surprising.aeron.service.matching.MatchingResult.Outcome outcome() {
+        if (!hasEventOwnedResult()) return firstDirectResult.outcome();
+        if (directNativeStateChanged)
+            return com.surprising.aeron.service.matching.MatchingResult.Outcome.KNOWN_PREFIX_APPLIED;
+        return directNativeAccepted
+                ? com.surprising.aeron.service.matching.MatchingResult.Outcome.APPLIED
+                : com.surprising.aeron.service.matching.MatchingResult.Outcome.REJECTED_UNCHANGED;
+    }
+    @Override public long nativeCoreSequence() {
+        return hasEventOwnedResult() ? directCoreSequence : firstDirectResult.nativeCoreSequence();
+    }
+    @Override public long nativeOrderId() {
+        return hasEventOwnedResult() ? directOrderId : firstDirectResult.nativeOrderId();
+    }
+    @Override public long nativeMatcherSequence() {
+        return hasEventOwnedResult() ? directMatcherSequence : firstDirectResult.nativeMatcherSequence();
+    }
+    @Override public int nativeMatcherShardId() {
+        return hasEventOwnedResult() ? directShard : firstDirectResult.nativeMatcherShardId();
+    }
+    @Override public boolean nativeMatches(java.util.UUID commandId) {
+        return hasEventOwnedResult() ? directCommandId != null && directCommandId.equals(commandId)
+                : firstDirectResult.nativeMatches(commandId);
+    }
+    @Override public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
+        return hasEventOwnedResult() ? directNativeResult : firstDirectResult.nativeMatcherResult();
+    }
+    @Override public java.util.List<exchange.core2.core.common.MatcherResult.MatcherEvent> matcherEvents() {
+        if (directSyntheticResultCode != null) return java.util.List.of();
+        return directNativeResult == null ? firstDirectResult.matcherEvents() : directNativeResult.events();
+    }
+    @Override public exchange.core2.core.common.MatcherResult.MarketData marketData() {
+        if (directSyntheticResultCode != null) return EMPTY_MARKET_DATA;
+        return directNativeResult == null ? firstDirectResult.marketData() : directNativeResult.marketData();
+    }
+    private boolean hasEventOwnedResult() {
+        return directNativeResult != null || directSyntheticResultCode != null;
     }
     private void requireDirectResult() {
         if (!direct || !directPublished) throw new IllegalStateException("direct result is not published");
@@ -644,7 +868,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
         directCoreSequence = 0;
         directCommandId = null; authorizedCancellations = java.util.List.of();
-        firstDirectResult = lastDirectResult = null; routedLaneMask = 0;
+        firstDirectResult = null;
+        directNativeResult = null;
+        directMatcherSequence = directLastMatcherSequence = directOrderId = 0;
+        directNativeItemCount = 0;
+        directAcceptedCancellationCount = 0;
+        directNativeAccepted = directNativeStateChanged = false;
+        directSyntheticResultCode = null;
+        routedLaneMask = 0;
         resultTarget = null;
         plan = null;
         if (batchStorage != null) batchStorage.clear();
@@ -716,7 +947,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             }
             if (resultTarget != null && changes != null
                     && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
-                if (direct && firstDirectResult != null) resultTarget.matcherResult(firstDirectResult);
+                if (direct && (firstDirectResult != null || directNativeResult != null))
+                    resultTarget.matcherResult(firstDirectResult());
                 LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
             }
             if (commitSequence != 0) {
@@ -765,7 +997,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         }
         if (replacement != null) {
             applyReplacement(lane, value);
-            if (!firstDirectResult.accepted()) return;
+            if (!accepted()) return;
         }
         value.validateDirectLane(lane, runtime, identities, valueInstrument);
         for (int index = 0; replacement == null && index < value.preCancellationCount(); index++) {
@@ -817,7 +1049,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         for (int index = 0; index < value.preCancellationCount(); index++)
             runtime.cancelOrderInLane(userId, value.preCancellationOrderId(index),
                     commitTimestamp, commitClusterPosition);
-        if (!firstDirectResult.accepted()) return;
+        if (!accepted()) return;
         OrderRuntime prepared = batchStorage.admittedOrders[0];
         if (lane.orders.get(replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
             throw new IllegalStateException("accepted replacement did not cancel original order");

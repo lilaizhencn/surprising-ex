@@ -121,7 +121,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     @Override
-    public void acceptBatch(TradingRuntimeState.LaneDelta delta, long coreSequence) {
+    public void acceptBatch(TradingRuntimeState.LaneCommitDelta delta, long coreSequence) {
         for (int index = 0; index < delta.terminalOrderCount(); index++) {
             accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
                     delta.terminalOrderClient(index), coreSequence);

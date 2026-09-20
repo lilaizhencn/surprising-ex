@@ -5,19 +5,19 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 /** Owns runtime order commit metadata and terminal-state cleanup. */
-final class RuntimeOrderCommitStateTransitions {
+public final class RuntimeOrderCommitStateTransitions {
 
     private RuntimeOrderCommitStateTransitions() {
     }
 
-    static void validateStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
+    public static void validateStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
         if (timestamp < 0 || position < 0 || orderIds == null)
             throw new IllegalArgumentException("invalid order commit metadata");
         // Preserve the preparation boundary before any account task can start.
         for (Long ignored : orderIds) { }
     }
 
-    static boolean stampChangedOrdersByLane(
+    public static boolean stampChangedOrdersByLane(
             TradingRuntimeState runtime, long timestamp, long clusterPosition,
             Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
         if (runtime == null || changedOrderIds == null || changedUserIds == null

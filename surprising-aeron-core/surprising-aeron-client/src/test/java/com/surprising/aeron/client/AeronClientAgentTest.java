@@ -284,7 +284,7 @@ class AeronClientAgentTest {
     }
 
     @Test
-    void preparedInfrastructureMessageRetainsItsStableHeader() {
+    void preparedCommandRetainsItsStableHeader() {
         AtomicReference<CoreMessage> offered = new AtomicReference<>();
         try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
             offered.set(message);
@@ -292,11 +292,10 @@ class AeronClientAgentTest {
         }))) {
             CoreMessage message = new CoreMessage(
                     com.surprising.aeron.protocol.CoreMessageHeader.command(
-                            CoreMessageType.ACK_EXPORT, UUID.randomUUID(), ProductLine.SPOT,
+                            CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), ProductLine.SPOT,
                             com.surprising.aeron.protocol.CommandSource.OPERATIONS,
                             0x4558504f52544552L, 17, 0, 1, 19),
-                    com.surprising.aeron.protocol.CoreExportCodec.encodeAck(
-                            new com.surprising.aeron.protocol.AckExportCommand(17)));
+                    com.surprising.aeron.protocol.CoreProtocol.probePayload(17));
 
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.submitPrepared(message))
                     .isInstanceOf(CoreCommandOutcome.NotAcceptedException.class);
@@ -610,7 +609,7 @@ class AeronClientAgentTest {
     private static CoreMessage preparedQuery(long correlationId) {
         return new CoreMessage(
                 com.surprising.aeron.protocol.CoreMessageHeader.query(
-                        CoreMessageType.EXPORT_STATUS_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                        CoreMessageType.STATE_HASH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
                         com.surprising.aeron.protocol.CommandSource.OPERATIONS,
                         0x4558504f52544552L, 0, 0, 1, correlationId),
                 new byte[0]);

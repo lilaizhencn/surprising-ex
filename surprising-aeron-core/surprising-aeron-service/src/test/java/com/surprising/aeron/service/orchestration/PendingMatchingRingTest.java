@@ -27,19 +27,19 @@ class PendingMatchingRingTest {
         ring.put(first); ring.put(second); ring.put(third);
         ring.registerSubmission(1, 0); ring.registerSubmission(2, 1); ring.registerSubmission(3, 1);
         ring.completeSubmission(2);
-        assertThat(ring.partitionDispatchHead(1)).isSameAs(second);
-        assertThatThrownBy(() -> ring.completePartitionDispatch(3, 1)).isInstanceOf(IllegalStateException.class);
-        ring.completePartitionDispatch(2, 1);
-        ring.completePartitionDispatch(3, 1);
-        assertThat(ring.partitionDispatchHead(1)).isNull();
+        assertThat(partitionHead(ring, 1)).isSameAs(second);
+        ring.completePartitionDispatchKnown(2, 1);
+        assertThat(partitionHead(ring, 1)).isSameAs(third);
+        ring.completePartitionDispatchKnown(3, 1);
+        assertThat(partitionHead(ring, 1)).isNull();
         assertThat(ring.dispatchHead()).isSameAs(first);
         assertThat(ring.firstSequence()).isEqualTo(1);
-        ring.completePartitionDispatch(1, 0);
+        ring.completePartitionDispatchKnown(1, 0);
         assertThat(ring.dispatchHead()).isNull();
         ring.clear();
         var reused = acquire(ring, 5, UUID.randomUUID(), 1004);
         ring.put(reused); ring.registerSubmission(5, 1);
-        assertThat(ring.partitionDispatchHead(1)).isSameAs(reused);
+        assertThat(partitionHead(ring, 1)).isSameAs(reused);
     }
 
     @Test
@@ -48,14 +48,12 @@ class PendingMatchingRingTest {
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
         var second = acquire(ring, 2, UUID.randomUUID(), 1002);
         second.clusterIndependent = true;
+        first.partitionLaneMask = 1;
+        second.partitionLaneMask = 2;
         ring.put(first); ring.put(second); ring.registerSubmission(2, 1);
-        assertThat(ring.partitionDispatchHead(1)).isNull();
+        assertThat(partitionHead(ring, 1)).isNull();
         ring.registerSubmission(1, 0);
-        assertThat(ring.partitionDispatchHead(1)).isNull();
-        first.clusterIndependent = true; first.partitionLaneMask = 1; second.partitionLaneMask = 2;
-        assertThat(ring.partitionDispatchHead(1)).isSameAs(second);
-        second.partitionLaneMask = 1;
-        assertThat(ring.partitionDispatchHead(1)).isNull();
+        assertThat(partitionHead(ring, 1)).isNull();
     }
 
     @Test
@@ -205,6 +203,11 @@ class PendingMatchingRingTest {
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
                 new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
                 1, 1, RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
+    }
+
+    private static CommandSlot partitionHead(PendingMatchingRing ring, int shard) {
+        ring.readyPartitionMask(Long.MAX_VALUE);
+        return ring.readyPartitionHead(shard);
     }
 
     private static CoreMessage command(UUID commandId, long userId) {

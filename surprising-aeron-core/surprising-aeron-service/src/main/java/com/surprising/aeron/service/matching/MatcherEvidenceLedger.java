@@ -15,7 +15,6 @@ final class MatcherEvidenceLedger {
     private final int shardCount;
     private final long[] issuedSequences;
     private final long[] shardSequences;
-    private final long[] shardPrefixes;
     private final long[] shardNativeSequences;
 
     MatcherEvidenceLedger(LaneTopology topology) {
@@ -31,7 +30,6 @@ final class MatcherEvidenceLedger {
         this.shardCount = progress.size();
         int paddedLength = Math.multiplyExact(shardCount, CACHE_LINE_LONGS);
         this.shardSequences = new long[paddedLength];
-        this.shardPrefixes = new long[paddedLength];
         this.shardNativeSequences = new long[paddedLength];
         this.issuedSequences = new long[paddedLength];
         boolean[] restored = new boolean[progress.size()];
@@ -42,7 +40,6 @@ final class MatcherEvidenceLedger {
             int offset = offset(index);
             shardSequences[offset] = shard.matcherSequence();
             issuedSequences[offset] = Math.max(sequenceFloor, shard.matcherSequence());
-            shardPrefixes[offset] = shard.prefixDigest();
         }
         for (boolean present : restored) {
             if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
@@ -64,15 +61,18 @@ final class MatcherEvidenceLedger {
             long sequence,
             int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
-        CoreMatchingResult.NativeCommand nativeCommand = advanceCommand(
-                coreSequence, commandId, orderId, aeronTimestamp, sequence,
-                matcherShardId, nativeMatcherShardId, result.nativeSequence());
-        int index = index(matcherShardId);
-        int offset = offset(index);
-        long before = (long) LONGS.getAcquire(shardPrefixes, offset);
-        long after = MatcherPrefixDigest.next(before, nativeCommand, result);
-        LONGS.setRelease(shardPrefixes, offset, after);
-        return result.bindEvidenceInPlace(nativeCommand, before, after);
+        if (commandId == null || result == null) throw new IllegalArgumentException("matcher evidence is required");
+        long nativeSequence = result.nativeSequence();
+        int matcherIndex = index(matcherShardId);
+        if (nativeSequence > 0) {
+            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                    "matcher shard native sequence is not strictly increasing");
+        }
+        advanceStrictly(shardSequences, matcherIndex, sequence,
+                "matcher shard sequence is not strictly increasing");
+        return result.bindEvidenceInPlace(coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), orderId, nativeSequence, sequence,
+                aeronTimestamp, matcherShardId);
     }
 
     CoreMatchingResult bindNative(
@@ -88,28 +88,86 @@ final class MatcherEvidenceLedger {
         }
         advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
-        int offset = offset(matcherIndex);
-        long before = (long) LONGS.getAcquire(shardPrefixes, offset);
         CoreMatchingResult bound = CoreMatchingResult.fromNativeWithEvidence(result,
                 coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
                 orderId, nativeSequence, sequence, aeronTimestamp,
-                matcherShardId, before);
-        LONGS.setRelease(shardPrefixes, offset, bound.matcherPrefixAfter());
+                matcherShardId);
         return bound;
     }
 
-    private CoreMatchingResult.NativeCommand advanceCommand(
+    exchange.core2.core.common.MatcherResult publishNative(
             long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
-            long nativeSequence) {
-        int index = index(matcherShardId);
-        if (nativeSequence > 0) advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                "matcher shard native sequence is not strictly increasing");
-        advanceStrictly(shardSequences, index, sequence,
+            exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null || result == null || target == null)
+            throw new IllegalArgumentException("native matcher publication is required");
+        int matcherIndex = index(matcherShardId);
+        long nativeSequence = result.sequence();
+        if (nativeSequence > 0) {
+            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                    "matcher shard native sequence is not strictly increasing");
+        }
+        advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
-        return new CoreMatchingResult.NativeCommand(
-                coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, nativeSequence, sequence, aeronTimestamp, matcherShardId);
+        target.publishDirectNativeResult(result, coreSequence,
+                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                sequence, matcherShardId);
+        return result;
+    }
+
+    exchange.core2.core.common.MatcherResult publishReplacement(
+            long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            exchange.core2.core.common.MatcherResult cancellation,
+            exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null || cancellation == null || result == null || target == null)
+            throw new IllegalArgumentException("native matcher replacement publication is required");
+        long nativeSequence = result.sequence();
+        if (nativeSequence > 0) {
+            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                    "matcher shard native sequence is not strictly increasing");
+        }
+        advanceStrictly(shardSequences, index(matcherShardId), sequence,
+                "matcher shard sequence is not strictly increasing");
+        target.publishDirectNativeReplacement(cancellation, result, coreSequence,
+                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                sequence, matcherShardId);
+        return result;
+    }
+
+    exchange.core2.core.common.MatcherResult publishBatchItem(
+            long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            exchange.core2.core.common.MatcherResult result, int index,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null || result == null || target == null)
+            throw new IllegalArgumentException("native matcher batch publication is required");
+        long nativeSequence = result.sequence();
+        if (nativeSequence > 0) {
+            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                    "matcher shard native sequence is not strictly increasing");
+        }
+        advanceStrictly(shardSequences, index(matcherShardId), sequence,
+                "matcher shard sequence is not strictly increasing");
+        target.publishDirectNativeBatchItem(result, index, coreSequence,
+                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                sequence, matcherShardId);
+        return result;
+    }
+
+    void publishRejection(
+            long coreSequence, java.util.UUID commandId, long orderId,
+            long sequence, int matcherShardId, String resultCode,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null || resultCode == null || resultCode.isBlank() || target == null)
+            throw new IllegalArgumentException("matcher rejection publication is required");
+        advanceStrictly(shardSequences, index(matcherShardId), sequence,
+                "matcher shard sequence is not strictly increasing");
+        target.publishDirectRejection(resultCode, coreSequence,
+                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                sequence, matcherShardId);
     }
 
     List<MatcherShardProgress> snapshot() {
@@ -117,8 +175,7 @@ final class MatcherEvidenceLedger {
         for (int index = 0; index < shardCount; index++) {
             int offset = offset(index);
             progress.add(new MatcherShardProgress(index - 1,
-                    (long) LONGS.getAcquire(shardSequences, offset),
-                    (long) LONGS.getAcquire(shardPrefixes, offset)));
+                    (long) LONGS.getAcquire(shardSequences, offset)));
         }
         return List.copyOf(progress);
     }
@@ -150,8 +207,7 @@ final class MatcherEvidenceLedger {
         if (topology == null) throw new IllegalArgumentException("matcher topology is required");
         ArrayList<MatcherShardProgress> progress = new ArrayList<>(topology.matchingEngineCount() + 1);
         for (int shardId = -1; shardId < topology.matchingEngineCount(); shardId++) {
-            progress.add(new MatcherShardProgress(
-                    shardId, 0, CoreMatchingResult.MatcherPrefix.initialDigest()));
+            progress.add(new MatcherShardProgress(shardId, 0));
         }
         return List.copyOf(progress);
     }

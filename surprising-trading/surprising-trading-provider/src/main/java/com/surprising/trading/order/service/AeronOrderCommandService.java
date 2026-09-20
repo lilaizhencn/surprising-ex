@@ -340,22 +340,22 @@ public class AeronOrderCommandService {
                 return new OrderCommandReceipt(execution.commandId(), "MATCHING_PENDING",
                         CoreResultCode.MATCHING_PENDING.name(), "matching pending",
                         OrderCommandReceipt.commandResultUrl(execution.commandId()),
-                        execution.prospectiveOrderIds(), knownExportSequence(response), null, null);
+                        execution.prospectiveOrderIds(), null, null);
             }
             OrderCommandResult result = decodeResult(execution.kind(), execution.prospectiveOrderIds(), response.data());
             return new OrderCommandReceipt(execution.commandId(), "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
                     OrderCommandReceipt.commandResultUrl(execution.commandId()), execution.prospectiveOrderIds(),
-                    knownExportSequence(response), result, null);
+                    result, null);
         }
         if (execution.outcome() instanceof CoreCommandOutcome.ResultUnknown) {
             return new OrderCommandReceipt(execution.commandId(), "RESULT_UNKNOWN", "RESULT_UNKNOWN",
                     "command result is unknown", OrderCommandReceipt.commandResultUrl(execution.commandId()),
-                    execution.prospectiveOrderIds(), null, null, null);
+                    execution.prospectiveOrderIds(), null, null);
         }
         CoreCommandOutcome.NotAccepted rejection = (CoreCommandOutcome.NotAccepted) execution.outcome();
         return new OrderCommandReceipt(execution.commandId(), "NOT_ACCEPTED", rejection.reason().name(),
-                rejection.reason().name(), null, execution.prospectiveOrderIds(), null, null,
+                rejection.reason().name(), null, execution.prospectiveOrderIds(), null,
                 rejection.rawOfferResult());
     }
 
@@ -367,26 +367,25 @@ public class AeronOrderCommandService {
                 return new OrderCommandReceipt(commandId, "OUTSIDE_RETENTION",
                         CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(),
                         CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(), null, List.of(),
-                        null, null, null);
+                        null, null);
             }
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
                 return new OrderCommandReceipt(commandId, "MATCHING_PENDING",
                         CoreResultCode.MATCHING_PENDING.name(), "matching pending",
                         OrderCommandReceipt.commandResultUrl(commandId), List.of(),
-                        knownExportSequence(response), null, null);
+                        null, null);
             }
             return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
-                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), knownExportSequence(response),
-                    null, null);
+                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, null);
         } catch (com.surprising.aeron.client.ResultUnknownException exception) {
             return new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
                     "command result is unknown", OrderCommandReceipt.commandResultUrl(commandId), List.of(),
-                    null, null, null);
+                    null, null);
         } catch (CoreCommandOutcome.NotAcceptedException exception) {
             CoreCommandOutcome.NotAccepted rejection = exception.rejection();
             return new OrderCommandReceipt(commandId, "NOT_ACCEPTED", rejection.reason().name(),
-                    rejection.reason().name(), null, List.of(), null, null, rejection.rawOfferResult());
+                    rejection.reason().name(), null, List.of(), null, rejection.rawOfferResult());
         }
     }
 
@@ -466,10 +465,6 @@ public class AeronOrderCommandService {
         }
         throw new CoreCommandOutcome.NotAcceptedException(
                 (CoreCommandOutcome.NotAccepted) execution.outcome());
-    }
-
-    private static Long knownExportSequence(CoreResponse response) {
-        return response.requiredExportSequence() == 0L ? null : response.requiredExportSequence();
     }
 
     private OrderCommandResult decodeResult(CommandKind kind, List<Long> prospectiveIds, byte[] data) {

@@ -3,7 +3,7 @@ import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
-import com.surprising.aeron.service.orchestration.snapshot.CoreStateSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinator;
 
@@ -68,7 +68,8 @@ import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
-import com.surprising.aeron.service.state.RuntimeCommandProcessor;
+import com.surprising.aeron.service.state.RuntimeOrderStateTransitions;
+import com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
@@ -301,8 +302,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final ActiveOrderIndex activeOrderIndex;
     /** adlPositionIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
     final AdlPositionIndex adlPositionIndex;
-    /** 对外导出与恢复的状态边界，和权威运行时分离。 */
-    final CoreExportState exportState;
     /** 撮合各阶段的运行观测指标，不参与确定性业务判断。 */
     final CoreMatchingPhaseMetrics matchingPhaseMetrics = new CoreMatchingPhaseMetrics();
     /** 采样开启时记录的提交时间，完成后移除；关闭时不分配此表。 */
@@ -452,20 +451,20 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     public TradingCoreRuntime(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
+                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), 0, 0, null, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
+                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
                    SnapshotEncoder snapshotEncoder) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
+                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, snapshotEncoder);
     }
 
@@ -476,7 +475,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             LinkedHashMap<UUID, StoredResult> commandResults,
             LinkedHashMap<SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
-            CoreExportState exportState,
             TerminalStateRetention terminalRetention,
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
@@ -494,7 +492,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
         admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
         snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
-        this.exportState = exportState;
         this.terminalRetention = terminalRetention;
         long restoredBusinessStateHash = canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), restoredFeePolicies, restoredPendingTransfers);
@@ -515,7 +512,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 matchingAdapter.topology().matchingEngineCount(),
                 matchingAdapter.topology().accountLaneCount());
         commits.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
-        commits.appliedMatcherPrefixDigests = new long[commits.appliedMatcherSequences.length];
         commits.initializeMatcherProgress(matcherSnapshot);
         this.laneCommandContexts = pendingMatching.contexts();
         this.matcherPipeline = new MatcherPipelineGroup(
@@ -569,7 +565,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             Map<UUID, StoredResult> commandResults,
             Map<SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
-            CoreExportState exportState,
             TerminalStateRetention terminalRetention,
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
@@ -581,14 +576,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS || lastSourceSequences == null
                 || lastSourceSequences.size() > MAX_SOURCE_SEQUENCES
                 || matcherSnapshot == null || snapshotState == null
-                || snapshotState.productLine() != productLine || exportState == null
+                || snapshotState.productLine() != productLine
                 || terminalRetention == null || feePolicies == null || pendingTransfers == null) {
             throw new IllegalArgumentException("invalid passive restored probe state");
         }
         CommandResultLedger.validateResultLedger(commandResults);
         return new TradingCoreRuntime(productLine, appliedCommandCount, probeValue,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
-                snapshotState, exportState, terminalRetention, matcherSnapshot, projectionSequence,
+                snapshotState, terminalRetention, matcherSnapshot, projectionSequence,
                 feePolicies, pendingTransfers, auditBusinessStateHash, auditFundsStateHash, null, null);
     }
 
@@ -893,7 +888,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long currentMarkPriceTicks(String symbol, long referencePriceTicks) {
         return matchingFlow.currentMarkPriceTicks(symbol, referencePriceTicks);
     }
-    public com.surprising.aeron.service.matching.CoreMatchingResult takeMatchingResult(long sequence) {
+    public com.surprising.aeron.service.matching.MatchingResult takeMatchingResult(long sequence) {
         return matchingFlow.takeMatchingResult(sequence);
     }
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
@@ -1101,16 +1096,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     public long stateHash() {
-        return stateHash(cachedBusinessStateHash);
-    }
-
-    long stateHash(long businessStateHash) {
-        return stateHash(businessStateHash, null, null, null, 0);
-    }
-
-    long stateHash(long businessStateHash, UUID commandId, ResponseStatus commandStatus,
-                           CoreResultCode commandResultCode, long commandAppliedCommandCount) {
-        return businessStateHash;
+        return cachedBusinessStateHash;
     }
 
     byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
@@ -1163,11 +1149,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     public static TradingCoreRuntime fromSnapshot(ProductLine productLine, byte[] snapshot) {
-        return CoreStateSnapshotCodec.decode(snapshot, productLine);
+        return SectionedCoreSnapshotCodec.decode(snapshot, productLine);
     }
 
     public static CoreSnapshotManifest inspectSnapshot(ProductLine productLine, byte[] snapshot) {
-        return CoreStateSnapshotCodec.manifest(snapshot, productLine);
+        return SectionedCoreSnapshotCodec.manifest(snapshot, productLine);
     }
 
     public ProductLine productLine() {
@@ -1235,10 +1221,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         stateView.restorePendingTransfers(transfers);
     }
-    CoreExportState exportState() {
-        return exportState;
-    }
-
     long sourceSequenceDigest() {
         return lastSourceSequences.digest();
     }
@@ -1321,7 +1303,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             try {
                 long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
                         runtimeState, userId, resolved, openInterestSteps, activeOrderIndex, admissionIdentity);
-                RuntimeCommandProcessor.placeOrderPrepared(runtimeState, userId, resolved,
+                RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation, preparedClientKey.key(), symbolId, assetId);
                 runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
                 return null;
@@ -1394,7 +1376,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     void stampOrderChangesRuntime(long timestamp, long clusterPosition,
                                           Iterable<Long> changedOrderIds) {
-        if (RuntimeCommandProcessor.stampChangedOrdersByLane(
+        if (RuntimeOrderCommitStateTransitions.stampChangedOrdersByLane(
                 runtimeState, timestamp, clusterPosition,
                 changedOrderIds, resultBuilder.commandChangedUserIds)) {
             commits.requestCommitPublication();
@@ -1405,7 +1387,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             CommandSlot pending,
             com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan,
             long coreSequence,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
+            com.surprising.aeron.service.matching.MatchingResult matchingResult,
             CommandSlot laneContext,
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
@@ -1425,7 +1407,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 runtimeState.collectMatcherSettlement(
                         event, commandFundsAccumulator, terminalRetention,
                         resultBuilder.changedUserIds, resultBuilder.changedOrderIds);
-        resultBuilder.markLaneDeltaIdsSeeded();
+        resultBuilder.markLaneCommitIdsSeeded();
         laneContext.completeLanes(event.requiredLaneMask());
         return delta;
     }
@@ -1755,7 +1737,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long clusterTimestamp, long clusterPosition, long nowNanos) { return snapshots.captureSnapshotSections(clusterTimestamp, clusterPosition, nowNanos); }
 
     public CoreResponse completeMatching(long sequence,
-                                  com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
+                                  com.surprising.aeron.service.matching.MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) { return commits.completeMatching(sequence, matchingResult, clusterTimestamp, clusterPosition); }
 
 }
