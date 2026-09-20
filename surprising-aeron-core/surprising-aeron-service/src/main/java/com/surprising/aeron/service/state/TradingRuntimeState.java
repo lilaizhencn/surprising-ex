@@ -573,7 +573,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicReference<Throwable> accountLaneFailure = new java.util.concurrent.atomic.AtomicReference<>();
 
     public void assertAccountLanesHealthy() {
-        assertOwner();
         Throwable failure = accountLaneFailure.get();
         if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
         if (failure instanceof Error error) throw error;
