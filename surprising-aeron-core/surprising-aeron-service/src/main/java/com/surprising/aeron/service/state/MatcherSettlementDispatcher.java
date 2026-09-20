@@ -234,8 +234,9 @@ final class MatcherSettlementDispatcher {
         long takerOrderId = plan.takerOrderId();
         OrderRuntime taker = plan.admittedTaker();
         if (taker == null) taker = owner.order(takerOrderId);
-        if (taker == null) throw new IllegalStateException("taker order is missing");
-        CoreInstrument instrument = owner.instrument(identities.symbol(taker.symbolId()));
+        ResolvedPlaceOrder resolved = plan.resolvedTaker();
+        if (taker == null && resolved == null) throw new IllegalStateException("taker order is missing");
+        CoreInstrument instrument = taker == null ? resolved.instrument() : taker.instrument();
         if (instrument == null) throw new IllegalStateException("match instrument is missing");
         owner.ensureMatcherSettlementDispatchCapacity(expectedLaneMask);
         int baseAssetId = identities.assetId(instrument.baseAsset());

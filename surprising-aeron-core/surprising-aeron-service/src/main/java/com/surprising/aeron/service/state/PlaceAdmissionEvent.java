@@ -24,7 +24,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private long identityAllocations;
     private long reservedAmount;
     private long admittedAccountVersion;
-    private OrderRuntime admittedOrder;
     private RuntimeException rejection;
     /** Volatile publication is sufficient: all payload fields are written before completion. */
     private volatile boolean completed;
@@ -59,7 +58,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.matcherShard = matcherShard;
         this.runtime = runtime;
         admittedAccountVersion = 0;
-        admittedOrder = null;
         rejection = null;
         reservedAmount = 0;
         completed = false;
@@ -76,7 +74,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         runtime = null;
         identities = null;
         admittedAccountVersion = 0;
-        admittedOrder = null;
         rejection = null;
         reservedAmount = 0;
         matcherShard = 0;
@@ -104,8 +101,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 runtime.placeOrderInLane(lane, userId, order, commandId,
                         requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedAccountVersion = lane.users.get(userId).revision();
-                // Cross-thread admission receipts must not alias Lane-owned mutable state.
-                admittedOrder = lane.orders.get(order.orderId()).publicationValue();
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
@@ -129,7 +124,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         completionRuntime.publishAdmissionReceipt(completionLaneId, matcherShard,
                 completionSequence, order.orderId(),
                 admittedAccountVersion, reservedAmount,
-                rejection == null, resultCode.wireCode(), rejection == null ? admittedOrder : null);
+                rejection == null, resultCode.wireCode());
         completed = true;
         completionRuntime.signalOwnerCompletion();
     }
@@ -149,7 +144,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         runtime = null;
         identities = null;
         admittedAccountVersion = 0;
-        admittedOrder = null;
         rejection = null;
         reservedAmount = 0;
         identityAllocations = 0;
@@ -192,10 +186,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         return order;
     }
 
-    public OrderRuntime admittedOrder() {
-        if (!complete() || admittedOrder == null) throw new IllegalStateException("place admission is incomplete");
-        return admittedOrder;
-    }
     public RuntimeException rejection() {
         if (!complete()) throw new IllegalStateException("place admission is incomplete");
         return rejection;

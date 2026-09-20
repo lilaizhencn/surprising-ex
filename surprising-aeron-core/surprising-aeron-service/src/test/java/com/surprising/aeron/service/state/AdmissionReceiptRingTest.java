@@ -11,40 +11,33 @@ import static org.assertj.core.api.Assertions.*;
 
 class AdmissionReceiptRingTest {
     @Test
-    void transfersImmutableVersionAndClearsReferenceBeforeSlotReuse() throws Exception {
+    void transfersPrimitiveAdmissionOutcomeAndReusesSlot() {
         var ring = new AdmissionReceiptRing(1);
-        var references = AdmissionReceiptRing.class.getDeclaredField("admittedOrders");
-        references.setAccessible(true);
         try (var runtime = new TradingRuntimeState()) {
             for (int sequence = 1; sequence <= 64; sequence++) {
                 var event = preparedEvent(runtime, sequence);
-                var laneOrder = CoreStateTestFixtures.order(11, 7, 0, 100);
-                var receipt = laneOrder.snapshot();
                 boolean accepted = sequence % 2 == 1;
-                ring.publish(sequence, 11, 1, 100, accepted, 0, accepted ? receipt : null);
+                ring.publish(sequence, 11, 1, 100, accepted, 0);
                 assertThat(ring.hasCapacity()).isFalse();
-                assertThatThrownBy(() -> ring.publish(100, 11, 1, 100, true, 0, receipt))
+                assertThatThrownBy(() -> ring.publish(100, 11, 1, 100, true, 0))
                         .hasMessageContaining("full");
                 ring.await(sequence, event);
                 assertThat(ring.hasCapacity()).isTrue();
-                assertThat((Object[]) references.get(ring)).containsOnlyNulls();
-                assertThat(event.admittedOrder()).isSameAs(accepted ? receipt : null);
-                laneOrder.applyCommitMetadataInPlace(123, 456);
-                assertThat(receipt.clusterPosition()).isZero();
+                assertThat(event.admissionAccepted()).isEqualTo(accepted);
+                assertThat(event.admittedOrder()).isNull();
                 runtime.releaseMatcherSettlementChanges(event.takeChanges());
             }
         }
     }
 
     @Test
-    void rejectsMissingOrMismatchedOrderWithoutConsumingCapacity() {
+    void rejectsInvalidMetadataWithoutConsumingCapacity() {
         var ring = new AdmissionReceiptRing(1);
-        var receipt = CoreStateTestFixtures.order(11, 7, 0, 100).snapshot();
-        assertThatThrownBy(() -> ring.publish(1, 11, 1, 100, true, 0, null))
+        assertThatThrownBy(() -> ring.publish(0, 11, 1, 100, true, 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> ring.publish(1, 12, 1, 100, true, 0, receipt))
+        assertThatThrownBy(() -> ring.publish(1, 0, 1, 100, true, 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> ring.publish(1, 11, 1, 100, false, 0, receipt))
+        assertThatThrownBy(() -> ring.publish(1, 11, -1, 100, false, 0))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(ring.hasCapacity()).isTrue();
     }

@@ -70,6 +70,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     long partitionLaneMask;
     /** 派发前的不可变订单身份；仅实时推送启用时保留，提交后释放。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
+    /** Normal PLACE reuses its immutable resolved input for realtime trade identity. */
+    ResolvedPlaceOrder realtimeResolvedTakerOrder;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
     /** Cached matcher shard for a non-batch command; stable until this slot is recycled. */
@@ -307,6 +309,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         clusterIndependent = false;
         partitionLaneMask = 0;
         realtimeTakerOrder = null;
+        realtimeResolvedTakerOrder = null;
         dispatchOnly = false;
         pipelinedSettlementCounted = false;
         cachedMatcherShard = -1;
@@ -478,6 +481,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
         realtimeTakerOrder = null;
+        realtimeResolvedTakerOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
         deferredClusterTimestamp = 0;
         deferredClusterPosition = 0;

@@ -53,6 +53,8 @@ public final class MatcherSettlementPlan {
     private OrderRuntime directTaker;
     /** Immutable admission receipt used by Owner-side plan/dispatcher preparation. */
     private OrderRuntime admittedTaker;
+    /** Immutable command input used when the Lane-owned order has not reached the Owner view. */
+    private ResolvedPlaceOrder resolvedTaker;
     /**
      * Direct PLACE facts are built by the Matcher before the Account Lane has exposed its
      * mutable OrderRuntime.  Keep the immutable order fields needed for proof and Lane-side
@@ -72,7 +74,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
-        directTaker = null; admittedTaker = null; takerLaneId = -1;
+        directTaker = null; admittedTaker = null; resolvedTaker = null; takerLaneId = -1;
         directTakerSide = null;
         directTakerSymbolId = 0;
         directTakerInstrument = null;
@@ -391,7 +393,7 @@ public final class MatcherSettlementPlan {
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
         return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     /** 调用方独占 target，全部 Lane 完成并消费结果之前不得再次构建或清理。 */
@@ -403,7 +405,7 @@ public final class MatcherSettlementPlan {
         target.initialOrderScratch[0] = firstOrderId;
         target.initialOrderScratch[1] = secondOrderId;
         return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
-                null, null, null, target);
+                null, null, null, null, target);
     }
 
     /** Build from the immutable Lane admission receipt before the final Owner view is published. */
@@ -415,7 +417,21 @@ public final class MatcherSettlementPlan {
         target.initialOrderScratch[0] = firstOrderId;
         target.initialOrderScratch[1] = secondOrderId;
         return build(sequence, taker.orderId(), taker.userId(), target.initialOrderScratch, result,
-                runtime, identities, taker, null, null, target);
+                runtime, identities, taker, null, null, null, target);
+    }
+
+    /** Build from the resolved admission without copying Lane-owned runtime state. */
+    public static MatcherSettlementPlan buildResolvedInto(MatcherSettlementPlan target,
+            long sequence, long userId, ResolvedPlaceOrder taker,
+            long firstOrderId, long secondOrderId, MatchingResult result,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (target == null || userId <= 0 || taker == null)
+            throw new IllegalArgumentException("resolved admitted taker is required");
+        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
+        target.initialOrderScratch[0] = firstOrderId;
+        target.initialOrderScratch[1] = secondOrderId;
+        return build(sequence, taker.orderId(), userId, target.initialOrderScratch, result,
+                runtime, identities, null, taker, taker.instrument(), null, target);
     }
 
     /**
@@ -431,7 +447,7 @@ public final class MatcherSettlementPlan {
             target.initialOrderScratch = new long[1];
         target.initialOrderScratch[0] = takerOrderId;
         return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
-                null, null, null, target);
+                null, null, null, null, target);
     }
 
     public static MatcherSettlementPlan emptyInto(MatcherSettlementPlan target, long sequence,
@@ -454,25 +470,34 @@ public final class MatcherSettlementPlan {
                                                 MatchingResult result, TradingRuntimeState runtime,
                                                 RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
         return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
-                taker, instrument, scratch, target);
+                taker, null, instrument, scratch, target);
     }
 
     private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, MatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                               OrderRuntime preparedTaker, CoreInstrument preparedInstrument,
+                                               OrderRuntime preparedTaker, ResolvedPlaceOrder resolvedTaker,
+                                               CoreInstrument preparedInstrument,
                                                BatchValidationScratch batch, MatcherSettlementPlan target) {
         if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
                 || result == null || runtime == null || identities == null
                 || result.nativeCoreSequence() != coreSequence) {
             throw new IllegalArgumentException("invalid matcher settlement plan input");
         }
-        OrderRuntime taker = preparedTaker == null ? requireOpen(runtime, takerOrderId) : preparedTaker;
-        if (taker.status() != CoreOrderStatus.OPEN || batch != null && batch.terminalOrderIds.contains(takerOrderId))
+        OrderRuntime taker = preparedTaker == null && resolvedTaker == null
+                ? requireOpen(runtime, takerOrderId) : preparedTaker;
+        if (taker != null && taker.status() != CoreOrderStatus.OPEN
+                || batch != null && batch.terminalOrderIds.contains(takerOrderId))
             throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
         CoreInstrument instrument = preparedInstrument == null
                 ? runtime.instrument(identities.symbol(taker.symbolId())) : preparedInstrument;
-        if (instrument == null || instrument != taker.instrument()) {
+        int takerSymbolId = taker == null ? resolvedTaker.symbolId() : taker.symbolId();
+        long takerRemainingQuantity = taker == null ? resolvedTaker.quantitySteps() : taker.remainingQuantitySteps();
+        var takerSide = taker == null ? resolvedTaker.side() : taker.side();
+        var takerPositionSide = taker == null ? resolvedTaker.positionSide() : taker.positionSide();
+        var takerTimeInForce = taker == null ? resolvedTaker.timeInForce() : taker.timeInForce();
+        var takerOrderType = taker == null ? resolvedTaker.orderType() : taker.orderType();
+        if (instrument == null || instrument != (taker == null ? resolvedTaker.instrument() : taker.instrument())) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
@@ -498,7 +523,7 @@ public final class MatcherSettlementPlan {
                 ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
         if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
         if (remainingByOrderId == null || !remainingByOrderId.containsKey(takerOrderId)) {
-            if (remainingByOrderId != null) remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
+            if (remainingByOrderId != null) remainingByOrderId.put(takerOrderId, takerRemainingQuantity);
         }
         int tradeCount = 0;
         try {
@@ -507,19 +532,20 @@ public final class MatcherSettlementPlan {
                 MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("runtime match is required");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
-                if (tradeCount == 0) preparePositionIdentity(runtime, identities, instrument, taker);
+                if (tradeCount == 0) preparePositionIdentity(runtime, identities, instrument,
+                        activeUserId, takerPositionSide);
                 if (event.price() <= 0 || event.size() <= 0) {
                     throw new IllegalArgumentException("invalid runtime match price or quantity");
                 }
                 OrderRuntime maker = batch == null ? requireOpen(runtime, event.matchedOrderId())
                         : batch.maker(runtime, event.matchedOrderId());
                 if (batch != null && batch.terminalOrderIds.contains(maker.orderId())
-                        || maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
-                        || maker.side() == taker.side() || maker.userId() == taker.userId()) {
+                        || maker.userId() != event.matchedOrderUid() || maker.symbolId() != takerSymbolId
+                        || maker.side() == takerSide || maker.userId() == activeUserId) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
                 }
                 long takerRemaining = Math.subtractExact(remainingByOrderId == null
-                        ? taker.remainingQuantitySteps() : remainingByOrderId.get(takerOrderId), event.size());
+                        ? takerRemainingQuantity : remainingByOrderId.get(takerOrderId), event.size());
                 boolean knownMaker = remainingByOrderId != null && remainingByOrderId.containsKey(maker.orderId());
                 long makerBefore = knownMaker ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
                 long makerRemaining = Math.subtractExact(makerBefore, event.size());
@@ -538,8 +564,8 @@ public final class MatcherSettlementPlan {
                 tradeCount++;
                 laneMask |= 1L << makerLane;
             }
-            if (batch != null && (remainingByOrderId.get(takerOrderId) == 0 || taker.timeInForce().immediate()
-                    || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET))
+            if (batch != null && (remainingByOrderId.get(takerOrderId) == 0 || takerTimeInForce.immediate()
+                    || takerOrderType == com.surprising.aeron.protocol.CoreOrderType.MARKET))
                 batch.terminalOrderIds.add(takerOrderId);
         } finally {
             if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
@@ -558,6 +584,7 @@ public final class MatcherSettlementPlan {
                 : target;
         plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
         plan.admittedTaker = taker;
+        plan.resolvedTaker = resolvedTaker;
         plan.directTaker = null;
         plan.directTakerSide = null;
         plan.directTakerSymbolId = 0;
@@ -615,10 +642,16 @@ public final class MatcherSettlementPlan {
 
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                                 CoreInstrument instrument, OrderRuntime order) {
+        preparePositionIdentity(runtime, identities, instrument, order.userId(), order.positionSide());
+    }
+
+    private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                                CoreInstrument instrument, long userId,
+                                                com.surprising.aeron.protocol.CorePositionSide positionSide) {
         if (!runtime.productLine().isDerivative()) return;
-        String positionIdentity = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? instrument.symbol() : instrument.symbol() + ':' + order.positionSide().name();
-        identities.positionKey(order.userId(), positionIdentity);
+        String positionIdentity = positionSide == com.surprising.aeron.protocol.CorePositionSide.NET
+                ? instrument.symbol() : instrument.symbol() + ':' + positionSide.name();
+        identities.positionKey(userId, positionIdentity);
     }
 
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
@@ -637,6 +670,7 @@ public final class MatcherSettlementPlan {
     public long takerOrderId() { return takerOrderId; }
     public long activeUserId() { return activeUserId; }
     OrderRuntime admittedTaker() { return admittedTaker; }
+    ResolvedPlaceOrder resolvedTaker() { return resolvedTaker; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public int orderCount() { return orderCount; }
 

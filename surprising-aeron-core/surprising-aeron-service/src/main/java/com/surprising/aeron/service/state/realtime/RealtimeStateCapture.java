@@ -401,13 +401,29 @@ public final class RealtimeStateCapture {
             long makerOrderId,
             long makerUserId) {
         if (!active() || taker == null) return;
+        trade(taker.userId(), taker.orderId(), taker.symbolId(), taker.side(), matcherSequence,
+                fillIndex, price, quantity, makerOrderId, makerUserId);
+    }
+
+    public void trade(
+            long takerUserId,
+            long takerOrderId,
+            int takerSymbolId,
+            CoreOrderSide takerSide,
+            long matcherSequence,
+            int fillIndex,
+            long price,
+            long quantity,
+            long makerOrderId,
+            long makerUserId) {
+        if (!active() || takerUserId <= 0 || takerOrderId <= 0 || takerSymbolId < 0 || takerSide == null) return;
         byte[] data =
                 ByteBuffer.allocate(25)
                         .order(ByteOrder.LITTLE_ENDIAN)
                         .putLong(price)
                         .putLong(quantity)
                         .putLong(matcherSequence)
-                        .put((byte) taker.side().ordinal())
+                        .put((byte) takerSide.ordinal())
                         .array();
         String id =
                 product
@@ -416,28 +432,29 @@ public final class RealtimeStateCapture {
                         + ":"
                         + matcherSequence
                         + ":"
-                        + taker.orderId()
+                        + takerOrderId
                         + ":"
                         + fillIndex;
-        emit(RealtimeFrame.Kind.TRADE, 0, identities.symbol(taker.symbolId()), id, data);
+        String symbol = identities.symbol(takerSymbolId);
+        emit(RealtimeFrame.Kind.TRADE, 0, symbol, id, data);
         if (tradesOnly) return;
         execution(
-                taker.userId(),
-                taker.orderId(),
-                identities.symbol(taker.symbolId()),
+                takerUserId,
+                takerOrderId,
+                symbol,
                 id,
                 price,
                 quantity,
-                taker.side(),
+                takerSide,
                 false);
         execution(
                 makerUserId,
                 makerOrderId,
-                identities.symbol(taker.symbolId()),
+                symbol,
                 id,
                 price,
                 quantity,
-                taker.side() == CoreOrderSide.BUY ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+                takerSide == CoreOrderSide.BUY ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                 true);
     }
 

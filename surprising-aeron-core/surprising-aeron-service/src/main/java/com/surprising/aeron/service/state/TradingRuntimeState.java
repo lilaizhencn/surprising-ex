@@ -2191,14 +2191,15 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /**
-     * Publish admission metadata and its immutable order version to the Matcher.
+     * Publish admission metadata to the Matcher. The immutable matcher input is already
+     * retained by the pooled settlement event; the mutable runtime order remains Lane-owned.
      * Owner scheduling remains separate from this Matcher-consumed payload.
      */
     void publishAdmissionReceipt(int laneId, int matcherShard, long coreSequence, long reservationId,
                                  long accountVersion, long reservedAmount,
-                                 boolean accepted, int resultCode, OrderRuntime admittedOrder) {
+                                 boolean accepted, int resultCode) {
         admissionReceiptRing(laneId, matcherShard).publish(coreSequence, reservationId, accountVersion,
-                reservedAmount, accepted, resultCode, admittedOrder);
+                reservedAmount, accepted, resultCode);
         admissionReceiptReadyQueues[laneId].publish(coreSequence);
         admissionReceiptReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
         signalOwnerCompletion();

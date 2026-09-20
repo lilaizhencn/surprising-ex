@@ -391,12 +391,9 @@ final class CoreMatchingFlow {
             owner.runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
             return true;
         }
-        OrderRuntime admittedRuntime = admission.admittedOrder();
         ResolvedPlaceOrder admitted = owner.runtimeState.collectPlaceAdmission(admission);
         pending.admissionCompleted(admitted);
-        // This immutable receipt is the cross-thread admission handoff used by settlement and,
-        // when enabled, realtime trade encoding. It is not a second authoritative order state.
-        pending.realtimeTakerOrder = admittedRuntime;
+        if (owner.realtimeCapture != null) pending.realtimeResolvedTakerOrder = admitted;
         completePlaceAdmissionSubmission(pending);
         owner.runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
         return true;

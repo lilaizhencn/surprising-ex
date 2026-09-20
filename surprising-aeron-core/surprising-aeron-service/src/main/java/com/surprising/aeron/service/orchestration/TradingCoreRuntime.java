@@ -1560,13 +1560,22 @@ public final class TradingCoreRuntime implements AutoCloseable,
     void captureRealtimeTrades(CommandSlot pending) {
         var plan = pending.settlementPlan();
         OrderRuntime taker = pending.realtimeTakerOrder;
+        ResolvedPlaceOrder resolvedTaker = pending.realtimeResolvedTakerOrder;
         pending.realtimeTakerOrder = null;
+        pending.realtimeResolvedTakerOrder = null;
         if (realtimeCapture == null || !realtimeCapture.active()) return;
         try {
             for (int index = 0; index < plan.matcherEventCount(); index++) {
                 MatcherEvent match = plan.matcherEvent(index);
-                if (match.eventType() == MatcherEventType.TRADE)
-                    realtimeCapture.trade(taker, plan.coreSequence(), index, match.price(), match.size(),match.matchedOrderId(),match.matchedOrderUid());
+                if (match.eventType() != MatcherEventType.TRADE) continue;
+                if (resolvedTaker != null) {
+                    realtimeCapture.trade(pending.command().header().userId(), resolvedTaker.orderId(),
+                            resolvedTaker.symbolId(), resolvedTaker.side(), plan.coreSequence(), index,
+                            match.price(), match.size(), match.matchedOrderId(), match.matchedOrderUid());
+                } else {
+                    realtimeCapture.trade(taker, plan.coreSequence(), index, match.price(), match.size(),
+                            match.matchedOrderId(), match.matchedOrderUid());
+                }
             }
         } catch (RuntimeException failure) { realtimeCapture.failed(); }
     }

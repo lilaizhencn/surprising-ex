@@ -310,13 +310,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     /** Matcher copies a receipt slot into this already pooled event. */
     void admissionReceipt(long reservationId, long accountVersion, long reservedAmount,
-                          boolean accepted, int resultCode, OrderRuntime admittedOrder) {
+                          boolean accepted, int resultCode) {
         if (!direct || !admissionRequired || admissionResolved || reservationId <= 0
                 || reservationId != admissionOrderId
-                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0
-                || accepted != (admittedOrder != null)
-                || admittedOrder != null && (admittedOrder.orderId() != reservationId
-                        || admittedOrder.userId() != admissionUserId)) {
+                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0) {
             throw new IllegalStateException("invalid place admission receipt");
         }
         admissionReservationId = reservationId;
@@ -324,8 +321,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         admissionReservedAmount = reservedAmount;
         admissionAccepted = accepted;
         admissionResultCode = resultCode;
-        // The receipt owns an immutable value, not a borrowed pooled admission event.
-        batchStorage.admittedOrders[0] = admittedOrder;
         admissionResolved = true;
     }
 
@@ -964,9 +959,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private void publishAdmittedState(
             AccountLaneState lane, MatcherSettlementPlan value, OrderRuntime admissionVersion) {
         OrderRuntime admitted = admissionVersion == null ? value.admittedTaker() : admissionVersion;
-        if (admitted == null || !runtime.currentLaneOwns(admitted.userId())) return;
-        long orderId = admitted.orderId();
-        runtime.publishUser(admitted.userId(), lane.users.get(admitted.userId()));
+        boolean eventAdmission = admissionRequired && admissionAccepted && admissionOrder != null;
+        long userId = admitted != null ? admitted.userId()
+                : eventAdmission ? admissionUserId : value.activeUserId();
+        long orderId = admitted != null ? admitted.orderId()
+                : eventAdmission ? admissionOrderId : value.takerOrderId();
+        if ((admitted == null && value.resolvedTaker() == null && !eventAdmission)
+                || !runtime.currentLaneOwns(userId)) return;
+        runtime.publishUser(userId, lane.users.get(userId));
         runtime.publishOrder(orderId, lane.orders.get(orderId));
         runtime.publishReservation(orderId, lane.reservations.get(orderId));
     }
@@ -978,7 +978,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         UserRuntime user = lane.users.get(userId);
         if (original == null || original.revision() != replacement.originalOrderRevision()
                 || user == null || user.revision() != replacement.userRevision())
-            throw new IllegalStateException("replace admission changed before Lane execution");
+            throw new IllegalStateException("replace admission changed before Lane execution: order="
+                    + (original == null ? "missing" : original.revision()) + '/'
+                    + replacement.originalOrderRevision() + " user="
+                    + (user == null ? "missing" : user.revision()) + '/' + replacement.userRevision());
         for (int index = 0; index < value.preCancellationCount(); index++)
             runtime.cancelOrderInLane(userId, value.preCancellationOrderId(index),
                     commitTimestamp, commitClusterPosition);
