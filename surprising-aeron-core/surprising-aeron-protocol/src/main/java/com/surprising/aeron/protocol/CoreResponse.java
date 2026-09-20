@@ -96,11 +96,6 @@ public final class CoreResponse {
                 appliedCommandCount, EMPTY_DATA);
     }
 
-    public CoreResponse withCommittedCoreSequence(long sequence) {
-        return new CoreResponse(status, commandStatus, resultCode, routeVersion, sequence,
-                appliedCommandCount, data, dataOffset, dataLength, true);
-    }
-
     /* Public reads never expose storage transferred by the encoder. */
     public byte[] data() {
         return dataLength == 0 ? EMPTY_DATA : java.util.Arrays.copyOfRange(data, dataOffset, dataOffset + dataLength);

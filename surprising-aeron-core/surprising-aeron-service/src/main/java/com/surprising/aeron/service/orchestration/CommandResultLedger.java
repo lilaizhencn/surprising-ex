@@ -14,7 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** 命令幂等结果账本：独占保留顺序、字节上限和结果摘要；仅 owner 读写。 */
+/** 命令幂等结果账本：独占保留顺序和字节上限；仅 owner 读写。 */
 final class CommandResultLedger {
     /* 命令结果及其保留顺序；不是第二份订单或账户状态。 */
     /** Keep the probe table below half load while retaining at most 128 results. */
@@ -104,25 +104,6 @@ final class CommandResultLedger {
 
     static long resultEntryBytes(StoredResult result) {
         return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataLength());
-    }
-
-    static long computeResultEntryDigest(UUID commandId, StoredResult result) {
-        long digest = HASH_OFFSET_BASIS;
-        digest = mix(digest, commandId.getMostSignificantBits());
-        digest = mix(digest, commandId.getLeastSignificantBits());
-        for (int index = 0; index < CommandFingerprint.LENGTH; index++) {
-            digest = mix(digest, Byte.toUnsignedInt(result.fingerprint().byteAt(index)));
-        }
-        digest = mix(digest, result.status().wireCode());
-        digest = mix(digest, result.resultCode().wireCode());
-        digest = mix(digest, result.appliedCommandCount());
-        digest = mix(digest, result.retentionSequence());
-        byte[] response = result.responseDataUnsafe();
-        int end = result.responseDataOffsetUnsafe() + result.responseDataLength();
-        for (int index = result.responseDataOffsetUnsafe(); index < end; index++) {
-            digest = mix(digest, Byte.toUnsignedInt(response[index]));
-        }
-        return digest;
     }
 
     static long nextRetentionSequence(Map<UUID, StoredResult> results) {
@@ -352,11 +333,6 @@ final class CommandResultLedger {
         private int responseLength;
         /** 本结果的保留顺序，替换内容不会重新排到队尾。 */
         private long retentionSequence;
-        /** 缓存摘要所对应的命令 ID。 */
-        UUID digestCommandId;
-        /** 本条结果的摘要缓存，避免恢复遍历重复计算。 */
-        long cachedEntryDigest;
-
         private StoredResult(int ringSlot) {
             this.ringSlot = ringSlot;
             fingerprint = null;
@@ -427,8 +403,6 @@ final class CommandResultLedger {
                 this.responseLength = responseLength;
             }
             this.retentionSequence = retentionSequence;
-            this.digestCommandId = null;
-            this.cachedEntryDigest = 0;
         }
 
         private void copyFrom(StoredResult other) {
@@ -455,15 +429,6 @@ final class CommandResultLedger {
         CoreResultCode resultCode() { return resultCode; }
         long appliedCommandCount() { return appliedCommandCount; }
         long retentionSequence() { return retentionSequence; }
-
-        long entryDigest(UUID commandId) {
-            if (commandId == null) throw new IllegalArgumentException("command id is required");
-            if (commandId.equals(digestCommandId)) return cachedEntryDigest;
-            long digest = computeResultEntryDigest(commandId, this);
-            digestCommandId = commandId;
-            cachedEntryDigest = digest;
-            return digest;
-        }
 
         byte[] responseDataUnsafe() {
             return responseData;

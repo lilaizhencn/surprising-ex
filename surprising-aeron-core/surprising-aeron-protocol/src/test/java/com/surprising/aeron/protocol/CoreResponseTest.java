@@ -1,7 +1,6 @@
 package com.surprising.aeron.protocol;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 
 class CoreResponseTest {
@@ -12,12 +11,7 @@ class CoreResponseTest {
         input[0] = 99;
         response.data()[1] = 99;
         assertThat(response.data()).containsExactly(3, 5, 8);
-        CoreResponse stamped = response.withCommittedCoreSequence(17);
-        assertThat(stamped.dataUnsafe()).isSameAs(response.dataUnsafe());
-        stamped.data()[2] = 99;
-        assertThat(stamped.data()).containsExactly(3, 5, 8);
         assertThat(response.committedCoreSequence()).isEqualTo(7);
-        assertThat(stamped.committedCoreSequence()).isEqualTo(17);
     }
 
     @Test
@@ -32,8 +26,6 @@ class CoreResponseTest {
         wire[wire.length - 1] = 99;
         assertThat(decoded.data()).containsExactly(3, 5, 8);
         assertThat(CoreProtocol.responsePayload(decoded)).isEqualTo(CoreProtocol.responsePayload(response));
-        assertThatThrownBy(() -> response.withCommittedCoreSequence(-1))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
