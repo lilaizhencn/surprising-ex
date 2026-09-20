@@ -538,7 +538,7 @@ class TradingCoreReducerTest {
             long makerFeeRatePpm, long takerFeeRatePpm) {
         CoreInstrument instrument = state.instruments().get(intent.symbol());
         return new ResolvedPlaceOrder(intent, instrument, -1, intent.limitPriceTicks(), intent.limitPriceTicks(),
-                intent.limitPriceTicks(), 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm, 0);
+                intent.limitPriceTicks(), kind, asset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
     private static Stream<ProductLine> derivativeProductLines() {

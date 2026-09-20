@@ -15,23 +15,21 @@ public record ResolvedPlaceOrder(
         long markPriceTicks,
         long indexPriceTicks,
         long forwardPriceTicks,
-        long markPriceSequence,
         ReservationKind reservationKind,
         String reservationAsset,
         long makerFeeRatePpm,
-        long takerFeeRatePpm,
-        long feePolicyVersion) {
+        long takerFeeRatePpm) {
 
     public ResolvedPlaceOrder {
         if (intent == null || instrument == null || symbolId < -1
                 || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
                 || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
                 || (indexPriceTicks == 0) != (forwardPriceTicks == 0)
-                || markPriceSequence < 0 || reservationKind == null
+                || reservationKind == null
                 || reservationAsset == null || reservationAsset.isBlank()
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
                 || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000
-                || makerFeeRatePpm > takerFeeRatePpm || feePolicyVersion < 0) {
+                || makerFeeRatePpm > takerFeeRatePpm) {
             throw new IllegalArgumentException("invalid resolved place order");
         }
         reservationAsset = AssetBalance.normalizeAsset(reservationAsset);
@@ -39,11 +37,10 @@ public record ResolvedPlaceOrder(
 
     public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
                               long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
-                              long markPriceSequence, ReservationKind reservationKind, String reservationAsset,
-                              long makerFeeRatePpm, long takerFeeRatePpm, long feePolicyVersion) {
+                              ReservationKind reservationKind, String reservationAsset,
+                              long makerFeeRatePpm, long takerFeeRatePpm) {
         this(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks, markPriceTicks,
-                0, 0, markPriceSequence, reservationKind, reservationAsset, makerFeeRatePpm,
-                takerFeeRatePpm, feePolicyVersion);
+                0, 0, reservationKind, reservationAsset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
     public long orderId() { return intent.orderId(); }

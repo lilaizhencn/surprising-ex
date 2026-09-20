@@ -57,7 +57,7 @@ class AdmissionReceiptRingTest {
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
         var resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,
-                1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0, 1);
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
         var event = new MatcherSettlementEvent();
         event.batchStorage(1);
         int lane = runtime.topology().accountLaneId(7);

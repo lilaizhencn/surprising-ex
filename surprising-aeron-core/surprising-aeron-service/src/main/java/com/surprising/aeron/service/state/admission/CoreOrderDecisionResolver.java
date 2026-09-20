@@ -78,7 +78,6 @@ public final class CoreOrderDecisionResolver {
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
         long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
         long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
-        long markPriceSequence = spotLimit ? 0 : mark.priceSequence();
         long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks);
         long reservationPriceTicks = reservationPrice(intent, instrument, markPriceTicks, matchingPriceTicks);
@@ -89,8 +88,8 @@ public final class CoreOrderDecisionResolver {
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
         return new ResolvedPlaceOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, markPriceSequence, reservationKind, reservationAsset,
-                fee.makerFeeRatePpm(), fee.takerFeeRatePpm(), fee.policyVersion());
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
+                fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
     }
 
     public static ResolvedPlaceOrder resolve(TradingCoreState state, PlaceOrderCommand intent) {
@@ -108,7 +107,6 @@ public final class CoreOrderDecisionResolver {
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
         long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
         long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
-        long markPriceSequence = spotLimit ? 0 : mark.priceSequence();
         long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks);
         long reservationPriceTicks = reservationPrice(intent, instrument, markPriceTicks, matchingPriceTicks);
@@ -119,8 +117,8 @@ public final class CoreOrderDecisionResolver {
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
         return new ResolvedPlaceOrder(intent, instrument, -1, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, markPriceSequence, reservationKind, reservationAsset,
-                instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0);
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
+                instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
     }
 
     private static void requireFreshMark(MarkPriceRuntime mark, CoreInstrument instrument,

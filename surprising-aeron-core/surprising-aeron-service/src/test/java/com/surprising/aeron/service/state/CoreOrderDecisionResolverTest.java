@@ -71,7 +71,6 @@ class CoreOrderDecisionResolverTest {
         assertThat(resolved.reservationAsset()).isEqualTo("USDT");
         assertThat(resolved.makerFeeRatePpm()).isEqualTo(-25);
         assertThat(resolved.takerFeeRatePpm()).isEqualTo(75);
-        assertThat(resolved.feePolicyVersion()).isEqualTo(2);
     }
 
     @Test

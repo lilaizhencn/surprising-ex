@@ -47,7 +47,7 @@ public class OrderAdmissionAllocationBenchmark {
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
         resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,
-                1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0, 1);
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 
     @Benchmark public OrderRuntime admitWithFinalMetadata(Blackhole blackhole) {
