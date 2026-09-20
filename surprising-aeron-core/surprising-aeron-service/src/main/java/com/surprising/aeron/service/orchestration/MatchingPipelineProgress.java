@@ -263,6 +263,10 @@ final class MatchingPipelineProgress {
         OrderBatchPending batch = head == null ? null : head.orderBatch;
         // Handoff and the final metadata commit have no matcher-settlement cursor. Keep polling
         // these bounded Owner continuations even after consuming the last notification.
+        // The throughput profile runs Owner on an exclusive CPU and intentionally keeps polling
+        // while a Lane commit is pending.  Completion correctness is still decided by the event
+        // bits and TradingCoreRuntime.hasCompletedLaneCommit(); this condition only selects the
+        // production busy-spin scheduling policy.
         return batch != null && (!batch.activated() || batch.laneCommitEvent != null || batch.itemAdmission != null)
                 || head != null && !head.isMatchingSubmitted() && head.placeAdmission() == null
                 && !head.deferredMatching()

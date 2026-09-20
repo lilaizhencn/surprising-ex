@@ -34,6 +34,9 @@ ISOLATE_STAGE="${ASYNC_ISOLATE_STAGE:-false}"
 SETTLEMENT_WAIT_STRATEGY="${ASYNC_SETTLEMENT_WAIT_STRATEGY:-${AERON_BASELINE_SETTLEMENT_WAIT_STRATEGY}}"
 SETTLEMENT_SPIN_LIMIT="${ASYNC_SETTLEMENT_SPIN_LIMIT:-${AERON_BASELINE_SETTLEMENT_SPIN_LIMIT}}"
 MATCHER_WAIT_STRATEGY="${ASYNC_MATCHER_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_WAIT_STRATEGY}}"
+MATCHER_PIPELINE_WAIT_STRATEGY="${ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_PIPELINE_WAIT_STRATEGY:-ADAPTIVE}}"
+OWNER_WAIT_STRATEGY="${ASYNC_OWNER_WAIT_STRATEGY:-${AERON_BASELINE_OWNER_WAIT_STRATEGY:-ADAPTIVE}}"
+OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
 COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
 ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
 OWNER_POLL_DIAGNOSTICS="${ASYNC_OWNER_POLL_DIAGNOSTICS:-false}"
@@ -59,13 +62,14 @@ case "${COLLECTOR}" in
   *) echo "ASYNC_COLLECTOR must be ZGC or G1" >&2; exit 2 ;;
 esac
 mkdir -p "${ROOT}"
+ROOT="$(cd "${ROOT}" && pwd)"
 if [[ "${SKIP_BUILD}" != true ]]; then
   JAVA_HOME="${JAVA_HOME_SELECTED}" mvn -f "${REPO_ROOT}/pom.xml" -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package > "${ROOT}.build.log"
 fi
 [[ -s "${SERVICE_JAR}" && -s "${BENCHMARK_JAR}" ]] || { echo "Build artifacts are missing" >&2; exit 2; }
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
-printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nownerPollDiagnostics=%s\nmatcherWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\n' \
-  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${OWNER_POLL_DIAGNOSTICS}" "${MATCHER_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" > "${ROOT}/strategy.txt"
+printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nownerPollDiagnostics=%s\nmatcherWaitStrategy=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
+  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${OWNER_POLL_DIAGNOSTICS}" "${MATCHER_WAIT_STRATEGY}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
 
 NODE_PID=""
 NODE_LANES="${ACCOUNT_LANES}"
@@ -96,14 +100,18 @@ start_node() {
     "-Dsurprising.owner.poll-diagnostics=${OWNER_POLL_DIAGNOSTICS}"
     "-Dsurprising.aeron.account-lanes=${NODE_LANES}" "-Dsurprising.aeron.matching-engines=${NODE_MATCHERS}"
     "-Dsurprising.aeron.owner-command-window=${window}" "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
+    "-Dsurprising.aeron.matcher-pipeline-wait-strategy=${MATCHER_PIPELINE_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
+    "-Dsurprising.aeron.owner-wait-strategy=${OWNER_WAIT_STRATEGY}"
+    "-Dsurprising.aeron.owner-input-batch-size=${OWNER_INPUT_BATCH_SIZE}"
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
   if [[ "${ENABLE_JFR}" == true ]]; then
     args+=(-Dcore.settlementLatencyDiagnostics=true "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
   fi
-  args+=(-cp "${SERVICE_JAR}" com.surprising.aeron.service.SurprisingCoreBootstrap)
+  # The shaded service jar owns the production entry point in its manifest.
+  args+=(-jar "${SERVICE_JAR}")
   printf '%q ' "${JAVA}" "${args[@]}" > "${dir}/node.command"; printf '\n' >> "${dir}/node.command"
   (cd "${dir}" && exec "${JAVA}" "${args[@]}") > "${dir}/node.log" 2>&1 & NODE_PID=$!
   for _ in {1..40}; do
@@ -119,7 +127,7 @@ run_stage() {
   NODE_LANES="${ACCOUNT_LANES}"; NODE_MATCHERS="${MATCHING_ENGINES}"
   if [[ "${ISOLATE_STAGE}" == true && ( "${stage}" == lane || "${stage}" == matcher ) ]]; then NODE_LANES="${LANE_STAGE_LANES}"; fi
   if [[ "${ISOLATE_STAGE}" == true && "${stage}" == matcher ]]; then NODE_LANES="${MATCHER_STAGE_LANES}"; fi
-  printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\ntradingProfile=%s\nbatchSize=%s\nenableJfr=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" "${profile}" "${batch}" "${ENABLE_JFR}" > "${dir}/stage-config.txt"
+  printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\ntradingProfile=%s\nbatchSize=%s\nenableJfr=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" "${profile}" "${batch}" "${ENABLE_JFR}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${dir}/stage-config.txt"
   start_node "${dir}"
   "${JCMD}" "${NODE_PID}" VM.native_memory baseline > "${dir}/nmt-baseline.txt" 2>&1 || true
   local -a client_args=(
@@ -149,6 +157,9 @@ run_stage() {
     "${JCMD}" "${NODE_PID}" Thread.print -l > "${dir}/threads.txt" 2>&1 || true
     "${JCMD}" "${NODE_PID}" VM.native_memory summary.diff > "${dir}/nmt-summary.diff.txt" 2>&1 || true
     "${JCMD}" "${NODE_PID}" VM.native_memory summary > "${dir}/nmt-summary.txt" 2>&1 || true
+    if [[ "${ENABLE_JFR}" == true ]]; then
+      "${JCMD}" "${NODE_PID}" JFR.dump name=1 filename="${dir}/node.jfr" > "${dir}/jfr-dump.txt" 2>&1 || true
+    fi
   fi
   stop_node
   if [[ -s "${dir}/node.jfr" ]]; then

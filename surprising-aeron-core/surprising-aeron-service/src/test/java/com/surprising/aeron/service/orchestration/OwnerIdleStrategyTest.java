@@ -8,6 +8,22 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class OwnerIdleStrategyTest {
+    @Test void busySpinStrategyDoesNotEnterCompletionProbe() {
+        String property = "surprising.aeron.owner-wait-strategy";
+        String previous = System.getProperty(property);
+        try {
+            System.setProperty(property, "BUSY_SPIN");
+            var probes = new java.util.concurrent.atomic.AtomicInteger();
+            var idle = new OwnerIdleStrategy(() -> { probes.incrementAndGet(); return false; });
+            idle.bindOwner();
+            for (int i = 0; i < 10_000; i++) idle.idle(0, true);
+            assertThat(probes.get()).isZero();
+        } finally {
+            if (previous == null) System.clearProperty(property);
+            else System.setProperty(property, previous);
+        }
+    }
+
     @Test void publicationDuringTheFinalEmptyProbeDoesNotLoseTheWakeup() throws Exception {
         var probing = new CountDownLatch(1);
         var published = new AtomicBoolean();

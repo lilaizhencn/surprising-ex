@@ -8,19 +8,28 @@ import java.util.function.BooleanSupplier;
 
 /** 仅通知休眠的 Owner；队列/完成标记仍是工作的唯一来源，不复制业务状态。 */
 public final class OwnerIdleStrategy {
+    private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.owner-wait-strategy";
     private static final VarHandle PARK_REQUESTED;
     static {
         try { PARK_REQUESTED = MethodHandles.lookup().findVarHandle(Wakeup.class, "requested", long.class); }
         catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
     }
     private final BooleanSupplier workAvailable;
+    private final WaitStrategy waitStrategy;
     /** 与 Owner 每轮修改的退避计数分离，完成生产者只读取这个通知单元。 */
     private final Wakeup wakeup = new Wakeup();
     private Thread owner;
     private int idleCount;
     private long parkNanos = 1_000;
 
-    public OwnerIdleStrategy(BooleanSupplier workAvailable) { this.workAvailable = Objects.requireNonNull(workAvailable); }
+    public OwnerIdleStrategy(BooleanSupplier workAvailable) {
+        this(workAvailable, configuredWaitStrategy());
+    }
+
+    OwnerIdleStrategy(BooleanSupplier workAvailable, WaitStrategy waitStrategy) {
+        this.workAvailable = Objects.requireNonNull(workAvailable);
+        this.waitStrategy = Objects.requireNonNull(waitStrategy);
+    }
 
     public void bindOwner() { owner = Thread.currentThread(); }
 
@@ -35,6 +44,10 @@ public final class OwnerIdleStrategy {
             if (idleCount != 0) { idleCount = 0; parkNanos = 1_000; }
             return;
         }
+        if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+            Thread.onSpinWait();
+            return;
+        }
         if (idleCount < 100) { idleCount++; Thread.onSpinWait(); return; }
         if (idleCount < 110) { idleCount++; Thread.yield(); return; }
         wakeup.requested = 1;
@@ -45,6 +58,18 @@ public final class OwnerIdleStrategy {
         } finally { wakeup.requested = 0; }
         parkNanos = Math.min(100_000, parkNanos * 2);
     }
+
+    private static WaitStrategy configuredWaitStrategy() {
+        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.ADAPTIVE.name());
+        try {
+            return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException(
+                    WAIT_STRATEGY_PROPERTY + " must be BUSY_SPIN or ADAPTIVE", failure);
+        }
+    }
+
+    enum WaitStrategy { BUSY_SPIN, ADAPTIVE }
 
     private static final class Wakeup {
         @SuppressWarnings("unused")

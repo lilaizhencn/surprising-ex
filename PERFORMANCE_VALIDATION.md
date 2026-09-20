@@ -67,6 +67,374 @@ java [JDK 27 Aeron opens/exports] \
 - 清理状态：Core、客户端和 Aeron 进程均已停止；本轮临时目录、Archive/CNC、JFR、NMT、线程转储和日志在本记录完成后移入用户回收站，不保留工作区临时集群。
 - 结论：**通过（短时功能/正确性压测）**；不是容量验收，也不能外推三节点云端容量或长稳表现。
 
+## 2026-09-18：beccd8b7 单节点 MATCH_STREAM 吞吐探索（20260918T074901Z）
+
+### 锁定计划（采集前）
+
+- **问题与门槛**：验证当前 `master` 的真实单节点交易 Core 在固定全局 in-flight `256` 下，`MATCH_STREAM` 异步 GTC maker + IOC taker 能达到的持续终态吞吐。目标是得到当前配置的有效吞吐上限探索值，不建立旧版本对照。有效条件：`acceptedBusinessOperations == terminalBusinessOperations`、accepted/terminal Core messages 相等、unfinished/backlog 为零、失败/拒绝/超时为零、`fundsDiff=0`、`bookLevels=0`；不满足则标记失败或无效，不把排空计数算入测量吞吐。
+- **环境与复现**：时间 `2026-09-18 15:49:01 CST`；commit `beccd8b7879e7d68fd60a905cda0d7ad60e4698e`；未提交改动仅为用户既有的 `AGENTS.md`（`1 insertion/58 deletions`，diff SHA-256 `35324a6c43103d81e805fe54377069b7609f144a615f98c153d6341525a92773`），不改动业务代码；MacBookPro16,1，16 logical CPU，16 GiB，macOS 26.7 x86_64；HotSpot Corretto JDK 27.0.0.33.1，Maven 3.9.16；开始前磁盘可用约 424 GiB；同机不启动 wallet，先检查并记录无残留 Java/Aeron/Maven 进程；随机种子 `9901`。
+- **业务场景**：`LINEAR_PERPETUAL`；单个真实 Aeron Cluster 成员、1 个 matcher、4 个 Account Lane；`MATCH_STREAM`，4 workers/4 connections，128 symbols，100 users（50 maker/taker pairs）；每个异步工作单元连续提交 GTC maker + IOC taker，买卖方向交替；做市状态由基准 workload 初始化，测量边界前排空；全局 async/session in-flight 固定 `256`。
+- **负载与时间**：恒定持续异步发压，窗口内不逐笔等待 maker 终态再发 taker；预热 30 秒，正式稳定测量 60 秒，单次主吞吐轮；结束后只做自然排空和资金/订单簿核对，不把排空计入吞吐。JFR 归因使用同一场景、独立新节点、30 秒预热 + 60 秒测量；客户端 `requestToTerminal` 以客户端单调时钟记录，窗口吞吐使用测量窗口终态增量/墙钟时长。
+- **采样配置**：主轮不启用 profiler；节点/客户端记录 GC 日志、NMT summary、线程转储和 macOS `top`/`vm_stat`/`iostat` 时间序列。归因轮启用 `owner-commit-profile.jfc`，节点和客户端各自独立 JFR 文件，`maxsize=256m`、`dumponexit=true`；每个进程单独 artifact。直接 `ClusterCapacityMain` 不是 JMH invocation，JMH `-prof gc` 不适用，本轮用 HotSpot GC 日志与 JFR GC/分配视图替代并在结果中标明缺口。
+- **完整复现命令（计划）**：构建 `JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -f pom.xml -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package`；节点按 `surprising-aeron.service.SurprisingCoreBootstrap` 启动，参数固定为 `-Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN`；客户端按 `com.surprising.aeron.benchmarks.workload.ClusterCapacityMain` 启动，参数固定为 `-Dsurprising.aeron.capacity-workload=MATCH_STREAM -Dsurprising.aeron.capacity-symbol-count=128 -Dsurprising.aeron.capacity-workers=4 -Dsurprising.aeron.capacity-connections=4 -Dsurprising.aeron.capacity-user-count=100 -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60 -Dsurprising.aeron.capacity-seed=9901`；实际命令、PID、起止时间及 artifact 校验在本节结果中补录。
+
+### 实际执行与偏差
+
+- 构建命令按计划执行并成功：`JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -f pom.xml -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package`，总耗时 `26.831s`。JDK/Maven/OS 与锁定计划一致。
+- 计划中的 `SurprisingCoreBootstrap` 不存在于当前 service jar；首次启动仅产生 `ClassNotFoundException`，没有启动交易节点和业务流量，结果不计入吞吐。实际修正为 service jar manifest 的 `java -jar surprising-aeron-service/target/surprising-aeron-service.jar`，主类为现有 `SurprisingCoreApplication`。无业务错误、无残留进程；无效尝试原始目录为 `target/pressure/20260918T074901Z/main/`。
+- 实际主轮命令由 `target/pressure/20260918T074901Z/main-rerun/node/node.command` 与 `target/pressure/20260918T074901Z/main-rerun/client/client.command` 保存；节点 PID `5294`，客户端 PID `5314`。节点 `07:52:58Z` 启动、`07:53:00Z` ready；客户端 `07:53:00Z` 启动、`07:54:33Z` 结束，退出码 `0`。主轮节点使用 G1、`-Xms512m -Xmx1536m`、NMT summary；客户端使用 G1、`-Xms128m -Xmx512m`；两端 GC 日志 10 MiB 文件滚动、最多 4 个文件。
+- JFR 归因轮使用同一业务参数和独立节点/客户端，节点 PID `6209`、客户端 PID `6242`，`07:56:13Z` 启动、节点 `07:56:16Z` ready、客户端 `07:57:50Z` 结束，退出码 `0`。使用 `config/owner-commit-profile.jfc`，节点/客户端各自 `maxsize=256m,dumponexit=true`。JFR 轮包含 profiler 开销，不与主轮绝对吞吐比较。
+
+### 主轮结果（只取 60.007 秒稳定测量窗口）
+
+- **持续吞吐**：`capacity=PASS`；`MATCH_STREAM`，`offered=2,216,728`、`accepted=2,216,728`、`finalized=2,216,728`，即 `36,941.445 terminal business ops/s`；成交 `1,108,364`，即 `18,470.723 matches/s`。Core 终态消息 `2,224,338`，约 `37,070.9 messages/s`；行情前置 `7,610`，`126.820/s`。订单业务操作按一单一个 operation 计，fill 没有混入 business ops。
+- **完成性**：`failures=0`、`transientOfferRetries=0`、`unfinishedRequests=0`；`submittedRequests=2,224,338`、`completedRequests=2,224,338`；accepted/terminal business 与 Core message 计数均相等。全局窗口 `256`，观察到请求峰值 `256`、1 秒采样 59 次的平均占用 `251.593`，说明实际到达率被 in-flight 窗口和终态 RTT 背压约束，不能解释为无限 open-loop 到达率；本轮未配置固定 offered rate，未做 coordinated-omission 校正（`expectedInterval=0`）。
+- **分段尾延迟**：客户端单调时钟的 `request → terminal`，直方图样本 `2,216,728`，总体 p50 `6,553µs`、p99 `15,507µs`、p99.9 `24,264µs`、max `38,633µs`。
+  - sell：`1,108,364` samples，p50/p90/p95/p99/p99.9/max = `6,569/7,921/8,626/15,523/24,264/38,633µs`。
+  - buy：`1,108,364` samples，p50/p90/p95/p99/p99.9/max = `6,541/7,892/8,593/15,499/24,297/37,683µs`。
+  - 本次 workload 只有订单命令；没有独立撤单、改单、触发、风险、强平、资金费、ADL 或结算动作样本，相关业务延迟项不适用，不填零。
+- **业务状态**：benchmark 末尾核对 `fundsDiff=0`、`bookLevels=0`；订单请求无 unfinished。该输出是聚合资金/订单簿不变量检查，没有导出逐用户余额、冻结、持仓和手续费流水明细，不能替代完整账务对账。
+
+### JFR/系统/GC 证据（归因轮，不替代主分数）
+
+- 归因轮 `MATCH_STREAM` 的有效性仍为 PASS：`1,822,200` accepted/finalized，`911,100` matches，`failures=0`，Core messages `1,829,752`，unfinished `0`，`fundsDiff=0`、`bookLevels=0`；JFR 开销下吞吐为 `30,366.087 ops/s`，仅用于归因。客户端 p50/p99/p99.9 为 `8,118/17,498/22,069µs`；窗口平均占用 `247.576`，峰值仍为 `256`。
+- **CPU 与线程**：JFR 轮 macOS `top` 分别采集节点和客户端；节点稳定样本约 `784.7–848.7% CPU`，客户端约 `477.4–664.0% CPU`，测量期间机器 idle 接近 `0%`，无 swap。JFR ExecutionSample 热点：`SettlementLaneWorker.run()` `15,669/20,950 = 74.79%`，`SettlementLaneWorker.peekMatcherSettlement()` `9.43%`，`TradingOwnerLoop.run()` `1.62%`；这支持“结算 lane/确定性 owner 交接是首要瓶颈假设”，但不是仅凭热点认定根因。客户端热点为 `ClusterCapacityMain.streamMatch(...)` `89.72%`，代表发压循环本身占比高。
+- **分配**：节点 allocation sample 的主要 class pressure 为 `OrderRuntime 12.10%`、`long[] 8.29%`、`ResolvedPlaceOrder 6.08%`、`byte[] 5.83%`、`CoreMessageHeader 4.64%`；线程 pressure 主要在 `trading-owner--1 40.39%`、`core-matcher-0 11.42%` 和四条 account lane `10.99/10.18/9.41/7.15%`。客户端主要为 `capacity-egress-dispatcher 82.50%`。这些是 JFR sample pressure，不是精确 bytes/op；本轮没有可比的直接 `-prof gc` 结果，因为实际网络 workload 是 `ClusterCapacityMain`，不是 JMH invocation。
+- **GC/停顿**：JFR summary 节点 `GarbageCollection=33`、客户端 `229`，无 `jdk.DataLoss`；稳定测量时间段内 GC 最大 pause 节点 `4.140ms`、客户端 `3.030ms`，对应 safepoint 最大约 `4.590ms`、`3.350ms`。JFR 文件含预热/启动/关闭阶段，关闭阶段另见节点 `55.5ms` safepoint，未与业务窗口关联，不能拿来解释主轮 p99。主轮 GC log 记录节点 40 个、客户端 257 个 GC 事件；退出 heap snapshot 为节点 used `158,095K/committed 524,288K`、客户端 used `66,639K/committed 131,072K`，是短轮末值，不构成长期稳定性证明。
+- **阻塞与 I/O**：节点 JFR 记录 `ThreadPark` `3,036,682` 次，p99 `1.22ms`；Java monitor blocked 仅 `22` 次，最大 `0.760ms`。节点 `FileWrite` `1,614,801` 次，p99 `0.0231ms`、max `36.5ms`，客户端 `2,514` 次、max `0.0667ms`；该聚合包含 Archive/JFR/外围文件事件，尚未把每次写入栈完整归因到交易 owner，下一轮需按窗口和 stack 单独确认是否存在主链路同步 I/O。
+- **Native/线程/长稳**：节点 NMT 相对 ready 后 baseline 的总量为 reserved `-24,136KB`、committed `-16,448KB`；类别中 code committed `+15,777KB`、thread committed `+594KB`，线程数增量 `+6`。这是单轮短时 diff，不能证明无泄漏；未执行长稳 20 分钟/多轮 GC 后 old-object、FD 和 native 增长斜率检查。JFR DirectBuffer/NativeMemory 事件已启用，但未将其时间序列汇总为精确峰值，相关项保留缺口。
+- **系统采样偏差**：主轮 `iostat`/`vm_stat` 正常记录，磁盘可用空间约从 `423GiB` 降至 `422GiB`、swap 始终 `0`；主轮的 macOS `top` 多 PID 参数不被系统接受，未得到主轮 per-process CPU 时间序列，因此 per-process CPU 仅引用独立 JFR 归因轮，不用 profiler 分数替代主分数。
+
+### 正确性、恢复与证据
+
+- Maven 精确测试命令：`JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -f pom.xml -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreStateSnapshotCodecTest,RuntimeCommitRecoveryTest -Dsurefire.failIfNoSpecifiedTests=false test`；`CoreStateSnapshotCodecTest` `14/14`、`RuntimeCommitRecoveryTest` `8/8`，共 `22` tests，0 failures/errors/skips。
+- 原始 artifact（清理前）路径、大小与校验：主轮目录 `target/pressure/20260918T074901Z/main-rerun/` `1.5G`；JFR 目录 `target/pressure/20260918T074901Z/jfr/` `915M`；全轮目录 `2.4G`。主轮 `client.log` SHA-256 `d18cc1b272526fd80f4c3b89697944d8648d41292b4d300267db16b5c06caadb`；JFR 节点 `node.jfr` `139,657,875B`、SHA-256 `20c9bb731822eea13180b86eda29ff2cb01eb137cf668f3d232777f6f232bc5e`；JFR 客户端 `client.jfr` `64,886,014B`、SHA-256 `017a0e2733b2599d0e7baee0feee82faf700db9b5402ff55ea7656d30b9e22c5`。JFR `summary` 与 views 位于对应 role 目录的 `jfr-summary.txt`、`thread-cpu-load.txt`、`hot-methods.txt`、`allocation-by-{class,site,thread}.txt`、`contention-by-thread.txt`、`gc.txt`、`safepoints.txt`、`latencies-by-type.txt`；原始文件在本节记录后清理。
+
+### 结论与下一步
+
+- **结论：部分验证（有效短时吞吐探索）**。在当前 MacBookPro16,1、JDK 27、单节点/单 matcher、4 lanes、`MATCH_STREAM`、全局 in-flight `256` 配置下，当前 `master` 稳定达到约 **3.69 万 terminal business ops/s**（约 **1.85 万 matches/s**），且本轮业务终态、Core 消息、资金聚合和订单簿核对通过。它不是三节点云端容量，也不是无背压的 open-loop 上限。
+- 主要现象是窗口长期接近满载且节点 CPU 饱和；JFR 证据把下一步最小验证指向 `SettlementLaneWorker.peekMatcherSettlement()`/owner-lane 交接。应只改变一个因素，优先做同场景 `BUSY_SPIN` 与受控等待策略的单变量对照，并保留 256 window；预期若 owner/lane 是瓶颈，相关热点和 p99/吞吐应同步变化，若仅 JFR 热点变化而吞吐不变则证伪该假设。之后再做 20 分钟长稳，采集 old/live set、FD、线程、NMT/native buffer 斜率；最后按需要补 API 入口分类型延迟和独立 `-prof gc`/JMH 证据。
+- **清理状态**：主轮/JFR 进程已停止，snapshot/recovery 测试已结束；本轮 `target/pressure/20260918T074901Z/` 下确认生成的临时集群、Archive/CNC、JFR、heap/NMT、GC、系统采样、日志和报告文件（约 `2.4G`）已整体移入用户回收站 `/Users/atomex/.Trash/surprising-ex-pressure-20260918T074901Z`，可恢复；工作区临时目录已移除。`AGENTS.md` 用户既有未提交改动保留。清理不影响本节已记录的结果、命令、路径、大小和校验信息。
+
+## 2026-09-18：beccd8b7 历史 MIXED batch20 满载定位（20260918T081159Z）
+
+### 锁定计划（采集前）
+
+- **问题与门槛**：在当前 `master` 的真实单节点交易 Core 上，按历史 `MIXED batch20` 业务口径验证满载持续吞吐，并定位限制端到端推进的 owner、matcher、Account Lane、客户端发压或外围 I/O。有效条件为 `acceptedBusinessOperations == terminalBusinessOperations`、accepted/terminal Core messages 相等、`unfinished/backlog=0`、拒绝/错误/超时为零、`fundsDiff=0`、资金/持仓/冻结/订单终态及订单簿核对通过；任何正确性错误标记失败，不以高吞吐抵销。
+- **环境与范围**：只测当前 `master` commit `beccd8b7879e7d68fd60a905cda0d7ad60e4698e`，不检出或重跑历史 commit；保留用户既有 `AGENTS.md` 文档改动，不改业务代码；单真实 Aeron Cluster 成员、1 matcher、4 Account Lane、`LINEAR_PERPETUAL`，不启动 wallet；HotSpot Corretto JDK 27、G1、节点 `512m/1536m`、客户端 `128m/512m`、MacBookPro16,1 x86_64，开始前及运行中检查磁盘、swap 和残留进程。
+- **业务场景**：`ClusterMixedCapacityMain` 的连续 `MIXED` 交易流，128 symbols、1000 retail users、1 command session + 1 reserved query session、`batchSize=20`、`mixed-trading-stream=true`、`mixed-operational=false`、`mixed-fill-heavy=false`；全局/session/owner in-flight 固定 `256`；matcher 与 settlement 均 `BUSY_SPIN`，Core `SHARED_NETWORK` + `YIELDING`。批量 item 按 business operation 展开，另报 Core messages、fills 和 batches/items，避免把批量计数当作单订单吞吐。
+- **负载与时间**：持续异步 FIFO 发压，不逐笔等待响应；预热 `30s`、稳定测量 `60s`、测量前排空、测量后自然排空和完整状态核对；主轮不启用 profiler 作为吞吐成绩，独立 JFR 轮使用同一业务参数与全局窗口，仅用于归因并记录采样开销。满载判据为 in-flight 峰值 `256`、窗口阻塞时间/比例显著、pipeline high-water mark 及 Account Lane 完成/执行时间可解释；若发压端先饱和，单独标明不能归因 Core 容量。
+- **采样配置**：节点和客户端各自独立 JFR，`config/owner-commit-profile.jfc`、`maxsize=256m`、`dumponexit=true`；记录 `jfr summary`、CPU/热点、分配 class/site/thread、GC、safepoint、阻塞/park、线程转储、NMT summary/diff、macOS `top`/`vm_stat`/`iostat`，JFR 轮不与主轮绝对吞吐比较。主轮记录 GC 日志和系统采样，限制 GC 日志滚动大小。
+- **完整复现命令（计划）**：先执行 `JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -f pom.xml -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package`；节点固定 `-Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN`；客户端固定 `-Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.mixed-fill-heavy=false -Dsurprising.aeron.capacity-batch-size=20 -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60`，入口为 `com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain`；实际命令、PID、时间、artifact 大小/校验及偏差在本节结果补录。
+
+### 受控等待单变量诊断计划（采集前）
+
+- 在主轮和 JFR 归因轮完成且正确性通过后，使用同一当前 `master`、同一 `MIXED batch20`、同一单节点/1 matcher/4 lanes、同一全局/session/owner in-flight `256`、同一 JDK27/G1、同一 30s/60s 时间，仅把节点 `settlement-wait-strategy` 从 `BUSY_SPIN` 改为 `BLOCKING`，`settlement-spin-limit=0` 保持不变；无 JFR，只比较稳定窗口吞吐、延迟、窗口阻塞、Lane 高水位和 CPU/系统负载。
+- **预期与证伪**：若忙等抢占 owner/matcher 或造成无效 CPU 消耗是主要限制，`BLOCKING` 应在保持满载/正确性不变的同时降低节点 CPU、减少 `SettlementLaneWorker.run()` 空转并改善吞吐或窗口阻塞；若吞吐不变或下降，则不能把忙等当作主因，保留“结算交接/Owner FIFO/业务分配路径”假设，下一步转向对应阶段的单变量诊断。
+
+### 实际执行与偏差
+
+- 构建按计划完成：`JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn mvn -f pom.xml -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package`，耗时 `26.024s`；JDK 27/Maven 3.9.16/OS 与锁定计划一致。当前 service jar manifest 没有 `SurprisingCoreBootstrap`，实际节点命令使用其 manifest 主类 `java -jar surprising-aeron-service.jar`；这只修正启动入口，不改变业务参数。
+- 主轮无 JFR：节点 PID `12350`，客户端 PID `12378`；节点 `08:15:10Z` 启动，客户端 `08:15:14Z` 启动，客户端 `08:17:26Z` 退出 `0`。JFR 归因轮：节点 PID `13281`，客户端 PID `13318`；节点 `08:18:27Z` 启动，客户端 `08:18:32Z` 启动，客户端 `08:20:44Z` 退出 `0`，进程及视图在 `08:20:46Z` 完成。`BLOCKING` 单变量轮：节点 PID `14916`，客户端 PID `14942`；节点 `08:24:00Z` 启动，客户端 `08:24:04Z` 启动，客户端 `08:26:16Z` 退出 `0`。
+- 三轮均保持 `LINEAR_PERPETUAL`、单节点/1 matcher/4 lanes、128 symbols、1000 retail users、`MIXED batch20`、`BUSY_SPIN` matcher、全局/session/owner window `256`、G1、JDK27、30s warmup/60s measurement；JFR 轮仅额外打开 `owner-commit-profile.jfc`。无 wallet、无残留交易进程。
+
+### 主轮结果：满载且正确（无 JFR，仅此轮作为吞吐成绩）
+
+- `60.006254s` 稳定窗口：`terminalBusinessOperations=19,898,900`、`offeredBusinessOperations=19,898,900`，`businessOpsPerSec=331,582.599`；Core `terminal/offered messages=1,902,100`，`coreMessagesPerSec=31,695.383`；`fills=4,736,000`，`fillsPerSec=78,917.688`。
+- 完成性：`mixedCapacity=PASS`、`unfinished=0`、accepted/terminal business 与 Core message 均相等、`peakInFlight=256`、`mixedVerify=PASS`、`fundsDiff=0`、用户/持仓/冻结/订单终态/清算资金边界及订单簿核对通过；`adminActionRetries=114` 为控制动作 offer 重试，不是业务拒绝或错误。
+- 满载证据：`windowBlockedCount=491,427`、`windowBlockedNanos=50,641,078,616`，占测量窗口 `84.39%`；客户端 JFR 的 `ClusterMixedCapacityMain.space()` 占 execution samples `57.22%`，说明发压端主要在等待 256 窗口释放，而非发不满。末尾 pipeline high-water：matcher `220/256`、completion `130/256`、command context `255/256`、Account Lane `[45,45,45,67]`；不是“请求少”，而是终态链路持续把固定窗口顶满。
+- 分业务 `request → terminal` 延迟 p99/p99.9/max（微秒）：`PLACE_ORDER 14,426/23,166/33,816`，`CANCEL_ORDER 13,705/23,019/31,457`，`APPLY_MARK_PRICE 16,441/28,262/33,914`，`PLACE_ORDER_BATCH 17,481/29,343/42,270`，`CANCEL_ORDER_BATCH 23,789/37,093/42,827`。批量撤单是本场景最高的 p99/p99.9 终态路径。
+- Lane 工作计数（operation `0=COMMAND`、`1=SETTLEMENT`）在四条 Lane 均衡：每条约 `296,000` command、`1,006,400` settlement；每条 Lane 实际业务执行约占 `34.1%–34.7%` 的 60 秒窗口，其余时间在等待/轮询，不是某一条 Lane 单独排队失衡。
+
+### JFR 归因轮结果（仅用于定位，不替代主轮）
+
+- 归因轮有效：`terminalBusinessOperations=19,791,379`、`terminalCoreMessages=1,891,859`、`fills=4,710,400`、`businessOpsPerSec=329,800.236`、`coreMessagesPerSec=31,525.623`、`fillsPerSec=78,493.319`；`mixedVerify=PASS`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。该轮含 JFR 开销，不与 `331,582.599` 比绝对吞吐。
+- 节点 JFR `137s`，客户端 JFR `131s`，两份均 `jdk.DataLoss=0`。节点 `ExecutionSample=26,518`，其中 `SettlementLaneWorker.run()` `18,105/26,518=68.27%`；其后单个方法均不超过 `1.30%`，`TradingOwnerLoop.run()` `0.46%`。四条 `core-account-lane-*` 各约 `5.86%–5.90%` user CPU，`clustered-service-101-0` 约 `3.89%` user + `1.37%` system，matcher 线程约 `0.25%` user；这支持“结算 Lane 的等待/交接循环是首要阶段瓶颈”，不支持“matcher 计算本身已饱和”。
+- `SettlementLaneWorker.run()` 的 68.27% 不能直接等同 68.27% 业务执行：源码在 [SettlementLaneWorker.java:204](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:204) 反复检查 admission、matcher settlement、主队列和 handoff；当队列头的 Matcher payload 未就绪时，`BUSY_SPIN` 在 [SettlementLaneWorker.java:265](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:265) 进入短自旋后 park，空队列路径在 [SettlementLaneWorker.java:280](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:280) 继续按策略等待。主轮 Lane 实际执行仅约三分之一，说明大量样本是等待/轮询成本。
+- 节点 allocation sample 主要类型：`OrderRuntime 19.12%`、`CoreMatchingResult 8.28%`、`long[] 6.96%`、`MatcherResult 6.30%`、`ReservationRuntime 6.30%`、`ResolvedPlaceOrder 5.06%`、`PlaceOrderCommand 3.36%`。主要分配站点：`OrderRuntime.snapshot()` `10.33%`、`TradingRuntimeState.preparedOrder(...)` `8.79%`、`CoreMatchingResult.fromNativeWithEvidence(...)` `8.28%`、`MatcherResult.from(...)` `6.31%`、`CoreMessageFlyweightDecoder.decode(...)` `5.63%`、`TradingCommandCodec.decodePlaceOrder(...)` `5.52%`、`TradingRuntimeState.placeOrderInLane(...)` `5.20%`、`CoreOrderDecisionResolver.resolveValues(...)` `5.06%`。这些是第二优先级的真实成本，不能仅凭 sample pressure 当作精确 bytes/op。
+- 节点 JFR 共 `156` 次 GC、`4,025,227` 次 ThreadPark、`84` 次 Java monitor enter；稳定测量窗口内 GC 记录 `106` 次、最大 pause `8.97ms`，JFR 无 DataLoss。NMT ready 后 diff 为 reserved `3,169,010KB (-16,818KB)`、committed `744,478KB (-2,550KB)`；短轮未发现 native 单调增长证据，但不替代长稳泄漏测试。无 swap，磁盘空间从约 `422GiB` 降到 `419GiB`，没有磁盘不足或环境无效证据。
+
+### 单变量 BLOCKING 对照：证伪“直接改阻塞等待”
+
+- `60.024984s` 稳定窗口：`businessOpsPerSec=307,301.971`、`coreMessagesPerSec=29,382.606`、`fillsPerSec=73,136.675`，`terminalBusinessOperations=18,447,360`，`mixedVerify=PASS`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。
+- 与无 JFR `BUSY_SPIN` 主轮相比吞吐下降 `7.32%`；窗口阻塞从 `84.39%` 上升到 `87.82%`，command context 高水位从 `255` 到 `256`，matcher/completion 高水位为 `225/162`，Account Lane 高水位反而只有 `[34,35,40,38]`。CPU 明显下降，但等待唤醒损失吞吐；因此当前生产基线保留 `BUSY_SPIN`，不能把全局切换 `BLOCKING` 作为修复方案。
+
+### 分析结论与解决方案
+
+#### 结论
+
+当前最新 `master` 按历史 `MIXED batch20` 口径已达到应用满载：稳定 `331,583 business ops/s`，不是发压端不足，也不是请求没有进入 Core。真正的卡点是：
+
+1. Owner command context 长期接近满窗，客户端 `84.39%` 时间在等待终态释放；
+2. Account Lane 的 `SettlementLaneWorker` 在大量时间执行等待/轮询和 matcher settlement/handoff 检查，JFR 把该循环放大为首要热点；
+3. 每笔 batch item 的订单快照、撮合结果、解码和准备对象分配进一步拖慢终态提交，但目前证据支持它是次要成本，不是先把 matcher 重写或把 window 调大。
+
+因此不能简单归因成“Matcher 慢”或“CPU 还没跑满”。16 个逻辑 CPU 的宿主没有全机 CPU 饱和；本轮的“满载”是固定 256 in-flight 的交易流水线满载，瓶颈在终态/结算交接的推进速度。
+
+#### 推荐落地顺序
+
+1. **先做 Settlement Lane 自适应等待优化，保留 BUSY_SPIN 基线。** 在 [SettlementLaneWorker.java:204](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:204) 的无工作、handoff 等待和“队头未 ready”三种状态分别统计并采用短自旋 + 有信号 park 的混合策略；不得直接全局改 `BLOCKING`。必须保证 producer 在发布 admission/matcher event/owner resume 时唤醒对应 Lane，避免丢唤醒和确定性顺序变化。新增诊断只记聚合计数/时间：`idleWaitNanos`、`notReadyWaitNanos`、`handoffWaitNanos`、`executeNanos`、`parkCount`，不做逐命令快照。
+2. **再压缩终态热路径分配。** 优先围绕 `OrderRuntime.snapshot()`、`CoreMatchingResult.fromNativeWithEvidence()`、`MatcherResult.from()`、`CoreMessageFlyweightDecoder.decode()` 和 `TradingCommandCodec.decodePlaceOrder()` 做一次性 publication/解码引用复用；只在同一 Owner commit、同一 Lane 所有权和不可变发布边界内复用，不能删除资金/持仓/订单终态需要的 immutable after-image。为 `OrderRuntime.publicationValue`、批量 PLACE/CANCEL 解码、matcher result 转换补 JMH `-prof gc`，再用同口径无 JFR 端到端复测。
+3. **最后检查 Owner FIFO/terminal retirement 的 ready gate。** 用已有 `TradingOwnerLoop`、`PendingMatchingRing`、`OwnerCommandPipelineState` 的聚合 `owner poll no-progress`、ready partition、context retire latency 诊断，确认 command context `255/256` 是被哪类 settlement/handoff 事件挡住；若证实是跨 Lane 的 ready gate，再在现有 owner/pending ring 边界做局部索引或批量退窗优化，不新增状态副本，也不把 in-flight 从 `256` 调大掩盖问题。
+4. **验证门槛**：每个优化只改一个因素，先跑受影响 JMH 与服务测试，再跑同口径 30s/60s 无 JFR、独立 JFR、资金/持仓/冻结/订单终态、snapshot/recovery；目标是保持 `peakInFlight=256`、`unfinished=0`、`fundsDiff=0`，同时降低 window blocked、`SettlementLaneWorker.run()` 空转占比和 batch cancel p99。若吞吐提升但资金或恢复不一致，直接判失败。
+
+### 测试、产物与清理
+
+- 构建：上述 JDK27 Maven package 成功。
+- 精确恢复测试：`CoreStateSnapshotCodecTest` `14/14`、`RuntimeCommitRecoveryTest` `8/8`，共 `22` tests，失败/错误/跳过均为 `0`。
+- 原始 artifact 清理前大小：主轮 `mixed-plain` `3.1G`，JFR 轮 `mixed-jfr` `2.9G`，BLOCKING 对照 `mixed-blocking` `2.9G`；主轮 client log SHA-256 `620cd1dd8436164d8e25ade56036dd014764dcbe2938ae06f5bc28ccfdd4cb2f`，JFR node/client SHA-256 分别为 `d740a8543433c36359e21fdc54e30f68a245e3cfe984867da13018eac2ab0a9b` / `42a7c330f8aa187c37537e5a678545ce8c922aa411ddb62c12e6dbecc7d9e86e`，BLOCKING client log SHA-256 `cc865b1db4578df99b0e843cc75319d21b969b549ebf04808b076d5b56b00ff6`。
+- JFR summary/views、GC/NMT/系统采样和完整日志均位于本轮 `target/pressure/20260918T081159Z/` 下，记录完成后只清理本轮生成目录；工作区保留 `AGENTS.md` 用户既有改动和本报告。
+- **本轮结论：部分验证**。吞吐、满载、正确性、JFR 归因和单变量等待对照已完成；尚未实施代码优化，也未完成 20 分钟长稳/old-live set/FD/native 增长斜率，因此不宣称无泄漏或最终容量验收。
+- **清理状态**：确认本轮 Java/Aeron/Maven 进程已停止，`git diff --check` 通过；本轮 `target/pressure/20260918T081159Z/` 生成的主轮、JFR、BLOCKING 对照及 Archive/CNC/GC/NMT/系统采样目录已整体移入用户回收站 `/Users/atomex/.Trash/surprising-ex-pressure-20260918T081159Z`，可恢复；工作区临时压测目录已移除，清理后磁盘可用约 `413GiB`。
+
+## 2026-09-18：Owner gate 细分诊断（diagnose-owner）
+
+### 目的与方法
+
+- 在不改变业务窗口、产品线、消息顺序或等待策略的前提下，打开 `-Dsurprising.owner.poll-diagnostics=true`；随后把诊断从仅在 terminate 输出改为每 5 秒输出一次，并把 Owner gate 的拒绝原因聚合为 `waiting-no-completion`、`pending-ingress-not-ready`、`no-drain-work`。默认关闭时不执行这些计数和日志路径。
+- 代码入口为 [TradingCoreOwner.java:347](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java:347)：`ownerWorkAvailable()` 只有在 pending ingress 可推进、完成通知到达或 Runtime 存在本地 matching drain work 时才调用完整 `pollCommands()`；队首等待异步完成时会进入 `waitingForMatchingNotification`。
+- 最终诊断轮为 `target/pressure/diagnose-owner-20260918T085522Z/`，仍是单节点/1 matcher/4 lanes、`LINEAR_PERPETUAL`、`MIXED batch20`、window `256`、matcher/settlement `BUSY_SPIN`、JDK27/G1、30s warmup/60s measurement。诊断日志只用于定位，吞吐不与无诊断主轮比较。
+
+### 证据与结论
+
+- 最终轮业务结果仍完整：`terminalBusinessOperations=16,985,088`、`businessOpsPerSec=283,001.854`、`peakInFlight=256`、`unfinished=0`、`mixedVerify=PASS`、`fundsDiff=0`；pipeline high-water 为 `matcher=218`、`completion=148`、`context=255`、`lanes=[55,90,82,70]`。
+- Owner 采样到 `gateSkippedPending=26,705,885`。在可分类的 `26,573,276` 次中：`waitingNoCompletion=17,796,159`（`66.97%`）、`pendingIngressNotReady=6,582,055`（`24.77%`）、`noDrainWork=2,195,062`（`8.26%`）。少量未归类项来自 producer 在两次只读检查之间发布了完成通知，不影响主结论。
+- `waitingNoCompletion` 期间的状态快照反复显示 `runtimeSettlementNotifications=false`、`matcherCompletions=false`、`completionAvailable=false`，说明 Owner 不是拿到通知后处理不过来，而是在等 Matcher/Lane 发布终态完成事实；通知到达时 Owner 能继续推进。`noProgress` 为 `616,938/1,902,682=32.42%` 次 poll，但累计 `noProgressNanos=308,833,293`，只占约 `0.51%` 的 60 秒窗口，故 Owner 的 Java 计算本身不是主耗时。
+- 因此问题已从“Owner gate 可能写错”收敛为：**终态命令窗口的队首长期等待 Matcher→Account Lane→Owner 的完成通知；其中约四分之一的入站命令进一步被同一窗口队首/容量挡住。** Owner gate 大量跳过是背压的表现和保护机制，不是当前第一根因。
+- 结合上一轮 JFR 的 `SettlementLaneWorker.run()` `68.27%` samples、四条 Lane 实际执行约三分之一窗口、Matcher 线程仅约 `0.25%` user CPU，以及 `BLOCKING` 比 `BUSY_SPIN` 低 `7.32%`，当前最具体的卡点是 **Account Lane 结算事件的 ready/handoff/通知交接路径**；Matcher 计算、Owner poll 计算和简单切换 BLOCKING 均已被排除为首要根因。对象分配仍是次级优化项。
+
+### 下一步方案
+
+1. 保留 `BUSY_SPIN` 基线，在 [SettlementLaneWorker.java:204](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:204) 只增加聚合计时：`idleWaitNanos`、`notReadyWaitNanos`、`handoffWaitNanos`、`executeNanos`、`parkCount`，并分别记录 Matcher payload ready、Lane handoff resume、Owner completion notification 的发布到消费延迟。
+2. 若 `notReadyWaitNanos` 占主导，修复 Matcher payload 发布/唤醒与队头检查的交接；若 `handoffWaitNanos` 占主导，优化 owner-lane ownership barrier；若 `executeNanos` 占主导，再处理 JFR 已发现的 snapshot/result/decode 分配。每次只改一个因素，并保持 `peakInFlight=256`、`unfinished=0`、`fundsDiff=0`。
+3. 诊断代码对应的 Owner pipeline/recovery 测试已用依赖闭包执行：`ClusterCommandPipelineTest` `244` tests，失败/错误 `0`、跳过 `1`；`RuntimeCommitRecoveryTest` `8/8`，失败/错误/跳过 `0`。直接只跑 service 模块曾因旧 protocol class 未随 reactor 重编译而失败，改用 `-am` 后通过。
+
+### 清理状态
+
+- 四轮 `diagnose-owner-*` 目录总计约 `10.5GiB`，已确认进程均停止；分析完成后将本轮生成目录整体移入 `/Users/atomex/.Trash/surprising-ex-owner-diagnostics-20260918T085522Z`，可恢复，不在工作区保留临时压测产物。
+
+## 2026-09-18：Owner、Matcher、Settlement Lane 联合诊断（diagnose-upstream-20260918T092300Z）
+
+### 目的与口径
+
+- 本轮继续使用历史 `MIXED batch20` 口径：单节点、`LINEAR_PERPETUAL`、1 matcher、4 Account Lane、128 symbols、1000 retail users、全局/session/owner window `256`、G1、JDK 27、30s warmup/60s measurement；无 wallet、无 JFR。
+- 只打开默认关闭的三个诊断开关：`surprising.owner.poll-diagnostics=true`、`surprising.matcher.wait-diagnostics=true`、`surprising.settlement.wait-diagnostics=true`；不改业务窗口、产品线、消息顺序或等待策略。因此该轮用于定位，不作为最终吞吐成绩。
+- 诊断代码分别聚合 Owner gate 原因、Matcher worker 的 idle/execute/park 时间、Settlement Lane 的 idle/not-ready/handoff/execute 时间及队列深度，不记录逐命令状态。
+
+### 结果
+
+- `60.037983s` 稳定窗口：`terminalBusinessOperations=18,888,206`、`offeredBusinessOperations=18,888,206`，`businessOpsPerSec=314,609.572`；Core `terminal/offered messages=1,805,838`，`coreMessagesPerSec=30,078.766`；`fills=4,495,360`，`fillsPerSec=74,876.528`。
+- 完成性仍为 `mixedCapacity=PASS`、`unfinished=0`、`peakInFlight=256`、`mixedVerify=PASS`、`fundsDiff=0`。诊断开销使吞吐低于无诊断主轮 `331,582.599 businessOps/s`，不作绝对吞吐比较。
+- 客户端在途窗口阻塞 `windowBlockedNanos=51,308,863,542`，约占稳定窗口 `85.47%`；说明发压端是被终态释放速度反压，不能用“提高发压线程数”解释差距。
+- Owner 最终聚合为 `waitingNoCompletion=7,505,774`、`pendingIngressNotReady=3,494,811`、`noDrainWork=1,304,564`，可分类 gate skip 中约 `61.00%/28.40%/10.60%`。但累计 `noProgressNanos=339,490,538`，只约占 60 秒窗口 `0.57%`，Owner Java poll 本身不是主耗时。
+
+### 关键排除证据
+
+- 队首 direct settlement 的多个采样均为 `settlementDispatched=true`、`settlementReady=true`、`settlementResultPrepared=true`、`settlementCompletedLanes=requiredLanes`、`settlementComplete=true`；没有发现“Lane 已收到但一直等不到 payload/完成标志”的卡死。
+- 四条 Settlement Lane 的 `notReadyWaitNanos=0`、`parkCount=0`，队列深度采样为 0；Lane 的累计 `idleWaitNanos` 远大于 `executeNanos`，说明 JFR 中 `SettlementLaneWorker.run()` 的高样本主要是等待/轮询循环，不能当作结算业务计算占满。
+- Matcher worker 最终约 `idleWaitNanos=94.06s`、`executeNanos=33.79s`、`executeCount=2,583,062`、`parkCount=1,098,344`，submission/completion depth 均为 0；Matcher 没有形成持续计算 backlog。
+- Owner gate 的 `waitingNoCompletion` 是窗口背压表现：它在等待有序终态事实；不是 Owner 处理完成通知太慢。直接把 Owner gate 放开会重复探测同一个未完成前缀，破坏有序提交边界。
+
+### 定位结论
+
+真正的限制点已经从“某个 Matcher/Lane 队列卡死”收敛为：**固定 256 in-flight 窗口下，批量业务的终态释放 cadence 受跨线程交接和有序提交延迟限制；同时 4 条 Lane 在没有工作时仍长期 BUSY_SPIN，持续消耗共享节点 CPU，放大 Owner、Aeron service 和 Matcher/Lane 之间的争用。**
+
+也就是说，`windowBlocked` 是表象，Owner gate 是保护机制，Matcher/Lane 的 ready 标志没有证据显示错误；当前最值得改的是 Lane 的空闲/交接等待策略及其唤醒边界，而不是调大窗口、绕过 FIFO，或重写撮合算法。订单快照、撮合结果、解码对象分配仍是已由 JFR 找到的次级成本，待等待机制验证后再处理。
+
+### 解决方案与验证顺序
+
+1. 在 [SettlementLaneWorker.java:286](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java:286) 做单变量的自适应等待：保留短 BUSY_SPIN，随后对 `IDLE`、`NOT_READY`、`HANDOFF` 分别使用有界 `yield/park`；所有 admission、Matcher result、handoff resume、Owner completion 的发布路径必须唤醒对应 Lane，保持现有 SPSC 所有权和确定性顺序。不能直接全局切 `BLOCKING`，因为既有对照吞吐下降 `7.32%`。
+2. 用同一 `window=256`、同一 `MIXED batch20` 做无 JFR A/B：比较 `businessOps/s`、`windowBlocked%`、terminal p99、Lane idle/not-ready/handoff 比例，并再次核对 `unfinished=0`、`fundsDiff=0`、余额/冻结/持仓/订单终态。
+3. 等等待机制验证后，再处理 JFR 已确认的 `OrderRuntime.snapshot()`、`CoreMatchingResult.fromNativeWithEvidence()`、`MatcherResult.from()`、解码与准备对象分配；每次只改一处，并用受影响 JMH 的 `-prof gc` 和端到端压测证明收益。
+4. 保持 `peakInFlight=256` 作为验收约束。调大窗口只能隐藏终态延迟，不能证明卡点已经解决；若 A/B 后仍有明显窗口阻塞，再用 per-thread JFR/CPU 采样定位 Aeron service 或提交阶段的剩余成本。
+
+### 构建、测试、产物与清理
+
+- JDK27 Maven package 成功；受影响测试：`ClusterCommandPipelineTest` `244` tests，失败/错误 `0`、跳过 `1`；`RuntimeCommitRecoveryTest` `8/8`，失败/错误/跳过 `0`。
+- 最新诊断产物清理前：`diagnose-upstream-20260918T092300Z` `2.9G`、`diagnose-upstream-20260918T091900Z` `2.7G`、`diagnose-lane-20260918T090718Z` `2.7G`。最新 client/node log SHA-256 分别为 `b5d15c0d5e294baf07ea76b0e1e93d2c93d2e4e8ada29283682587483d857c62` / `0fac22b027775c4006521352648fe960be4bb059c51bc008fe08d3a268ea027f`。
+- 本轮诊断已完成，未实施业务优化；测试和压测进程均已停止。上述三个诊断目录随后整体移入 `/Users/atomex/.Trash/surprising-ex-upstream-diagnostics-20260918T092300Z`，可恢复；不删除编译产物或用户已有文件。
+- 本节结论为“机制层根因已定位、代码修复尚未实施”。后续实现自适应等待后必须重新跑受影响测试和同口径压测，不能把诊断轮吞吐当作修复后的成绩。
+
+## 2026-09-18：阶段墙钟耗时确认（confirm-stages-20260918T175500Z）
+
+### 计划、环境与偏差
+
+- 目标是区分 Owner 业务处理、Owner 输入队列、Matcher→Lane、Lane 执行、Lane 完成→Owner 观察哪一段限制终态释放；不改变 BUSY_SPIN、window `256`、产品线或业务顺序。
+- 使用现有 `qualify-aeron-async-stages.sh` 的 `end_to_end` 阶段，单节点/1 matcher/4 lanes、`LINEAR_PERPETUAL`、`MIXED batch20`、128 symbols、1000 retail users、JDK27/G1、30s warmup/60s measure，并启用 `core.settlementLatencyDiagnostics=true` 和 JFR。服务端只按约 `1/64` 采样 `SettlementLatency`、`CommandBoundaryLatency`，不记录逐命令日志。
+- 本机是 macOS x86_64 单节点，脚本没有设置 OS CPU affinity；因此本轮只确认阶段墙钟耗时，不把本机调度条件等同于生产独占 CPU。生产若保持 Matcher/Lane/Owner 独占 CPU，BUSY_SPIN 仍可作为生产基线。
+- 前两次脚本执行无效：第一次使用了已删除的 `SurprisingCoreBootstrap` 入口，第二次 `jcmd JFR.dump` 使用了 JDK27 不支持的 `compress=true`；两次客户端均为 `NOT_CONNECTED` 或无服务端 JFR，不纳入结论。脚本现已改为使用 shaded jar manifest 入口、停止前主动 dump JFR，并将 artifact root 转为绝对路径。
+
+### 有效结果与阶段数据
+
+- 稳定窗口 `60.006092s`：`businessOpsPerSec=259,044.082`、`coreMessagesPerSec=24,786.662`、`fillsPerSec=61,646.689`；`mixedCapacity=PASS`、`unfinished=0`、`peakInFlight=256`、`mixedVerify=PASS`、`fundsDiff=0`。该轮含 JFR 和阶段事件采样，只用于归因。
+- JFR 服务端 `DataLoss=0`；`SettlementLatency` 样本 `30,780`，`CommandBoundaryLatency` 样本 `141,524`。阶段事件是采样值，单位均为纳秒：
+
+| 阶段 | p50 | p90 | p99 | max | 解释 |
+|---|---:|---:|---:|---:|---|
+| `admissionExecution` | `4.3us` | `8.1us` | `21.2us` | `241.8us` | Owner 真正执行准入/准备逻辑 |
+| `ingressToAdmission` | `3.60ms` | `6.93ms` | `14.06ms` | `226.62ms` | Owner 输入队列/批处理到准入的等待 |
+| Matcher→最后一条 Lane 开始 | `2.2us` | `83.3us` | `607.6us` | `11.64ms` | Matcher publication 到 Lane 开始执行 |
+| Matcher→所有 Lane 完成 | `19.5us` | `109.0us` | `624.4us` | `11.65ms` | 包含 Lane 执行 |
+| Lane 实际执行最长值 | `10.5us` | `55.2us` | `92.5us` | `5.97ms` | 账户状态实际修改时间 |
+| Lane 完成→Owner 观察 | `371.6us` | `2.05ms` | `3.47ms` | `10.18ms` | Owner 观察完成通知并进入有序提交前的间隔 |
+| `ownerToEgress` | `4.7us` | `20.5us` | `298.0us` | `10.99ms` | 结果出口，不是主要阶段 |
+
+- JFR Thread CPU：四条 Lane 各约 `5.97%–5.99% user`、`0.25%–0.26% system`；`trading-owner--1` 约 `0.45% user`、`0.36% system`；`core-matcher-0` 约 `0.42% user`、`0.36% system`。Lane 的实际业务执行只占测量墙钟约 `28.1%–29.2%`，因此 `SettlementLaneWorker.run()` 的高 ExecutionSample 主要是等待/自旋循环，不能当作 Lane 业务计算饱和。
+
+### 确认结论
+
+1. **不是 Owner 业务处理耗时长。** `admissionExecution` p99 只有 `21.2us`；Owner CPU 也很低。
+2. **主要可见延迟在 Owner 输入排队/批处理。** `ingressToAdmission` 的 p50 已达 `3.60ms`，明显高于实际准入执行；当前 `TradingOwnerLoop` 每轮最多取 64 条输入后再统一推进，且还受 pending ingress、依赖 fence 和固定窗口 gate 影响。这是 Owner 调度/队列 residence 成本，不是 Owner 业务计算成本。
+3. **终态侧 Lane 计算不是主要成本。** Lane 实际修改账户状态 p99 `92.5us`，但 Lane 完成到 Owner 观察 p99 `3.47ms`，说明主要应检查 completion notification 被 Owner 观察及有序退休的间隔。
+4. **BUSY_SPIN 不是当前已证实的根因。** 生产独占 CPU 时可以保留；本轮没有证据支持通过 park/unpark 解决吞吐问题。唤醒策略只能作为资源利用或尾延迟的独立 A/B，不能替代阶段确认。
+
+### 下一项最小验证与方案
+
+- 下一轮只改变 Owner 输入批处理预算/推进时机：保持 `window=256`、BUSY_SPIN、同一 workload，比较 `ingressToAdmission`、`lanesCompleteToOwner`、window blocked、terminal p99 与吞吐；同时验证 `unfinished=0`、`fundsDiff=0`、余额/冻结/持仓/订单终态和恢复一致。
+- 优先在现有 [TradingOwnerLoop.java:156](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java:156) 输入批处理边界与 [TradingCoreOwner.java:141](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java:141) pending ingress 推进边界做局部 A/B，不绕过 `OrderedCommitCoordinator` 的 FIFO ready gate。
+- 若降低输入批处理等待后 `ingressToAdmission` 明显下降而吞吐不降，卡点就是 Owner 输入调度；若该段不变，再单独追 `lanesCompleteToOwner` 的通知/退休路径。当前不再把“Owner 处理慢”或“BUSY_SPIN 抢 CPU”作为结论。
+
+### 清理与状态
+
+- 有效产物清理前约 `2.4G`；client log SHA-256 为 `775d02867481428b7ecb17409332b81457c24de40f04a932c960dcacb2117c09`，node log SHA-256 为 `8f1918f99019aef50ece4f4db3ba801a9d517fc54c98dbf8926d044169e24902`；服务端 JFR 位于该 run 目录下的相对路径展开目录中，JFR summary 显示 `DataLoss=0`。
+- 本节结论为“Owner 业务执行已排除，Owner 输入排队和 Lane→Owner 观察间隔已量化；下一步是单变量验证 Owner 批处理/推进时机”。本轮未修改交易业务逻辑。
+
+## 2026-09-18：服务器 Core Aeron-Service MATCH_STREAM 吞吐（废弃口径）
+
+> 修订：本节使用 `ClusterCapacityMain + MATCH_STREAM`，输出是单订单终态请求吞吐，不能与本地 `MIXED batch20` 的 `businessOpsPerSec` 比较。该入口后续不再使用；原始结果仅保留作历史记录。
+
+### 口径与环境
+
+- 目标仅为 `surprising-aeron-core/surprising-aeron-service` 的 Core/Aeron 服务吞吐；服务器为 `surprising-ex`（主机 `vmi3458356`），代码提交 `7fffebb5`，Linux、12 vCPU、47 GiB RAM、HotSpot JDK 27、Maven 3.8.7。
+- 单节点、1 个 matcher、4 条 account lane、`LINEAR_PERPETUAL`、128 symbols、100 users、4 workers、4 connections、BUSY_SPIN、DEDICATED、全局/会话 in-flight window `256`；30 秒 warmup、60 秒测量；未启动 wallet。
+- 基准包通过 `mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package` 构建。服务器已有 Kafka/wallet 进程未启动、未修改，因此本结果不是隔离硬件容量上限。
+- 首次启动因 JDK 27 缺少 `--add-opens=java.base/java.util.zip=ALL-UNNAMED` 未进入业务流量，已排除；补齐 JVM opens/exports 后重新执行有效轮次。
+
+### 结果
+
+- `capacity=PASS`，有效时长 `60.607s`；提交/接受/终态完成均为 `15,684`，撮合事件 `7,842`。
+- Core 终态吞吐 `258.781/s`，撮合事件吞吐 `129.391/s`；市场数据命令 `1,952`，Core terminal messages `17,636`。
+- 正确性：`failures=0`、临时重试 `0`、未完成请求 `0`、提交数=完成数 `17,636`、`fundsDiff=0`、`bookLevels=0`，峰值在途 `255/256`。
+- 端到端 terminal latency：p50 `391,905us`、p99 `2,019,557us`、p99.9 `3,279,945us`。
+- JVM 采样：退出前 teardown 采样 RSS 约 `654,560K`、CPU 约 `413%`，不是严格测量窗口 CPU 序列；堆已提交 `524,288K`、使用 `156,333K`，NMT reserved/committed 为 `3,116,404/683,044 KB`；Core/client GC pause 事件分别为 `8/14`。
+
+### 清理与结论
+
+- Core/client 及无效首次轮次均已停止；本轮临时目录、日志和报告已清理，服务器保留已构建 jar；未触碰已有 Kafka/wallet 进程，磁盘空间正常。
+- 本轮可确认 Core Aeron-Service 在该服务器配置下完成了短时吞吐和业务一致性验证；由于服务器存在其他服务且未采集严格隔离的时间序列资源曲线，不将其作为硬件峰值，也不与本机历史吞吐直接比较。
+
+## 2026-09-18：服务器 Core Aeron-Service MIXED batch20 吞吐
+
+### 口径与环境
+
+- 使用 `ClusterMixedCapacityMain`，`MIXED batch20`；单节点、1 matcher、4 account lanes、128 symbols、1000 retail users、全局/session in-flight `256`、`LINEAR_PERPETUAL`，30 秒预热、60 秒测量。
+- 服务器 `surprising-ex`（`vmi3458356`），提交 `7fffebb5`，HotSpot JDK 27、Maven 3.8.7、12 个 AMD EPYC 2.0GHz vCPU、47 GiB RAM；Core 使用 `SHARED_NETWORK + YIELDING`，matcher/settlement 使用 `BUSY_SPIN`。本机未推送的改动未混入本轮。
+- 服务器已有 Kafka/wallet 进程未启动、未修改；本轮未创建持久化压测脚本，仅使用临时启动命令，结束后已清理。
+
+### 结果
+
+- `mixedCapacity=PASS`；有效窗口 `60.485s`，`terminalBusinessOperations=490,045`，`offeredBusinessOperations=490,045`，`businessOpsPerSec=8,101.880`。
+- Core terminal messages `52,285`，`coreMessagesPerSec=864.424`；fills `115,200`，`fillsPerSec=1,904.594`；`unfinished=0`、`peakInFlight=256`、`mixedVerify=PASS`、`fundsDiff=0`。
+- 业务延迟 p50/p99/p99.9（微秒）：`PLACE_ORDER 173,539/983,039/1,275,068`，`CANCEL_ORDER 199,098/980,942/1,274,019`，`APPLY_MARK_PRICE 223,346/1,628,438/1,897,922`，`PLACE_ORDER_BATCH 228,851/1,608,515/1,906,311`，`CANCEL_ORDER_BATCH 227,672/1,373,634/1,800,404`。
+- 测量期间 Core 退出前采样约 `534% CPU`、RSS `1,650,412K`；堆 committed/used `944,128K/334,393K`；NMT reserved/committed `3,121,979/1,128,763KB`。该 CPU 采样不是完整时间序列，且宿主存在其他服务。
+
+### 结论与清理
+
+- 本轮业务正确性通过，但吞吐仅约 `8.1k businessOps/s`，与本地 `41.5 万 ops/s` 不同量级；由于代码提交、硬件/虚拟化环境和同机干扰均不完全相同，不能据此判断代码退化，也不能作为服务器容量上限。
+- 本轮 Core/client 已停止，约 `298M` 临时目录、日志和 Aeron 数据已删除；删除前 client/node 日志 SHA-256 分别为 `0d814d9362840ab5197aae2812447d0e641a7bb4d20b2093372afda8a23d427d` / `6fb0290289f308fdb858afd351194c40c8ef759899f761aadd963c2b5805baeb`；服务器磁盘剩余约 `256G`。
+
+## 2026-09-18：Owner 输入批处理 A/B（owner-batch-20260918T201300Z~20260918T202500Z）
+
+### 目的、改动与固定口径
+
+- 目标是验证阶段墙钟确认提出的最小假设：Owner 每轮读取 ingress 的预算是否造成额外队列 residence，缩小预算能否降低 `windowBlocked` 并提高满载吞吐。
+- 只新增运行时参数 `-Dsurprising.aeron.owner-input-batch-size=N`，默认仍为 `64`；代码入口为 [TradingOwnerLoop.java:171](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java:171)。没有改变 FIFO ready gate、跨线程所有权、Matcher/Lane 顺序或业务语义。
+- 四档首轮为 `64/32/16/8`，另对 `64`、`16` 各复跑一次。固定单节点、1 matcher、4 lanes、`LINEAR_PERPETUAL`、128 symbols、`MIXED batch20`、G1、JDK27、`SHARED_NETWORK + YIELDING`、Matcher/Settlement `BUSY_SPIN`、全局/session/owner window `256`、30s warmup/60s measurement、无 JFR。
+- 本机未设置 OS CPU affinity，因此结果用于同机相对 A/B，不等价于生产独占 CPU 的绝对容量；每轮均要求 `peakInFlight=256`、`unfinished=0`、`mixedVerify=PASS`、`fundsDiff=0`。
+
+### 结果
+
+| Owner batch | businessOps/s | 相对首轮 64 | core messages/s | fills/s | windowBlocked | 正确性 |
+|---:|---:|---:|---:|---:|---:|---|
+| 64 | 316,094 | 基线 | 30,220 | 75,234 | 50.846s / 84.74% | PASS |
+| 32 | 290,334 | -8.15% | 27,767 | 69,095 | 51.056s / 85.09% | PASS |
+| 16 | 300,952 | -4.79% | 28,778 | 71,628 | 50.665s / 84.44% | PASS |
+| 8 | 297,418 | -5.91% | 28,440 | 70,784 | 50.488s / 84.15% | PASS |
+| 64（复跑） | 295,833 | — | 28,290 | 70,410 | 50.874s / 84.76% | PASS |
+| 16（复跑） | 309,709 | — | 29,612 | 73,711 | 50.288s / 83.80% | PASS |
+
+- 64 两次均值为 `305,964 businessOps/s`，16 两次均值为 `305,331 businessOps/s`，差异为 `-0.21%`；64 单次范围 `295.8k~316.1k`，已显示本机单次抖动约 `6.4%`，因此首轮 `64` 与 `16` 的 `4.79%` 差异不能视为确定性收益或回退。
+- 四档首轮的 `windowBlocked` 均在 `84.15%~85.09%`，批处理缩小没有释放固定 `window=256` 的主要反压；`pipelineHighWater.context` 每轮仍为 `255`，说明在途窗口持续满载。
+- 六轮均 `mixedCapacity=PASS`、`unfinished=0`、`peakInFlight=256`；六轮 `mixedVerify=PASS`、`fundsDiff=0`，并且 `offeredBusinessOperations=terminalBusinessOperations`，没有丢单或未终态。
+
+### 结论与方案
+
+1. **“Owner 一次取 64 条导致 Owner 处理太慢”没有被 A/B 证实。** 缩小到 32/16/8 没有降低窗口反压，也没有稳定提高吞吐；64 与 16 的重复均值基本相同。
+2. 当前应保留默认批预算 `64`，不把 32/16/8 作为优化方案；它们增加轮次切换/调度机会，却没有改变跨线程终态交接和有序提交 cadence。
+3. 生产方案继续保持独占 CPU + `BUSY_SPIN` 基线，不引入未经证实的唤醒/park 改造；下一步若继续优化，应针对已量化的 `ingressToAdmission` 和 `lanesCompleteToOwner` 做事件级测量，检查 Owner 推进与完成通知观察的交错时机。不得绕过 `OrderedCommitCoordinator` 的有序提交约束，也不能只调大窗口掩盖 cadence 问题。
+4. 本轮只验证了 Owner 输入批预算这一单变量；它排除了“缩小批次即可解决”的方案，但没有证明 completion cadence 的实现已优化。若要获得稳定提升，需要在生产等价 CPU 隔离条件下对交接/提交路径做单变量代码改动，再重复同口径压测。
+
+### 构建、测试、产物与清理
+
+- HotSpot JDK27 Maven package 成功。受影响测试：`ClusterCommandPipelineTest` `244` tests，失败/错误 `0`、跳过 `1`；`RuntimeCommitRecoveryTest` `8/8`，失败/错误/跳过 `0`；`bash -n qualify-aeron-async-stages.sh` 通过。
+- 每轮原始目录约 `2.8G~3.0G`，共约 `14.5G`。client/node 日志 SHA-256 已在清理前记录；例如首轮 64 为 `d49a52e37e2b52fcdefa781a2b646a11f7b2ba9bc351538181ffab5a6c27ac36` / `59a647ec755cb549c3f084a257503d7d2d5b315fdf73ea424a7b3c91860a8240`，复跑 16 为 `aee43bdc6fbf18a7ad6e8d3dff1f98636c757ab2e906db0a9143809e46ef2a38` / `37af35ff76f9eba7a31156e74be279d89931e1818edf7295d8bba8d94ad139d6`。
+- 六个本轮目录在分析完成后整体移入 `/Users/atomex/.Trash/surprising-ex-owner-batch-ab-20260918T203000Z`，可恢复；不删除编译产物或用户已有文件。清理后确认无本轮节点/客户端进程残留，并检查磁盘空间。
+
+## 2026-09-18：终态交接具体位置复核（lane-commit-signal-20260918T204300Z）
+
+### 已定位的代码链路
+
+1. **LaneCommit 完成发布点**：`LaneCommitEvent.execute()` 在 [LaneCommitEvent.java:184](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LaneCommitEvent.java:184) 用 `LONGS.setRelease(completedLanes, ...)` 写完成位，但没有调用 `TradingRuntimeState.signalOwnerCompletion()`。该事件由批量终态提交 [OrderBatchExecutor.java:951](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java:951)、控制命令 [OrderedCommitCoordinator.java:488](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderedCommitCoordinator.java:488) 和直接命令 [CoreDirectCommandFlow.java:123](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreDirectCommandFlow.java:123) 使用。
+2. **Owner gate 不认识该完成源**：Owner 在 [TradingCoreOwner.java:350](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java:350) 处于 `waitingForMatchingNotification` 时，只检查 `ownerCompletionAvailable()`；而 [TradingCoreOwner.java:565](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java:565) 只检查 Matcher completion 和 `hasMatchingNotifications()`。`LaneCommitEvent` 的完成位没有进入这两个通知源。
+3. **实际延迟位置**：因此 Lane 完成后，Owner 只能走 [OwnerIdleStrategy.java:43](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/cluster/OwnerIdleStrategy.java:43) 的下一次 bounded idle probe（有 pending command 时最多 `10us`），再回到 `pollCommands()` 的 [TradingCoreOwner.java:571](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java:571) 和 `laneCommitComplete()` 检查。这里是“完成已发生，但 Owner 尚未观察”的具体 cadence 缺口。
+
+### 排除与验证边界
+
+- 普通 Matcher→Lane settlement 不是同一个遗漏：其完成路径在 [MatcherSettlementEvent.java:750](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java:750) 发布完成通知，并在 [TradingRuntimeState.java:2293](/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java:2293) 设置 ready 位并 signal Owner。
+- 临时在 `LaneCommitEvent` 完成位后补 `signalOwnerCompletion()` 的单轮结果为 `314,753 businessOps/s`，在此前同机 64 档 `295,833~316,094 businessOps/s` 范围内，不能把它认定为全局吞吐修复；该临时改动已撤回。受影响测试在临时改动下仍为 `252` 个通过、`0` 失败/错误。
+- 所以当前准确结论是：**已定位一个确定存在的通知/门禁缺口，属于终态交接 cadence 的具体实现问题；但它不是目前全局吞吐下降的唯一根因。** 下一步应为 LaneCommit 增加与完成位一致的 ready 事实/通知，再验证 Owner gate 是否消费该事实；不能只补无状态 wakeup，也不能直接绕过有序提交。
+
+## 2026-09-18：JDK27 口径复核与 Matcher mailbox cadence 定位（20260918T213700Z~20260918T221500Z）
+
+### 先校正 41.5 万历史结果的可比性
+
+- 历史 `compare256-fixed-20260916T1320` / `profile256-20260916T1345` 使用的是 Oracle GraalVM `25.0.1`；本轮按 `AGENTS.md` 要求使用 Corretto HotSpot JDK `27.0.0.33.1`。两者不是同一 JVM，历史 `415,217~419,611 businessOps/s` 不能作为当前 JDK27 的直接基线。
+- 当前 JDK27、同一 `MIXED batch20`、单节点/1 matcher/4 lanes、window `256`、30s/60s 的 ADAPTIVE mailbox 对照为 `331,930 businessOps/s`、`31,728 coreMessages/s`，正确性 PASS；因此先前把 41.5 万与当前 3.3~3.4 万 core msg/s 直接比较，会把 JVM 差异误判成业务代码退化。
+
+### 单变量 A/B
+
+| 配置 | businessOps/s | coreMessages/s | windowBlocked | peak | 正确性 |
+|---|---:|---:|---:|---:|---|
+| Owner ADAPTIVE + Matcher mailbox ADAPTIVE | 331,930 | 31,728 | 51.34s | 256 | PASS |
+| Owner BUSY_SPIN + Matcher mailbox ADAPTIVE | 292,091 | 27,934 | 50.66s | 256 | PASS |
+| Owner ADAPTIVE + Matcher mailbox BUSY_SPIN | 342,283 | 32,714 | 50.32s | 256 | PASS |
+| 上行同配置，window 512 | 344,041 | 32,878 | 50.74s | 512 | PASS |
+
+- Owner 全程 BUSY_SPIN 在未做 OS CPU affinity 的本机反而下降约 `5.5%`，说明它会和 `SHARED_NETWORK` 的 Aeron 线程争用 CPU；不能仅凭“生产独占核”假设就把 Owner BUSY_SPIN 当作已验证修复。
+- Matcher mailbox 在 64 次自旋后固定 `parkNanos(100us)`；切换为可配置 `-Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN` 后提升约 `3.1%`，说明这是一个真实但局部的 cadence 成本。默认仍为 ADAPTIVE，生产独占核环境可单独启用并复测。
+- window `256→512` 只提升约 `0.5%`，且窗口阻塞仍约 `50s/60s`；扩大窗口只能增加在途量，不能消除下游终态退休瓶颈。
+
+### JFR 阶段证据
+
+- JDK27、Matcher mailbox BUSY_SPIN 的 JFR 轮保持 `clientPass=true`、`unfinished=0`、`fundsDiff=0`。Owner/Matcher/4 Lane 的单核 CPU 约为 `97.18%/98.26%/98.25~98.29%`，说明当前 JDK27 是满载状态，不是发压不足。
+- `admissionExecution` 为 p50 `4.3us`、p99 `17.5us`；但 `ingressToAdmission` 为 p50 `1.86ms`、p99 `9.44ms`。等待主要发生在 `PendingClusterIngress` 到准入之间，不在准入业务函数本身。
+- Matcher mailbox BUSY_SPIN 后，`matcherToLastLaneStart` p99 约 `418us`，相对此前 ADAPTIVE JFR 的 `553us` 有改善；但普通 settlement 的 `lanesCompleteToOwner` 仍为 p50 `341us`、p99 `2.96ms`，没有被该改动消除。
+- 最终 `LaneCommit` 的 `completeToOwner` 多数为微秒级，`ownerToRelease` p50 约 `0.22us`；因此最终 LaneCommit release 不是全局吞吐主因。Owner ExecutionSample 的首个业务栈主要落在 `TradingRuntimeState` 与 `OrderedCommitCoordinator`/`TradingCoreOwner`，表明 Owner 同时承担入口准入、异步结果收集、资金/订单/持仓 publication 和有序退休，队首完成时常被下一轮 Owner 工作延后观察。
+
+### 当前真正的卡点与方案
+
+当前不是单一的“Owner 处理函数太慢”，而是两层 cadence 叠加：
+
+1. Matcher mailbox 的 park/wakeup 放大了 Matcher→Lane 的提交间隔；这是可局部配置的优化，生产独占核可使用 BUSY_SPIN，并保留 ADAPTIVE 作为非独占核默认。
+2. 更大的剩余成本在 Owner 单线程的 ingress 排队和 FIFO 有序终态退休：`ingressToAdmission` 毫秒级，而 `admissionExecution` 微秒级；`lanesCompleteToOwner` 仍有毫秒级尾延迟。不能绕过 `OrderedCommitCoordinator` 或复制业务状态来“提前释放”窗口。
+
+下一步真正值得实现的优化是围绕现有 Owner 所有权边界减少一次命令一次退休的调度/扫描成本：在不改变日志顺序、资金不变量和 Lane 单写者的前提下，验证连续 ready 命令的批量收集/退休，以及 Owner 入口与终态收集的交错预算。Owner 输入批量 `64/32/16/8` 已证明单独改预算没有稳定收益，因此不再把它作为方案。任何批量退休改动都必须用资金守恒、订单终态、恢复和同口径 JFR 重新验证。
+
+### 本轮验证与清理
+
+- JDK27 精确测试：`ClusterCommandPipelineTest`、`RuntimeCommitRecoveryTest`、`OwnerIdleStrategyTest`、`MatcherCommandPipelineTest` 共 `261` 个，失败 `0`、错误 `0`、跳过 `1`；benchmark Maven package 成功；脚本 `bash -n` 和 `git diff --check` 通过。
+- 所有本轮节点/客户端已停止；本轮压测 artifact、JFR、日志和中间解析文件在记录完成后移入 `/Users/atomex/.Trash/`，可恢复；未删除编译产物或用户已有文件。磁盘空间充足，未启动 wallet。
+
 ## 2026-09-18：Owner FIFO 调度减法（owner-simplification）
 
 ### 采集前计划
@@ -916,3 +1284,91 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 
 - 已停止本轮全部进程，将约12GiB的四轮Cluster/Archive/JFR、JMH结果、系统监测、测试日志及分析结果移至`/Users/atomex/.Trash/surprising-ex-owner-simplify-20260919/`，可恢复；未清空Trash或删除其他轮次。原target/tmp路径仅作历史定位，完整命令/summary/views/校验和与本节保留复核依据。
 - 仅提交本轮六个state实现文件、四个回归测试、OwnerPublicationBenchmark、README及本节追加记录。既有AGENTS、Owner/Matcher/Lane及LaneCommitEvent、压测脚本/配置、OwnerIdleStrategyTest和368行历史报告diff保持原样，不纳入本次提交。未扩大为临时Owner发布删除或架构重写；`git diff --check`通过。
+## 2026-09-19 admission/Owner 减法最终验证（owner-final-cleanup-20260919）
+
+### 采集前锁定计划
+
+- 仅验证当前 `master=4acc76e7` 加工作区既有 Owner/Lane 调度改动；不检出旧版本，对照 commit 不适用。新增实现已依次删除单线程 exchange-core 的阻塞池、Owner 迭代器/callback、空 primitive 索引反复分配、终态重复遍历、admission 临时 User/Order/Reservation publication，以及普通/批量 `CoreMatchingOrder` 重复 DTO。`MatcherResult/CoreMatchingResult` 保留为 matcher 内部事件池回收前的不可变跨线程所有权边界，不在无新证据时引入 window 槽归还协议。
+- 问题：确认上述减法后真实 Aeron 持续终态吞吐、请求尾延迟与分配是否改善，并重新定位首要限制。探索门槛沿用当前已达口径：三轮无 profiler 均须零业务错误/超时、accepted=terminal、unfinished=0、资金差0、快照恢复一致；持续 Core 吞吐不低于 30,000/s，业务吞吐不低于 300,000/s；PLACE/CANCEL/批量请求 p99 不高于 30ms。任一正确性失败判失败；swap 增长、JFR DataLoss/损坏、磁盘不足、窗口错位使对应性能证据无效。
+- 环境：本机 macOS x86_64、16 逻辑 CPU/16GiB；HotSpot Corretto JDK 27、Maven 3.9.16、G1。采集前记录磁盘、swap、进程、commit 与 tracked/untracked diff 摘要；不终止用户应用，不声称 CPU 物理独占或三节点生产容量。
+- 真实集群固定：单成员，网络与 Archive 保留；LINEAR_PERPETUAL，MIXED，batch=20，128 symbols，既有固定种子；4 Account Lane、1 matcher；全局/session in-flight=256；settlement/matcher-pipeline/Owner 均 BUSY_SPIN。持续异步发压，30s 预热、60s 稳态、排空单列。
+- 主轮三次且无 profiler：run ID `owner-final-cleanup-20260919-main{1,2,3}`；独立 JFR 一次：`owner-final-cleanup-20260919-jfr`，使用 `owner-commit-profile.jfc`，node/runner/fork 各自录制且每份最大 256MiB，另采 NMT、线程、GC/safepoint/allocation views。JFR 分数不与主轮混算。
+- 真实集群完整命令统一为：`ASYNC_RUN_ID=<run> ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=<false|true> ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。先用 JDK 27 执行 benchmarks reactor package，之后才允许 skip build。
+- 分配补充：`ContinuousOwnerBenchmark.placeCancelWithoutTimers` 仅跑 LINEAR_PERPETUAL、batch20、DISTINCT/BUSY_SPIN、1 fork/1 thread、3×3s warmup、3×3s measurement、512MiB/G1；无 profiler 与独立 `-prof gc` 各一轮。每 invocation 的 Core/business 换算、B/business、GC 次数/时间单列；它不含真实网络/Archive，不能代替集群吞吐。
+- 有效性：主吞吐取三轮稳定窗终态增量/窗口秒数并报告均值、范围和波动；JFR 只在无 DataLoss、无 swap 增长且保护窗对齐时用于热点/分配/GC归因。窗口达到256后的背压比例与 coordinated omission 缺口必须披露。完成后停止所有本轮进程，将本轮 artifact 移入 Trash（可恢复），不删除其他轮次；结果、校验和和清理状态追加在本节。
+
+### 构建与版本
+
+- 正确 fork 为 `/Users/atomex/Desktop/surprising/exchange-core-lilaizhencn`，`master=ad920d8815cd2cd0bfff2d7a8885d0e6a9d26e7c` 且工作区干净；主项目 `surprising-parent/pom.xml` 锁定同一完整 SHA，service 构建期 provenance 校验通过。主项目为 `master=4acc76e7` 加采集前已存在的 Owner/Lane 调度诊断改动。
+- HotSpot Corretto JDK 27、Maven 3.9.16；benchmarks reactor `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package` 成功，耗时 2 分 15 秒。核心 service 939 项测试 0 failure/0 error/1 既有 skip；整个 reactor 成功。采集前后 swap 均为 0，磁盘最低约 301 GiB 可用。
+
+### 真实单成员集群结果
+
+| 轮次 | 稳态秒 | business/s | Core/s | fills/s | 最大业务类型 p99 | window 阻塞占比 | Lane 有效执行均值 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| main1 | 60.010712 | 281376.965 | 26913.595 | 66974.709 | 31.244 ms | 83.51% | 42.87% |
+| main2 | 60.012988 | 334219.236 | 31946.535 | 79556.112 | 31.047 ms | 81.83% | 46.20% |
+| main3 | 60.009381 | 344630.803 | 32937.667 | 82035.174 | 28.213 ms | 82.47% | 44.79% |
+| JFR（仅归因） | 60.020582 | 329519.250 | 31498.812 | 78437.094 | 30.015 ms | 82.53% | 44.22% |
+
+- 三轮无 profiler 算术均值为 320075.668 business/s、30599.266 Core/s；范围分别 281376.965–344630.803、26913.595–32937.667，极差/均值 19.76%/19.69%，CV 8.65%/8.62%。吞吐均值勉强超过探索门槛，但 main1 未达到 300k/30k，轮间波动也超过 10%，因此稳定性验收失败，不宣称容量达到或问题已解决。
+- 三轮最大 p99 分别 31.244/31.047/28.213 ms。main1/main2 的 `CANCEL_ORDER_BATCH` p99 超过 30 ms，尾延迟门槛失败；main3 通过。普通 PLACE p99 16.482/14.499/14.229 ms，普通 CANCEL 15.720/13.238/13.205 ms，PLACE_BATCH 22.315/18.644/17.711 ms。
+- 四轮均 `mixedCapacity=PASS`、`mixedVerify=PASS`，最终 offered=terminal business/Core、unfinished=0、排空后 backlog=0、fundsDiff=0，population/hftPositions/reservations/loss 均 true。初始化 admin retry 为 97/115/118/114，不计作稳态交易失败；稳定交易没有错误或超时。
+- matcher/completion/context high-water：main1 221/209/255，main2 222/202/255，main3 223/207/255；Lane high-water 仅 `[82,72,78,73]`、`[47,40,51,54]`、`[61,56,64,62]`。客户端窗口长期满 256，而 Lane 业务执行只占约 43%–46%，故瓶颈不是四条 Lane 算力打满。
+- 本轮是单 session、尽力异步、有序响应负载，仍存在 coordinated omission，且本机没有 CPU 绑核/物理独占；不能把最好一轮称为生产容量。历史同口径均值 332191 business/s/31753 Core/s 与本轮均值相差约 -3.6%，但本轮自身极差接近 20%，没有统计依据判定为代码回退或提升。
+
+### JFR、分配与根因
+
+- JFR node 135 秒、两个 client 132/131 秒，三份 `jdk.DataLoss=0`；保护窗为稳态首尾各剔除 2 秒。Owner、matcher、四条 Lane 的单核 CPU 均约 98.4%，其中含 busy-spin，不能把该数字当有效业务计算比例。保护窗 101 次 GC，总暂停 554.586 ms、最大 10.500 ms，约占保护窗 0.99%；GC 会贡献长尾，但不是 3 万 Core/s 的主因。
+- 稀疏 `OwnerTurn` 样本 20060 个（每 64 个非空 turn 采一）：平均每 turn 只退休 1.398 条，p50 为 0，19910 个样本标记 head wait，约 99.25%；窗口起始平均 73.3。说明满载下绝大多数 Owner cadence 没有连续终态可退休，严格 FIFO 队首完成可见性是首要限制。
+- Lane 真正执行很短：PLACE/CANCEL/PLACE_BATCH 的 Lane execution p99 分别 16.377/23.328/129.593 µs；但 Lane 完成到 Owner 观察 p99 分别 285.060/2017.236/1280.539 µs。差值是完成通知、Owner 调度及前序 FIFO 等待，不是 owner 单次业务处理本身。
+- Owner 终态提交尝试均值/p99 17.838/59.013 µs；其中 fact publication 均值 5.021 µs、terminal bookkeeping 3.127 µs、实时发布 0.102 µs、响应及槽退休 0.867 µs。`OwnerSettlementMerge` 58164 个样本均值/p99 8.764/28.011 µs，publication 2.273 µs、removals 0.827 µs、terminal index 0.613 µs、changed index 0.111 µs。重复删除/查表/清零已不是唯一或主要瓶颈。
+- 命令边界进一步显示：admission execution 均值/p99 5.246/14.296 µs，transport→Owner 632/3369 µs，ingress→admission 2050/7145 µs；Owner 内部本地处理远小于排队/交接等待。源码对应 `TradingCoreOwner.pollCommandCommit()` 每次调用 `commitReadyMatching(1)`，用逐命令 realtime capture/响应边界换取确定性；`progressCommandsInScope()` 遇到一次队首未完成后，本 turn 不再重复收集。这是当前 3 万 Core/s cadence 的直接机制解释。
+- 稳态线程分配增量约 matcher 6.57 GiB、Owner 4.86 GiB、每条 Lane 4.15 GiB、cluster service 1.86 GiB。JFR 采样分配头部为 `OrderRuntime` 26.57%（其中 `snapshot()` 18.63%）、`CoreMatchingResult` 8.66%、`ReservationRuntime` 8.35%、byte[] 8.05%、long[] 6.36%、native `MatcherResult` 5.65%、`ResolvedPlaceOrder` 5.00%。这些是采样权重，不是精确对象数。
+- 聚焦 JMH 普通轮 106.241±7.361 cycles/s；每 cycle 512 Core/10240 business，换算约 54395 Core/s、1087908 business/s。独立 GC 轮 103.159 cycles/s，`gc.alloc.rate.norm=23240013 B/cycle`，即约 2269.5 B/business、45390.7 B/Core；三次测量共 73 次 GC/277 ms。accepted=terminal business/Core。JMH 不含 Aeron/Archive，说明纯 Owner/Lane 路径更快，同时证实分配仍高。
+
+### 结论与彻底方案边界
+
+- 已完成的局部减法（临时准入 publication、重复 matcher DTO、重复终态遍历/清零/查表、迭代器/callback、空索引分配）正确性通过，但没有消除主瓶颈。当前首要问题是**跨线程完成可见性叠加全局 FIFO 的逐命令提交 cadence**；其次是约 2.27 KiB/business 的快照/结果对象分配。不是单纯 owner 某个方法“处理太久”，也不是 busy-spin 唤醒方式或 Lane 尾部算力不足。
+- 不能安全地把 `commitReadyMatching(1)` 直接改成更大：当前 realtime capture、终态 publication、响应和窗口槽退休按每条复制命令形成确定性边界，一次提交多条会把不同命令的实时增量合并，改变重放及客户端可见顺序。
+- 下一项可实施优化应在 Owner 内部做 **ready-run retirement**：一次读取完成游标/通知并收集当前连续 ready 的命令槽，随后仍按顺序逐条执行 capture→终态 apply/publication→response→slot release；复用一次 matcher/Lane 完成扫描、publication batch 与固定 scratch，不新增线程、任务、barrier、Map 或业务状态副本。必须先加“多条连续 ready 与中间一条未 ready”的重放/实时分组测试，再做单因素 JFR；若每命令 realtime 边界无法从 `commitReadyMatching` 中显式拆开，则不实施该优化。
+- 分配的后续顺序是先消除 `OrderRuntime.snapshot()` 在未跨边界场景的重复副本，再评估固定 window result slot + 显式归还协议替代 `CoreMatchingResult`；后者涉及 matcher→Lane→Owner 所有权，不能以对象池名义直接复用。协议解码 byte[]/`PlaceOrderCommand` 则在 Aeron ingress 边界改 flyweight。每项单独验证资金、恢复、六产品线隔离和分配，不能与 ready-run 同轮混改。
+- 因本轮性能门槛部分失败，最终状态为：**正确性通过，减法完成，根因已定位；整体性能目标未解决**。当前证据不支持声称只能有 3 万 Core/s，也不支持声称已恢复历史 41.5 万 business/s。
+
+### 证据与清理
+
+- summary SHA256：main1 `f85d9326363f9f633ad116ee3288435035a721b40aa82295d043ad007b53c833`，main2 `e6239af29f7a3188fcc47dcb4ed6b6fff8fa36eacfb366a35f51ced20853b595`，main3 `9e1725da93ae43fc538c701c1b051474decfc3059415248f84040b3beb271b7b`，JFR `047c36e25f84da1f77f733c2fc6e7154c164f80c62229f0a02c58d7b66968ae1`。node JFR SHA256 `212c51c0ac1ba02962dd81d9c18a8d492ef13f590a72344ab66ac52770caa8a7`；JMH main/GC JSON 为 `bd2c46d60d88c1887be2258a00dee4ade9466ff42f8fdd0a1226705f18dd921a` / `63b8c019abedde039a164e8e7954a8efad9d269d545d9457cf0d152dc6e46481`。
+- 现有 `analyze-owner-commit-jfr.sh` 仍要求已移除的 `OwnerCommitMeasurement`，严格模式在确认 DataLoss=0 后退出；本轮按现行 `OwnerTurn`、`OwnerSettlementMerge`、`SettlementLatency`、`CommandBoundaryLatency` 直接聚合。该兼容性缺口不影响录制有效性，但脚本需后续更新，不能把缺事件当性能失败。
+- 本轮全部 Java/Cluster/JMH 进程已退出；四个真实集群 run、JFR 分析中间文件及两份 JMH JSON 共约 12 GiB 已移至 `/Users/atomex/.Trash/surprising-ex-owner-final-cleanup-20260919/`，可恢复。原 target 路径仅作历史定位；未删除其他轮次或清空 Trash。清理后 swap 仍为 0、磁盘约 301 GiB 可用，`git diff --check` 通过。
+
+## 2026-09-19 Owner 终态直返与完成索引删除（owner-direct-retire-20260919）
+
+### 改动和正确性边界
+
+- 代码审计确认 `progressCommandsInScope()` 已经在一轮内连续退休最多 64 个 ready 队首，并在首条之后跳过公共 Matcher/Lane 推进；再增加 ready 数组、window commit 阶段或新 barrier 会重复现有机制。因此本轮不新增阶段，只让有正序号的 FIFO 队首从 `OrderedCommitCoordinator` 直接返回 `CoreResponse` 给 Owner，并删除 `ClusterCommandWindow.completionSlots` 的逐命令 put/get/remove。控制命令和回放兼容回调仍保留线性兜底；`sequence=0` 的同步终态命令直接使用准入阶段已有响应。
+- 第一版错误地把 `sequence=0` 的“无待撮合项”当成“尚未 ready”，`queryAndSessionCloseDrainTheFinalPartialWindowAndRetryIsIdempotent` 和 `deferredSequentialBatchUsesOriginalLogTimeEvenWhenLaterIngressIsAfterExpiry` 超时；加入明确分流后两项及完整参数化流水线通过。该失败结果未用于压测。
+- 曾验证终态 `OrderRuntime` 原对象能否代替 `snapshot()`。`RuntimeCommitRecoveryTest.replayAfterRestoreProducesIdenticalResponsesAndState` 证明对象仍可能被后续流程观察/改变，导致历史响应 data 从空值变成旧 OPEN 订单数据；该尝试已完整回退。结论是当前对象模型下 `publicationValue()` 的不可变快照是恢复和响应隔离边界，不能仅凭 terminal status 删除。
+- HotSpot Corretto JDK 27、Maven 3.9.16。定向回归 298 项 0 失败；service 完整 940 项 0 失败/1 个既有跳过；benchmarks reactor package 成功。正确 fork 仍为 `/Users/atomex/Desktop/surprising/exchange-core-lilaizhencn` 的 `ad920d8815cd2cd0bfff2d7a8885d0e6a9d26e7c`。未启动 wallet。
+
+### 同口径真实 Aeron 结果
+
+- 配置不变：本机、单成员真实网络与 Archive、LINEAR_PERPETUAL/MIXED/batch20、1 Matcher/4 Lane、全局/session window 256、Owner/Matcher/Lane BUSY_SPIN、30 秒预热/60 秒稳态/单独排空。无 profiler 三轮 `owner-direct-retire-20260919-main{1,2,3}`，独立 JFR 轮 `owner-direct-retire-20260919-jfr`；命令格式与上一节相同，仅替换 run ID。
+
+| 轮次 | 稳态秒 | business/s | Core/s | 最大业务类型 p99 | 排空 ms | window 阻塞占比 | Lane 有效执行均值 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| main1 | 60.004418 | 366341.926 | 35006.322 | 25.346 ms | 6.462 | 82.74% | 43.68% |
+| main2 | 60.030471 | 359197.230 | 34325.418 | 26.525 ms | 16.764 | 82.64% | 44.88% |
+| main3 | 60.006439 | 346261.356 | 33093.898 | 27.983 ms | 5.581 | 82.07% | 45.12% |
+
+- 三轮均值 **357266.837 business/s、34141.879 Core/s**；范围 346261.356–366341.926 business/s、33093.898–35006.322 Core/s；极差/均值 5.62%/5.60%，CV 2.33%/2.32%。三轮窗口峰值均 256，client/saturation gate 均 PASS。每轮最终 offered=terminal、unfinished=0；main3 为 business 20780589、Core 1986093，资金差 0，population/HFT positions/reservations/loss 全部一致。
+- 相对上一节三轮均值为 +11.62% business/Core，p99 也全部回到 30 ms 门槛内；但这不是同机交错 A/B，上一组自身极差约 20%，所以只能确认当前代码达到并稳定复现该水平，不能把 11.62% 全部归因于删除 Map。JFR 轮 349111.314 business/s、33365.061 Core/s、p99 26.705 ms，仅用于诊断。
+
+### JFR、分配和最终判断
+
+- 三份 JFR `jdk.DataLoss=0`，保护窗为稳态首尾各剔除 2 秒。Owner 终态提交均值/p99 17.227/54.353 µs（上一轮 17.838/59.013 µs）；response+retirement 0.813/2.107 µs，realtime publication 0.113/0.206 µs。局部减法有效，但节省量不足以解释毫秒级 FIFO 等待。
+- 保护窗 `OwnerTurn` 稀疏样本 21470 个，平均退休 1.462，p50/p99 均为 0，99.24% 标记 head wait，窗口起始均值 67.3。该事件按每 64 个非空 turn 采样且 busy-spin 会产生大量无进展 turn，不能把百分比当业务阻塞率；它说明 ready 命令会以少量 64 条级 burst 退休，绝大多数轮次仍在等严格 FIFO 队首完成可见。
+- Lane 执行 p99：PLACE 14.036 µs、CANCEL 20.552 µs、PLACE_BATCH 116.414 µs；Lane 完成到 Owner p99：241.967/2078.873/1278.203 µs。主剩余成本仍是跨线程完成可见性、Owner 调度及前序 FIFO 等待，而不是 Owner 的 completion Map 或业务尾部计算。
+- 分配热点几乎未变：`OrderRuntime` 26.26%（`snapshot()` 18.51%）、`CoreMatchingResult` 8.67%、`ReservationRuntime` 8.27%、byte[] 7.86%、long[] 6.52%、native `MatcherResult` 5.48%。保护窗 109 次 GC、总暂停 610.715 ms、最大 10.110 ms，约占 56 秒窗口 1.09%；swap 始终为 0。
+- 聚焦 JMH 普通轮 108.385±11.623 cycles/s，即约 55493 Core/s、1109862 business/s；独立 GC 轮 105.919 cycles/s，`gc.alloc.rate.norm=23241329 B/cycle`，约 **2269.7 B/business、45393.2 B/Core**，三次测量 75 次 GC/291 ms。与上一轮 2269.5 B/business 实质相同，说明本轮不解决分配。
+- 最终结论：**Owner 完成索引和同线程响应往返已彻底移除，当前同口径性能与 p99 达标；但架构级 FIFO 等待和发布快照分配仍未消除。** 下一步不能再把 `OrderRuntime.snapshot()` 直接省掉，必须改变发布表示：让 Lane 把只含本命令 after-image 的固定容量不可变值/编码缓冲交给 Owner，且生命周期覆盖响应、实时发布和恢复校验；随后单独设计 `CoreMatchingResult` 的固定 window slot 与显式归还协议。两项都必须各自做恢复重放、六产品线资金一致性和 JFR 分配验证，不能混改。
+- 本轮 Java/Cluster/JMH 进程均已退出；四个真实集群 run 与两份 JMH JSON 共约 13 GiB 已移动到 `/Users/atomex/.Trash/surprising-ex-owner-direct-retire-20260919/`，可恢复。清理后 swap 为 0，磁盘约 289 GiB 可用，`git diff --check` 通过。

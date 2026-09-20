@@ -948,6 +948,22 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** Fast Owner-side gate for the matching completion pump. */
     boolean hasMatchingDrainWork() { return matchingProgress.hasDrainWork(); }
 
+    /**
+     * Reads the existing Lane commit event held by the active Owner command.  The event's
+     * completion bits remain the single source of truth; this method only makes that state
+     * visible to the Owner wake-up gate and does not maintain a second ready flag.
+     */
+    boolean hasCompletedLaneCommit() {
+        var directCommit = directCommand.commitEvent();
+        if (directCommit != null && directCommit.complete()) return true;
+
+        CommandSlot pending = pendingMatching.head();
+        if (pending == null) return false;
+        if (pending.commitEvent != null && pending.commitEvent.complete()) return true;
+        OrderBatchPending batch = pending.orderBatch;
+        return batch != null && batch.laneCommitEvent != null && batch.laneCommitEvent.complete();
+    }
+
     /** Consumes Lane/Matcher notifications and advances the ordered matching pipeline. */
     void drainMatchingCompletions() { matchingProgress.drainMatchingCompletions(); }
 

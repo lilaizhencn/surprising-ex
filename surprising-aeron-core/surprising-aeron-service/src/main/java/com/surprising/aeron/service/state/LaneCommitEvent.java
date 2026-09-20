@@ -8,12 +8,17 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private static final int CACHE_LINE_LONGS = 16;
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
+    private static final boolean LATENCY_DIAGNOSTICS = MatcherSettlementEvent.LATENCY_DIAGNOSTICS;
+    private static final jdk.jfr.EventType LATENCY_EVENT_TYPE =
+            jdk.jfr.EventType.getEventType(LaneCommitLatency.class);
 
     private final LongArrayList[] usersByLane;
     private final long[] completedLanes;
     private TradingRuntimeState runtime;
     private long coreSequence;
     private long requiredLaneMask;
+    private long dispatchedNanos;
+    private long ownerObservedNanos;
 
     // Lazily allocated only for controls whose final commit also stamps account orders.
     private LongArrayList[] metadataOrderIds;
@@ -154,6 +159,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         coreSequence = sequence;
         requiredLaneMask = laneMask;
         runtime = owner;
+        if (LATENCY_DIAGNOSTICS) dispatchedNanos = System.nanoTime();
         long lanes = laneMask;
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
@@ -176,12 +182,25 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         cancelClosingTriggers(lane);
         stampMetadata(lane);
         runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
-        runtime.recordSequenceCommitLaneOperation(laneId, System.nanoTime() - startedNanos);
+        long finishedNanos = System.nanoTime();
+        runtime.recordSequenceCommitLaneOperation(laneId, finishedNanos - startedNanos);
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("Account Lane committed the same sequence twice");
         }
+        // Capture the callback target before publishing completion.  The Owner may observe the
+        // last completion immediately, publish-and-clear this reusable event, and null its
+        // runtime field before this Lane performs the wake-up.
+        TradingRuntimeState completionRuntime = runtime;
+        if (LATENCY_DIAGNOSTICS) {
+            LONGS.setOpaque(completedLanes, completionOffset + 1, startedNanos);
+            LONGS.setOpaque(completedLanes, completionOffset + 2, finishedNanos);
+        }
         LONGS.setRelease(completedLanes, completionOffset, 1L);
+        // The completion bits are the authoritative hand-off state.  Publish the wake-up only
+        // after this Lane's bit is visible; the Owner gate re-reads the event and proceeds only
+        // when all required Lane bits have been observed.
+        completionRuntime.signalOwnerCompletion();
     }
 
     public long coreSequence() { return coreSequence; }
@@ -198,11 +217,17 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         }
         return mask;
     }
-    public boolean complete() { return completedLaneMask() == requiredLaneMask; }
+    public boolean complete() {
+        boolean complete = completedLaneMask() == requiredLaneMask;
+        if (complete && LATENCY_DIAGNOSTICS && ownerObservedNanos == 0)
+            ownerObservedNanos = System.nanoTime();
+        return complete;
+    }
 
     void publishAndClear() {
         if (!complete()) throw new IllegalStateException("incomplete Account Lane commit event");
         publishMetadata();
+        if (LATENCY_DIAGNOSTICS && LATENCY_EVENT_TYPE.isEnabled()) recordLatency(System.nanoTime());
         reset();
     }
 
@@ -246,5 +271,44 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         runtime = null;
         coreSequence = 0;
         requiredLaneMask = 0;
+        dispatchedNanos = 0;
+        ownerObservedNanos = 0;
+    }
+
+    private void recordLatency(long releasedNanos) {
+        long mask = requiredLaneMask;
+        long lastStarted = 0;
+        long lastFinished = 0;
+        int lanes = 0;
+        while (mask != 0) {
+            int laneId = Long.numberOfTrailingZeros(mask);
+            mask &= mask - 1;
+            lanes++;
+            lastStarted = Math.max(lastStarted,
+                    (long) LONGS.getOpaque(completedLanes, laneId * CACHE_LINE_LONGS + 1));
+            lastFinished = Math.max(lastFinished,
+                    (long) LONGS.getOpaque(completedLanes, laneId * CACHE_LINE_LONGS + 2));
+        }
+        LaneCommitLatency event = new LaneCommitLatency();
+        event.sequence = coreSequence;
+        event.lanes = lanes;
+        event.dispatchToLastLaneStartNanos = lastStarted - dispatchedNanos;
+        event.dispatchToCompleteNanos = lastFinished - dispatchedNanos;
+        event.completeToOwnerNanos = ownerObservedNanos - lastFinished;
+        event.ownerToReleaseNanos = releasedNanos - ownerObservedNanos;
+        event.commit();
+    }
+
+    @jdk.jfr.Name("surprising.LaneCommitLatency")
+    @jdk.jfr.Label("Lane commit through ordered release")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class LaneCommitLatency extends jdk.jfr.Event {
+        public long sequence;
+        public int lanes;
+        public long dispatchToLastLaneStartNanos;
+        public long dispatchToCompleteNanos;
+        public long completeToOwnerNanos;
+        public long ownerToReleaseNanos;
     }
 }

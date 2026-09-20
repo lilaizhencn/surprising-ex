@@ -26,6 +26,9 @@ public final class TradingOwnerLoop implements Runnable {
 
     private static final long DEADLINE_NS = 30_000_000_000L;
     private static final long INPUT_BYTES = 64L * 1024 * 1024;
+    private static final String INPUT_BATCH_SIZE_PROPERTY =
+            "surprising.aeron.owner-input-batch-size";
+    private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
 
     private final OneToOneConcurrentArrayQueue<Input> input = new OneToOneConcurrentArrayQueue<>(8192);
     private final ClusterServiceEgress egress;
@@ -45,6 +48,9 @@ public final class TradingOwnerLoop implements Runnable {
     private long ownerNoProgressPolls;
     private long ownerNoProgressNanos;
     private long ownerGateSkippedPending;
+    private long ownerGateWaitingNoCompletion;
+    private long ownerGatePendingIngressNotReady;
+    private long ownerGateNoDrainWork;
 
     @Autowired
     public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress) {
@@ -62,6 +68,7 @@ public final class TradingOwnerLoop implements Runnable {
         inputProduced = 0;
         inputConsumed = 0;
         ownerPollCalls = ownerNoProgressPolls = ownerNoProgressNanos = ownerGateSkippedPending = 0;
+        ownerGateWaitingNoCompletion = ownerGatePendingIngressNotReady = ownerGateNoDrainWork = 0;
         failure = null;
         stopping = false;
         ownerEpoch = 0;
@@ -141,14 +148,27 @@ public final class TradingOwnerLoop implements Runnable {
         if (failure != null) throw new AgentTerminationException(failure);
     }
 
+    private static int configuredInputBatchSize() {
+        String configured = System.getProperty(INPUT_BATCH_SIZE_PROPERTY, "64");
+        try {
+            int value = Integer.parseInt(configured.trim());
+            if (value < 1 || value > 64) throw new IllegalArgumentException();
+            return value;
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException(
+                    INPUT_BATCH_SIZE_PROPERTY + " must be an integer in [1,64]", failure);
+        }
+    }
+
     @Override
     public void run() {
         ownerIdle.bindOwner();
         boolean initialized = false;
+        long nextOwnerDiagnosticsNanos = System.nanoTime() + 5_000_000_000L;
         try {
             while (!stopping) {
                 int work = 0;
-                for (int i = 0; i < 64 && !stopping; i++) {
+                for (int i = 0; i < INPUT_BATCH_SIZE && !stopping; i++) {
                     Input next = input.poll();
                     if (next == null) break;
                     if (next.action != null) {
@@ -180,6 +200,28 @@ public final class TradingOwnerLoop implements Runnable {
                         work += polled;
                     } else if (ownerPollDiagnostics && processor.pendingCommandCount() != 0) {
                         ownerGateSkippedPending++;
+                        switch (processor.ownerWorkGateReason()) {
+                            case "waiting-no-completion" -> ownerGateWaitingNoCompletion++;
+                            case "pending-ingress-not-ready" -> ownerGatePendingIngressNotReady++;
+                            case "no-drain-work" -> ownerGateNoDrainWork++;
+                            default -> { }
+                        }
+                    }
+                }
+                if (ownerPollDiagnostics) {
+                    long now = System.nanoTime();
+                    if (now >= nextOwnerDiagnosticsNanos) {
+                        log.info("Aeron core owner-poll sample calls={} noProgress={} "
+                                        + "noProgressNanos={} gateSkippedPending={} pendingCommands={} inputBytes={}",
+                                ownerPollCalls, ownerNoProgressPolls, ownerNoProgressNanos,
+                                ownerGateSkippedPending, processor.pendingCommandCount(),
+                                inputProduced - inputConsumed);
+                        log.info("Aeron core owner-poll gate-reasons waitingNoCompletion={} "
+                                        + "pendingIngressNotReady={} noDrainWork={}",
+                                ownerGateWaitingNoCompletion, ownerGatePendingIngressNotReady,
+                                ownerGateNoDrainWork);
+                        log.info("Aeron core owner-poll state {}", processor.ownerWorkDiagnostics());
+                        nextOwnerDiagnosticsNanos = now + 5_000_000_000L;
                     }
                 }
                 ownerIdle.idle(work, processor.pendingCommandCount() != 0);

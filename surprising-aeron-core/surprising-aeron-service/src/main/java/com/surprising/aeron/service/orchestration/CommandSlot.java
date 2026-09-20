@@ -441,6 +441,19 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         admittedMatchingOrder = order;
     }
     boolean isMatchingSubmitted() { return matchingLifecycle >= MATCHING_SUBMITTED; }
+
+    /** Compact lifecycle label used only by the opt-in Owner wait diagnostic. */
+    String matchingLifecycleName() {
+        return switch (matchingLifecycle) {
+            case MATCHING_ADMITTED -> "ADMITTED";
+            case MATCHING_DEFERRED -> "DEFERRED";
+            case MATCHING_SUBMITTED -> "SUBMITTED";
+            case MATCHER_DONE -> "MATCHER_DONE";
+            case LANES_DONE -> "LANES_DONE";
+            case COMMITTED -> "COMMITTED";
+            default -> "UNKNOWN";
+        };
+    }
     void matchingSubmitted() {
         // A cross-shard control path may publish its evidenced result before it releases the
         // submission cursor.  The result transition already proves submission in that case.

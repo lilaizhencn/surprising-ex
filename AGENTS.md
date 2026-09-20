@@ -47,63 +47,6 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 - 交付说明必须写明已测范围、未测范围及依据、无法启动的环境和已知缺口，不得因测试耗时跳过受影响路径。
 - 测试前及运行中检查磁盘空间，限制日志和录制大小；空间不足时停止并记录环境异常。分析入档后停止本轮进程，清理本轮临时集群、Archive、JFR、堆转储、日志及报告；只删除确认属于本轮的生成文件。记录追加清理状态，已删除路径仅作历史定位。
 
-## 统一压测标准
-
-本节是压测与性能验收的唯一标准；`PERFORMANCE_VALIDATION.md` 只按时间追加每轮计划、结果和证据，不改写历史。目标是回答：在什么负载下达到什么表现、瓶颈在哪、证据是什么、下一步如何验证。
-
-### 1. 适用范围与固定条件
-
-- 影响交易主链路功能或性能的改动（订单、撮合、冻结、持仓、风险、强平、资金费、ADL、保险基金、结算、编解码、Lane、Snapshot、Core Fact）必须新增或更新覆盖真实改动路径的 JMH，并执行受影响产品线的 JMH/JFR、资金状态及快照恢复检查。无关基准不能代替。
-- 只测当前 `master`，记录 commit 及未提交改动的摘要/校验；不检出或重跑旧版本，不用历史结果作本轮性能对照。对照 commit 填“不适用（仅验证当前 master）”。
-- 本机只启动一个真实 Aeron Cluster 成员，保留网络、Archive 和交易 Core；正式验收使用 1 个 matcher。本机结果不能推导三节点云端容量。云端测试按用户明确任务启动，云资源释放属于独立运维任务。
-- 全局 in-flight 固定 `256`，所有 smoke、诊断和验收均不得改档；允许在此上限内调整 session 提交窗口、连接及到达率。多 matcher 仅作独立诊断，不与单 matcher 验收混算。
-- 持续异步发压，不逐笔等待响应或等 maker 终态才发 taker；保留行情前置、Core 确定性/结算边界及初始化、测量边界排空。普通独立订单使用 MATCH_STREAM（买卖 GTC 各半），mixed 与连续交易分开报告；禁止用无业务自旋伪造计算饱和。
-
-### 2. 采集前锁定计划
-
-每轮先在验证记录中填写以下信息，再开始采集；缺少业务目标时可做探索诊断，但不能事后按结果制定验收线。
-
-- **问题与门槛**：本轮要验证的假设；持续终态吞吐下限、各业务尾延迟上限、拒绝/错误/超时容限、资源预算及正确性要求；明确通过、失败、无效条件。
-- **环境与复现**：时间、commit/修改点、完整命令、机器/CPU/内存、OS/容器配额、JDK/JVM、JVM 参数/GC、同机干扰、随机种子及数据初始化方式。
-- **业务场景**：产品线、业务动作及 maker/taker 比例、用户/连接/symbol 数、Account Lane、matcher/risk engine 数、做市状态、初始资金/持仓/订单簿深度、资金核对与快照恢复步骤。
-- **负载与时间**：到达模型、计划到达率及阶梯、提交窗口、预热/稳定测量/排空/冷却时长、重复次数和波动容限；预热须越过主要 JIT 编译并达到稳定状态。长稳另锁定持续时间、采样间隔及增长斜率判据。
-- **采样配置**：JMH 参数、fork/线程数/warmup/measurement；JFR 事件配置、阈值/采样周期、时长/大小上限、NMT 和系统采样命令。每个进程/fork 使用独立 artifact 名称，记录 PID、角色及起止时间。
-
-### 3. 执行与数据有效性
-
-- 无 profiler 轮次给主吞吐；相同场景单独运行 `-prof gc` 和 JFR 归因，记录采样开销，不以 profiler 分数替代主结果，不跨配置比较绝对吞吐。
-- 优先恒定到达率或 open-loop；记录计划到达、实际提交、accepted、terminal 速率，以及客户端排队/背压时长。达到 256 上限后的负载已受背压，必须报告受限比例及 coordinated omission 处理方法，不能声称仍实现计划到达率。
-- 按统一 run ID、进程角色和测量窗口对齐业务计数、延迟、队列、CPU、GC/JFR 和 I/O 时间序列；明确采样间隔与时钟来源。跨进程时钟未校准时不得直接相减计算延迟。
-- 预热与正式样本分离；用测量窗口内终态增量除以窗口时长计算持续吞吐。排空仅用于完成核对，单独报告排空时长和完成量，不把排空完成数计入稳定窗口吞吐。
-- 验证发压端 CPU、提交线程、连接及网络能支撑负载；记录各阶段背压、队列深度/峰值/增长趋势。发压端先受限时只报告已达负载，不能宣称 Core 已达容量上限。
-- 明显 throttling、swap、磁盘不足、profiler DataLoss/文件损坏或窗口错位使对应证据无效；保留异常记录并定位环境原因。正确性错误属于业务失败，不能当作环境无效删除。
-
-### 4. 必采指标与定位用途
-
-所有指标注明来源、单位、窗口、样本数；不可用项写明缺口和影响，不能填零或凭估计补齐。
-
-| 证据 | 最低采集内容 | 要回答的问题 |
-|---|---|---|
-| 业务吞吐与完成性 | API 分类型 `requests/s`；Core `terminal business ops/s`、`terminal Core messages/s`、`fills/s` 或 `trades/s`；批量另报 batches/s、items/s、平均/最大 batch size；accepted/terminal 总数、unfinished、最大/期末 backlog、拒绝/错误/超时率 | 是业务处理能力不足，还是批量口径、拒单或未完成量造成虚高？ |
-| 分段尾延迟 | 各业务分别报入口→accepted、accepted→terminal、入口→terminal 的 p50/p90/p95/p99/p99.9/max、直方图区间、样本数及超时上限；客户端等待另报 | 慢在接入、Core 内部还是发压端？不得合并下单、成交、撤单、批量、触发、风险、强平、资金费、ADL、结算及 snapshot fence |
-| 阶段与线程 | owner、matcher、风险、snapshot/projection、Core Fact、Aeron/Kafka/外围及发压端分别报 CPU、execution samples/top stacks、队列/背压；锁竞争、park/wait、阻塞栈、线程数及启停、上下文切换 | 哪个阶段积压、哪个线程限制推进？busy-spin CPU 单列；墙钟热点需对应墙钟/等待证据，不能由 CPU 样本代替 |
-| 分配与 GC | bytes/s、bytes/business op、对象数/op 的测量或估算方法、TLAB/非 TLAB、最大观测对象及 top class/thread/site；heap committed/used、GC 前后/live set/old 趋势、各类 GC 次数/原因/总时间占比、pause p50/p95/p99/max、最长 phase、晋升/疏散失败 | 哪条分配路径导致 GC，停顿是否与业务尾延迟同窗？采样事件不能直接当作精确对象总数 |
-| Native 与长稳 | NMT 各类 reserved/committed、峰值及增量；Direct/Mapped、Aeron/Netty/Chronicle buffer/pool 当前/峰值及分配释放差；多轮 GC 后 live set、old object/class、线程、FD 和 native 增长斜率 | 是合理驻留、积压还是持续增长？短 JFR 不能证明无泄漏 |
-| JVM 停顿与预热 | safepoint 次数/原因/到达时间/停顿、VM operation；compilation 次数/总时间/最长耗时、code cache、deoptimization、类加载卸载及 metaspace | p99/p99.9 是否被 VM 停顿或未完成预热影响？接近尾延迟的停顿必须解释 |
-| I/O 与系统 | file/socket 次数/字节/阻塞时长/top stack，异常数量/top throw site；进程/机器 CPU、物理内存、swap/page fault、容器内存/配额/节流及干扰进程 | 是同步 I/O、网络/Archive、异常风暴还是宿主资源限制？交易 owner 同步文件、网络或数据库 I/O 判主链路验收失败 |
-
-- 一个下单、撤单、改单、触发或风险/结算动作算一个 business operation；批量按 item 展开，fill 不能混作订单操作。JMH 另报主分数、误差/置信区间、业务计数换算及 `-prof gc` 分配率、bytes/op、GC 次数/时间；局部微基准不能冒充完整 Core 吞吐。
-- 排空后必须满足 `acceptedBusinessOperations == terminalBusinessOperations`、accepted/terminal Core messages 相等、两个 `unfinished* == 0`、期末 backlog 为零；资金核对遵循测试要求，并验证冻结/持仓、订单终态及快照恢复后的状态一致。
-- JFR 检查可用分配事件（`ObjectAllocationSample`、`ObjectAllocationInNewTLAB`、`ObjectAllocationOutsideTLAB`、`ThreadAllocationStatistics`），说明启用情况和覆盖限制。涉及长期状态、缓存、订单簿、snapshot/outbox 或 native buffer 必须做长稳；疑似泄漏才增加 `OldObjectSample`/`path-to-gc-roots` 并记录停顿开销。
-
-### 5. 归因、结论与归档
-
-- 每个主要问题按“**现象和时间窗口 → 阶段/线程/方法或资源证据 → 原因假设 → 排除项与缺口 → 下一项最小验证**”记录。关联现象不等于根因；没有阶段证据时写“未定位”，不能仅凭总 CPU 或热点排名下结论。
-- 诊断每次只改变一个因素，预先写出预期变化和证伪条件；只对当前 master 的同场景配置做诊断，不引入旧版本对照。优先处理能解释积压、尾延迟或分配成本的因素，不为采指标给热路径加入逐命令快照、同步日志或无必要容器。
-- 结论分为：**通过**（有效且达到预锁门槛，正确性和必需证据齐全）、**失败**（正确性错误或有效结果未达门槛）、**部分验证**（缺场景/指标/长稳等证据）、**无效**（采集或环境不满足条件）。诊断假设未定位不等同业务失败；无效性能数据不能掩盖已确认的正确性失败。
-- 最终报告同时给出指定并发/负载下的持续吞吐、分业务尾延迟、完成性/资金状态、GC/分配、heap/native、热点/阻塞及长稳结论；不适用项须给依据。不得用短时峰值、平均延迟或一句“无泄漏”代替证据。
-- 每轮（含失败/无效）在 `PERFORMANCE_VALIDATION.md` 追加：锁定计划、实际参数及偏差、完整命令、指标与时间序列摘要、关键栈/方法及源码定位、资金/恢复核对、结论和下一步。JFR 附 `jfr summary`、相关 `jfr view`/JMC 聚合结果、配置/时长、各进程 artifact 原始路径/大小/校验信息；按测试清理规则清理并追加状态，保证删原始文件后记录仍足以复核结论。
-
 ## 文档
 
 - 新增或调整产品线、资金模型、撮合、风控、交割、期权、WebSocket、Kafka Topic 后，要同步中文 README 和相关文档。
@@ -111,5 +54,5 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 ## 提交
 
-- 后续仅在 `master` 分支开发、提交和推送；未经用户明确要求，不再创建或切换开发分支。
+- 仅在 `master` 分支开发、提交和推送；未经用户明确要求，不再创建或切换开发分支。
 - 每完成一个模块并通过测试后 commit and push。
