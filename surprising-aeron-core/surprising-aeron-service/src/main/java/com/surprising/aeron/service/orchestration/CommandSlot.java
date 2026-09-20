@@ -5,6 +5,7 @@ import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
+import com.surprising.aeron.service.state.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.LaneCancelEvent;
@@ -31,7 +32,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private CoreMessage command;
     private CommandFingerprint fingerprint;
     private List<Long> preMatchingCancellationOrderIds;
-    private RuntimeFundsDelta fundsDelta;
+    private final RuntimeFundsAccumulator fundsAccumulator = new RuntimeFundsAccumulator();
     private DecodedMatchingCommand decodedCommand;
     private ResolvedMatchingAdmission admission;
     private long commitFenceTimestamp;
@@ -287,7 +288,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         this.command = command;
         this.fingerprint = fingerprint;
         this.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
-        this.fundsDelta = fundsDelta;
+        fundsAccumulator.clear();
+        fundsAccumulator.add(fundsDelta);
         this.decodedCommand = decodedCommand;
         this.admission = admission;
         commitFenceTimestamp = 0;
@@ -318,6 +320,17 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     CommandSlot withPreMatchingCancellations(List<Long> orderIds) {
         preMatchingCancellationOrderIds = retainCancellationIds(orderIds);
+        return this;
+    }
+
+    CommandSlot initialize(long sequence, Operation operation, CoreMessage command,
+                           CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
+                           RuntimeFundsAccumulator sourceFunds,
+                           DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        if (sourceFunds == null) throw new IllegalArgumentException("pending command funds are required");
+        initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
+                RuntimeFundsDelta.empty(), decodedCommand, admission);
+        sourceFunds.transferToEmpty(fundsAccumulator);
         return this;
     }
 
@@ -352,7 +365,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     CoreMessage command() { return command; }
     CommandFingerprint fingerprint() { return fingerprint; }
     List<Long> preMatchingCancellationOrderIds() { return preMatchingCancellationOrderIds; }
-    RuntimeFundsDelta fundsDelta() { return fundsDelta; }
+    RuntimeFundsAccumulator fundsAccumulator() { return fundsAccumulator; }
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission matchingAdmission() { return admission; }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
@@ -470,7 +483,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         command = null;
         fingerprint = null;
         preMatchingCancellationOrderIds = List.of();
-        fundsDelta = null;
+        fundsAccumulator.clear();
         decodedCommand = null;
         admission = null;
         continuationKind = null;

@@ -4,21 +4,23 @@ import static org.assertj.core.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
 class SettlementChangesReuseTest {
-    @Test void completionCanReuseAnImmutableAdmissionWithoutFreezingItAgain() {
+    @Test void completionUpdatesTheIndependentOwnerMirrorWithoutAnotherSnapshot() {
         var order = CoreStateTestFixtures.order(1, 7, 0, 1);
         var admission = order.snapshot();
-        var changes = new RuntimeIndexedChangeBuffer<OrderRuntime, Void>();
+        var changes = new OrderChangeBuffer();
+        var published = new LanePublishedMap<OrderRuntime>();
+        published.put(1, admission);
         changes.put(1, admission);
-        changes.freezeValues(OrderRuntime::publicationValue);
-        assertThat(changes.get(1)).isSameAs(admission);
+        changes.capturePublicationValues();
+        assertThat(changes.applyPublished(0, published, null)).isSameAs(admission);
         // Commit metadata is not represented by revision alone.
         order.applyCommitMetadataInPlace(123, 456);
         assertThat(order.revision()).isEqualTo(admission.revision());
         assertThat(order).isNotEqualTo(admission);
         changes.put(1, order);
-        changes.freezeValues(OrderRuntime::publicationValue);
-        assertThat(changes.get(1)).isNotSameAs(order).isEqualTo(order);
-        assertThat(admission.clusterPosition()).isZero();
+        changes.capturePublicationValues();
+        assertThat(changes.applyPublished(0, published, null)).isSameAs(admission).isEqualTo(order);
+        assertThat(admission.clusterPosition()).isEqualTo(456);
     }
 
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {

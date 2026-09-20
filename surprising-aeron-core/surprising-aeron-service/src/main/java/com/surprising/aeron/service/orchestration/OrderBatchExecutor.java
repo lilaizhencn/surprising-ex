@@ -942,7 +942,7 @@ final class OrderBatchExecutor {
                                           long clusterTimestamp, long clusterPosition) {
         if (!batch.finishing()) {
             owner.activateFactContext(pending.command(), pending.fingerprint());
-            owner.setCommandFundsDelta(pending.fundsDelta());
+            owner.setCommandFunds(pending.fundsAccumulator());
             batch.finishing(true);
         }
         CommandSlot laneContext = owner.laneCommandContexts.required(batch.sequence);

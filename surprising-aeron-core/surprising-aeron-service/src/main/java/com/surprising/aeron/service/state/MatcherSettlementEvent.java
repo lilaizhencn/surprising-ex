@@ -51,7 +51,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private TradingRuntimeState.MatcherSettlementChanges changes;
     private boolean isolatedChanges;
     private boolean treasuryTrades;
-    private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     private long[] completedLanes;
     private boolean collected;
     /** Owner 已以 acquire 观察到的完成位；本代事件不会倒退，复用时清零。 */
@@ -216,7 +215,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         changes = runtime.acquireMatcherSettlementChanges(laneMask);
         changes.directPositionIdentities = true;
         isolatedChanges = true; collected = false;
-        collectedFundsDelta = RuntimeFundsDelta.empty();
         prepareTreasuryDeltas(laneMask, true);
         resetCompletions(runtime.topology().accountLaneCount());
         // Direct events expose their completion through the event-owned padded bitset.  Do not
@@ -686,7 +684,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     requiredLaneMask);
         }
         prepareTreasuryDeltas(requiredLaneMask, plan.tradeCount() != 0);
-        collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
         runtime.expectMatcherSettlement(requiredLaneMask);
@@ -763,7 +760,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         changes.ensureOrderCapacity(expectedOrders, requiredLaneMask);
         treasuryTrades = hasTrade(plans, planCount);
         prepareTreasuryDeltas(requiredLaneMask, treasuryTrades);
-        collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
         runtime.expectMatcherSettlement(requiredLaneMask);
@@ -816,7 +812,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         batchBaseAssetIds = null;
         batchQuoteAssetIds = null;
         batchSettleAssetIds = null;
-        collectedFundsDelta = RuntimeFundsDelta.empty();
         isolatedChanges = false;
         treasuryTrades = false;
         collected = false;
@@ -1065,10 +1060,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         TradingRuntimeState.MatcherSettlementChanges value = changes();
         changes = null;
         return value;
-    }
-    public RuntimeFundsDelta collectedFundsDelta() { return collectedFundsDelta; }
-    void collectedFundsDelta(RuntimeFundsDelta value) {
-        collectedFundsDelta = value == null ? RuntimeFundsDelta.empty() : value;
     }
 
     RuntimeTreasuryDelta collectTreasuryDelta() {

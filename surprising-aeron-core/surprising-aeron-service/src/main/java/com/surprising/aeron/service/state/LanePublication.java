@@ -85,15 +85,27 @@ final class LanePublication {
             }
             changes.reservations.clear();
             if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
-            changes.positions.forEach((id, value) -> {
+            for (int index = 0; index < changes.positions.size(); index++) {
+                long id = changes.positions.keyAt(index);
+                PositionRuntime value = changes.positions.valueAt(index);
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
                 // Capture the old value before deletion, in the same publication traversal.
                 if (value == null && owner.realtimeCapture != null) {
                     try { owner.realtimeCapture.removedPosition(owner.publishedPositions.get(id)); }
                     catch (RuntimeException failure) { owner.realtimeCapture.failed(); }
                 }
-                owner.publishedPositions.applyPublished(id, value);
-            });
+                if (value == null) {
+                    owner.publishedPositions.applyPublished(id, null);
+                    continue;
+                }
+                PositionRuntime published = owner.publishedPositions.get(id);
+                if (published == null) published = value.publicationValue();
+                else published.copyStateFrom(value);
+                owner.publishedPositions.applyPublished(id, published);
+                // The Owner changed-index adopts this same buffer after publication. Replace the
+                // Lane alias with the independent Owner mirror before the buffer crosses over.
+                changes.positions.setValueAt(index, published);
+            }
             if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             // Terminal cleanup may intentionally omit a zero-reservation after-image.  Apply
             // route removals independently so the Owner cannot retain a stale reservation/order

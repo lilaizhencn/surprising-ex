@@ -123,6 +123,18 @@ final class PendingMatchingRing {
         return pending;
     }
 
+    CommandSlot acquire(long sequence, CommandSlot.Operation operation, CoreMessage command,
+                        com.surprising.aeron.protocol.CommandFingerprint fingerprint,
+                        java.util.List<Long> preMatchingCancellationOrderIds,
+                        com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator,
+                        DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        CommandSlot context = contexts.claim(sequence);
+        CommandSlot pending = context.initialize(sequence, operation, command, fingerprint,
+                preMatchingCancellationOrderIds, fundsAccumulator, decodedCommand, admission);
+        if (context != pending) throw new IllegalStateException("command must use its claimed slot");
+        return pending;
+    }
+
     CommandSlot get(long sequence) {
         int index = slot(sequence);
         if (!linked(index)) return null;

@@ -76,6 +76,17 @@ public final class PositionRuntime {
 
     PositionRuntime publicationValue() { return mutable ? snapshot() : this; }
 
+    /** Owner mirror update; identity fields are fixed and only the owning thread mutates it. */
+    void copyStateFrom(PositionRuntime source) {
+        if (source == null || userId != source.userId || symbolId != source.symbolId
+                || assetId != source.assetId || marginMode != source.marginMode
+                || positionSide != source.positionSide || instrument != source.instrument) {
+            throw new IllegalArgumentException("position publication identity changed");
+        }
+        applyInPlace(instrument, source.signedQuantitySteps, source.entryPriceTicks,
+                source.entryValueTicks, source.realizedPnlUnits, source.positionMarginUnits);
+    }
+
     void applyInPlace(CoreInstrument instrument, long signedQuantitySteps, long entryPriceTicks,
                       long entryValueTicks, long realizedPnlUnits, long positionMarginUnits) {
         if (this.instrument != instrument) throw new IllegalArgumentException("position instrument mismatch");

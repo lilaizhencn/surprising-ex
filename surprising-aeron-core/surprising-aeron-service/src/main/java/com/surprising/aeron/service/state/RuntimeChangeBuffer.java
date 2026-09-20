@@ -53,15 +53,6 @@ class RuntimeChangeBuffer<V> {
         }
     }
 
-    /** Freeze one final after-image per changed key before the Lane/Owner handoff. */
-    void freezeValues(java.util.function.UnaryOperator<V> freezer) {
-        if (freezer == null) throw new IllegalArgumentException("publication freezer is required");
-        for (int index = 0; index < size; index++) {
-            @SuppressWarnings("unchecked") V value = (V) values[index];
-            if (value != null) values[index] = freezer.apply(value);
-        }
-    }
-
     int put(long key, V value) {
         int slot = indexOf(key);
         if (slot >= 0) {

@@ -98,7 +98,7 @@ final class MatchingCommandAdmission {
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
                 preMatchingCancellations,
-                owner.commandFundsAccumulator.toDelta(), decodedCommand, admission);
+                owner.commandFundsAccumulator, decodedCommand, admission);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
@@ -107,7 +107,7 @@ final class MatchingCommandAdmission {
                                                DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
-                owner.commandFundsAccumulator.toDelta(),
+                owner.commandFundsAccumulator,
                 decodedCommand, admission);
     }
 

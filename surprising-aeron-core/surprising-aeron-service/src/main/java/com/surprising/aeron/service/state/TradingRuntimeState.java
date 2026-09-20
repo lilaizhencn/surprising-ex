@@ -1125,8 +1125,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         final RuntimeFundsAccumulator[] laneFundsDeltas;
         /** 每个 settlement 内按用户合并的 revision 增量，避免每个 fill 创建 UserRuntime。 */
         final LongLongHashMap[] userRevisionDeltas;
-        /** 汇总各 Lane 资金增量的复用累加器。 */
-        final RuntimeFundsAccumulator aggregateFundsDelta = new RuntimeFundsAccumulator(32);
 
         MatcherSettlementChanges(int laneCount) {
             this(laneCount, -1);
@@ -1205,7 +1203,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             // an order, reservation, or position several times before the Owner sees it.
             changes.orders.capturePublicationValues();
             changes.reservations.capturePublicationValues();
-            changes.positions.freezeValues(PositionRuntime::publicationValue);
             // Terminal identity is a Lane fact. Capture its primitive fields before the
             // publication handoff so the Owner never has to walk changed orders again merely
             // to update the bounded tombstone window.
@@ -1267,17 +1264,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        RuntimeFundsDelta collectFundsDelta(long laneMask) {
-            aggregateFundsDelta.clear();
-            long lanes = laneMask;
-            while (lanes != 0) {
-                int laneId = Long.numberOfTrailingZeros(lanes);
-                lanes &= lanes - 1;
-                aggregateFundsDelta.add(laneFundsDeltas[laneId]);
-            }
-            return aggregateFundsDelta.toDelta();
-        }
-
         void appendFundsDelta(long laneMask, RuntimeFundsAccumulator target) {
             if (target == null) throw new IllegalArgumentException("funds accumulator is required");
             long lanes = laneMask;
@@ -1300,7 +1286,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 laneFundsDeltas[lane].clear();
             }
             activeLaneMask = 0;
-            aggregateFundsDelta.clear();
         }
     }
 
@@ -2425,7 +2410,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (timing != null) timing.trimNanos = System.nanoTime() - trimStarted;
             if (changes != null) {
                 pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
-                if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
             }
             if (timing != null) timing.completed = true;
             return aggregate;

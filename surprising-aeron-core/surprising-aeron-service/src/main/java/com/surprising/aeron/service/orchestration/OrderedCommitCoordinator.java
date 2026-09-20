@@ -254,7 +254,7 @@ final class OrderedCommitCoordinator {
                 owner.resultBuilder.commandLiquidationBatchResult = null;
                 owner.resultBuilder.commandRiskScanControl = null;
                 owner.resultBuilder.resetChangeAccumulators();
-                owner.setCommandFundsDelta(pending.fundsDelta());
+                owner.setCommandFunds(pending.fundsAccumulator());
                 owner.activateFactContext(pending.command(), pending.fingerprint());
                 beginCommitPublicationBatch();
                 return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
@@ -301,7 +301,7 @@ final class OrderedCommitCoordinator {
         owner.resultBuilder.commandLiquidationBatchResult = null;
         owner.resultBuilder.commandRiskScanControl = null;
         owner.resultBuilder.resetChangeAccumulators();
-        owner.setCommandFundsDelta(pending.fundsDelta());
+        owner.setCommandFunds(pending.fundsAccumulator());
         owner.activateFactContext(pending.command(), pending.fingerprint());
         beginCommitPublicationBatch();
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;

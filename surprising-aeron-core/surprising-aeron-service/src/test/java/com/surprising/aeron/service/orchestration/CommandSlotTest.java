@@ -110,7 +110,7 @@ class CommandSlotTest {
         var decoded = pending.decodedCommand();
         CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
-        assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
+        assertThat(updatedCancellations.fundsAccumulator().toDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);
         assertThat(updatedCancellations.decodedCommand()).isSameAs(decoded);

@@ -1488,6 +1488,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
         commandFundsAccumulator.add(fundsDelta);
     }
 
+    void setCommandFunds(
+            com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator) {
+        commandFundsAccumulator.clear();
+        commandFundsAccumulator.add(fundsAccumulator);
+    }
+
     void validateFundsConservation(CoreMessage command) {
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
