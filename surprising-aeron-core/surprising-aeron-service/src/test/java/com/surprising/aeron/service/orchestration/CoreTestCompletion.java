@@ -138,7 +138,7 @@ final class CoreTestCompletion {
                 if (event == null && active.orderBatch != null)
                     event = active.orderBatch.itemSettlementEvent != null
                             ? active.orderBatch.itemSettlementEvent : active.orderBatch.settlementEvent;
-                if (event != null && event.direct() && event.ready()) result = event.firstDirectResult();
+                if (event != null && event.direct() && event.ready()) result = event.directResult();
             }
             if (result != null) return result;
             long remainingNanos = deadline - System.nanoTime();

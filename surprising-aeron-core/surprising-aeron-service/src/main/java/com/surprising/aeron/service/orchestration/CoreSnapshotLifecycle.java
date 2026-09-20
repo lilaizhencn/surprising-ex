@@ -127,7 +127,7 @@ final class CoreSnapshotLifecycle {
                                 : owner.laneCommandContexts.required(sequence).takeMatchingCompletion();
                 if (result == null && pending != null && pending.settlementEvent() != null
                         && pending.settlementEvent().direct() && pending.settlementEvent().ready())
-                    result = pending.settlementEvent().firstDirectResult();
+                    result = pending.settlementEvent().directResult();
                 if (result == null) return null;
                 if (owner.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
                 owner.drainMatchingCompletions();

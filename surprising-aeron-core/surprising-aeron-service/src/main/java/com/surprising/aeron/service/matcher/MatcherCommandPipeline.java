@@ -356,9 +356,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
                             ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
                     if (settlement != null && !settlement.resultPrepared()) {
-                        if (slot.result instanceof CoreMatchingResult matchingResult)
-                            settlement.publishDirectResult(matchingResult);
-                        else throw new IllegalStateException("direct matcher did not publish its native result");
+                        throw new IllegalStateException("direct matcher did not publish its native result");
                     }
                 } catch (Throwable failure) {
                     if (settlement != null) settlement.failDirect(failure);

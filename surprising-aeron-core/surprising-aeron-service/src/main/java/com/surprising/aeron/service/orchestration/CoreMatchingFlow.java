@@ -361,7 +361,7 @@ final class CoreMatchingFlow {
             direct = pending.orderBatch.itemSettlementEvent != null
                     ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
         }
-        if (direct != null && direct.direct()) return direct.ready() ? direct.firstDirectResult() : null;
+        if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
         return context.takeMatchingCompletion();
     }
 

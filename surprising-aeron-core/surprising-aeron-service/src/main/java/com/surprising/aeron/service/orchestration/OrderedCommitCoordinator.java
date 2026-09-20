@@ -81,7 +81,7 @@ final class OrderedCommitCoordinator {
             // Advance the Owner's shard sequence before recycling the direct event so restored
             // runtimes see the same Matcher cursor as the live runtime.
             if (direct.directResultAvailable()) {
-                MatchingResult matcherResult = direct.firstDirectResult();
+                MatchingResult matcherResult = direct.directResult();
                 // The normal direct completion path validates and applies the same result before
                 // it reaches this rejection helper. Avoid applying that evidence twice when the
                 // Lane rejection is observed after the Matcher event has completed.
@@ -177,7 +177,7 @@ final class OrderedCommitCoordinator {
         if (waitingBatch != null && waitingBatch.settlementEvent != null && waitingBatch.settlementEvent.direct()
                 && !waitingBatch.matchingApplied()) {
             if (!waitingBatch.settlementEvent.complete()) return null;
-            validateMatchingEvidence(pending, waitingBatch.settlementEvent.firstDirectResult());
+            validateMatchingEvidence(pending, waitingBatch.settlementEvent.directResult());
             applyMatcherProgress(waitingBatch.settlementEvent);
             waitingBatch.nextIndex = waitingBatch.items.size();
             waitingBatch.matchingApplied(true);
@@ -204,7 +204,7 @@ final class OrderedCommitCoordinator {
                 && waitingBatch.itemSettlementEvent.direct()
                 && waitingBatch.lastMatchingResult == null) {
             if (!waitingBatch.itemSettlementEvent.complete()) return null;
-            MatchingResult directResult = waitingBatch.itemSettlementEvent.firstDirectResult();
+            MatchingResult directResult = waitingBatch.itemSettlementEvent.directResult();
             validateMatchingEvidence(pending, directResult);
             applyMatcherProgress(directResult);
             return owner.batches.completeOrderBatchMatching(
@@ -213,7 +213,7 @@ final class OrderedCommitCoordinator {
         }
         if (waitingBatch != null && waitingBatch.itemSettlementEvent != null) {
             if (waitingBatch.itemSettlementEvent.direct()) {
-                MatchingResult directResult = waitingBatch.itemSettlementEvent.firstDirectResult();
+                MatchingResult directResult = waitingBatch.itemSettlementEvent.directResult();
                 validateMatchingEvidence(pending, directResult);
                 applyMatcherProgress(directResult);
                 waitingBatch.lastMatchingResult = directResult;
@@ -1106,15 +1106,15 @@ final class OrderedCommitCoordinator {
                         || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
                 ? pending.orderBatch.lastMatchingResult : context.matchingResult();
         if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
-            matching = pending.settlementEvent().firstDirectResult();
+            matching = pending.settlementEvent().directResult();
         }
         if (matching == null && pending.orderBatch != null && pending.orderBatch.settlementEvent != null
                 && pending.orderBatch.settlementEvent.direct()) {
-            matching = pending.orderBatch.settlementEvent.firstDirectResult();
+            matching = pending.orderBatch.settlementEvent.directResult();
         }
         if (matching == null && pending.orderBatch != null && pending.orderBatch.itemSettlementEvent != null
                 && pending.orderBatch.itemSettlementEvent.direct()) {
-            matching = pending.orderBatch.itemSettlementEvent.firstDirectResult();
+            matching = pending.orderBatch.itemSettlementEvent.directResult();
         }
         if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
                 && pending.cancelEvent() == null) {

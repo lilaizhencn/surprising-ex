@@ -38,6 +38,11 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import exchange.core2.core.common.MatcherResult;
+import exchange.core2.core.common.OrderAction;
+import exchange.core2.core.common.OrderType;
+import exchange.core2.core.common.cmd.CommandResultCode;
+import exchange.core2.core.common.cmd.OrderCommandType;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
@@ -965,17 +970,17 @@ class CoreOrderedOrderBatchTest {
             assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
-            var partialMatcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    false, "MATCHING_INVALID_ORDER_ID", List.of(), 0, true);
-
             // Inject at the actual Matcher -> Lane boundary. An Owner-supplied token is no
             // longer authoritative once the command has a direct settlement event.
             var event = state.pendingMatching(sequence).orderBatch.itemSettlementEvent;
             assertThat(event).isNotNull();
-            assertThatThrownBy(() -> event.publishDirectResult(partialMatcherFailure))
-                    .isInstanceOf(IllegalStateException.class);
+            var nativeCancellation = nativeResult(CommandResultCode.SUCCESS, 12_101);
+            var nativePlacement = nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, 12_102);
+            event.publishDirectNativeReplacement(nativeCancellation, nativePlacement, sequence,
+                    commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                    12_102, 1, 0);
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
-                    () -> completeEventually(state, sequence, partialMatcherFailure, 2_000, 4));
+                    () -> completeEventually(state, sequence, event, 2_000, 4));
 
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
@@ -1338,6 +1343,12 @@ class CoreOrderedOrderBatchTest {
         }
         if (completed == null) throw new AssertionError("account lane settlement did not complete");
         return completed;
+    }
+
+    private static MatcherResult nativeResult(CommandResultCode code, long orderId) {
+        return new MatcherResult(1, OrderCommandType.PLACE_ORDER, orderId, 1,
+                1_000, 1, 1_000, OrderAction.BID, OrderType.GTC, 1001, 1_000, 0,
+                code, List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
 
     private static com.surprising.aeron.service.matching.MatchingResult awaitMatching(

@@ -8,6 +8,10 @@ import com.surprising.aeron.service.matching.MatcherEventFixtures;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
+import exchange.core2.core.common.OrderAction;
+import exchange.core2.core.common.OrderType;
+import exchange.core2.core.common.cmd.CommandResultCode;
+import exchange.core2.core.common.cmd.OrderCommandType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -28,10 +32,8 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectCancellation(1, original, id, 0, identities, 10, 20);
-            var result = new CoreMatchingResult(false, "MATCHING_UNKNOWN_ORDER_ID", List.of(), 0, false,
-                    1, 1, 2, 11, 1, 1, 1, 0,
-                    null, List.of(), fill(1).marketData());
-            event.publishDirectResult(result);
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
             assertThat(event.complete()).isTrue();
             assertThat(event.plan().orderCount()).isZero();
@@ -58,13 +60,11 @@ class MatcherSettlementPlanTest {
             assertThat(event.ready()).isFalse();
             assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
             assertThat(event.direct()).isTrue();
-            var result = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
-                    1, 1, 2, 11, 1, 1, 1, 0,
-                    null, List.of(), fill(1).marketData());
             boolean[] routeReleased = {false};
             event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
             event.beginMatcherPublication();
-            event.publishDirectResult(result);
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                    List.of()), 1, 1, 2, 11, 1, 0);
             assertThat(event.resultPrepared()).isTrue();
             assertThat(event.ready()).isFalse();
             assertThat(routeReleased[0]).isFalse();
@@ -313,6 +313,12 @@ class MatcherSettlementPlanTest {
                 0, 0, 0, 0, 0, 0, 0, -1, null,
                 List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false)),
                 new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(sequence);
+    }
+    private static MatcherResult nativeResult(CommandResultCode code, int symbol, long sequence,
+                                               List<MatcherResult.MatcherEvent> events) {
+        return new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, symbol,
+                100, 1, 100, OrderAction.BID, OrderType.GTC, 21, 1_000, 0,
+                code, events, new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
     private static CoreInstrument instrument() {
         return INSTRUMENT;
