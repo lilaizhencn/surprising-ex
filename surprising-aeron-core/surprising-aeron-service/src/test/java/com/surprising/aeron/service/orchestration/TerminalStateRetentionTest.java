@@ -11,7 +11,7 @@ class TerminalStateRetentionTest {
     @Test
     void reusingLookupKeysCannotMutateStoredKeysOrSnapshot() {
         var retention = new TerminalStateRetention();
-        retention.accept(new com.surprising.aeron.service.state.OrderRuntime(1, 7, 0, 1, true), 1);
+        retention.accept(1, 7, "", 1);
         byte[] snapshot = retention.encode();
         for (int id = 2; id < 1000; id++) {
             assertThat(retention.containsOrder(id, 8, "client-" + id)).isFalse();
@@ -37,7 +37,7 @@ class TerminalStateRetentionTest {
     void oneSequenceEvictsEveryExcessTombstoneAndKeepsTheNewestAfterRestore() {
         var retention = new TerminalStateRetention();
         for (long id = 1; id <= TerminalStateRetention.MAX_TOMBSTONES + 40; id++)
-            retention.accept(new com.surprising.aeron.service.state.OrderRuntime(id, 7, 0, 1, true), 1);
+            retention.accept(id, 7, "", 1);
         retention.completeSequence();
         assertThat(retention.tombstoneCount()).isEqualTo(TerminalStateRetention.MAX_TOMBSTONES);
         for (var state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {

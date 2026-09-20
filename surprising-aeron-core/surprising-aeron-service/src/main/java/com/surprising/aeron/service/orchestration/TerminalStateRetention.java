@@ -115,11 +115,6 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     @Override
-    public void accept(OrderRuntime order, long coreSequence) {
-        retainPrunedOrder(order, coreSequence);
-    }
-
-    @Override
     public void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
         tombstones.putIfAbsent(EntityType.ORDER.ordinal(), orderId, userId,
                 normalizeClientId(clientOrderId), coreSequence);
@@ -134,21 +129,8 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     @Override
-    public void acceptBatch(OrderRuntime[] orders, int count, long coreSequence) {
-        if (orders == null || count < 0 || count > orders.length) {
-            throw new IllegalArgumentException("invalid terminal order batch");
-        }
-        for (int index = 0; index < count; index++) retainPrunedOrder(orders[index], coreSequence);
-    }
-
-    @Override
     public void completeSequence() {
         trimTombstones();
-    }
-
-    private void retainPrunedOrder(OrderRuntime order, long coreSequence) {
-        tombstones.putIfAbsent(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
-                normalizeClientId(order.clientOrderId()), coreSequence);
     }
 
     TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {

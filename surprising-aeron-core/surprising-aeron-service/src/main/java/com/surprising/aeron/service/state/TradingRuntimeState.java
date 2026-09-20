@@ -1336,8 +1336,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         private long[] terminalOrderIds = new long[4];
         private long[] terminalOrderUsers = new long[4];
         private String[] terminalOrderClients = new String[4];
-        /** Frozen Lane-side values retained only for legacy TerminalOrderSink adapters. */
-        private OrderRuntime[] terminalOrderValues = new OrderRuntime[4];
         private int terminalOrderCount;
 
         void ensureTerminalCapacity(int expectedCount) {
@@ -1347,7 +1345,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             terminalOrderIds = java.util.Arrays.copyOf(terminalOrderIds, capacity);
             terminalOrderUsers = java.util.Arrays.copyOf(terminalOrderUsers, capacity);
             terminalOrderClients = java.util.Arrays.copyOf(terminalOrderClients, capacity);
-            terminalOrderValues = java.util.Arrays.copyOf(terminalOrderValues, capacity);
         }
 
         private void recordTerminalOrder(OrderRuntime value) {
@@ -1357,7 +1354,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             terminalOrderIds[terminalOrderCount] = value.orderId();
             terminalOrderUsers[terminalOrderCount] = value.userId();
             terminalOrderClients[terminalOrderCount] = value.clientOrderId();
-            terminalOrderValues[terminalOrderCount++] = value;
+            terminalOrderCount++;
         }
 
         void preparePublication(TradingRuntimeState state) {
@@ -1381,7 +1378,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         public long terminalOrderId(int index) { return terminalOrderIds[index]; }
         public long terminalOrderUser(int index) { return terminalOrderUsers[index]; }
         public String terminalOrderClient(int index) { return terminalOrderClients[index]; }
-        OrderRuntime terminalOrderValue(int index) { return terminalOrderValues[index]; }
 
         /** 本次需要发布的触发单变化。 */
         RuntimeChangeBuffer<CoreTriggerOrderState> triggers;
@@ -1631,7 +1627,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication != null) publication.clear();
             publication = null;
             java.util.Arrays.fill(terminalOrderClients, 0, terminalOrderCount, null);
-            java.util.Arrays.fill(terminalOrderValues, 0, terminalOrderCount, null);
             // 原语列不持有引用；count 是唯一有效边界，recordTerminalOrder 先完整覆盖再递增。
             terminalOrderCount = 0;
             users.clear();
@@ -2574,23 +2569,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     @FunctionalInterface
     public interface TerminalOrderSink {
-        void accept(OrderRuntime order, long coreSequence);
-
         /** Compact Lane handoff; the Owner receives identity primitives, never a second order walk. */
-        default void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
-            // Compatibility sinks can continue to consume the historical OrderRuntime callback.
-            // The built-in retention sink overrides this method and stays allocation-free.
-        }
+        void accept(long orderId, long userId, String clientOrderId, long coreSequence);
 
         default void acceptBatch(LaneDelta delta, long coreSequence) {
             for (int index = 0; index < delta.terminalOrderCount(); index++) {
-                accept(delta.terminalOrderValue(index), coreSequence);
+                accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
+                        delta.terminalOrderClient(index), coreSequence);
             }
-        }
-
-        /** 批量终态交接；默认实现保留第三方 sink 的兼容性。 */
-        default void acceptBatch(OrderRuntime[] orders, int count, long coreSequence) {
-            for (int index = 0; index < count; index++) accept(orders[index], coreSequence);
         }
 
         default void completeSequence() {

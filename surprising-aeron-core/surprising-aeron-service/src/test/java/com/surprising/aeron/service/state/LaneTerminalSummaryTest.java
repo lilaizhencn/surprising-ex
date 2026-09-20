@@ -20,21 +20,24 @@ class LaneTerminalSummaryTest {
         }
         changes.preparePublication(state);
         var actual = new ArrayList<Long>();
-        changes.commitTerminalToOwner(state, 0, (order, sequence) -> actual.add(order.orderId()), 9);
+        changes.commitTerminalToOwner(state, 0,
+                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 9);
         assertThat(actual).containsExactlyElementsOf(expected);
         state.clearChangedKeys();
         changes.clear();
         changes.putOrder(41, new OrderRuntime(41, 7, 5, 10));
         changes.preparePublication(state);
         actual.clear();
-        changes.commitTerminalToOwner(state, 0, (order, sequence) -> actual.add(order.orderId()), 10);
+        changes.commitTerminalToOwner(state, 0,
+                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 10);
         assertThat(actual).isEmpty();
     }
     @Test void publishedOpenTerminalAndRemovedOrdersRemainCorrectAcrossReuse() {
         var state = new TradingRuntimeState();
         var changes = new TradingRuntimeState.LaneDelta();
         var retained = new ArrayList<Long>();
-        TradingRuntimeState.TerminalOrderSink sink = (order, sequence) -> retained.add(order.orderId());
+        TradingRuntimeState.TerminalOrderSink sink =
+                (orderId, userId, clientOrderId, sequence) -> retained.add(orderId);
         var open = new OrderRuntime(11, 7, 5, 10);
         for (var status : new CoreOrderStatus[]{CoreOrderStatus.OPEN, CoreOrderStatus.FILLED,
                 CoreOrderStatus.OPEN, CoreOrderStatus.CANCELED, CoreOrderStatus.REJECTED}) {
@@ -61,7 +64,8 @@ class LaneTerminalSummaryTest {
         var changes = new TradingRuntimeState.LaneDelta();
         changes.putOrder(11, new OrderRuntime(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2));
         var retained = new ArrayList<Long>();
-        changes.commitTerminalToOwner(state, 0, (order, sequence) -> retained.add(order.orderId()), 9);
+        changes.commitTerminalToOwner(state, 0,
+                (orderId, userId, clientOrderId, sequence) -> retained.add(orderId), 9);
         assertThat(retained).containsExactly(11L);
         assertThat(state.publishedOrders.get(11).status()).isEqualTo(CoreOrderStatus.CANCELED);
     }

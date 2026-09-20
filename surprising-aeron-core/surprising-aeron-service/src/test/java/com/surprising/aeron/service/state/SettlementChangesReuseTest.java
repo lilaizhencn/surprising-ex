@@ -36,17 +36,14 @@ class SettlementChangesReuseTest {
                 for (int i = 0; i < delta.terminalOrderCount(); i++) {
                     assertThat(delta.terminalOrderId(i)).isEqualTo(firstId + i);
                     assertThat(delta.terminalOrderUser(i)).isEqualTo(firstId + i + 100);
-                    assertThat(delta.terminalOrderValue(i).orderId()).isEqualTo(firstId + i);
                 }
                 // Recycle an unpublished receipt too: failure cleanup must not leak into reuse.
                 delta.clear();
                 assertThat(delta.terminalOrderCount()).isZero();
                 assertThat(delta.orders.isEmpty()).isTrue();
-                for (String name : new String[]{"terminalOrderClients", "terminalOrderValues"}) {
-                    var field = TradingRuntimeState.LaneDelta.class.getDeclaredField(name);
-                    field.setAccessible(true);
-                    assertThat((Object[]) field.get(delta)).containsOnlyNulls();
-                }
+                var field = TradingRuntimeState.LaneDelta.class.getDeclaredField("terminalOrderClients");
+                field.setAccessible(true);
+                assertThat((Object[]) field.get(delta)).containsOnlyNulls();
             }
         }
     }

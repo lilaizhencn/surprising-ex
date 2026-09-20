@@ -149,28 +149,6 @@ class RuntimeChangeBuffer<V> {
         resetIndex();
     }
 
-    org.eclipse.collections.api.iterator.LongIterator longIterator() {
-        return new org.eclipse.collections.api.iterator.LongIterator() {
-            /** 当前只读迭代器位置，不改变底层变更缓冲。 */
-            int cursor;
-
-            @Override
-            public long next() {
-                if (!hasNext()) throw new java.util.NoSuchElementException();
-                return keys[cursor++];
-            }
-
-            @Override
-            public boolean hasNext() {
-                return cursor < size;
-            }
-        };
-    }
-
-    long[] toArray() {
-        return java.util.Arrays.copyOf(keys, size);
-    }
-
     void clear() {
         if (size == 0) return;
         for (int index = 0; index < size; index++) values[index] = null;
