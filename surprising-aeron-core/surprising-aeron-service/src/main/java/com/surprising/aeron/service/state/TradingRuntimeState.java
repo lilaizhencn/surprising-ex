@@ -1015,8 +1015,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             return;
         }
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
-        // Matcher settlement buffers are frozen once at the terminal handoff. Repeated fills for
-        // one order therefore keep only one immutable after-image instead of one per mutation.
+        // Matcher settlement buffers capture primitive fields once at terminal handoff. Repeated
+        // fills therefore coalesce into one slot without allocating an object after-image.
         laneDelta(scoped.laneId()).putOrder(orderId,
                 value == null || changes == null ? value == null ? null : value.publicationValue() : value);
     }
@@ -1203,8 +1203,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             LaneCommitDelta changes = laneDeltas[laneId];
             // Freeze only the final value for each changed key. A single settlement can update
             // an order, reservation, or position several times before the Owner sees it.
-            changes.orders.freezeValues(OrderRuntime::publicationValue);
-            changes.reservations.freezeValues(ReservationRuntime::publicationValue);
+            changes.orders.capturePublicationValues();
+            changes.reservations.capturePublicationValues();
             changes.positions.freezeValues(PositionRuntime::publicationValue);
             // Terminal identity is a Lane fact. Capture its primitive fields before the
             // publication handoff so the Owner never has to walk changed orders again merely
@@ -1331,7 +1331,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public static final class LaneCommitDelta {
-        /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
+        /** 本 Lane 的实体键与原语 after-image；Owner 原地更新自己的独立镜像。 */
         LanePublication publication;
         private LanePublication publicationBuffer;
         /** Lane 准备的终态原语收据；Owner 不再重新遍历订单或创建 OrderRuntime 快照。 */
@@ -1363,6 +1363,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             if (publicationBuffer == null) publicationBuffer = new LanePublication();
             publication = publicationBuffer;
+            // Normal matcher settlement captures these fields in prepareLaneTerminal. Direct
+            // commit/recovery callers enter here instead, so capture again from the final values;
+            // the retained primitive arrays make this allocation-free and idempotent.
+            orders.capturePublicationValues();
+            reservations.capturePublicationValues();
             // Standalone/recovery callers do not pass through prepareLaneTerminal;
             // preserve their terminal callback contract without making the Owner rescan orders.
             if (terminalOrderCount == 0) {
@@ -1387,9 +1392,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         /** 本次需要发布的用户变化。 */
         final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
         /** 本次需要发布的订单变化。 */
-        final RuntimeIndexedChangeBuffer<OrderRuntime, Void> orders = new RuntimeIndexedChangeBuffer<>();
+        final OrderChangeBuffer orders = new OrderChangeBuffer();
         /** 本次需要发布的预留变化。 */
-        final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
+        final ReservationChangeBuffer reservations = new ReservationChangeBuffer();
         /** 本次需要发布的持仓变化。 */
         final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = new RuntimeIndexedChangeBuffer<>();
         /** 本次需要发布的清算变化。 */

@@ -63,22 +63,27 @@ final class LanePublication {
                 owner.changedUsers.add(id);
             });
             if (timing != null) { timing.usersNanos = System.nanoTime() - started; started = System.nanoTime(); }
-            changes.orders.forEach((id, value) -> {
+            for (int index = 0; index < changes.orders.size(); index++) {
+                long id = changes.orders.keyAt(index);
                 if (changedOrders != null) changedOrders.add(id);
                 // 删除由下面的路由集合统一应用，不先删除一次再重复探测发布表。
                 if (timing != null && timing.mapTiming) timing.ordersVisited++;
                 if (!changes.removedOrderRoutes.contains(id))
-                    owner.publishedOrders.applyPublished(id, value, timing != null && timing.mapTiming ? timing : null);
+                    changes.orders.applyPublished(index, owner.publishedOrders,
+                            timing != null && timing.mapTiming ? timing : null);
                 else if (timing != null && timing.mapTiming) timing.ordersSkipped++;
-            });
+            }
             if (timing != null) { timing.ordersNanos = System.nanoTime() - started; started = System.nanoTime(); }
-            changes.reservations.drainTo((id, value) -> {
+            for (int index = 0; index < changes.reservations.size(); index++) {
+                long id = changes.reservations.keyAt(index);
+                ReservationRuntime value = changes.reservations.valueAt(index);
                 if (changedOrders != null) changedOrders.add(id);
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());
                 if (!changes.removedReservationRoutes.contains(id))
-                    owner.publishedReservations.applyPublished(id, value);
+                    changes.reservations.applyPublished(index, owner.publishedReservations);
                 owner.changedReservations.add(id);
-            });
+            }
+            changes.reservations.clear();
             if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             changes.positions.forEach((id, value) -> {
                 if (changedUsers != null && value != null) changedUsers.add(value.userId());

@@ -14,8 +14,10 @@ import java.util.UUID;
 /**
  * Runtime order state owned by one Account Lane.
  *
- * <p>The lane mutates the execution fields in place.  Published/rollback views use
- * {@link #snapshot()} so a later lane command can never change an already committed value.</p>
+ * <p>The Lane mutates its execution fields in place. Cross-thread publication captures the
+ * mutable fields into primitive event storage and updates a distinct Owner-owned mirror, so a
+ * later Lane command can never change an already committed value. Explicit snapshot/rollback
+ * boundaries still use {@link #snapshot()}.</p>
  */
 public final class OrderRuntime {
     private final long orderId;
@@ -225,6 +227,36 @@ public final class OrderRuntime {
     }
 
     OrderRuntime publicationValue() { return mutable ? snapshot() : this; }
+
+    OrderRuntime publishedCopy(long executed, long remaining, long cumulativeFee,
+                               long createdAt, long updatedAt, long position,
+                               CoreOrderStatus publishedStatus, long publishedRevision) {
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
+                priceTicks, matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
+                marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
+                makerFeeRatePpm, takerFeeRatePpm, cumulativeFee, createdAt, updatedAt, position,
+                publishedStatus, publishedRevision, false);
+    }
+
+    void applyPublishedStateInPlace(OrderRuntime source, long executed, long remaining,
+                                    long cumulativeFee, long createdAt, long updatedAt,
+                                    long position, CoreOrderStatus publishedStatus,
+                                    long publishedRevision) {
+        if (source == null || orderId != source.orderId || instrument != source.instrument
+                || executed < 0 || remaining < 0 || Math.addExact(executed, remaining) != quantitySteps
+                || createdAt < 0 || updatedAt < createdAt || position < 0
+                || publishedStatus == null || publishedRevision <= 0) {
+            throw new IllegalStateException("invalid published order state");
+        }
+        executedQuantitySteps = executed;
+        remainingQuantitySteps = remaining;
+        cumulativeFeeUnits = cumulativeFee;
+        createdAtEpochMillis = createdAt;
+        updatedAtEpochMillis = updatedAt;
+        clusterPosition = position;
+        status = publishedStatus;
+        revision = publishedRevision;
+    }
 
     /** Lane-only mutation; all validation is performed before changing any field. */
     void applyFillInPlace(long executed, long remaining, long feeUnits,

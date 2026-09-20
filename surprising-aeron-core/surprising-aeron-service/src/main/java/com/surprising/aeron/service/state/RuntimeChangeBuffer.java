@@ -122,6 +122,11 @@ class RuntimeChangeBuffer<V> {
         return (V) values[index];
     }
 
+    void setValueAt(int index, V value) {
+        if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
+        values[index] = value;
+    }
+
     @SuppressWarnings("unchecked")
     V get(long key) {
         int slot = indexOf(key);

@@ -4,7 +4,7 @@ package com.surprising.aeron.service.state;
  * Lane 变更与可选的持仓预计算索引共用实体键索引。
  * 订单只交接运行态引用，不分配 prepared 列；持仓按需分配第二列。
  */
-final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
+class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     /** 预计算索引列按需分配，与基础变更槽对齐。 */
     private static final Object[] NO_PREPARED = new Object[0];
     /** 非null哨兵表示已预计算的删除；null槽表示尚未预计算。 */
