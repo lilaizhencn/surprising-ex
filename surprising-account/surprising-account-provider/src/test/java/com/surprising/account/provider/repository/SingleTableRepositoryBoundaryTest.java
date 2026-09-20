@@ -63,7 +63,6 @@ class SingleTableRepositoryBoundaryTest {
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
                 .contains("FROM account_product_transfers")
-                .doesNotContain("account_product_balances")
                 .doesNotContain("account_product_ledger_entries");
     }
 

@@ -34,7 +34,7 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 
 ## P1 价格、预占、平仓容量与费用契约
 
-本节冻结普通订单进入 Product Core 前的交易语义。`trading_orders`、账户投影、Kafka 和 PostgreSQL 都是异步事实或查询投影；它们不得覆盖、补齐或反向裁决 Product Core 的下单预检。价格、预占、平仓容量和费用的最终事实均由同一条 Product Core 命令状态转换产生。
+本节冻结普通订单进入 Product Core 前的交易语义。账户投影、Kafka 和 PostgreSQL 都是异步事实或查询投影；它们不得覆盖、补齐或反向裁决 Product Core 的下单预检。价格、预占、平仓容量和费用的最终事实均由同一条 Product Core 命令状态转换产生。
 
 正式下单路径不先调用独立 Core preflight；Provider 直接提交一次正式 `PLACE_ORDER`，由该命令完成权威校验、
 预占和撮合。`preflight` 仅保留给显式 test/dry-run API，结果不作为后续正式下单的授权或缓存。
@@ -131,22 +131,21 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 
 订单事实入口不再依赖订单数据库仓储：下单、撤单、账户预占结果和撮合结果先按用户分区命令
 Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateService` 按序应用。
-`OrderRepository` 仅作为异步投影写入
-`trading_orders`，不参与订单状态裁决；订单事件、仓位、仓位模式和算法单状态均从本地事实快照产生。
+订单状态、仓位、仓位模式和算法单状态均从 Aeron Core 与本地事实快照产生；订单查询只读取
+`core_order_projection`，数据库投影不参与订单状态裁决。
 账户完整快照 Topic 使用用户键压缩，订单节点每个 JVM 通过唯一 `client-id` 使用独立消费组接收完整快照；
 不能让多个订单实例共享快照消费组，否则本地缓存会被 Kafka 分摊而缺失用户状态。
 订单状态也通过 `order.state.events.v1` 使用同样的用户键压缩广播，事件中的 `stateRevision` 是跨节点
 单调修订号，本地 WAL 序号只负责当前节点顺序。分区迁移时没有完整快照或本地事实无法安全合并，订单节点
-必须失败关闭，不能从落后的 `trading_orders` 投影恢复在线状态。
+必须失败关闭，不能从落后的 PostgreSQL 查询投影恢复在线状态。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
-- 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
+- 订单接受时会把最终 maker/taker 费率写入 Core 订单事实。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
 - account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
 - 做市商返佣仍应由做市商计划或后台流程根据挂单质量确认后配置。
 
 ## 杠杆设置
 
-- 用户杠杆配置的事实通过 `LeverageSettingEvent` 发布到产品线 Topic，订单 JVM 快照直接读取；
-  `trading_leverage_settings` 只作为异步投影和启动恢复来源，唯一键是 `user_id + symbol + margin_mode`。
+- 用户杠杆配置的事实由 Aeron Core 持有；设置和查询均通过 Core Command/Query 完成，PostgreSQL 不保存第二份杠杆状态。
 - `leveragePpm` 使用 ppm 表示杠杆：`10_000_000 = 10x`，`100_000_000 = 100x`。
 - 用户接口：`POST /api/v1/trading/leverage/settings` 设置杠杆，`GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` 查询当前设置。
 - 设置杠杆时会先校验不能超过 instrument 当前版本的 `max_leverage_ppm`。
@@ -266,8 +265,8 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - Core 从 Runtime Instrument、mark、leverage、position、active-order、open-interest 和 fee policy 计算保护价、预占价格、结算资产、保证金及手续费上界；所有整数运算溢出都会拒绝。
-- Aeron Core 校验用户可用余额并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；`trading_orders` 只保存订单及预占事实投影，不更新账户余额表。
-- 账户类型、结算资产和初始冻结量作为 Core 订单/预占元数据的一部分原子保存；`trading_orders` 只接收异步投影，永续不再维护独立的可裁决保证金预占记录。
+- Aeron Core 校验用户可用余额并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；订单和预占事实由 Core 原子保存，不更新数据库余额表。
+- 账户类型、结算资产和初始冻结量作为 Core 订单/预占元数据的一部分原子保存，PostgreSQL 只接收 Core Export 查询投影。
 - 如果 Core 判断保证金不足，命令直接返回 `REJECTED`，不会进入撮合；数据库只接收最终订单状态投影。
 
 `reduceOnly=true` 的平仓和强平订单不冻结新增保证金。
@@ -335,7 +334,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 ## 幂等和多节点
 
-- `trading_orders_user_client_order_uidx` 保证同一用户 `clientOrderId` 幂等。
+- Product Core 的用户级 `clientOrderId` 索引保证同一用户请求幂等。
 - 下单插入只允许这个部分 `(userId, clientOrderId)` 唯一键冲突被幂等跳过。`orderId` 或其他唯一键冲突必须失败，不能被当成请求重放。
 - 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
 - 普通订单、条件单和算法父单分别使用独立身份域，并由 `ProductLine + userId + client business key`
@@ -348,7 +347,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
 - HTTP、账户结果、撮合结果和只减仓清理都必须先写入 `order.user.commands.v1`；订单节点之间不能直接
   调用另一个节点的本地 WAL。结果 Topic 只用于同步等待，终态同时保存在用户分区结果库。
-- `trading_outbox_events` 仅由撮合、触发、强平等仍需要数据库事务发件箱的模块使用，不再作为订单下单或账户资金的事实入口。
+- 交易事实事件由 Core 日志和产品线 Kafka 事件发布，交易数据库不再维护订单 Outbox。
 - Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
 - 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
 
@@ -396,7 +395,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - Core Event 使用 `(product_line, symbol, trade_id)` 作为投影幂等键。`trade_id` 由
   `commandId * 1_000_000 + matchIndex` 确定性生成，成交热路径不发生数据库序列往返。
 - Core 以 `commandId` 做重放幂等；投影端收到重复事件只更新更高 revision，不反向驱动订单状态。
-- 资金结算命令携带不可变的订单总量和 `reduceOnly` 快照；account-provider 对照自己持有的 reservation 校验，成交热路径不再 join `trading_orders`。
+- 资金结算命令携带不可变的订单总量和 `reduceOnly` 快照；account-provider 对照 Core 事实校验，成交热路径不访问 PostgreSQL 订单表。
 - matcher 提交后若业务状态、delta 或恢复对账不一致，当前 Member 进入 sticky fail-closed；不得在进程内 rebuild、retry 或 resubmit。
 
 adapter 关闭 exchange-core 内置业务风险、保证金和手续费；这些仍由 ProductExecutionCore 权威裁决。
@@ -480,9 +479,9 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
 订单用户接口：
 
 - `POST /api/v1/trading/orders`：提交普通订单。`clientOrderId` 在同一用户内幂等。
-- `POST /api/v1/trading/orders/test`：测单。只执行基础字段、产品规则、reduce-only、手续费快照和开仓冻结需求测算；不写 `trading_orders`，不冻结余额，不发布 Kafka command。
+- `POST /api/v1/trading/orders/test`：测单。只执行基础字段、产品规则、reduce-only、手续费快照和开仓冻结需求测算；不冻结余额，不发布 Kafka command。
 - `POST /api/v1/trading/orders/batch`：批量下单，最多 20 条。响应逐项返回成功/失败；单项业务拒单仍会返回对应订单响应。
-- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端读取 Aeron Core 当前用户状态，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金，也不锁定 `account_positions` 投影行。
+- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端读取 Aeron Core 当前用户状态，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金，也不写入 PostgreSQL 持仓投影。
 - `POST /api/v1/trading/orders/cancel`：按 `orderId` 撤单。
 - `POST /api/v1/trading/orders/batch-cancel`：批量撤单，最多 50 条。
 - `POST /api/v1/trading/orders/cancel-open`：撤销用户普通开放订单，可按 `symbol` 过滤，单次最多 1000 条。
@@ -509,28 +508,17 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 
 根目录 [init.sql](../init.sql) 创建：
 
-- `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`
-- `trading_orders`
-- `trading_order_events`
-- `trading_outbox_events`
-- `account_position_margins`
-- `trading_match_results`
-- `trading_match_trades`
+- `trading_fee_schedules`
+- `trading_symbol_open_interest_shards` 和 `trading_symbol_open_interest` 视图
+- `core_order_projection`
+- `core_execution_projection`
+- `core_projection_watermark`
 
 核心索引：
 
-- `trading_orders_user_client_order_uidx`
-- `trading_orders_open_query_idx`
-- `trading_orders_stp_open_idx`
-- `trading_orders_recovery_idx`
-- `trading_order_events_order_idx`
-- `trading_order_events_trace_idx`
-- `trading_outbox_pending_idx`
-- `trading_match_results_order_idx`
-- `trading_match_results_success_place_idx`
-- `trading_match_results_trace_idx`
-- `trading_match_trades_symbol_time_idx`
-- `trading_match_trades_trace_idx`
+- `idx_core_order_projection_user_status`
+- `idx_core_order_projection_symbol_status`
+- `idx_core_execution_projection_user_time`
 
 ## 本地运行
 
@@ -563,7 +551,7 @@ mvn -pl :surprising-market-data-provider -am spring-boot:run
 - 当前已经实现 Aeron 配对 native snapshot + Cluster Log catch-up 的开放订单簿恢复；PostgreSQL 只保留异步投影，不参与在线簿恢复。
 - Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
 - 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
-- 动态单用户持仓量限额已实现：account 根据 Core Export 的结算事实把 OI 投影到 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 Core Export/用户状态快照重建核对分片，`account_positions` 只作为对账投影，尤其在人工修数或灾备恢复之后。
+- 动态单用户持仓量限额已实现：account 根据 Core Export 的结算事实把 OI 投影到 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 Core Export/用户状态快照重建核对分片。
 - 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
 - 止盈止损触发后一定通过 trading provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。

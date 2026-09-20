@@ -15,7 +15,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 账户余额、产品余额和持仓查询通过 `AccountAeronGateway.userState()` 发送 `USER_STATE_QUERY`，不能从 PostgreSQL 当前余额表读取。
 - Aeron Cluster 重启使用 Snapshot 加 Snapshot 之后的 Cluster Log Replay 恢复 Core 状态；账户数据库不是实时资金恢复源。
 - PostgreSQL 只保存 Core Export 的异步账本、审计、对账和查询投影。投影延迟或失败不能改变 Core 的余额裁决。
-- `init.sql` 中保留的 `account_deficits`、`account_positions` 等表属于历史/投影/对账数据结构，不能重新作为在线资金写模型。
+- 旧的余额、订单、持仓和风险投影表已经从 `init.sql` 移除，不能重新作为在线资金写模型。
 
 ## 持久化边界
 
@@ -40,15 +40,14 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 持仓使用 `signedQuantitySteps`，正数为净多，负数为净空。
 - 持仓保存 `instrumentChangeId`，当前敞口绑定开仓时的计算参数审计记录；有敞口时禁止替换计算参数。
 - 持仓和持仓保证金都会保存 `marginMode`；单向净持仓链路下 `CROSS` 和 `ISOLATED` 都可执行。
-- 持仓查询响应返回 `positionSide = NET`。Core 当前按 `userId + symbol + marginMode` 保存一条净持仓；
-  `account_positions` 只是这份 Core 状态的异步投影，hedge-mode `LONG/SHORT` 持仓还没有进入当前在线模型。
+- 持仓查询响应返回 `positionSide = NET`。Core 当前按 `userId + symbol + marginMode` 保存一条净持仓，hedge-mode
+  `LONG/SHORT` 持仓还没有进入当前在线模型。
 - 开仓均价使用 `entryPriceTicks`。
-- 持仓保证金由 CoreUserState 维护；`account_position_margins.margin_units` 只是异步投影字段。
+- 持仓保证金由 CoreUserState 维护；PostgreSQL 不保存第二份可变持仓保证金状态。
 - 已实现盈亏按 `realizedPnlUnits` 累计，单位是 instrument 的结算资产最小单位。U 本位线性合约使用 tick-step notional；币本位反向合约使用合约面值和入场/出场价格倒数公式。
-- 交易手续费使用 Core 订单中固化的 `takerFeeRatePpm` / `makerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣；账户结算热路径不回查 `trading_orders` 费率。
-- 强平费使用 `liquidation_orders.liquidation_fee_rate_ppm` 冻结费率。账户结算只扣实际可从用户保证金中收上的金额，并把已收金额发布给保险基金。
-- 当亏损超过 `availableUnits + lockedUnits` 时，Core 维护超额亏损状态，不让在线余额变成负数；
-  `account_deficits` 只保留异步投影/对账记录。
+- 交易手续费使用 Core 订单中固化的 `takerFeeRatePpm` / `makerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣；账户结算热路径不回查 PostgreSQL 订单表。
+- 强平费使用 `core_liquidation_projection.liquidation_fee_rate_ppm` 的 Core Export 事实。账户结算只扣实际可从用户保证金中收上的金额，并把已收金额发布给保险基金。
+- 当亏损超过 `availableUnits + lockedUnits` 时，Core 维护超额亏损状态，不让在线余额变成负数；亏空事实通过 Core Export 进入账本或保险基金流程。
 
 ## 资金命令与结算
 
@@ -60,7 +59,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 订单预占和释放、可用余额与冻结余额之间的转移属于 Core 状态变化，不要求数据库余额表写入；`balance_after_units` 只能作为账本事实快照。
 - 账本和管理员调整使用业务引用幂等；重复投影内容必须一致，冲突必须停住，不能静默覆盖历史事实。
 - 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation 和 WebSocket 等查询下游；条件单由 Aeron Core 直接读取同一份账户状态，不再由 trading provider 消费账户快照。任何 JVM/Redis 快照都只是读模型，不是资金权威。
-- `account_trade_settlement_sides`、`account_commands` 等数据库表只用于异步审计、投影和对账。任何数据库投影失败都不能回滚或改写已经提交的 Core 状态。
+- 数据库账本、管理员调整和保险基金流水只用于异步审计、投影和对账。任何数据库投影失败都不能回滚或改写已经提交的 Core 状态。
 
 ## 接口
 
@@ -130,32 +129,24 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 
 ## 数据库
 
-根目录 [init.sql](../init.sql) 创建的账户表分为 Core 投影/对账表和历史审计表。它们不是实时余额权威来源，
+根目录 [init.sql](../init.sql) 创建的账户表只保存 Core Export 账本、划转、管理员调整和保险基金审计事实。它们不是实时余额权威来源，
 在线账户命令不得对余额、冻结资金和持仓表执行 DML：
 
-- 原生 PostgreSQL 账户 ID Sequence，覆盖异步账本投影、账户命令审计和恢复元数据
-- `account_deficits`（历史/投影表，非在线风险裁决来源）
 - `account_ledger_entries`
 - `account_product_ledger_entries`
 - `account_product_transfers`（仅保存 `TRANSFER_IN` Core Fact 投影出的已完成历史，不保存在线划转状态）
 - `account_admin_balance_adjustments`
-- `account_position_margins`（Core 持仓保证金的异步投影）
-- `account_positions`（Core 持仓状态的异步投影）
-- `account_state_order_locks`
-- `account_commands`
-- `account_trade_settlement_sides`
-- `account_trade_settlement_completions`（只读视图）
+- `insurance_fund_ledger`
+- `insurance_deficit_coverages`
+- `adl_events`
 
 核心索引：
 
 - `account_ledger_reference_uidx`
 - `account_ledger_liquidation_fee_order_idx`
-- `account_deficits_user_idx`
-- `account_position_margins_user_idx`
-- `account_positions_user_idx`
-- `account_commands_processing_idx`
-- `account_commands_dependency_idx`
-- `account_trade_settlement_sides_monitor_idx`
+- `insurance_fund_ledger_reference_uidx`
+- `insurance_coverages_reserve_command_uidx`
+- `insurance_coverages_finalize_command_uidx`
 
 ## 配置
 
@@ -286,17 +277,17 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - 除 `AccountCommandGateway` 外不能绕过 Aeron Core 直接执行账户资金写入。不能重新引入账户余额、冻结资金或持仓表 DML。
 - HTTP 超时表示结果未知，不代表失败。调用方必须使用原 `referenceId` 重试；新 reference 表示一笔新资金意图。
 - 订单入口在校验后向 Aeron Core 发布下单命令；Core 冻结初始保证金，成交后按实际成交价迁移为持仓保证金，委托价或市价保护价多冻结的部分释放回可用余额。
-- `trading_orders`、`account_positions`、`account_position_margins` 中的预占和持仓字段是投影/审计快照，不能作为实时资金来源。
+- 订单、持仓和保证金事实都由 Aeron Core 维护，不能从 PostgreSQL 查询投影推导实时资金来源。
 - 用户逐仓保证金调整按 `referenceId` 幂等，并由 Aeron Core 把可用余额转入或从持仓保证金释放；`account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT` 只记录审计事实。
 - 平仓成交按平仓数量比例释放持仓保证金。这条链路必须保持 long-only，并与 exchange-core 的 ticks/steps 一致。
 - reduce-only 剪枝不是撮合层或账户表写入功能；trading provider 按用户消费持仓事件，在自己的事务里锁定相关订单并发布按 symbol 分区的 cancel command。多节点部署时必须共享 PostgreSQL，并使用同一个 Kafka consumer group。
 - reduce-only 剪枝遇到 `Long.MIN_VALUE` 这类不可能的 signed quantity 必须 fail-fast，不能让容量数学回绕后基于负绝对值错误撤单或保留挂单。
-- 如果出现订单预占快照缺失或订单保证金核算不平，要检查 trading provider 是否漏写 `trading_orders.reserved_units` 快照、matching 是否丢失快照字段，以及 `account_trade_settlement_sides` 的消费/释放审计值。
+- 如果出现订单预占或保证金核算不平，要检查 Core Export 的订单/成交事实、账户账本幂等键和 Core projection watermark。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结；该状态转移必须由 Core reducer 原子完成，数据库只接收投影。
-- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。Product Core 使用订单接受时固化的费率完成结算并导出 Core Fact，不查询 `trading_orders`，也不能按当前用户等级重算。
+- 手续费扣款复用已实现亏损的余额安全路径。手续费返佣先清理 Core 维护的亏空，再增加 available balance。Product Core 使用订单接受时固化的费率完成结算并导出 Core Fact，也不能按当前用户等级重算。
 - 亏空和权益结算由 Core reducer 维护；异步数据库投影不能增加 `SELECT ... FOR UPDATE`、余额表 UPDATE 或更新后回查，否则会把数据库重新带回资金热路径。
 - Aeron Cluster 重启以 Core Snapshot 加 Snapshot 之后的 Cluster Log Replay 为准；数据库账本、审计和投影不能作为 Core 资金恢复源。
-- 强平费扣款故意不创建新的 `account_deficits`。保险基金只接收 account-provider 已经从用户 collateral 实际收上的金额，避免把未收上的惩罚费记成保险基金收入。
+- 强平费扣款故意不创建 PostgreSQL 余额或亏空表。保险基金只接收 account-provider 已经从用户 collateral 实际收上的金额，避免把未收上的惩罚费记成保险基金收入。
 - `surprising.linear-perp.account.liquidation-fee.events.v1` 是 at-least-once 投递。insurance 消费端必须使用 `(reference_type, reference_id, asset)` 幂等，其中 `reference_id = tradeId:orderId`。
 - `contract_type` 决定已实现盈亏公式：`LINEAR_PERPETUAL` 使用 `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`；`INVERSE_PERPETUAL` 使用 `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`。
 - 维持保证金和未实现盈亏由 risk 模块计算。资金费、保险基金和 ADL 模块保留各自编排状态，

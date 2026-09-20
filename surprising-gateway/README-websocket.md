@@ -72,8 +72,8 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 matching trade
   -> account 消费撮合成交
   -> account 在一个 DB 事务里更新余额、保证金、PnL、手续费和持仓
-  -> account 写 account_outbox_events 的 POSITION_UPDATED 行
-  -> account outbox publisher 发送 surprising.linear-perp.account.position.events.v1
+  -> Core Export / account ledger publisher 发送 POSITION_UPDATED 事件
+  -> account position publisher 发送 surprising.linear-perp.account.position.events.v1
   -> websocket 节点消费事件，并推给匹配的私有订阅
 ```
 

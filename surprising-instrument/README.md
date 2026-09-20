@@ -33,7 +33,7 @@ instrument 配置按 exchange-core 友好的 long 单位保存：
 - `min_notional_units` / `max_notional_units`：long notional 边界。`LINEAR_PERPETUAL` 使用结算资产最小单位；`INVERSE_PERPETUAL` 使用报价币合约面值单位。
 - `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
 - `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。OKX 初始化基线为现货 maker/taker `800/1000 ppm`、永续和交割 `200/500 ppm`、期权 `200/300 ppm`。实际用户费率仍以账户等级覆盖为准。
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后固化到 Aeron Core 订单事实；账户结算按订单事实写入 `TRADE_FEE` ledger。OKX 初始化基线为现货 maker/taker `800/1000 ppm`、永续和交割 `200/500 ppm`、期权 `200/300 ppm`。实际用户费率仍以账户等级覆盖为准。
 - `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。trading provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
 - `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
