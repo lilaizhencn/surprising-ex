@@ -4816,7 +4816,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         return !changedPositions.isEmpty();
     }
 
-    void visitChangedIndexes(RuntimeFactFrame.ChangeConsumer consumer) {
+    interface ChangedIndexConsumer {
+        default void order(long orderId, OrderRuntime before, OrderRuntime after) {}
+        default void position(long positionKey, PositionRuntime before, PositionRuntime after) {}
+        default void liquidation(long liquidationId, LiquidationRuntime before, LiquidationRuntime after) {}
+        default void algoOrder(long algoOrderId,
+                               com.surprising.aeron.service.state.model.CoreAlgoOrderState before,
+                               com.surprising.aeron.service.state.model.CoreAlgoOrderState after) {}
+        default void triggerOrder(long triggerOrderId,
+                                  com.surprising.aeron.service.state.model.CoreTriggerOrderState before,
+                                  com.surprising.aeron.service.state.model.CoreTriggerOrderState after) {}
+        default void timer(com.surprising.aeron.service.state.model.CoreCancelAllAfterKey key,
+                           com.surprising.aeron.service.state.model.CoreCancelAllAfterState before,
+                           com.surprising.aeron.service.state.model.CoreCancelAllAfterState after) {}
+    }
+
+    void visitChangedIndexes(ChangedIndexConsumer consumer) {
         assertOwner();
         if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
         RuntimeFactIndexes preparedConsumer = consumer instanceof RuntimeFactIndexes indexes ? indexes : null;
@@ -4897,8 +4912,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             appendBalanceFundsDelta(balances, accumulator);
         }
         treasury.changedAssets().forEach(assetId -> {
-            RuntimeFactFrame.TreasuryAssetValue before = treasury.patchAssetBefore(assetId);
-            RuntimeFactFrame.TreasuryAssetValue after = treasuryAssetValue(assetId);
+            TreasuryRuntime.AssetState before = treasury.patchAssetBefore(assetId);
+            TreasuryRuntime.AssetState after = treasuryAssetValue(assetId);
             accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.FEE, Math.subtractExact(fee(after), fee(before)));
             accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
@@ -4949,39 +4964,39 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    static long available(RuntimeFactFrame.UserBalance value) {
+    static long available(BalanceState value) {
         return value == null ? 0 : value.availableUnits();
     }
 
-    static long locked(RuntimeFactFrame.UserBalance value) {
+    static long locked(BalanceState value) {
         return value == null ? 0 : value.lockedUnits();
     }
 
-    static long fee(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long fee(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.fee();
     }
 
-    static long insurance(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long insurance(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.insurance();
     }
 
-    static long deficit(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long deficit(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.deficit();
     }
 
-    static long liquidationFee(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long liquidationFee(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.liquidationFee();
     }
 
-    static long fundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long fundingResidual(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.fundingResidual();
     }
 
-    static long roundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long roundingResidual(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.roundingResidual();
     }
 
-    static long clearingPnl(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long clearingPnl(TreasuryRuntime.AssetState value) {
         return value == null ? 0 : value.clearingPnl();
     }
 
@@ -5007,7 +5022,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return captured == null ? order(orderId) : captured.value();
     }
 
-    RuntimeFactFrame.TreasuryAssetValue treasuryAssetValue(int assetId) {
+    TreasuryRuntime.AssetState treasuryAssetValue(int assetId) {
         long fee = treasury.fee(assetId);
         long insurance = treasury.insurance(assetId);
         long deficit = treasury.insuranceDeficit(assetId);
@@ -5018,7 +5033,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if ((fee | insurance | deficit | liquidationFee | fundingResidual | roundingResidual | clearingPnl) == 0) {
             return null;
         }
-        return new RuntimeFactFrame.TreasuryAssetValue(fee, insurance, deficit, liquidationFee,
+        return new TreasuryRuntime.AssetState(fee, insurance, deficit, liquidationFee,
                 fundingResidual, roundingResidual, clearingPnl);
     }
 
@@ -5470,7 +5485,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int index = 0; index < balances.size(); index++) {
             long userId = balances.userId(index);
             int assetId = balances.assetId(index);
-            RuntimeFactFrame.UserBalance before = balances.before(index);
+            BalanceState before = balances.before(index);
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
             if (before == null) {
                 if (userBalances != null) {
@@ -5810,13 +5825,22 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     }
 
+    record BalanceState(long availableUnits, long lockedUnits, long pendingReservedUnits) {
+        BalanceState {
+            if (availableUnits < 0 || lockedUnits < 0 || pendingReservedUnits < 0
+                    || pendingReservedUnits > lockedUnits) {
+                throw new IllegalArgumentException("invalid runtime balance state");
+            }
+        }
+    }
+
     static final class LaneBalancePatches {
         void mergeBefore(LaneBalancePatches source) {
             for (int index = 0; index < source.size; index++) {
                 long userId = source.userIds[index];
                 int assetId = source.assetIds[index];
                 if (contains(userId, assetId)) continue;
-                RuntimeFactFrame.UserBalance before = source.before(index);
+                BalanceState before = source.before(index);
                 BalanceRuntime value = before == null ? null
                         : new BalanceRuntime(userId, assetId, before.availableUnits(), before.lockedUnits());
                 add(userId, assetId, value, before == null ? 0 : before.pendingReservedUnits());
@@ -5882,16 +5906,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         int size() { return size; }
         long userId(int index) { return userIds[index]; }
         int assetId(int index) { return assetIds[index]; }
-        RuntimeFactFrame.UserBalance before(int index) {
-            return !presentBefore[index] ? null : new RuntimeFactFrame.UserBalance(
+        BalanceState before(int index) {
+            return !presentBefore[index] ? null : new BalanceState(
                     availableBefore[index], lockedBefore[index], pendingBefore[index]);
         }
 
-        RuntimeFactFrame.UserBalance after(int index) {
+        BalanceState after(int index) {
             if (!capturedAfter[index]) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
             }
-            return !presentAfter[index] ? null : new RuntimeFactFrame.UserBalance(
+            return !presentAfter[index] ? null : new BalanceState(
                     availableAfter[index], lockedAfter[index], pendingAfter[index]);
         }
 

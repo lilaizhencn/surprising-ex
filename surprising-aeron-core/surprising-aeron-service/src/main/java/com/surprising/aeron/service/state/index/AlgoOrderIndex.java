@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TradingCoreState;
 
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
@@ -67,12 +66,6 @@ public final class AlgoOrderIndex {
             if (result.size() == boundedLimit) break;
         }
         return List.copyOf(result);
-    }
-
-    void apply(java.util.List<RuntimeFactFrame.AlgoOrderChange> changes) {
-        for (RuntimeFactFrame.AlgoOrderChange change : changes) {
-            apply(change.algoOrderId(), change.after());
-        }
     }
 
     public void apply(long algoOrderId, CoreAlgoOrderState after) {

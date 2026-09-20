@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 
 /**
  * 直接控制命令的终结边界。
@@ -28,12 +27,12 @@ final class CoreDirectCommandFlow {
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
         runtime.activateFactContext(message, fingerprint);
-        RuntimeProjectionPoint beforeProjection = runtime.currentProjectionPoint;
+        long beforePublicationSequence = runtime.publicationSequence;
         long beforeRuntimeRevision = runtime.runtimeState.revision();
         long runtimeCommandCheckpoint = runtime.runtimeState.commandRevisionCheckpoint();
         long positionIdentityCheckpoint = runtime.identities.positionCheckpoint();
         runtime.directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
-                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         runtime.resultBuilder.beginCommand();
         runtime.admissions.queuedMatching.clear();
         runtime.commits.beginCommitPublicationBatch();
@@ -55,13 +54,13 @@ final class CoreDirectCommandFlow {
         }
         if (runtime.directCommand.hasControlWork() || runtime.directCommand.status() != null) return null;
         return finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
 
     CoreResponse finish(CoreMessage message, long clusterTimestamp, long clusterPosition,
                         TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint,
-                        RuntimeProjectionPoint beforeProjection, long beforeRuntimeRevision,
+                        long beforePublicationSequence, long beforeRuntimeRevision,
                         long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
                         ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(runtime.appliedCommandCount);
@@ -143,7 +142,7 @@ final class CoreDirectCommandFlow {
         runtime.commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) runtime.validateFundsConservation(message);
         boolean tradingStateChanged = status == ResponseStatus.APPLIED
-                && runtime.currentProjectionPoint != beforeProjection;
+                && runtime.publicationSequence != beforePublicationSequence;
         long businessStateHash = tradingStateChanged
                 ? runtime.currentBusinessStateHash() : runtime.cachedBusinessStateHash;
         runtime.appliedCommandCount = nextAppliedCommandCount;

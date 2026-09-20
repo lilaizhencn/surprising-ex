@@ -14,10 +14,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
-import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -29,9 +26,8 @@ class CommandSlotTest {
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
         DirectCommandSlot slot = new DirectCommandSlot();
         CoreMessage first = command(1000);
-        var point = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
         slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 10, 20, point, 1, 2, 3);
+                CommandSource.OPERATIONS, 1), 10, 20, 0, 1, 2, 3);
         slot.deferControl(() -> true);
         slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                 com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND);
@@ -40,7 +36,7 @@ class CommandSlotTest {
 
         CoreMessage second = command(1001);
         slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 30, 40, point, 4, 5, 6);
+                CommandSource.OPERATIONS, 1), 30, 40, 0, 4, 5, 6);
         assertThat(slot.command()).isSameAs(second);
         assertThat(slot.controlWork()).isNull();
         assertThat(slot.status()).isNull();
@@ -54,13 +50,12 @@ class CommandSlotTest {
     @Test
     void batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration() {
         CoreMessage command = command(1000);
-        var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
         var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command,
-                projection, 0, 0, RuntimeFundsDelta.empty());
+                0, 0, 0, RuntimeFundsDelta.empty());
         var batch = new OrderBatchPending(1);
         pending.orderBatch = batch;
         pending.initialize(2000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), projection, 0, 0,
+                CommandFingerprint.of(command), List.of(), 0, 0, 0,
                 RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
@@ -68,7 +63,6 @@ class CommandSlotTest {
     @Test
     void batchOrderingDetachesMiddleHeadAndTailAcrossRingReuse() {
         try (var owner = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
             for (int generation = 0; generation < 3; generation++) {
                 long first = 1000L + (long) generation * owner.pendingMatching.capacity();
                 var pending = new CommandSlot[3];
@@ -109,18 +103,17 @@ class CommandSlotTest {
     void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
         CoreMessage command = command(11);
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
-        TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
-        RuntimeProjectionPoint beforeProjection = new RuntimeProjectionPoint(0, beforeState);
+        long beforePublicationSequence = 13;
         RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
         CommandSlot pending = new CommandSlot(7, CommandSlot.Operation.PLACE, command, fingerprint,
-                List.of(17L), beforeProjection, 101L, 202L, fundsDelta);
+                List.of(17L), beforePublicationSequence, 101L, 202L, fundsDelta);
 
         var decoded = pending.decodedCommand();
         CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
         assertThat(updatedCancellations.beforeBusinessStateHash()).isEqualTo(101L);
         assertThat(updatedCancellations.beforeFundsStateHash()).isEqualTo(202L);
-        assertThat(updatedCancellations.beforeProjection()).isSameAs(beforeProjection);
+        assertThat(updatedCancellations.beforePublicationSequence()).isEqualTo(beforePublicationSequence);
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);

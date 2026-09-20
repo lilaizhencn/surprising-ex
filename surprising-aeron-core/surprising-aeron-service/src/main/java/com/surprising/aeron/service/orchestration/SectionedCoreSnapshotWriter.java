@@ -49,7 +49,7 @@ public final class SectionedCoreSnapshotWriter {
         var snapshotState = state.snapshotTradingState();
         long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), state.feePolicies(), state.pendingTransfers());
-        long fundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState);
+        long fundsStateHash = com.surprising.aeron.service.state.FundsStateHash.compute(snapshotState);
         matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
         if (snapshotId != matcherSnapshot.snapshotId() || coreSequence != matcherSnapshot.coreSequence()
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {

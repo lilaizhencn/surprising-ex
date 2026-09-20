@@ -1039,7 +1039,7 @@ final class OrderBatchExecutor {
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
-        long businessStateHash = owner.currentProjectionPoint == batch.beforeProjection
+        long businessStateHash = owner.publicationSequence == batch.beforePublicationSequence
                 ? owner.cachedBusinessStateHash : owner.currentBusinessStateHash();
         owner.cachedBusinessStateHash = businessStateHash;
         long stateHash = businessStateHash;
@@ -1109,7 +1109,7 @@ final class OrderBatchExecutor {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.beginCommand();
         owner.runtimeState.beginOrderBatchMutationScope();
-        batch.beforeProjection = owner.currentProjectionPoint;
+        batch.beforePublicationSequence = owner.publicationSequence;
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
         batch.positionIdentityCheckpoint = owner.identities.positionCheckpoint();
         batch.beginCommit();

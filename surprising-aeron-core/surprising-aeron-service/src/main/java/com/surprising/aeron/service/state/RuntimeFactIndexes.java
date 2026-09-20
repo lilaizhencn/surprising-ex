@@ -11,7 +11,7 @@ import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
-public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer {
+public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedIndexConsumer {
     private final PositionUserIndex positionUsers;
     private final OpenInterestIndex openInterest;
     private final TriggerOrderIndex triggers;
@@ -20,7 +20,7 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
     private final CancelAllAfterIndex timers;
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
-    private RuntimeFactFrame.IdentityView activeIdentities;
+    private RuntimeIdentityRegistry activeIdentities;
 
     public RuntimeFactIndexes(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
                                 TriggerOrderIndex triggers, AlgoOrderIndex algos,
@@ -36,7 +36,7 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         this.adlPositions = require(adlPositions, "ADL-position");
     }
 
-    public void applyCurrent(TradingRuntimeState runtime, RuntimeFactFrame.IdentityView identities) {
+    public void applyCurrent(TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || activeIdentities != null) {
             throw new IllegalArgumentException("runtime changed indexes are invalid");
         }

@@ -9,16 +9,13 @@ import org.junit.jupiter.api.Test;
 class RuntimeCommitJournalTest {
 
     @Test
-    void passiveJournalActivatesWithoutStartingAProjector() {
+    void passiveJournalActivates() {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.SPOT);
         try (RuntimeCommitJournal journal = RuntimeCommitJournal.passive(
                 ProductLine.SPOT, initial, initial.businessStateHash(), 0, 0)) {
             assertThat(journal.activated()).isFalse();
             journal.activate();
             assertThat(journal.activated()).isTrue();
-            assertThat(journal.projectorAlive()).isFalse();
-            assertThat(journal.lag()).isZero();
-            assertThat(journal.metrics().currentBacklog()).isZero();
         }
     }
 
@@ -34,21 +31,15 @@ class RuntimeCommitJournalTest {
             assertThat(journal.auditBusinessStateHash()).isEqualTo(101);
             assertThat(journal.auditFundsStateHash()).isEqualTo(202);
             assertThat(journal.publish(2, 303, 404)).isEqualTo(2);
-            assertThat(journal.metrics().reservedEntries()).isZero();
         }
     }
 
     @Test
-    void metadataJournalCannotServeAsAStateReplica() {
+    void restoresItsPublicationSequence() {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.SPOT);
         try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.SPOT, initial, initial.businessStateHash(), 0, 7)) {
-            assertThat(journal.current().sequence()).isEqualTo(7);
-            assertThat(journal.current().state()).isNull();
-            assertThatThrownBy(() -> journal.await(
-                    7, System.nanoTime() + 1_000_000, true))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessageContaining("materialize authoritative runtime");
+            assertThat(journal.publishedSequence()).isEqualTo(7);
         }
     }
 }

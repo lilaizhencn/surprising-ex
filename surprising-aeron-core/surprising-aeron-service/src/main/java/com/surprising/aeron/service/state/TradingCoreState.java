@@ -262,7 +262,7 @@ public record TradingCoreState(
     }
 
     public long businessStateHash() {
-        return RollingBusinessStateHash.compute(this);
+        return fullBusinessStateHash();
     }
 
     long fullBusinessStateHash() {
@@ -389,38 +389,47 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, scanControl.updatedBy());
         hash = CoreStateHash.mix(hash, scanControl.reason());
         hash = CoreStateHash.mix(hash, scanControl.updatedAtEpochMillis());
+        hash = CoreStateHash.mix(hash, "treasuryFee");
         for (Map.Entry<String, Long> entry : treasuryState.feeBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryInsurance");
         for (Map.Entry<String, Long> entry : treasuryState.insuranceBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryDeficit");
         for (Map.Entry<String, Long> entry : treasuryState.insuranceDeficits().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryLiquidationFee");
         for (Map.Entry<String, Long> entry : treasuryState.liquidationFeeBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryFundingResidual");
         for (Map.Entry<String, Long> entry : treasuryState.fundingResidualBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryRoundingResidual");
         for (Map.Entry<String, Long> entry : treasuryState.roundingResidualBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryClearingPnl");
         for (Map.Entry<String, Long> entry : treasuryState.clearingPnlBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryFundingSettlement");
         for (Map.Entry<String, Long> entry : treasuryState.fundingSettlements().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryFundingProgress");
         for (Map.Entry<String, CoreTreasuryState.FundingProgress> entry : treasuryState.fundingProgress().entrySet()) {
             CoreTreasuryState.FundingProgress progress = entry.getValue();
             hash = CoreStateHash.mix(hash, entry.getKey());
@@ -432,10 +441,12 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
             hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());
         }
+        hash = CoreStateHash.mix(hash, "treasuryLifecycleSettlement");
         for (Map.Entry<String, Long> entry : treasuryState.lifecycleSettlements().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        hash = CoreStateHash.mix(hash, "treasuryLifecycleProgress");
         for (Map.Entry<String, CoreTreasuryState.LifecycleProgress> entry
                 : treasuryState.lifecycleProgress().entrySet()) {
             CoreTreasuryState.LifecycleProgress progress = entry.getValue();

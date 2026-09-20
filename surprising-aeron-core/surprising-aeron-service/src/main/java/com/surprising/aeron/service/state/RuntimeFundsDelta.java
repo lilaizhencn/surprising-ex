@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.settlement.FundsDelta;
 import com.surprising.aeron.service.state.settlement.FundsPosting;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,21 +9,21 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 public final class RuntimeFundsDelta {
 
     private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of(), false, true);
-    private final List<RuntimeFactFrame.FundsPosting> postings;
+    private final List<Posting> postings;
     private final IntLongHashMap unitsByAsset;
     private final int[] assetIds;
 
     RuntimeFundsDelta(List<Posting> postings) {
-        this(toPatchPostings(postings), true, true);
+        this(postings, true, true);
     }
 
-    private RuntimeFundsDelta(List<RuntimeFactFrame.FundsPosting> postings,
+    private RuntimeFundsDelta(List<Posting> postings,
                               boolean normalize, boolean trusted) {
         if (postings == null) throw new IllegalArgumentException("runtime funds postings are required");
-        ArrayList<RuntimeFactFrame.FundsPosting> normalizedPostings;
+        ArrayList<Posting> normalizedPostings;
         if (normalize) {
             normalizedPostings = new ArrayList<>(postings.size());
-            for (RuntimeFactFrame.FundsPosting posting : postings) {
+            for (Posting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
                 int existingIndex = -1;
                 for (int index = 0; index < normalizedPostings.size(); index++) {
@@ -37,20 +36,20 @@ public final class RuntimeFundsDelta {
                     normalizedPostings.add(posting);
                     continue;
                 }
-                RuntimeFactFrame.FundsPosting existing = normalizedPostings.get(existingIndex);
+                Posting existing = normalizedPostings.get(existingIndex);
                 long units = Math.addExact(existing.units(), posting.units());
                 if (units == 0) normalizedPostings.remove(existingIndex);
-                else normalizedPostings.set(existingIndex, new RuntimeFactFrame.FundsPosting(
+                else normalizedPostings.set(existingIndex, new Posting(
                         existing.assetId(), existing.ownerKind(), existing.ownerId(), existing.subledger(), units));
             }
         } else if (trusted) {
-            for (RuntimeFactFrame.FundsPosting posting : postings) {
+            for (Posting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
             }
             normalizedPostings = null;
         } else {
             normalizedPostings = new ArrayList<>(postings.size());
-            for (RuntimeFactFrame.FundsPosting posting : postings) {
+            for (Posting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
                 normalizedPostings.add(posting);
             }
@@ -58,8 +57,8 @@ public final class RuntimeFundsDelta {
         IntLongHashMap totals = new IntLongHashMap();
         int[] touchedAssets = new int[Math.max(1, trusted ? postings.size() : normalizedPostings.size())];
         int touchedAssetCount = 0;
-        List<RuntimeFactFrame.FundsPosting> source = trusted ? postings : normalizedPostings;
-        for (RuntimeFactFrame.FundsPosting posting : source) {
+        List<Posting> source = trusted ? postings : normalizedPostings;
+        for (Posting posting : source) {
             if (!totals.containsKey(posting.assetId())) touchedAssets[touchedAssetCount++] = posting.assetId();
             long previous = totals.get(posting.assetId());
             totals.put(posting.assetId(), Math.addExact(previous, posting.units()));
@@ -69,8 +68,7 @@ public final class RuntimeFundsDelta {
         this.assetIds = java.util.Arrays.copyOf(touchedAssets, touchedAssetCount);
     }
 
-    private static boolean samePostingKey(RuntimeFactFrame.FundsPosting left,
-                                          RuntimeFactFrame.FundsPosting right) {
+    private static boolean samePostingKey(Posting left, Posting right) {
         return left.assetId() == right.assetId()
                 && left.ownerKind() == right.ownerKind()
                 && left.ownerId() == right.ownerId()
@@ -86,14 +84,6 @@ public final class RuntimeFundsDelta {
     }
 
     static RuntimeFundsDelta fromDistinct(List<Posting> postings) {
-        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(toPatchPostings(postings), false, true);
-    }
-
-    static RuntimeFundsDelta fromPatchPostings(List<RuntimeFactFrame.FundsPosting> postings) {
-        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, true, true);
-    }
-
-    static RuntimeFundsDelta fromDistinctPatchPostings(List<RuntimeFactFrame.FundsPosting> postings) {
         return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, false, true);
     }
 
@@ -120,47 +110,10 @@ public final class RuntimeFundsDelta {
         }
     }
 
-    public FundsDelta materialize(RuntimeFactFrame.IdentityView identities, boolean externalAdjustment) {
-        return materialize(identities, null, externalAdjustment);
-    }
-
-    public FundsDelta materialize(RuntimeFactFrame.IdentityView identities,
-                                  RuntimeFactFrame.IdentityView fallbackIdentities,
-                                  boolean externalAdjustment) {
-        ArrayList<FundsPosting> materialized = new ArrayList<>(postings.size() + unitsByAsset.size());
-        for (RuntimeFactFrame.FundsPosting posting : postings) {
-            materialized.add(new FundsPosting(asset(identities, fallbackIdentities, posting.assetId()),
-                    posting.ownerKind(),
-                    posting.ownerId(), posting.subledger(), posting.units()));
-        }
-        if (externalAdjustment) {
-            for (int assetId : assetIds) {
-                long units = unitsByAsset.get(assetId);
-                if (units != 0) {
-                    materialized.add(new FundsPosting(asset(identities, fallbackIdentities, assetId),
-                            FundsPosting.OwnerKind.EXTERNAL,
-                            0, FundsPosting.Subledger.EXTERNAL_ADJUSTMENT, Math.negateExact(units)));
-                }
-            }
-        }
-        return new FundsDelta(materialized);
-    }
-
-    private static String asset(RuntimeFactFrame.IdentityView identities,
-                                RuntimeFactFrame.IdentityView fallbackIdentities,
-                                int assetId) {
-        if (identities instanceof RuntimeFactFrame.FactIdentitySlice slice) {
-            String asset = slice.assetOrNull(assetId);
-            if (asset != null) return asset;
-            if (fallbackIdentities != null) return fallbackIdentities.asset(assetId);
-        }
-        return identities.asset(assetId);
-    }
-
     public RuntimeTreasuryDelta treasuryDelta() {
         RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta(Math.max(
                 RuntimeTreasuryDelta.SINGLE_COMMAND_CAPACITY, unitsByAsset.size()));
-        for (RuntimeFactFrame.FundsPosting posting : postings) {
+        for (Posting posting : postings) {
             if (posting.ownerKind() != FundsPosting.OwnerKind.TREASURY) continue;
             switch (posting.subledger()) {
                 case FEE -> delta.addFee(posting.assetId(), posting.units());
@@ -177,19 +130,8 @@ public final class RuntimeFundsDelta {
         return delta;
     }
 
-    List<RuntimeFactFrame.FundsPosting> postings() {
+    List<Posting> postings() {
         return postings;
-    }
-
-    private static List<RuntimeFactFrame.FundsPosting> toPatchPostings(List<Posting> postings) {
-        if (postings == null || postings.isEmpty()) return List.of();
-        ArrayList<RuntimeFactFrame.FundsPosting> converted = new ArrayList<>(postings.size());
-        for (Posting posting : postings) {
-            if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
-            converted.add(new RuntimeFactFrame.FundsPosting(posting.assetId(), posting.ownerKind(),
-                    posting.ownerId(), posting.subledger(), posting.units()));
-        }
-        return converted;
     }
 
     record Posting(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,

@@ -88,7 +88,7 @@ class TriggerOrderIndexTest {
             runtime.putTriggerOrder(changed);
             assertThat(runtime.triggerOrder(901)).isSameAs(changed);
             var observed = new java.util.HashMap<Long, CoreTriggerOrderState>();
-            var consumer = new RuntimeFactFrame.ChangeConsumer() {
+            var consumer = new TradingRuntimeState.ChangedIndexConsumer() {
                 public void triggerOrder(long id, CoreTriggerOrderState before, CoreTriggerOrderState after) {
                     observed.put(id, after);
                 }

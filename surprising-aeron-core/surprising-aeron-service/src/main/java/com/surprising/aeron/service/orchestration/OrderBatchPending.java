@@ -9,7 +9,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.PlaceBatchAdmissionEvent;
@@ -169,7 +168,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 随批上下文复用的结果槽，生命周期覆盖所有 matcher/Lane 引用。 */
     private final OrderBatchItem[] itemSlots;
     /** 本批开始前的完整提交点，用于失败恢复判断。 */
-    RuntimeProjectionPoint beforeProjection;
+    long beforePublicationSequence;
     /** 本批开始前的状态 revision，限定回滚范围。 */
     long runtimeCheckpoint;
     /** 本批新增持仓身份的回滚起点。 */
@@ -374,7 +373,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         for (OrderBatchItem item : items) item.clear();
         items.clear();
         decodedCommand = null;
-        beforeProjection = null;
+        beforePublicationSequence = 0;
         runtimeCheckpoint = 0;
         positionIdentityCheckpoint = 0;
         changedUserIds.clear();

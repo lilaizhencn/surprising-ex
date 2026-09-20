@@ -15,7 +15,6 @@ import com.surprising.aeron.protocol.CoreLiquidationProgressView;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
@@ -435,9 +434,9 @@ final class OrderedCommitCoordinator {
      */
     private CoreResponse storeTerminalResponse(CommandSlot pending, MatchingResult matchingResult,
             ResponseStatus status, CoreResultCode resultCode) {
-        RuntimeProjectionPoint beforeProjection = pending.beforeProjection();
+        long beforePublicationSequence = pending.beforePublicationSequence();
         long applied = pending.sequence();
-        long businessStateHash = owner.currentProjectionPoint == beforeProjection
+        long businessStateHash = owner.publicationSequence == beforePublicationSequence
                 ? owner.cachedBusinessStateHash : owner.currentBusinessStateHash();
         owner.commitMatchingSequence(applied);
         owner.cachedBusinessStateHash = businessStateHash;

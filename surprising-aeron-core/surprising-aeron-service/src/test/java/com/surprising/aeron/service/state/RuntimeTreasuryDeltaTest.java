@@ -62,7 +62,7 @@ class RuntimeTreasuryDeltaTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(expected, identities);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
-        assertThat(RollingBusinessStateHash.compute(expected)).isEqualTo(expected.businessStateHash());
+        assertThat(expected.businessStateHash()).isEqualTo(expected.fullBusinessStateHash());
     }
 
     @Test

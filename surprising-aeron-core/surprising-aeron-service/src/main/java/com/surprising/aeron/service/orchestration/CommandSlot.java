@@ -5,7 +5,6 @@ import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.LaneCancelEvent;
@@ -32,7 +31,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private CoreMessage command;
     private CommandFingerprint fingerprint;
     private List<Long> preMatchingCancellationOrderIds;
-    private RuntimeProjectionPoint beforeProjection;
+    private long beforePublicationSequence;
     private long beforeBusinessStateHash;
     private long beforeFundsStateHash;
     private RuntimeFundsDelta fundsDelta;
@@ -221,78 +220,78 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    RuntimeProjectionPoint beforeProjection,
+                    long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeProjection,
+        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    RuntimeProjectionPoint beforeProjection,
+                    long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, fingerprint, List.of(), beforeProjection,
+        this(sequence, operation, command, fingerprint, List.of(), beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeProjection,
+                beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
                 DecodedMatchingCommand.decode(command));
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforeProjection,
+        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
                 DecodedMatchingCommand.decode(command));
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeProjection,
+                beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, null);
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand) {
-        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforeProjection,
+        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforePublicationSequence,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, null);
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand,
+                beforePublicationSequence, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand,
                 admission);
     }
 
     CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    List<Long> preMatchingCancellationOrderIds, long beforePublicationSequence,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
-                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
+                beforePublicationSequence, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
                 decodedCommand, admission);
     }
 
     CommandSlot initialize(long sequence, Operation operation, CoreMessage command,
                                CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                               RuntimeProjectionPoint beforeProjection, long beforeBusinessStateHash,
+                               long beforePublicationSequence, long beforeBusinessStateHash,
                                long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                                DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
-                || fingerprint == null || beforeProjection == null || fundsDelta == null || decodedCommand == null
+                || fingerprint == null || beforePublicationSequence < 0 || fundsDelta == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
             throw new IllegalArgumentException("invalid pending matching request");
         }
@@ -305,7 +304,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         this.command = command;
         this.fingerprint = fingerprint;
         this.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
-        this.beforeProjection = beforeProjection;
+        this.beforePublicationSequence = beforePublicationSequence;
         this.beforeBusinessStateHash = beforeBusinessStateHash;
         this.beforeFundsStateHash = beforeFundsStateHash;
         this.fundsDelta = fundsDelta;
@@ -378,7 +377,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     CoreMessage command() { return command; }
     CommandFingerprint fingerprint() { return fingerprint; }
     List<Long> preMatchingCancellationOrderIds() { return preMatchingCancellationOrderIds; }
-    RuntimeProjectionPoint beforeProjection() { return beforeProjection; }
+    long beforePublicationSequence() { return beforePublicationSequence; }
     long beforeBusinessStateHash() { return beforeBusinessStateHash; }
     long beforeFundsStateHash() { return beforeFundsStateHash; }
     RuntimeFundsDelta fundsDelta() { return fundsDelta; }
@@ -500,7 +499,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         command = null;
         fingerprint = null;
         preMatchingCancellationOrderIds = List.of();
-        beforeProjection = null;
+        beforePublicationSequence = 0;
         fundsDelta = null;
         decodedCommand = null;
         admission = null;

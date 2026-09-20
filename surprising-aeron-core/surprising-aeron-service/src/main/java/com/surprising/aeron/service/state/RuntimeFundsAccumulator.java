@@ -55,7 +55,7 @@ public final class RuntimeFundsAccumulator {
 
     public void add(RuntimeFundsDelta delta) {
         if (delta == null) return;
-        for (RuntimeFactFrame.FundsPosting posting : delta.postings()) {
+        for (RuntimeFundsDelta.Posting posting : delta.postings()) {
             add(posting.assetId(), posting.ownerKind(), posting.ownerId(), posting.subledger(), posting.units());
         }
     }
@@ -70,12 +70,12 @@ public final class RuntimeFundsAccumulator {
 
     public RuntimeFundsDelta toDelta() {
         if (size == 0) return RuntimeFundsDelta.empty();
-        ArrayList<RuntimeFactFrame.FundsPosting> postings = new ArrayList<>(size);
+        ArrayList<RuntimeFundsDelta.Posting> postings = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
-            postings.add(new RuntimeFactFrame.FundsPosting(assetIds[index], OWNER_KINDS[ownerKinds[index]],
+            postings.add(new RuntimeFundsDelta.Posting(assetIds[index], OWNER_KINDS[ownerKinds[index]],
                     ownerIds[index], SUBLEDGERS[subledgers[index]], units[index]));
         }
-        return RuntimeFundsDelta.fromDistinctPatchPostings(postings);
+        return RuntimeFundsDelta.fromDistinct(postings);
     }
 
     public void requireConserved(boolean externalAdjustment) {

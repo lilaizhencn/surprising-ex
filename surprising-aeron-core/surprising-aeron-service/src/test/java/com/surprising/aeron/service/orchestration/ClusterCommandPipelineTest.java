@@ -2016,7 +2016,7 @@ class ClusterCommandPipelineTest {
             var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
             epoch.setAccessible(true);
             long before = epoch.getLong(runtime);
-            long funds = com.surprising.aeron.service.state.RollingFundsStateHash.compute(live.service.state().tradingState());
+            long funds = com.surprising.aeron.service.state.FundsStateHash.compute(live.service.state().tradingState());
             live.sequence += 1000; // Commands occur after the expired order and the new mark timestamp.
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
@@ -2048,7 +2048,7 @@ class ClusterCommandPipelineTest {
             assertThat(runtime.triggerOrder(9010).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             assertThat(runtime.triggerOrder(9010).highestPriceTicks()).isEqualTo(120);
             assertThat(runtime.triggerOrder(9010).activatedAtEpochMillis()).isEqualTo(TIME + 1000);
-            assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(live.service.state().tradingState()))
+            assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(live.service.state().tradingState()))
                     .isEqualTo(funds);
         }
     }

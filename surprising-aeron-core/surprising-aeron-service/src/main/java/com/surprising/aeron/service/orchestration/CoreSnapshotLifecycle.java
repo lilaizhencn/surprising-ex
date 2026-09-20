@@ -145,7 +145,7 @@ final class CoreSnapshotLifecycle {
                 fence.snapshotState = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
                         owner.runtimeState, owner.identities);
                 long businessStateHash = owner.canonicalBusinessStateHash(fence.snapshotState.businessStateHash());
-                long fundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(
+                long fundsStateHash = com.surprising.aeron.service.state.FundsStateHash.compute(
                         fence.snapshotState);
                 fence.projection = new com.surprising.aeron.service.state.RuntimeCommitJournal.ProjectionVersion(
                         fence.projectionSequence, fence.snapshotState, businessStateHash, fundsStateHash);

@@ -2,7 +2,7 @@ package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.RuntimeFactFrame;
+import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.TradingCoreState;
 
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
@@ -34,14 +34,7 @@ public final class LiquidationIndex {
         return allActiveIds;
     }
 
-    void apply(java.util.List<RuntimeFactFrame.LiquidationChange> changes,
-               RuntimeFactFrame.IdentityView identities) {
-        for (RuntimeFactFrame.LiquidationChange change : changes) {
-            apply(change.liquidationId(), change.after(), identities);
-        }
-    }
-
-    public void apply(long liquidationId, LiquidationRuntime after, RuntimeFactFrame.IdentityView identities) {
+    public void apply(long liquidationId, LiquidationRuntime after, RuntimeIdentityRegistry identities) {
         LiquidationKey previous = keysById.get(liquidationId);
         LiquidationKey current = isActive(after)
                 ? new LiquidationKey(after.userId(), identities.symbol(after.symbolId()), after.positionSide())

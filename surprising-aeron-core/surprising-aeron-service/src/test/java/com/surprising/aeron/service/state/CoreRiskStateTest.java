@@ -238,7 +238,7 @@ class CoreRiskStateTest {
         state = reducer.registerInstrument(state, instrument("ETH-USDT"));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
         state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", 10, 100, 1000, 0, 100));
-        long funds = RollingFundsStateHash.compute(state);
+        long funds = FundsStateHash.compute(state);
         var ids = new RuntimeIdentityRegistry();
         var runtime = RuntimeStateProjector.project(state, ids);
         var positions = new PositionUserIndex(state, ids, runtime.topology());
@@ -248,7 +248,7 @@ class CoreRiskStateTest {
         assertThat(work).isBetween(3,64);
         assertThat(runtime.firstRiskIncompleteScan()).isNull();
         var result = RuntimeStateMaterializer.materialize(runtime, ids);
-        assertThat(RollingFundsStateHash.compute(result)).isEqualTo(funds);
+        assertThat(FundsStateHash.compute(result)).isEqualTo(funds);
         assertThat(result.riskState().liquidations().values()).anySatisfy(liquidation -> {
             assertThat(liquidation.userId()).isEqualTo(7);
             assertThat(liquidation.symbol()).isEqualTo("ETH-USDT");

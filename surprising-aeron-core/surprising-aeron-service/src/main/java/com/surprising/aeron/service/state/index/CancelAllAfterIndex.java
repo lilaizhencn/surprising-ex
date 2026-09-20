@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state.index;
 
-import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TradingCoreState;
 
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
@@ -52,12 +51,6 @@ public final class CancelAllAfterIndex {
             if (result.size() == boundedLimit) break;
         }
         return List.copyOf(result);
-    }
-
-    void apply(java.util.List<RuntimeFactFrame.TimerChange> changes) {
-        for (RuntimeFactFrame.TimerChange change : changes) {
-            apply(change.key(), change.after());
-        }
     }
 
     public void apply(CoreCancelAllAfterKey key, CoreCancelAllAfterState after) {

@@ -53,16 +53,14 @@ class LinearPerpetualBenchmarkSupportTest {
     }
 
     @Test
-    void scalarProgressCountersMatchMaterializedStateWithoutFreezingProjection() {
+    void scalarProgressCountersMatchMaterializedState() {
         try (var harness = LinearPerpetualBenchmarkSupport.Harness.create(4)) {
             harness.adjust(100_001L, 100);
-            long before = harness.state().snapshotProjectionFreezeCount();
             assertThat(harness.state().activeOrderCount()).isZero();
             assertThat(harness.state().positionCount()).isZero();
             assertThat(harness.state().triggerOrderCount()).isZero();
             assertThat(harness.state().incompleteFundingCount()).isZero();
             assertThat(harness.state().incompleteRiskScanCount()).isZero();
-            assertThat(harness.state().snapshotProjectionFreezeCount()).isEqualTo(before);
         }
     }
 
@@ -98,19 +96,6 @@ class LinearPerpetualBenchmarkSupportTest {
                 1_000_000L);
 
         assertThat(lastTimestamp - firstTimestamp).isLessThanOrEqualTo(5_000);
-    }
-
-    @Test
-    void commandConstructionDoesNotRequestImmutableProjection() {
-        try (var harness = LinearPerpetualBenchmarkSupport.Harness.create(4)) {
-            harness.adjust(100_001L, 100);
-            long freezesBefore = harness.state().snapshotProjectionFreezeCount();
-
-            harness.command(CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY,
-                    100_001L, new byte[0]);
-
-            assertThat(harness.state().snapshotProjectionFreezeCount()).isEqualTo(freezesBefore);
-        }
     }
 
     @Test

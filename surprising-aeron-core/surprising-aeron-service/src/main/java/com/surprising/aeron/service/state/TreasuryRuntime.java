@@ -23,11 +23,11 @@ public final class TreasuryRuntime {
     private final IntHashSet changedAssets = new IntHashSet();
     private final IntHashSet changedFundingSymbols = new IntHashSet();
     private final IntHashSet changedLifecycleSymbols = new IntHashSet();
-    private final IntObjectHashMap<RuntimeFactFrame.TreasuryAssetValue> patchAssetBefore =
+    private final IntObjectHashMap<AssetState> patchAssetBefore =
             new IntObjectHashMap<>();
-    private final IntObjectHashMap<RuntimeFactFrame.TreasuryFundingValue> patchFundingBefore =
+    private final IntObjectHashMap<FundingState> patchFundingBefore =
             new IntObjectHashMap<>();
-    private final IntObjectHashMap<RuntimeFactFrame.TreasuryLifecycleValue> patchLifecycleBefore =
+    private final IntObjectHashMap<LifecycleState> patchLifecycleBefore =
             new IntObjectHashMap<>();
     private Thread owner;
     private boolean orderBatchMutationScope;
@@ -202,17 +202,17 @@ public final class TreasuryRuntime {
         if (!patchLifecycleBefore.isEmpty()) patchLifecycleBefore.clear();
     }
 
-    RuntimeFactFrame.TreasuryAssetValue patchAssetBefore(int assetId) {
+    AssetState patchAssetBefore(int assetId) {
         assertOwner();
         return patchAssetBefore.get(assetId);
     }
 
-    RuntimeFactFrame.TreasuryFundingValue patchFundingBefore(int symbolId) {
+    FundingState patchFundingBefore(int symbolId) {
         assertOwner();
         return patchFundingBefore.get(symbolId);
     }
 
-    RuntimeFactFrame.TreasuryLifecycleValue patchLifecycleBefore(int symbolId) {
+    LifecycleState patchLifecycleBefore(int symbolId) {
         assertOwner();
         return patchLifecycleBefore.get(symbolId);
     }
@@ -220,7 +220,7 @@ public final class TreasuryRuntime {
     void rollbackChangedValues() {
         assertOwner();
         for (int assetId : changedAssets.toArray()) {
-            RuntimeFactFrame.TreasuryAssetValue before = patchAssetBefore.get(assetId);
+            AssetState before = patchAssetBefore.get(assetId);
             restoreSigned(feeBalances, assetId, before == null ? 0 : before.fee());
             restoreSigned(insuranceBalances, assetId, before == null ? 0 : before.insurance());
             restoreSigned(insuranceDeficits, assetId, before == null ? 0 : before.deficit());
@@ -230,13 +230,13 @@ public final class TreasuryRuntime {
             restoreSigned(clearingPnlBalances, assetId, before == null ? 0 : before.clearingPnl());
         }
         for (int symbolId : changedFundingSymbols.toArray()) {
-            RuntimeFactFrame.TreasuryFundingValue before = patchFundingBefore.get(symbolId);
+            FundingState before = patchFundingBefore.get(symbolId);
             restoreSigned(fundingSettlements, symbolId, before == null ? 0 : before.settlementId());
             if (before == null || before.progress() == null) fundingProgress.remove(symbolId);
             else fundingProgress.put(symbolId, before.progress());
         }
         for (int symbolId : changedLifecycleSymbols.toArray()) {
-            RuntimeFactFrame.TreasuryLifecycleValue before = patchLifecycleBefore.get(symbolId);
+            LifecycleState before = patchLifecycleBefore.get(symbolId);
             restoreSigned(lifecycleSettlements, symbolId, before == null ? 0 : before.settlementId());
             if (before == null || before.progress() == null) lifecycleProgress.remove(symbolId);
             else lifecycleProgress.put(symbolId, before.progress());
@@ -294,11 +294,11 @@ public final class TreasuryRuntime {
 
     private void captureAssetBefore(int assetId) {
         if (changedAssets.contains(assetId)) return;
-        RuntimeFactFrame.TreasuryAssetValue value = currentAsset(assetId);
+        AssetState value = currentAsset(assetId);
         if (value != null) patchAssetBefore.put(assetId, value);
     }
 
-    private RuntimeFactFrame.TreasuryAssetValue currentAsset(int assetId) {
+    private AssetState currentAsset(int assetId) {
         long fee = feeBalances.get(assetId);
         long insurance = insuranceBalances.get(assetId);
         long deficit = insuranceDeficits.get(assetId);
@@ -309,7 +309,7 @@ public final class TreasuryRuntime {
         if ((fee | insurance | deficit | liquidationFee | fundingResidual | roundingResidual | clearingPnl) == 0) {
             return null;
         }
-        return new RuntimeFactFrame.TreasuryAssetValue(fee, insurance, deficit, liquidationFee,
+        return new AssetState(fee, insurance, deficit, liquidationFee,
                 fundingResidual, roundingResidual, clearingPnl);
     }
 
@@ -319,7 +319,7 @@ public final class TreasuryRuntime {
         FundingProgressRuntime progress = fundingProgress.get(symbolId);
         if (settlementId != 0 || progress != null) {
             patchFundingBefore.put(symbolId,
-                    new RuntimeFactFrame.TreasuryFundingValue(settlementId, progress));
+                    new FundingState(settlementId, progress));
         }
     }
 
@@ -329,9 +329,16 @@ public final class TreasuryRuntime {
         LifecycleProgressRuntime progress = lifecycleProgress.get(symbolId);
         if (settlementId != 0 || progress != null) {
             patchLifecycleBefore.put(symbolId,
-                    new RuntimeFactFrame.TreasuryLifecycleValue(settlementId, progress));
+                    new LifecycleState(settlementId, progress));
         }
     }
+
+    record AssetState(long fee, long insurance, long deficit, long liquidationFee,
+                      long fundingResidual, long roundingResidual, long clearingPnl) { }
+
+    record FundingState(long settlementId, FundingProgressRuntime progress) { }
+
+    record LifecycleState(long settlementId, LifecycleProgressRuntime progress) { }
 
     public record FundingProgressRuntime(long settlementId, CoreInstrument instrument, long fundingRatePpm,
                                          int accountLaneId, long nextCursorUserId, UUID commandId,

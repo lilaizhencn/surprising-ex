@@ -55,7 +55,7 @@ record CoreSnapshotImage(
         verifyMatcherState(matcherSnapshot, tradingState, appliedCommandCount, businessStateHash);
         if (TradingCoreRuntime.canonicalBusinessStateHash(
                 tradingState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash
-                || com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState)
+                || com.surprising.aeron.service.state.FundsStateHash.compute(tradingState)
                 != fundsStateHash) {
             throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
         }

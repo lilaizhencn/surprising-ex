@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.OrderRuntime;
-import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
@@ -411,13 +410,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         }
     }
 
-    void apply(java.util.List<RuntimeFactFrame.OrderChange> changes, RuntimeFactFrame.IdentityView identities) {
-        for (RuntimeFactFrame.OrderChange change : changes) {
-            apply(change.orderId(), change.after(), identities);
-        }
-    }
-
-    public void apply(long orderId, OrderRuntime after, RuntimeFactFrame.IdentityView identities) {
+    public void apply(long orderId, OrderRuntime after, RuntimeIdentityRegistry identities) {
         OrderRuntime current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
         applyRuntime(orderId, current, current == null ? null : identities.symbol(current.symbolId()));
     }

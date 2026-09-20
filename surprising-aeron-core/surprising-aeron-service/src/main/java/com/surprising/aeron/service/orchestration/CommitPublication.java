@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 
 import java.util.Objects;
 
@@ -93,8 +92,7 @@ final class CommitPublication {
                 owner.runtimeProjectionJournal.publish(sequence,
                         owner.runtimeProjectionJournal.auditBusinessStateHash(),
                         owner.runtimeProjectionJournal.auditFundsStateHash());
-                owner.currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
-                owner.currentProjectionPoint.completeSequence();
+                owner.publicationSequence = sequence;
                 runtimePatchRevision = owner.runtimeState.committedRevision();
                 owner.runtimeState.clearCommittedChanges(owner.identities);
             } catch (RuntimeException failure) {

@@ -10,7 +10,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
-public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
+public final class RuntimeIdentityRegistry {
     // Lookup-only keys never enter a map. Lanes and owner each borrow their own probe.
     private static final ThreadLocal<PositionLookup> POSITION_LOOKUP = ThreadLocal.withInitial(PositionLookup::new);
 
@@ -158,9 +158,6 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private int nextSymbolId;
     private long nextPositionKey = 1;
     private long dictionaryVersion;
-    private final RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice =
-            new RuntimeFactFrame.FactIdentitySlice(
-                    java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), 0, this);
     private Thread owner;
 
     public void assertOwner() {
@@ -579,9 +576,6 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         return clients.size();
     }
 
-    RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice() {
-        return liveFactIdentitySlice;
-    }
 
     public void releasePositionKey(long positionKey) {
         assertOwner();

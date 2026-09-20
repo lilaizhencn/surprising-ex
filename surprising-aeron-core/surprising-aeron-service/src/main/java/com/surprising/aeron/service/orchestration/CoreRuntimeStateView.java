@@ -71,7 +71,6 @@ final class CoreRuntimeStateView {
     long snapshotBusinessAuditBaseHash() { return owner.auditBusinessStateHash; }
     long snapshotFundsStateHash() { return owner.auditFundsStateHash; }
     long snapshotProjectionSequence() { return owner.runtimeProjectionJournal.publishedSequence(); }
-    long snapshotProjectionFreezeCount() { return owner.runtimeProjectionJournal.projectionFreezeCount(); }
 
     boolean runtimeRiskScanComplete() { return owner.runtimeState.firstIncompleteRiskScan() == null; }
 

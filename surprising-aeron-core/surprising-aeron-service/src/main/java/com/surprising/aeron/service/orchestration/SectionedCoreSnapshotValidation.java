@@ -107,7 +107,7 @@ final class SectionedCoreSnapshotValidation {
                         tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
-                == com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState), "funds hash");
+                == com.surprising.aeron.service.state.FundsStateHash.compute(tradingState), "funds hash");
         requireMatch(manifest.engineStateHash() == matcherSnapshot.engineStateHash(), "engine state hash");
         requireMatch(manifest.bookStateHash() == matcherSnapshot.bookStateHash(), "book state hash");
         requireMatch(manifest.symbolRegistryHash() == matcherSnapshot.symbolRegistryHash(), "symbol registry hash");

@@ -955,8 +955,6 @@ class RuntimeCommitRecoveryTest {
         assertThat(state.pendingMatchingCount()).isZero();
         assertThat(state.laneCommandContexts.inFlight()).isZero();
         state.runtimeState.requireSnapshotFenceReady();
-        assertThat(state.runtimeProjectionJournal.projectedSequence())
-                .isEqualTo(state.runtimeProjectionJournal.publishedSequence());
     }
 
     private static Object field(Object target, String name) throws Exception {

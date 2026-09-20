@@ -200,14 +200,14 @@ public final class RuntimeStateMaterializer {
                 value.accountLaneId(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
-    static OrderReservation reservation(ReservationRuntime value, RuntimeFactFrame.IdentityView identities) {
+    static OrderReservation reservation(ReservationRuntime value, RuntimeIdentityRegistry identities) {
         return new OrderReservation(value.orderId(), identities.symbol(value.symbolId()),
                 value.kind(), identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
                 value.consumedUnits(), value.orderQuantitySteps());
     }
 
     static CorePositionState position(long positionKey, PositionRuntime value,
-                                      RuntimeFactFrame.IdentityView identities) {
+                                      RuntimeIdentityRegistry identities) {
         String identity = identities.positionKey(value.userId(), positionKey);
         CorePositionState result = new CorePositionState(identities.symbol(value.symbolId()),
                 identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
@@ -219,7 +219,7 @@ public final class RuntimeStateMaterializer {
         return result;
     }
 
-    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeFactFrame.IdentityView identities) {
+    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeIdentityRegistry identities) {
         if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
         return orderSnapshot(value, identities.symbol(value.symbolId()));
     }
@@ -237,14 +237,14 @@ public final class RuntimeStateMaterializer {
     }
 
     static CoreRiskSnapshot riskSnapshot(RiskSnapshotRuntime value,
-                                         RuntimeFactFrame.IdentityView identities) {
+                                         RuntimeIdentityRegistry identities) {
         return new CoreRiskSnapshot(value.userId(), identities.symbol(value.symbolId()), value.positionSide(),
                 value.priceSequence(), value.equityUnits(), value.unrealizedPnlUnits(),
                 value.maintenanceMarginUnits(), value.marginRatioPpm(), value.status());
     }
 
     static CoreLiquidationState liquidation(LiquidationRuntime value,
-                                            RuntimeFactFrame.IdentityView identities) {
+                                            RuntimeIdentityRegistry identities) {
         return new CoreLiquidationState(value.liquidationId(), value.userId(),
                 identities.symbol(value.symbolId()), value.marginMode(), value.positionSide(),
                 value.triggerPriceSequence(), value.signedQuantitySteps(),
@@ -254,7 +254,7 @@ public final class RuntimeStateMaterializer {
     }
 
     static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
-                                           RuntimeFactFrame.IdentityView identities) {
+                                           RuntimeIdentityRegistry identities) {
         return new CoreRiskState.RiskScan(identities.symbol(value.symbolId()), value.accountLaneId(),
                 value.priceSequence(),
                 value.scanStartPriceSequence(), value.lastUserId(), value.riskComplete(), value.riskUserId(),

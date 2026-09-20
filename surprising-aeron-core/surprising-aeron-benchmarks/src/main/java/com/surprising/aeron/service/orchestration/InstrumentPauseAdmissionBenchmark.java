@@ -51,11 +51,11 @@ public class InstrumentPauseAdmissionBenchmark {
             if(core.tradingState().instruments().get("BTC-USDT").maintenance().mode()
                     !=CoreInstrumentMaintenance.Mode.HALTED)
                 throw new IllegalStateException("pause lost on recovery");
-            funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(core.tradingState());
+            funds=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState());
         }
         @TearDown(Level.Invocation) public void verify() {
             try {
-                if(funds!=com.surprising.aeron.service.state.RollingFundsStateHash.compute(core.tradingState()) || !core.tradingState().orders().isEmpty())
+                if(funds!=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState()) || !core.tradingState().orders().isEmpty())
                     throw new IllegalStateException("paused admission changed funds or created an order");
             } finally { core.close(); }
         }

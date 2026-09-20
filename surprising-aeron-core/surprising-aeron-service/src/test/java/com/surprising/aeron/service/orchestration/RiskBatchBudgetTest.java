@@ -37,7 +37,7 @@ class RiskBatchBudgetTest {
                                 user%2==1?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                                 CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
             }
-            long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
             var firstBatch = batch(line, work(state, line), 16);
             try (var reference = TradingCoreRuntime.fromSnapshot(line, state.snapshot(400))) {
                 var expected = reference.apply(firstBatch);
@@ -71,7 +71,7 @@ class RiskBatchBudgetTest {
                 }
                 assertThat(work(state,line).riskScanPending()).isFalse();
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
-                assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             }
         }
     }
@@ -98,7 +98,7 @@ class RiskBatchBudgetTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"SYM4-USDT",
                             user==7?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
-            long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
             var first=work(state,line);
             applied(state, batch(line,first,2));
             assertThat(state.tradingState().riskState().scans().values().stream()
@@ -115,7 +115,7 @@ class RiskBatchBudgetTest {
                 applied(state,finish);applied(restored,finish);
                 assertThat(state.tradingState().riskState().scans().values()).allMatch(s->s.riskComplete());
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
-                assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             }
         }
     }

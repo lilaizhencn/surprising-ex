@@ -19,13 +19,13 @@ class CoreMaintenanceTest {
             applied(state,command(line,11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(301,false,CoreOrderSide.SELL))));
             applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(302,false,CoreOrderSide.BUY))));
             applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(303,false,CoreOrderSide.BUY))));
-            long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
             var instrument=state.tradingState().instruments().get("BTC-USDT");
             applied(state,gate(line,0,new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0)));
             assertThat(state.tradingState().instruments().get("BTC-USDT")).isSameAs(instrument);
             assertThat(instrument.maintenance()).isEqualTo(
                     new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
-            assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+            assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             var denied=apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(304,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             // Registration is startup-only; the canonical object cannot be replaced after startup.
@@ -36,7 +36,7 @@ class CoreMaintenanceTest {
                 var recovered=restored.tradingState().instruments().get("BTC-USDT");
                 assertThat(recovered.maintenance()).isEqualTo(
                         new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
-                assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
                 assertThat(apply(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(305,false,CoreOrderSide.BUY)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 applied(restored,gate(line,2,CoreInstrumentMaintenance.TRADING));
                 applied(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(306,false,CoreOrderSide.BUY))));
@@ -63,10 +63,10 @@ class CoreMaintenanceTest {
         try (var state = fixture(line)) {
             var mode = line == ProductLine.SPOT ? CoreInstrumentMaintenance.Mode.HALTED : CoreInstrumentMaintenance.Mode.REDUCE_ONLY;
             applied(state,gate(line,0,new CoreInstrumentMaintenance(701,mode,0)));
-            long funds = com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
+            long funds = com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
             var denied = apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(200,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+            assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             try (var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(restored.tradingState().instruments().get("BTC-USDT").maintenance()).isEqualTo(new CoreInstrumentMaintenance(701,mode,0));
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());

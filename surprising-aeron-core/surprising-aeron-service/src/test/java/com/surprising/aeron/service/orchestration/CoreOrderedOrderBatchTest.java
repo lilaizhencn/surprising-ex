@@ -1232,8 +1232,6 @@ class CoreOrderedOrderBatchTest {
 
         assertThat(state.pendingMatchingCount()).isZero();
         assertThat(state.snapshotHasPendingCommands()).isFalse();
-        assertThat(journal.metrics().reservedEntries()).isZero();
-        assertThat(journal.metrics().reservedBytes()).isZero();
         assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherSequences);
         assertThat(state.takeMatchingResult(sequence)).isNull();
     }

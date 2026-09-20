@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 
@@ -288,12 +287,6 @@ public final class TriggerOrderIndex {
     public boolean containsClient(long userId, String clientTriggerOrderId) {
         return clientTriggerOrderId != null && !clientTriggerOrderId.isEmpty()
                 && idsByClient.containsKey(new ClientTriggerKey(userId, clientTriggerOrderId));
-    }
-
-    void apply(java.util.List<RuntimeFactFrame.TriggerOrderChange> changes) {
-        for (RuntimeFactFrame.TriggerOrderChange change : changes) {
-            apply(change.triggerOrderId(), change.after());
-        }
     }
 
     public void apply(long id, CoreTriggerOrderState current) {

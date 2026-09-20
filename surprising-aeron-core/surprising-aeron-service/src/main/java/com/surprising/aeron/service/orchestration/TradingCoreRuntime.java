@@ -67,7 +67,6 @@ import com.surprising.aeron.service.state.PositionRuntime;
 import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions;
 import com.surprising.aeron.service.state.OrderRuntime;
@@ -323,8 +322,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** 提交日志与快照版本边界；与交易日志共同约束恢复。 */
     final com.surprising.aeron.service.state.RuntimeCommitJournal runtimeProjectionJournal;
-    /** 当前完整提交点；只描述提交边界，不逐命令复制全量状态。 */
-    RuntimeProjectionPoint currentProjectionPoint;
+    /** 当前已发布状态序号；Owner 单线程递增，不为每次发布创建 fence 对象。 */
+    long publicationSequence;
 
     /** Owner 当前是否持有命令的变更缓冲；挂起时交还序号槽。 */
     boolean factContextActive;
@@ -541,10 +540,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.cachedFeePolicyHash = computeFeePolicyHash(restoredFeePolicies);
         this.cachedTransferHash = computeTransferHash(restoredPendingTransfers);
         this.auditBusinessStateHash = restoredAuditBusinessStateHash == 0
-                ? com.surprising.aeron.service.state.RollingBusinessStateHash.compute(snapshotState)
+                ? snapshotState.businessStateHash()
                 : restoredAuditBusinessStateHash;
         this.auditFundsStateHash = restoredAuditFundsStateHash == 0
-                ? com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState)
+                ? com.surprising.aeron.service.state.FundsStateHash.compute(snapshotState)
                 : restoredAuditFundsStateHash;
         this.auditHashCoreSequence = Long.MIN_VALUE;
         this.cachedBusinessStateHash = currentBusinessStateHash();
@@ -553,7 +552,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.runtimeProjectionJournal = com.surprising.aeron.service.state.RuntimeCommitJournal.passive(
                 productLine, snapshotState, cachedBusinessStateHash, auditFundsStateHash,
                 projectionSequence);
-        this.currentProjectionPoint = runtimeProjectionJournal.initialPoint();
+        this.publicationSequence = runtimeProjectionJournal.publishedSequence();
         runtimeState.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();
     }
@@ -627,11 +626,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return commandIngress.prepareClusterPipelineScope(message, window);
     }
     CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
-            SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
+            SourceKey sourceKey, CommandFingerprint fingerprint, long beforePublicationSequence,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
         return directCommandFlow.finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                beforePublicationSequence, beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
@@ -1197,7 +1196,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long snapshotBusinessAuditBaseHash() { return stateView.snapshotBusinessAuditBaseHash(); }
     long snapshotFundsStateHash() { return stateView.snapshotFundsStateHash(); }
     long snapshotProjectionSequence() { return stateView.snapshotProjectionSequence(); }
-    long snapshotProjectionFreezeCount() { return stateView.snapshotProjectionFreezeCount(); }
     boolean runtimeRiskScanComplete() { return stateView.runtimeRiskScanComplete(); }
     boolean runtimeRiskScanComplete(String symbol) { return stateView.runtimeRiskScanComplete(symbol); }
     RiskScanRuntime runtimeRiskScan(String symbol) { return stateView.runtimeRiskScan(symbol); }
