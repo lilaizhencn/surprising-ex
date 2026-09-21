@@ -221,6 +221,10 @@ final class LinearPerpetualBenchmarkSupport {
                             order(harness.nextOrderId(), CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
                 }
             }
+            // Population setup is deliberately synchronous.  The measured 256-in-flight path must
+            // use the same cluster admission boundary as production; otherwise the Harness queues
+            // callers asynchronously while Core still executes the legacy synchronous result path.
+            harness.useClusterMatchingPipeline();
             return new DenseResidentBook(harness, List.copyOf(makers), ENTRY_PRICE + 1, residentOrders);
         } catch (RuntimeException failure) {
             harness.close();
