@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.AuxCounters;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -49,6 +50,20 @@ public class LinearPerpetualCoreBenchmark {
         return state.scenario.run();
     }
 
+    /** Place/cancel against a large resident book without snapshot restore in the timed path. */
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long denseResidentBookPlaceCancel(DenseResidentBookState state, MixedWorkloadCounters counters) {
+        long result = state.book.placeAndCancel();
+        counters.acceptedBusinessOperations += 2;
+        counters.terminalBusinessOperations += 2;
+        counters.acceptedCoreMessages += 2;
+        counters.terminalCoreMessages += 2;
+        counters.terminalTradingOperations += 2;
+        return result;
+    }
+
     @Benchmark
     public long amendRestingOrder(AmendState state) {
         return state.scenario.run();
@@ -96,6 +111,12 @@ public class LinearPerpetualCoreBenchmark {
         return state.scenario.run();
     }
 
+    /** Safe mark-price scan over a large resident position population; no account may liquidate. */
+    @Benchmark
+    public long stablePositionRiskScan(StablePositionRiskScanState state) {
+        return state.scenario.run();
+    }
+
     @Benchmark
     public long liquidationExecution(LiquidationState state) {
         return state.scenario.run();
@@ -115,6 +136,16 @@ public class LinearPerpetualCoreBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     public long liquidationBurst256(LiquidationBurstState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    /** Maximum protocol-sized liquidation wave after risk discovery has completed. */
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long liquidationBurst1000(LargeLiquidationBurstState state, MixedWorkloadCounters counters) {
         long result = state.scenario.run();
         recordCounters(state.scenario, counters);
         return result;
@@ -372,6 +403,32 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @State(Scope.Thread)
+    public static class DenseResidentBookState {
+        @Param("4")
+        public int accountLanes;
+
+        @Param("10")
+        public int priceLevels;
+
+        @Param("5000")
+        public int ordersPerLevel;
+
+        LinearPerpetualBenchmarkSupport.DenseResidentBook book;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            book = LinearPerpetualBenchmarkSupport.denseResidentBook(
+                    accountLanes, priceLevels, ordersPerLevel);
+        }
+
+        @TearDown(Level.Trial)
+        public void tearDownTrial() {
+            book.verify();
+            book.close();
+        }
+    }
+
+    @State(Scope.Thread)
     public static class AmendState extends InvocationState {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
@@ -477,6 +534,22 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @State(Scope.Thread)
+    public static class StablePositionRiskScanState extends SnapshotBackedState {
+        @Param("10000")
+        public int positionUsers;
+
+        @Override
+        LinearPerpetualBenchmarkSupport.SnapshotTemplate createTemplate() {
+            return LinearPerpetualBenchmarkSupport.stablePositionScanTemplate(accountLanes, positionUsers);
+        }
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.stablePositionScan(template, positionUsers);
+        }
+    }
+
+    @State(Scope.Thread)
     public static class LiquidationState extends InvocationState {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
@@ -500,6 +573,15 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualBenchmarkSupport.liquidationBatchExecution(accountLanes, 256, 0);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class LargeLiquidationBurstState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.liquidationBatchExecution(
+                    accountLanes, ExecuteLiquidationBatchCommand.MAX_ACTIONS, 0);
         }
     }
 

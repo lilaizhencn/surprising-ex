@@ -13,6 +13,14 @@ import org.junit.jupiter.api.Test;
 class LinearPerpetualBenchmarkSupportTest {
 
     @Test
+    void denseResidentBookKeepsItsPopulationAcrossPlaceCancelCycles() {
+        try (var book = LinearPerpetualBenchmarkSupport.denseResidentBook(4, 4, 16)) {
+            for (int cycle = 0; cycle < 32; cycle++) book.placeAndCancel();
+            book.verify();
+        }
+    }
+
+    @Test
     void longRunningDriverRefreshesPricesEvenWhenRiskWorkIsStillInFlight() throws Exception {
         var template = LinearPerpetualMixedWorkload.template(4, 32, 2);
         try (var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot())) {
@@ -168,6 +176,33 @@ class LinearPerpetualBenchmarkSupportTest {
                 }
             }).as(named.name()).doesNotThrowAnyException();
         }
+    }
+
+    @Test
+    void stablePositionPopulationCompletesRiskScanWithoutLiquidation() {
+        int users = 64;
+        var template = LinearPerpetualBenchmarkSupport.stablePositionScanTemplate(4, users);
+
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualBenchmarkSupport.stablePositionScan(template, users)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.positions()).isEqualTo(users + 1);
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void liquidationBatchSupportsTheProtocolMaximumPopulation() {
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualBenchmarkSupport.liquidationBatchExecution(4,
+                    com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_ACTIONS, 0)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.operations())
+                        .isEqualTo(com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_ACTIONS);
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
     }
 
     @Test

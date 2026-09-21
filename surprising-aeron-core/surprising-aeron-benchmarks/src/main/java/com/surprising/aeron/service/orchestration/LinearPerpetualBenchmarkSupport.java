@@ -203,6 +203,64 @@ final class LinearPerpetualBenchmarkSupport {
         return commandScenario(harness, command);
     }
 
+    static DenseResidentBook denseResidentBook(int accountLanes, int priceLevels, int ordersPerLevel) {
+        int residentOrders = Math.multiplyExact(priceLevels, ordersPerLevel);
+        if (priceLevels <= 0 || ordersPerLevel <= 0 || residentOrders > 100_000) {
+            throw new IllegalArgumentException("dense resident book requires 1..100000 orders");
+        }
+        Harness harness = base(accountLanes);
+        try {
+            List<Long> makers = usersAcrossLanes(accountLanes, accountLanes, 20_000);
+            for (long maker : makers) harness.adjust(maker, SAFE_BALANCE);
+            for (int level = 0; level < priceLevels; level++) {
+                long price = ENTRY_PRICE + 1 + level;
+                for (int index = 0; index < ordersPerLevel; index++) {
+                    long maker = makers.get(index & (accountLanes - 1));
+                    harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
+                            order(harness.nextOrderId(), CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
+                }
+            }
+            return new DenseResidentBook(harness, makers.getFirst(), ENTRY_PRICE + 1, residentOrders);
+        } catch (RuntimeException failure) {
+            harness.close();
+            throw failure;
+        }
+    }
+
+    static final class DenseResidentBook implements AutoCloseable {
+        private final Harness harness;
+        private final long userId;
+        private final long price;
+        private final int residentOrders;
+
+        private DenseResidentBook(Harness harness, long userId, long price, int residentOrders) {
+            this.harness = harness;
+            this.userId = userId;
+            this.price = price;
+            this.residentOrders = residentOrders;
+        }
+
+        long placeAndCancel() {
+            long orderId = harness.nextOrderId();
+            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
+                    order(orderId, CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
+            harness.execute(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
+            return orderId;
+        }
+
+        void verify() {
+            if (harness.state().tradingState().orders().size() != residentOrders) {
+                throw new IllegalStateException("dense resident book size changed");
+            }
+        }
+
+        @Override
+        public void close() {
+            harness.close();
+        }
+    }
+
     static Scenario amendRestingOrder(int accountLanes) {
         Harness harness = base(accountLanes);
         long userId = usersAcrossLanes(accountLanes, 1, 2_500).getFirst();
@@ -424,6 +482,60 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
+    static SnapshotTemplate stablePositionScanTemplate(int accountLanes, int positionUsers) {
+        if (positionUsers < 1 || positionUsers > MAX_BENCHMARK_SCALE) {
+            throw new IllegalArgumentException("positionUsers must be positive and at most "
+                    + MAX_BENCHMARK_SCALE);
+        }
+        Harness harness = base(accountLanes);
+        try {
+            List<Long> users = usersAcrossLanes(accountLanes, positionUsers + 1, 70_000);
+            long shortUser = users.getFirst();
+            harness.adjust(shortUser, SAFE_BALANCE);
+            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, shortUser,
+                    order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE,
+                            positionUsers, CoreTimeInForce.GTC)));
+            for (int index = 1; index <= positionUsers; index++) {
+                long longUser = users.get(index);
+                harness.adjust(longUser, SAFE_BALANCE);
+                harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, longUser,
+                        order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, 1, CoreTimeInForce.IOC)));
+            }
+            return harness.snapshotTemplate(accountLanes);
+        } finally {
+            harness.close();
+        }
+    }
+
+    static Scenario stablePositionScan(SnapshotTemplate template, int positionUsers) {
+        Harness harness = Harness.restore(template);
+        CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand(SYMBOL, 99, 2, BASE_EPOCH_MILLIS + 1)));
+        return new Scenario() {
+            @Override
+            public long run() {
+                CoreResponse response = harness.execute(mark);
+                while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
+                    int maxUsers = CoreRiskState.defaultScanControl().scanBatchSize();
+                    response = harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN,
+                            CommandSource.OPERATIONS, 0,
+                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
+                }
+                if (!harness.executionWork().actions().isEmpty()) {
+                    throw new IllegalStateException("safe mark price unexpectedly produced liquidation work");
+                }
+                return response.appliedCommandCount();
+            }
+
+            @Override public long operations() { return positionUsers; }
+            @Override public long terminalLifecycleOperations() { return positionUsers; }
+            @Override public int positions() { return positionUsers + 1; }
+            @Override public void verify() { verifySnapshot(harness); }
+            @Override public void close() { harness.close(); }
+        };
+    }
+
     static Scenario liquidationExecution(int accountLanes) {
         Harness harness = base(accountLanes);
         List<Long> users = usersAcrossLanes(accountLanes, 2, 30_000);
@@ -470,7 +582,8 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     static Scenario liquidationBatchExecution(int accountLanes, int liquidationUsers, int openOrders) {
-        if (liquidationUsers < 1 || liquidationUsers > 256 || openOrders < 0 || openOrders > 256) {
+        if (liquidationUsers < 1 || liquidationUsers > ExecuteLiquidationBatchCommand.MAX_ACTIONS
+                || openOrders < 0 || openOrders > 256) {
             throw new IllegalArgumentException("invalid liquidation batch benchmark scale");
         }
         Harness harness = positionedUsers(accountLanes, liquidationUsers, Math.max(10, openOrders));

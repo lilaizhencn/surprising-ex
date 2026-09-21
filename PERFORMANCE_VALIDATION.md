@@ -1561,3 +1561,62 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - main1→main2在相同代码/配置下由28.3万恢复到31.9万，同时Lane有效执行从37.05%恢复到43.77%，证明当前未绑核桌面机器存在显著调度干扰；它不能解释为死reducer删除后的确定性回归。JFR归因轮在profiler开销下为30.4万business/s，批量撤单p99 29.573ms。当前用户已确认本机有资源占用，因此本轮重点结论限定为“分配下降且主要站点已定位”，吞吐容量待资源空闲后按同命令三轮复验。
 - 主/GC/JFR JSON SHA-256分别为`c91b11826297207261aa090e67444fd1fdae2adc42164d5ebd3b416a74767319`、`560bd161abd25dfd52b688b1bbf8b46c63fcd95fde9506d21dfae8a78a9dc5f8`、局部JFR `c6eb3aeec2014defc8d21f8cfe2565a433e3143aa5d4e1fe4345c2e25a34341c`；真实main1/main2 summary为`124c12c2a5c5f11e9a464d42dfc4f9c9367c7d6bfc918319a0e34020e1206ba2`/`6fcd38de2c5e570dd70ae26f1a60d132de258733bfafe8c918dcb348df66116e`，node JFR为`6fa57109d7a05324a3025dcff1859334793224af882b005630a98eba8da54271`。
 - 一次完整分析脚本试图逐条物化137万Archive `FileWrite`，临时目录增长到21GiB；确认与订单分配无关后已停止并删除该明确属于本轮的临时目录，保留原始JFR及有界class/site/thread汇总。所有本轮Java/Aeron/JMH进程已停止，swap仍为0；约7.9GiB的三轮Cluster/Archive、原始JFR、局部JMH和有界汇总已移动到`/Users/atomex/.Trash/surprising-ex-seven-stage-cleanup-20260921/`，可恢复，未移动或删除其他轮次产物。
+
+## 2026-09-21 APFS 快照清理后单轮复测（apfs-cleanup-20260921）
+
+### 采集前锁定计划
+
+- 只验证当前干净 `master=14a4c82bed6d0c72778f78b0a60770a8b04d4006`，不检出旧版本、不修改业务代码；问题是清理本地 APFS/Time Machine 快照并重启后的本机环境能否恢复同口径真实单成员吞吐。单轮只作为当前环境检查，不据此声明稳定容量或代码性能变化。
+- 场景沿用历史 37 万口径：单 Aeron Cluster 成员及真实网络/Archive，LINEAR_PERPETUAL、MIXED、batch20、128 symbols、seed25620、1385 users、4 Account Lane、1 matcher、全局/session in-flight 256，Owner/Matcher BUSY_SPIN；30s 预热、60s 稳态、排空单列，不启用 profiler。
+- 探索门槛保持 business throughput≥300,000/s、Core throughput≥30,000/s、各业务请求 p99≤30ms；零业务错误/拒绝/超时，accepted=terminal business/Core、unfinished=0、期末 backlog=0、fundsDiff=0，population/HFT positions/reservations/loss及快照恢复全部通过。窗口满载后的背压与 coordinated-omission 缺口照实报告。
+- 环境为 MacBookPro16,1、16逻辑CPU/16GiB、macOS 26.7，HotSpot Corretto JDK 27.0.0.33.1、Maven3.9.16、G1；采集前根卷可用546GiB、swap total/used=0、Time Machine未运行且根卷没有本地快照。桌面进程存在、未绑核，不外推生产或三节点容量。
+- 使用当前 commit 在 10:08 构建的 benchmark jar，完整命令：`ASYNC_RUN_ID=apfs-cleanup-20260921-main1 ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。运行中记录磁盘、swap和进程资源；任何swap增长、磁盘不足或正确性失败按标准判失败/无效。结束后停止进程，只清理本轮Cluster/Archive/log/report并追加结果。
+
+### 执行结果与结论
+
+- 稳定窗60.016524s完成22,734,766 business operations、2,172,206 Core messages和5,411,840 fills，持续吞吐为 **378,808.445 business/s、36,193.466 Core/s、90,172.500 fills/s**。排空12.670ms，另完成2,679 business/247 Core，不计入稳态吞吐。
+- 各业务请求p99：PLACE_ORDER 12.632ms、CANCEL_ORDER 11.509ms、APPLY_MARK_PRICE 17.006ms、PLACE_ORDER_BATCH 15.351ms、CANCEL_ORDER_BATCH 26.181ms；最大业务p99低于30ms门槛。该延迟为客户端请求到响应，入口→accepted与accepted→terminal的独立分段本轮未采集。
+- in-flight峰值256，window blocked 49.334s/60.017s（82.20%）；matcher/completion/context高水位213/208/256，四条Lane高水位47/47/75/54，Lane有效执行均值43.27%。这是持续背压下的已达吞吐，仍受窗口和coordinated omission限制，不等同无限open-loop容量。
+- 最终offered=terminal：22,737,445 business、2,172,453 Core；unfinished=0、期末backlog=0，`mixedCapacity=PASS`、`mixedVerify=PASS`、fundsDiff=0，population/HFT positions/reservations/loss全部通过，日志无业务ERROR/Exception。
+- 本轮通过全部探索门槛。相对七阶段减法后最近有效无profiler main2的318,774.784 business/s提高18.83%，相对当时两轮均值300,765.898提高25.95%；相对更早racefix两轮均值381,773.867低0.78%，说明当前本机已恢复到约37万同口径区间。由于只有一轮、commit和后台调度状态也不同，不能把提升全部因果归于删除APFS快照；可以确认本轮没有快照、swap或磁盘压力时，当前代码并不存在“只能约30万business/s”的现象。
+- 采集前后swap total/used及swap-in/out始终为0、Pages throttled为0；根卷最低可用543GiB，Time Machine未运行且没有新本地快照。本轮未启用JFR或GC profiler，因此不新增分配、GC停顿或方法级瓶颈结论；沿用上一轮分配结论须明确不是本轮实测。
+- summary/metrics SHA-256分别为`11d54fbf36b9bc077a7ac1fa646ebe46cdc4ac14bd61430592bc12fe17a14c7e`/`553ccf3b22ceb1c398c7743eaff5c6672a6e5c56d11984d4afb8aa836a6ec673`。全部Java/Aeron/JMH进程已退出；本轮生成物约3.3GiB，清理状态见下。
+- 已逐项删除确认属于本轮的 `target/aeron-async-stages/apfs-cleanup-20260921-main1`（约3.3GiB，Archive约2.8GiB、Aeron约438MiB），不可从项目目录恢复；未删除或移动其他轮次产物。清理后根卷可用546GiB、swap仍为0，且无残留Java/Aeron/JMH进程。
+
+## 2026-09-21 U本位永续独立规模场景（linear-perpetual-population-20260921）
+
+### 采集前锁定计划
+
+- 不修改、也不调用现有 `qualify-aeron-async-stages.sh` 主交易容量基线；新增 `qualify-linear-perpetual-scenarios.sh`，每个真实Cluster业务边界使用全新节点/数据目录，规模型Core场景每项使用独立JMH fork和状态模板。当前工作树还包含上一轮仅追加的性能记录；本轮代码影响限于benchmark模型、测试和新脚本，不改生产交易逻辑。
+- 本轮先执行用户指定的三组人口形态：①深订单簿：单热点symbol、10个价格档、每档5,000单（共5万驻留订单，maker按4条账户lane分布），计时区只做同档下单→撤单并保持驻留规模不变；另单独执行256个taker、每个成交128个maker订单的同档深度成交；②稳定大持仓：10,000持仓账户，标记价100→99并完成全量风险扫描，要求爆仓任务为0；③大行情：扫描10,000个风险账户，并单独执行协议单批上限1,000账户的强平波次。各组不互相混合，也不与37万主吞吐比较。旧混合工作负载用5,000账户/约25万挂单预跑时在准备阶段触发当前64 MiB核心恢复快照容量保护，单独记录为恢复容量缺口，不混入热路径吞吐。
+- HotSpot Corretto JDK27、G1、1 fork/1 thread；人口场景4GiB固定堆、1×2s预热、3×2s测量，1 matcher/4 Account Lane、BUSY_SPIN。报告JMH主分数、accepted/terminal/unfinished（可用时）、场景人口及正确性；小于实际生产人口时只报告已测规模，不外推。
+- 正确性门槛：所有场景无异常；accepted=terminal、unfinished=0；深度成交资金/净持仓/终态订单一致；稳定持仓扫描无任何liquidation work且快照恢复hash一致；强平波次每个账户到达COMPLETED或INSURANCE_REQUIRED边界并通过快照恢复。性能没有预设SLA，本轮建立独立基线。
+- 测试前JDK27定向新增门禁2项已通过；完整`LinearPerpetualBenchmarkSupportTest`和benchmark package需在采集前通过。采集前后核对swap/磁盘；任一OOM、swap增长或正确性错误使对应场景失败。完成后停止进程，提取结果并仅清理本轮生成物。
+
+### 实施、偏差与正确性
+
+- 新脚本提供 `orders|triggers|account|funding|liquidation|adl|book|positions|risk-storm|population|all` 独立入口；未改动原主吞吐脚本。规模场景均为独立fork，`book`、`positions`、`risk-storm`可分别运行；`SCENARIO_POPULATION_PROFILER=gc`用于单独分配轮。
+- 首次旧混合订单簿预跑使用5,000账户、约25万挂单，在JMH Trial准备阶段由`SectionedCoreSnapshotWriter.encode`拒绝：`core snapshot exceeds maximum size`。它未进入测量，不计为性能结果；根因是当前`SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES=64 MiB`，说明该规模不能用“每次调用恢复完整快照”的基准方法，同时也是生产恢复容量需要单独验证的边界。
+- 随后将订单簿场景改为简单的常驻状态：Trial一次建立10档×5,000单，计时区只执行同档GTC下单后撤单，结束校验仍为50,000单；没有增加生产线程、状态、锁或业务包装。风险扫描会改变标记价和清算状态，仍采用每次恢复模板的端到端口径，不能用其GC值代表纯扫描分配。
+- JDK27 `LinearPerpetualBenchmarkSupportTest`最终24 tests、0 failure/error/skip；新增覆盖50,000单场景的小规模可逆性、10,000稳定持仓零爆仓和协议上限1,000户强平。benchmarks reactor `-am -DskipTests package`成功。所有有效JMH场景退出码0；可用业务计数均为accepted=terminal、unfinished=0，teardown的资金、净持仓、订单数量及恢复校验未失败。
+
+### 无profiler结果
+
+| 独立场景 | 固定规模 | JMH结果 | 业务换算/结论 |
+|---|---:|---:|---:|
+| 常驻密集订单簿下单→撤单 | 10档×5,000单 | 2,183.307 ± 788.582 pair/s | **4,366.613 business ops/s**；每pair严格2个终态业务动作，结束仍50,000挂单 |
+| 单档深度成交 | 256 taker×128 maker | 19.382 ± 4.807 burst/s | **4,961.814 taker ops/s、635,112.238 fills/s**；fill不混作业务订单吞吐 |
+| 稳定行情持仓扫描 | 10,000持仓，mark 100→99 | **71,642.981 ± 6,968.424 us/全量扫描** | 扫描完成且liquidation work=0 |
+| 大行情风险发现 | 10,000风险账户 | **88,300.651 ± 8,175.277 us/全量扫描** | 完成全量风险扫描和恢复校验 |
+| 大行情强平执行 | 1,000户/批 | 38.522 ± 24.665 batch/s | **38,521.851账户/s**；accepted=terminal=38,521.851/s、unfinished=0 |
+
+- 最终订单簿、持仓和风险轮使用1×2s预热、5×3s测量、1 fork/1 thread、4GiB/G1、1 matcher/4 Lane/BUSY_SPIN；深度成交与前述订单簿在同一最终`book`轮。强平批次方差仍较大，当前只建立数量级基线，不设发布SLA，也不与真实Aeron主链路37.9万business/s横向比较。
+- 这些局部JMH没有真实网络/Archive，也没有开放环分段直方图，因此不提供入口→accepted/terminal的p99；平均全量扫描时间不能冒充单账户p99。后续若用于容量验收，应把相同人口装入真实单成员场景，分别采集风险发现、强平执行和订单响应尾延迟。
+
+### 分配、环境与清理
+
+- 独立GC轮中，常驻5万订单簿为2,253.820 pair/s，`gc.alloc.rate=13.645 MB/s`、`gc.alloc.rate.norm=6,511.279 B/pair`，即约 **3,255.640 B/business op**；1次GC、15ms。该值含命令编码、响应及JMH harness，但已排除逐调用大快照恢复。
+- 深度成交GC轮为339,902,258 B/burst，旧风险/强平GC轮为112–336 MB/invocation；它们的共同主因是每次invocation恢复大人口快照，不能作为生产每单/每持仓分配结论，故不据此提出热路径优化。
+- 有效JSON SHA-256：常驻订单簿`3363ba7274a31d9fe4b7e8e64a59d5aa1d8b64657fb6d4165c0f6477becd81b5`、深档成交`ca6c5b2c26072248956ae1635286509ae62914f1930f33da74455ef5eaef19be`、稳定持仓`332d51870cb1e4c5c39eb4fe90118b7688e4db5893314c19ff20cbc74ffc7e57`、风险扫描`049afc69e3b22f92f0aa3c1732a1ec4ef5f8d30c8a40e39df70e335df26a9193`、强平批次`21fe7b2d711993804aed905cec0a5d73770286e1ad8591a5db4c211cc2d47d29`、常驻订单簿GC`6c1173a22ba369ad699a18128731bb9611e872c4658f4806b9eee4869ffad3fd`。
+- 采集前后swap均为0，根卷可用546GiB，场景产物合计不足1MiB，无JMH/Aeron/Java残留进程。原始路径仅作历史定位；清理状态见下。
+- 已删除确认属于本轮的8个`target/linear-perpetual-scenarios/*20260921*`失败/主轮/GC轮目录；结果不可从项目目录恢复，关键参数、分数、正确性和校验和已记录在上文，未删除其他轮次产物。清理后swap仍为0、根卷可用546GiB。
