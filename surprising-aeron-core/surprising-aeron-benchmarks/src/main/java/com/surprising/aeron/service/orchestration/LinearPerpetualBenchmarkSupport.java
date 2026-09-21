@@ -229,20 +229,32 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     static final class DenseResidentBook implements AutoCloseable {
+        private static final long MARK_HEARTBEAT_CHECK_MASK = (1L << 12) - 1;
+        private static final long MARK_HEARTBEAT_INTERVAL_NANOS = 1_000_000_000L;
+
         private final Harness harness;
         private final long userId;
         private final long price;
         private final int residentOrders;
+        private long nextMarkHeartbeatNanos;
 
         private DenseResidentBook(Harness harness, long userId, long price, int residentOrders) {
             this.harness = harness;
             this.userId = userId;
             this.price = price;
             this.residentOrders = residentOrders;
+            this.nextMarkHeartbeatNanos = System.nanoTime() + MARK_HEARTBEAT_INTERVAL_NANOS;
         }
 
         long placeAndCancel() {
             long orderId = harness.nextOrderId();
+            if ((orderId & MARK_HEARTBEAT_CHECK_MASK) == 0) {
+                long now = System.nanoTime();
+                if (now >= nextMarkHeartbeatNanos) {
+                    harness.publishMarkPriceHeartbeat(SYMBOL);
+                    nextMarkHeartbeatNanos = now + MARK_HEARTBEAT_INTERVAL_NANOS;
+                }
+            }
             harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
                     order(orderId, CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
             harness.execute(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
@@ -1008,6 +1020,15 @@ final class LinearPerpetualBenchmarkSupport {
                                 mark.markPriceTicks(),
                                 Math.incrementExact(mark.priceSequence()), now))));
             }
+        }
+
+        void publishMarkPriceHeartbeat(String symbol) {
+            long now = nextCommandTimestamp();
+            var mark = state.runtimeMarkPrice(symbol);
+            if (mark == null) throw new IllegalStateException("workload mark price is missing: " + symbol);
+            execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
+                            mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now))));
         }
 
         void beginBusinessLatencies(int targetOperationsPerSecond) {

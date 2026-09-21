@@ -1636,3 +1636,35 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - JDK27服务模块全量reactor测试914项：0 failure、0 error、1 skipped；快照定向测试44项全部通过；最终benchmark支持测试24项全部通过。没有运行六产品线真实集群的超64 MiB Archive重启恢复，因此本轮证明的是核心捕获/编码/恢复及Aeron适配层测试正确，生产部署前仍需在目标堆配置下完成真实成员snapshot→Archive→restart验收。
 - 大快照probe日志SHA-256为`e681edb8a8187ccdf96ced3d74f233d04eefc1946339aa7b759a1306d925572f`；200档标准轮summary/常驻订单簿/深度成交结果分别为`0884af4a021845f5d5bd6f00a51ccb597178b8e1c42c81e5b0844b9916cf111e`/`a4a16529174497fcf0df72b08e3b21429dffc614da2e9f8bddc1e47e4a61d457`/`ae8d5c9f6aab5b856dcfb085c5b5adc2eace778be587df200ee8f10ee17581c4`。本轮不提供p99或分配结论；快照probe的堆占用不能解释为每单分配。
 - 本轮JMH、probe及失败的4账户探索产物已移动到`/Users/atomex/.Trash/surprising-ex-large-snapshot-200-levels-20260921/`，可恢复；项目目录无本轮残留Java/Aeron/JMH进程，swap为0，根卷可用545 GiB。
+
+## 2026-09-21 200档订单簿十分钟长稳
+
+### 采集前锁定计划
+
+- 问题是200个价格档、每档1,250单、共250,000个常驻maker订单分布到5,000账户后，Core在持续下单→撤单并维持订单簿规模的10分钟稳态窗口内是否崩溃、OOM、失去终态或出现持续内存增长。本轮是稳定性/JFR诊断，不设发布吞吐门槛，也不以局部JMH替代真实Aeron容量。
+- 通过条件：完整600秒测量和teardown正常退出；accepted=terminal、unfinished=0、拒绝/错误/超时=0；结束仍为250,000个常驻订单且快照恢复/资金校验通过；无JVM fatal error、OOM、业务异常、GC失败、swap或磁盘压力。失败条件为任一正确性错误或进程异常退出；JFR损坏、明显同机干扰或系统资源异常则性能数据无效，但不掩盖正确性失败。
+- 当前`master=f3e99f1f6f81e4013ef0be45fa2cc977dd317c32`，工作树仅含本节预先追加的验证记录；对照commit不适用。机器MacBookPro16,1、16逻辑CPU/16GiB、macOS26.7，HotSpot Corretto JDK27.0.0.33.1、Maven3.9.16、G1，4GiB固定堆，1 matcher/4 Account Lane、BUSY_SPIN，1 fork/1 JMH线程。开始前根卷可用545GiB、swap=0。
+- 负载使用`LinearPerpetualCoreBenchmark.denseResidentBookPlaceCancel`，先初始化25万订单并完成30秒预热，再单次连续测量600秒；每次invocation严格执行一个GTC下单和对应撤单，accepted/terminal按两个business operations计数。JMH超时900秒，进程结束后排空和teardown检查，不混入深度成交、风险、强平或真实网络/Archive场景。
+- 启用JFR profile录制，最大512MiB，并记录GC日志；运行中约每30秒核对进程RSS/CPU、系统swap和磁盘。JFR用于崩溃、分配、GC和线程归因，因此本轮吞吐只作带采样开销的长稳观测，不与无profiler历史分数横比。原始结果使用统一run ID `dense-book-10m-20260921`，结束后记录命令、时间、校验和、JFR摘要和清理状态。
+
+### 首次执行失败与场景修正
+
+- 首次执行在约81秒进程时长、正式测量开始后失败：第5,121,025个已应用命令附近，正常`PLACE_ORDER`被Core以`STALE_MARK_PRICE`拒绝，JMH按`-foe true`退出。进程没有OOM或fatal error；退出前8次G1 young GC，末次2845MiB→395MiB、7.535ms，退出已用堆约694MiB，swap=0。该轮按正确性门槛记为失败，不计吞吐。
+- 原因是场景模型只在初始化写入一次mark price，而Core要求mark age不超过5,000逻辑毫秒；benchmark每1,024条命令推进1逻辑毫秒，因此约512万命令后必然过期。生产稳定行情也有同价、递增sequence的mark heartbeat。基准已仅在`DenseResidentBook`中按逻辑时间低频调用既有`refreshMarkPricesIfDue`，不修改生产代码、资金或订单逻辑；定向24项测试通过并重新打包。随后使用独立run ID `dense-book-10m-rerun-20260921`从头执行相同30秒预热和600秒测量。
+- 首次失败JFR时长81秒、无DataLoss，JFR/GC日志SHA-256分别为`13d6660e614224723290b85e4606ef612e1a2c6da975a5d05792796d8bb5d876`/`482c1cdf8f853f362ef7c6b5211f997383396fcb3eced394ce51686bbb4083c6`；原始路径仅作本轮结束前定位。
+- 第一次修正原计划仅按逻辑时间临近过期时刷新；用户要求贴近生产持续输入后，该轮在正式结果产生前被主动终止，不计结果。最终场景每1秒真实墙钟提交一次同价、递增sequence和新generated-at的`APPLY_MARK_PRICE`心跳，订单循环每4,096个pair检查一次截止时间，最大调度误差只受该小段处理时间影响；不另起线程，避免给Harness引入非生产状态竞争。最终run ID改为`dense-book-10m-continuous-mark-20260921`。
+
+### 最终十分钟结果
+
+- 最终命令为JDK27执行`product-core-benchmarks.jar '^com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.denseResidentBookPlaceCancel$' -p accountLanes=4 -p priceLevels=200 -p ordersPerLevel=1250 -wi 1 -w 30s -i 1 -r 600s -f 1 -t 1 -foe true -to 900s`，fork附加4GiB固定堆、G1、AlwaysPreTouch、1 matcher/4 Lane全BUSY_SPIN、JFR profile/512MiB上限及GC日志。总进程时长643.948秒，JMH报告完整600秒测量并正常退出。
+- 持续结果为**34,998.174 place+cancel pair/s**，即**69,996.347 terminal business ops/s**，约2,099.9万pair、4,199.8万业务终态；accepted=terminal，unfinished business/Core、rejected、error、timeout均为0。teardown未报错，说明结束仍为250,000个常驻订单，资金和快照恢复校验通过。稳定同价mark heartbeat持续输入后，没有再次出现`STALE_MARK_PRICE`。
+- 结论为该局部Core长稳场景**通过**：无JVM crash、OOM、fatal error、业务异常、GC/promotion/evacuation failure、进程残留或swap。它证明200档/25万订单/5,000账户在持续下撤单和生产型mark心跳下可连续运行10分钟；由于不是实际Aeron网络/Archive、只有单fork且带JFR，不能据此声明真实集群吞吐、请求p99或多小时无泄漏。
+
+### JFR、GC与资源
+
+- JFR时长643秒、8.3MiB、DataLoss=0，包含268,756个execution samples、108,842个allocation samples、639个RSS样本和48次young GC。48次GC含初始化，合计暂停约467ms；启动建簿前三次较长暂停为22.018/65.926/34.318ms。排除前60秒后42次稳态暂停合计311.134ms，平均7.408ms，p50/p95/p99/max为7.338/8.335/8.616/8.616ms，无old/full GC。
+- 稳态GC后堆长期为391–392MiB，old regions保持146→146；退出时1,268,732KiB包含距离末次GC后新产生的812MiB Eden，不能当作live set。JFR第60秒至结束的579个RSS样本从4,579,790,848B到4,582,199,296B，仅增加2,408,448B（约2.3MiB），范围4,579,790,848–4,582,199,296B；固定4GiB堆已预触页。swap始终0，根卷可用545GiB。
+- JFR采样分配前列为byte[] 17.37%、`OrderRuntime` 6.35%、long[] 4.75%、`CoreResponse` 4.29%、`CoreMatchingResult` 4.04%、`ResolvedPlaceOrder` 3.44%、`CoreMessageHeader` 3.17%、int[] 3.16%、Lane commit lambda 2.95%、`ReservationRuntime` 2.89%。本轮未启用JMH GC profiler或NMT，采样占比不能换算成精确bytes/business或native分类，因此不补估计值。
+- CPU采样主要是独占线程busy spin：`SettlementLaneWorker.run` 61.66%、`MatcherCommandPipeline.run` 16.50%；有效业务站点中`dispatchPlaceAdmission`为6.45%。这是局部单线程驱动场景，空闲Lane/matcher的busy-spin样本不能解释为业务计算瓶颈。
+- 最终result/JFR/GC日志SHA-256分别为`cf1c1c4e9c759cdb4f11b72fb04df612a2cb3e81b50e3123c71ea0647bf04749`/`d63ff8c6f3ca4eada66754671988bedd8bbbc7ead02d4a515a8ab2f106f62d59`/`183a30c8fe5f1707337087a53423ecb8661e017420e619b8276b4b2b4b61eef2`。原始路径仅作清理前定位：`target/linear-perpetual-scenarios/dense-book-10m-continuous-mark-20260921`。
+- 首次失败、主动终止和最终有效轮的三个目录已移动到`/Users/atomex/.Trash/surprising-ex-dense-book-10m-20260921/`，可恢复；项目目录无本轮产物和Java/JMH残留进程，清理后swap仍为0、根卷可用545GiB。
