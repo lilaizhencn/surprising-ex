@@ -60,9 +60,9 @@ public class TradingOrderProperties {
 
         public java.util.List<String> getHostnames() { return hostnames; }
         public void setHostnames(java.util.List<String> hostnames) {
-            if (hostnames == null || hostnames.size() != 3
+            if (hostnames == null || (hostnames.size() != 1 && hostnames.size() != 3)
                     || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
-                throw new IllegalArgumentException("aeron hostnames must contain three non-blank members");
+                throw new IllegalArgumentException("aeron hostnames must contain one or three non-blank members");
             }
             this.hostnames = java.util.List.copyOf(hostnames);
         }

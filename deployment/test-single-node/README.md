@@ -10,7 +10,7 @@
 4. 启动成交导出器，从 Aeron Archive 的已提交位置恢复可靠 `match.trades` 事件。
 5. 按 `instrument → price → account → trading → market-data → derivatives-lifecycle → funding → gateway → maker` 启动永续服务。
 
-Core、账户、撮合、行情、资金费和 Gateway 仍是独立 JVM。它们分别拥有自己的状态、Kafka consumer group 和故障恢复边界；这里合并的是启动编排，不是业务状态。
+Core、账户、撮合、行情、资金费和 Gateway 仍是独立 JVM。它们分别拥有自己的状态、Kafka consumer group 和故障恢复边界；这里合并的是启动编排，不是业务状态。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
 
 ## 服务器条件
 
@@ -54,6 +54,8 @@ chmod 600 /etc/surprising/linear-perpetual.env
 Core 只按 `exchange-core.version` 解析 Maven 依赖，不再在 `surprising-ex` 内校验 exchange-core provenance。服务器仍应使用已确认可运行的 exchange-core 构建产物；依赖缺失时让 Maven 正常解析或先安装对应版本，不要把不同版本的 jar 混入同一 release。
 
 必须把数据库密码和 `GATEWAY_JWT_SECRET` 改成服务器实际值。测试环境也不要继续使用默认 JWT secret。
+
+本测试 unit 默认设置 `GATEWAY_PRODUCT_TRANSFER_ENABLED=false`，因为只部署永续 provider，没有可供 Gateway 轮询的现货账户路由；这只关闭跨产品转账后台对账，不关闭永续下单、账户、撮合或风险链路。
 
 ## 启停与验收
 

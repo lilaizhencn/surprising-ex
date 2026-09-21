@@ -100,7 +100,8 @@ public class InstrumentOutboxRepository {
                 UPDATE instrument_outbox_events
                    SET attempts = attempts + 1,
                        last_error = ?,
-                       next_attempt_at = ? + (CAST(power(2, LEAST(attempts, 6)) AS INTEGER) * INTERVAL '1 second'),
+                       next_attempt_at = CAST(? AS TIMESTAMPTZ)
+                           + (CAST(power(2, LEAST(attempts, 6)) AS INTEGER) * INTERVAL '1 second'),
                        updated_at = ?
                  WHERE id = ?
                    AND published_at IS NULL

@@ -56,9 +56,9 @@ public class MatchingProperties {
 
         public List<String> getHostnames() { return hostnames; }
         public void setHostnames(List<String> hostnames) {
-            if (hostnames == null || hostnames.size() != 3
+            if (hostnames == null || (hostnames.size() != 1 && hostnames.size() != 3)
                     || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
-                throw new IllegalArgumentException("Aeron hostnames must contain three members");
+                throw new IllegalArgumentException("Aeron hostnames must contain one or three members");
             }
             this.hostnames = List.copyOf(hostnames);
         }

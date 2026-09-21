@@ -19,6 +19,9 @@ public class ProductTransferReconciliationTask {
 
     @Scheduled(fixedDelayString = "${surprising.gateway.product-transfer.reconciliation-delay:5s}")
     public void reconcileProductTransfers() {
+        if (!properties.getProductTransfer().isEnabled()) {
+            return;
+        }
         coordinator.reconcile(properties.getProductTransfer().getReconciliationBatchSize());
     }
 }

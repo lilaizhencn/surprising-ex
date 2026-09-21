@@ -163,16 +163,6 @@ service_port() {
   done
 }
 
-application_aeron_hostnames() {
-  local member_count
-  member_count="$(cluster_member_count)"
-  if (( member_count == 1 )); then
-    printf '%s,%s,%s\n' "$AERON_CLUSTER_HOSTNAMES" "$AERON_CLUSTER_HOSTNAMES" "$AERON_CLUSTER_HOSTNAMES"
-  else
-    printf '%s\n' "$AERON_CLUSTER_HOSTNAMES"
-  fi
-}
-
 jar_path() {
   case "$1" in
     core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$ROOT_DIR" ;;
@@ -422,12 +412,11 @@ if [[ "$REALTIME_ENABLED" == true ]]; then
 fi
 
 start_http_service() {
-  local service="$1" port app_cluster_hostnames
+  local service="$1" port
   port="$(service_port "$service")"
-  app_cluster_hostnames="$(application_aeron_hostnames)"
   java_args_for "$service"
   start_owned_process "$service" "$port" "${COMMON_ENV[@]}" \
-    AERON_CLUSTER_HOSTNAMES="$app_cluster_hostnames" SERVER_PORT="$port" \
+    SERVER_PORT="$port" \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path "$service")"
 }
 

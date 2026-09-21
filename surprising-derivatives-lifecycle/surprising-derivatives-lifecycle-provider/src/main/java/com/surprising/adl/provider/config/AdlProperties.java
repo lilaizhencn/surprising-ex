@@ -73,8 +73,9 @@ public class AdlProperties {
         private int clientConnections = 2;
         public java.util.List<String> getHostnames() { return hostnames; }
         public void setHostnames(java.util.List<String> value) {
-            if (value == null || value.size() != 3 || value.stream().anyMatch(host -> host == null || host.isBlank())) {
-                throw new IllegalArgumentException("aeron.hostnames must contain exactly three nonblank hosts");
+            if (value == null || (value.size() != 1 && value.size() != 3)
+                    || value.stream().anyMatch(host -> host == null || host.isBlank())) {
+                throw new IllegalArgumentException("aeron.hostnames must contain one or three nonblank hosts");
             }
             hostnames = java.util.List.copyOf(value);
         }

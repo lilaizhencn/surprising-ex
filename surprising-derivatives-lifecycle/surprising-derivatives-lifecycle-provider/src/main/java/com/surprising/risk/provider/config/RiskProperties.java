@@ -29,9 +29,9 @@ public class RiskProperties {
 
         public List<String> getHostnames() { return hostnames; }
         public void setHostnames(List<String> value) {
-            if (value == null || value.size() != 3
+            if (value == null || (value.size() != 1 && value.size() != 3)
                     || value.stream().anyMatch(host -> host == null || host.isBlank())) {
-                throw new IllegalArgumentException("aeron.hostnames must contain exactly three nonblank hosts");
+                throw new IllegalArgumentException("aeron.hostnames must contain one or three nonblank hosts");
             }
             hostnames = List.copyOf(value);
         }
