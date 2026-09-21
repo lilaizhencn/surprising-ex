@@ -213,6 +213,10 @@ final class CoreMatchingFlow {
             return;
         }
         var direct = owner.directMatcherSettlements.prepareForMatching(pending);
+        if (owner.runtimeState.asynchronousCommands()
+                && pending.operation() == CommandSlot.Operation.PLACE && direct == null) {
+            throw new IllegalStateException("asynchronous PLACE requires direct pooled matcher settlement");
+        }
         var command = owner.matcherCommands.prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {
