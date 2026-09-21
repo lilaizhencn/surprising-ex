@@ -187,6 +187,21 @@ final class CoreMatchingFlow {
     }
 
     void submitMatching(CommandSlot pending) {
+        // A cluster command can lose its shard submission head and be resumed by a later Owner
+        // progress turn.  Keep the command's durable admission mode authoritative: the transient
+        // ingress scope is no longer active in that turn, but submission must still reserve the
+        // pooled Matcher-to-Lane settlement instead of falling back to CoreMatchingResult.
+        boolean enteredAsynchronousScope = pending.clusterIndependent
+                && !owner.runtimeState.asynchronousCommands();
+        if (enteredAsynchronousScope) owner.runtimeState.enterAsynchronousCommandScope();
+        try {
+            submitMatchingInCommandScope(pending);
+        } finally {
+            if (enteredAsynchronousScope) owner.runtimeState.exitAsynchronousCommandScope();
+        }
+    }
+
+    private void submitMatchingInCommandScope(CommandSlot pending) {
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
         pending.prepareLaneResultTarget(owner.responseArena);
         if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
