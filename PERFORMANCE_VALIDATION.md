@@ -1521,3 +1521,15 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 该1,905.68 B/business仍包含命令与batch集合构造、codec、响应和JMH harness，不是纯Owner/Core分配；它也不证明真实Aeron、对象存活量、old/live set或长期泄漏表现。最新普通MATCH_STREAM约5,972 B/business属于batch1式固定成本未摊薄场景，不能与本次batch20数值直接比较。
 - 最终JSON/日志SHA-256分别为 `84adfa9dd9233707310aff904a34aa60b44eae3dca2c1d36b53873ce3c925f3f` / `22991ec663bb9352cc586fdaa9f2da1d9f1653155f4e8a2a3c8631d94b132bd7`。结束后无Java/Aeron/JMH进程，swap total/used均为0，磁盘约252GiB可用。
 - 本轮构建日志、两次GC JSON及日志共约104KiB，已移动到 `/Users/atomex/.Trash/surprising-ex-owner-allocation-20260921/`，可恢复；未移动或删除其他轮次产物。
+
+## 2026-09-21 七阶段减法后的最终验证（seven-stage-cleanup-20260921）
+
+### 采集前锁定计划
+
+- 只验证当前干净 `master=9386fb61`，不检出旧版本；本轮前六阶段已依次删除死的命令结果 view、`LanePublication` 转发层、Owner 重复订单物化、热路径缓存/rolling audit hash、`CoreRuntimeStateView`/`AccountLaneView`，以及整套不再被生产入口使用的 immutable reducer 写状态机。第七阶段检查 matcher 结果包装；只有 JFR 证明其仍是主要分配或执行热点时才改动，不以破坏 pooled settlement event 生命周期、Lane 路由、严格 FIFO 或恢复正确性换取表面减法。
+- 业务流程保持：命令入口完成准入和冻结，matcher 生成确定性不可变结果，实际涉及的 Account Lane 串行应用账户/持仓变化，Owner 按 FIFO 发布终态、响应并释放槽位；异常结果不得被当作成功退休。前六阶段后的 service reactor 已通过 913 tests、0 failure/0 error、1 skip；第七阶段若改生产代码，重新执行受影响定向测试及完整 service reactor。
+- JMH 固定为 `ContinuousOwnerBenchmark.placeCancelWithoutTimers`、LINEAR_PERPETUAL、batch20、DISTINCT/BUSY_SPIN、1 matcher、4 Account Lane、owner window 256；每 invocation 为 512 Core messages、10,240 business operations。主轮与独立 `-prof gc` 各 1 fork/1 thread、3×3s warmup、3×3s measurement、512MiB/G1；JFR 独立轮同场景、最大 128MiB，不拿 profiler 分数替代主吞吐。
+- JMH 通过条件：accepted/terminal business 与 Core 逐项相等，teardown 资金、冻结、订单终态和快照恢复通过，无异常；报告 invocation/s、换算 Core/business吞吐、`gc.alloc.rate.norm`、B/business、B/Core、GC 次数/时间。分配对照仅使用同配置最新当前分支历史值 1,905.68 B/business；JMH 不含真实网络/Archive，不能冒充实际集群容量。
+- 真实单成员最终轮固定 LINEAR_PERPETUAL、MIXED batch20、128 symbols、4 Lane、1 matcher、全局/session in-flight=256、Owner/Matcher BUSY_SPIN，30s预热、60s稳定窗和独立排空；目标为 business吞吐≥300,000/s、Core吞吐≥30,000/s、各业务p99≤30ms、零错误/超时/unfinished、资金差0及快照恢复一致。单轮用于当前 master 最终检查，不声称统计稳定容量，也不把历史41.5万峰值当作本轮硬门槛。
+- JFR 重点核对 matcher native/result包装、Owner/Lane分配、GC和线程执行热点。若 `CoreMatchingResult` 仅是 deferred matcher→Owner 生命周期所需且占比很小，第七阶段结论为“不可安全删除并保留”，记录证据而不新增协议；若有重复包装则只删除重复层并复测。
+- 环境为本机 MacBookPro16,1、16逻辑CPU/16GiB、macOS 26.7，HotSpot Corretto JDK 27.0.0.33.1、Maven 3.9.16；采集前 swap 0、磁盘约252GiB可用。桌面进程存在且未绑核。任何 swap 增长、磁盘不足、JFR DataLoss/损坏、正确性失败使对应数据失败或无效。结束后停止本轮进程，只清理本轮生成物并记录状态。

@@ -30,6 +30,7 @@ public class OwnerPublicationBenchmark {
     private final RuntimeChangeBuffer<UserRuntime> mapChanges = new RuntimeChangeBuffer<>();
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserRuntime> map =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    private long coreSequence;
 
     @Setup public void setup() {
         for (int i = 0; i < users.length; i++) users[i] = new UserRuntime(i + 1);
@@ -43,8 +44,8 @@ public class OwnerPublicationBenchmark {
 
     @Benchmark public Object publishUsers() {
         for (int i = 0; i < users.length; i++) delta.putUser(i + 1, users[i]);
-        delta.preparePublication(runtime);
-        delta.publication.publish();
+        delta.preparePublication();
+        delta.commitTerminalToOwner(runtime, 0, null, ++coreSequence, null, null);
         delta.clear();
         runtime.changedUsers.clear();
         return runtime.publishedUsers.get(20);
