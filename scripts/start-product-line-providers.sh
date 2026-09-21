@@ -41,6 +41,17 @@ VALKEY_HOST="${VALKEY_HOST:-127.0.0.1}"
 VALKEY_PORT="${VALKEY_PORT:-6379}"
 AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-127.0.0.1,127.0.0.1,127.0.0.1}"
 AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
+CORE_AERON_BASE_DIR="${CORE_AERON_BASE_DIR:-${TMPDIR:-/tmp}/surprising-aeron}"
+APP_AERON_DIR="${APP_AERON_DIR:-${TMPDIR:-/tmp}/surprising-app-aeron}"
+REALTIME_ENABLED="${REALTIME_ENABLED:-false}"
+TRADE_EXPORT_ENABLED="${TRADE_EXPORT_ENABLED:-false}"
+REALTIME_ROUTER_PORT="${REALTIME_ROUTER_PORT:-9095}"
+REALTIME_ROUTER_CHANNEL="${REALTIME_ROUTER_CHANNEL:-aeron:udp?endpoint=0.0.0.0:21010}"
+REALTIME_PUBLISH_CHANNEL="${REALTIME_PUBLISH_CHANNEL:-aeron:udp?endpoint=127.0.0.1:21010}"
+REALTIME_WS_CHANNEL="${REALTIME_WS_CHANNEL:-aeron:udp?endpoint=127.0.0.1:21030}"
+REALTIME_CORE_CONTROL_CHANNEL="${REALTIME_CORE_CONTROL_CHANNEL:-aeron:udp?endpoint=127.0.0.1:21020}"
+REALTIME_CORE_CONTROL_DESTINATION="${REALTIME_CORE_CONTROL_DESTINATION:-127.0.0.1:21020}"
+TRADE_EXPORT_CHECKPOINT="${TRADE_EXPORT_CHECKPOINT:-$RUN_DIR/trade-export/checkpoint.bin}"
 BUILD_CHANGED="${BUILD_CHANGED:-false}"
 JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
@@ -68,7 +79,49 @@ case "$JVM_GC" in ZGC|G1) ;; *) fail 'JVM_GC must be ZGC or G1' ;; esac
 case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false' ;; esac
 case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
 case "$POSTGRES_MODE" in auto|docker|native) ;; *) fail 'POSTGRES_MODE must be auto, docker or native' ;; esac
+case "$REALTIME_ENABLED" in true|false) ;; *) fail 'REALTIME_ENABLED must be true or false' ;; esac
+case "$TRADE_EXPORT_ENABLED" in true|false) ;; *) fail 'TRADE_EXPORT_ENABLED must be true or false' ;; esac
 [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "invalid RUN_ID=$RUN_ID"
+
+cluster_member_count() {
+  local hosts=() host
+  IFS=',' read -r -a hosts <<< "$AERON_CLUSTER_HOSTNAMES"
+  (( ${#hosts[@]} == 1 || ${#hosts[@]} == 3 )) || \
+    fail "AERON_CLUSTER_HOSTNAMES must contain one or three hosts value=$AERON_CLUSTER_HOSTNAMES"
+  for host in "${hosts[@]}"; do
+    [[ -n "${host//[[:space:]]/}" ]] || fail "AERON_CLUSTER_HOSTNAMES contains an empty host"
+  done
+  printf '%s\n' "${#hosts[@]}"
+}
+
+product_line_ordinal() {
+  case "$PRODUCT_LINE" in
+    SPOT) printf '0\n' ;;
+    LINEAR_PERPETUAL) printf '1\n' ;;
+    INVERSE_PERPETUAL) printf '2\n' ;;
+    LINEAR_DELIVERY) printf '3\n' ;;
+    INVERSE_DELIVERY) printf '4\n' ;;
+    OPTION) printf '5\n' ;;
+    *) fail "unsupported PRODUCT_LINE=$PRODUCT_LINE" ;;
+  esac
+}
+
+product_line_data_name() {
+  printf '%s\n' "$PRODUCT_LINE" | tr '[:upper:]' '[:lower:]'
+}
+
+core_aeron_directory() {
+  printf '%s-surprising-%s-0\n' "$CORE_AERON_BASE_DIR" "$(product_line_data_name)"
+}
+
+archive_control_channel() {
+  local port=$((20000 + $(product_line_ordinal) * 1000 + 1))
+  printf 'aeron:udp?term-length=65536|endpoint=%s:%s\n' "$AERON_EGRESS_HOSTNAME" "$port"
+}
+
+cluster_id() {
+  printf '%s\n' "$((100 + $(product_line_ordinal)))"
+}
 
 detect_jvm_campaign_support() {
   local version_output
@@ -112,6 +165,7 @@ jar_path() {
     core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$ROOT_DIR" ;;
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
     benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$ROOT_DIR" ;;
+    realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
@@ -149,7 +203,9 @@ build_artifacts() {
     BUILD_BASE="${BUILD_BASE:-HEAD}" "$ROOT_DIR/scripts/build-incremental.sh" --changed
   fi
   local service missing=()
-  for service in core tools "${SERVICES[@]}"; do
+  local required_artifacts=(core tools "${SERVICES[@]}")
+  [[ "$REALTIME_ENABLED" == true ]] && required_artifacts+=(realtime)
+  for service in "${required_artifacts[@]}"; do
     service_enabled "$service" || continue
     [[ -f "$(jar_path "$service")" ]] || missing+=("$service")
   done
@@ -340,6 +396,18 @@ COMMON_ENV=(
     MM_ORDER_LEVELS="$MM_ORDER_LEVELS"
 )
 
+if [[ "$REALTIME_ENABLED" == true ]]; then
+  COMMON_ENV+=(
+    SURPRISING_REALTIME_ENABLED=true
+    SURPRISING_REALTIME_PUBLISH_JSON=true
+    SURPRISING_REALTIME_DIRECTORY="$APP_AERON_DIR"
+    SURPRISING_REALTIME_CHANNEL="$REALTIME_PUBLISH_CHANNEL"
+    SURPRISING_REALTIME_STREAM=2101
+    SURPRISING_REALTIME_WS_CHANNEL="$REALTIME_WS_CHANNEL"
+    SURPRISING_REALTIME_WS_STREAM=2103
+  )
+fi
+
 start_http_service() {
   local service="$1" port
   port="$(service_port "$service")"
@@ -357,13 +425,24 @@ start_background_service() {
 }
 
 start_core() {
-  local mode="${1:-up}" node
+  local mode="${1:-up}" node member_count
+  member_count="$(cluster_member_count)"
   if [[ "$mode" == fresh && -d "$RUN_DIR/aeron" ]]; then
     mv "$RUN_DIR/aeron" "$RUN_DIR/aeron.previous.$(date +%s)"
   fi
   mkdir -p "$RUN_DIR/aeron"
-  for node in 0 1 2; do
+  for ((node = 0; node < member_count; node++)); do
     java_args_for "core-node$node"
+    JVM_ARGS+=("-Daeron.dir=$CORE_AERON_BASE_DIR")
+    if [[ "$REALTIME_ENABLED" == true ]]; then
+      JVM_ARGS+=(
+        "-Dsurprising.realtime.directory=$(core_aeron_directory)"
+        "-Dsurprising.realtime.channel=$REALTIME_PUBLISH_CHANNEL"
+        "-Dsurprising.realtime.stream=2101"
+        "-Dsurprising.realtime.control-channel=$REALTIME_CORE_CONTROL_CHANNEL"
+        "-Dsurprising.realtime.control-stream=2102"
+      )
+    fi
     start_owned_process "core-node$node" '' "${COMMON_ENV[@]}" AERON_CORE_THREADING_MODE=DEDICATED \
       "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
       -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
@@ -387,6 +466,39 @@ start_core() {
   mark_ready core-cluster
 }
 
+start_app_media_driver() {
+  java_args_for app-media-driver
+  start_owned_process "app-media-driver" '' "${COMMON_ENV[@]}" \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
+    "-Daeron.dir=$APP_AERON_DIR" "-Daeron.threading.mode=SHARED" \
+    -cp "$(jar_path tools)" io.aeron.driver.MediaDriver
+}
+
+start_realtime_router() {
+  local router_json
+  router_json="${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-{\"surprising\":{\"realtime\":{\"router\":{\"control-channels\":{\"$PRODUCT_LINE\":\"aeron:udp?control-mode=manual\"},\"control-destinations\":{\"$PRODUCT_LINE\":[\"aeron:udp?endpoint=$REALTIME_CORE_CONTROL_DESTINATION\"]}}}}}}"
+  java_args_for realtime-router
+  start_owned_process "realtime-router" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
+    AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
+    SERVER_PORT="$REALTIME_ROUTER_PORT" SPRING_APPLICATION_JSON="$router_json" \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path realtime)"
+}
+
+start_trade_export() {
+  mkdir -p "$(dirname "$TRADE_EXPORT_CHECKPOINT")"
+  java_args_for trade-export
+  start_owned_process "trade-export" '' "${COMMON_ENV[@]}" \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -cp "$(jar_path tools)" \
+    com.surprising.aeron.tools.export.CommittedTradeExportMain \
+    "$PRODUCT_LINE" \
+    "$RUN_DIR/aeron/$(product_line_data_name)/node0/cluster" \
+    "$(core_aeron_directory)" \
+    "$(archive_control_channel)" \
+    "$KAFKA_BOOTSTRAP_SERVERS" \
+    "$TRADE_EXPORT_CHECKPOINT" \
+    "$(cluster_id)"
+}
+
 start_stack() {
   local core_action="$1"
   preflight
@@ -396,6 +508,11 @@ start_stack() {
   initialize_database
   start_http_service instrument
   start_core "$core_action"
+  if [[ "$REALTIME_ENABLED" == true ]]; then
+    start_app_media_driver
+    start_realtime_router
+  fi
+  [[ "$TRADE_EXPORT_ENABLED" == true ]] && start_trade_export
   start_http_service price
   start_http_service account
   start_http_service trading
@@ -472,8 +589,14 @@ run_test() {
 
 print_status() {
   [[ -f "$LOCK_OWNER" && "$(<"$LOCK_OWNER")" == "$RUN_ID" ]] || fail "runtime not active runId=$RUN_ID"
-  local service pid index
-  local required_services=(core-node0 core-node1 core-node2) verified_pids=()
+  local service pid index member_count
+  member_count="$(cluster_member_count)"
+  local required_services=() verified_pids=()
+  for ((index = 0; index < member_count; index++)); do
+    required_services+=("core-node$index")
+  done
+  [[ "$REALTIME_ENABLED" == true ]] && required_services+=(app-media-driver realtime-router)
+  [[ "$TRADE_EXPORT_ENABLED" == true ]] && required_services+=(trade-export)
   for service in "${SERVICES[@]}"; do
     service_enabled "$service" && required_services+=("$service")
   done
@@ -521,11 +644,18 @@ verify_owned_process() {
 }
 
 print_dry_run() {
-  printf 'DRY_RUN=PASS\nPRODUCT_LINE=%s\nRUN_ID=%s\nCORE_MODE=HOST_THREE_NODE_DEDICATED\n' "$PRODUCT_LINE" "$RUN_ID"
+  local member_count
+  member_count="$(cluster_member_count)"
+  printf 'DRY_RUN=PASS\nPRODUCT_LINE=%s\nRUN_ID=%s\nCORE_MODE=HOST_%s_NODE_DEDICATED\n' "$PRODUCT_LINE" "$RUN_ID" "$member_count"
   printf 'JVM_COMPATIBILITY=PASS implementation=%s featureVersion=%s collector=%s telemetry=%s jfr=%s\n' \
     "$JVM_IMPLEMENTATION" "$JVM_FEATURE_VERSION" "$JVM_GC" "$JVM_TELEMETRY_MODE" "$JFR_ENABLED"
   local service
-  printf 'START_ORDER=instrument,host-core-node0,host-core-node1,host-core-node2,price,account,trading,market-data'
+  printf 'START_ORDER=instrument'
+  local index
+  for ((index = 0; index < member_count; index++)); do printf ',host-core-node%s' "$index"; done
+  [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver,realtime-router'
+  [[ "$TRADE_EXPORT_ENABLED" == true ]] && printf ',trade-export'
+  printf ',price,account,trading,market-data'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   service_enabled funding && printf ',funding'
   printf ',gateway,maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \

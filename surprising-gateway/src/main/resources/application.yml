@@ -94,7 +94,7 @@ surprising:
       verification-code-ttl: ${GATEWAY_VERIFICATION_CODE_TTL:10m}
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
       issuer: surprising-ex-gateway
-      jwt-secret: local-dev-change-me-surprising-ex-gateway-secret-2026
+      jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       access-token-ttl: 30m
       refresh-token-ttl: 30d
     http-client:

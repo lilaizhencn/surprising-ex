@@ -126,4 +126,6 @@ flowchart TB
 | [surprising-gateway](surprising-gateway/) | 接入、认证、管理接口与 WebSocket 连接 |
 | [surprising-maker](surprising-maker/) | 做市程序与相关业务支持 |
 
+测试服务器单节点永续部署见 [deployment/test-single-node/README.md](deployment/test-single-node/README.md)。该入口只启用 `LINEAR_PERPETUAL`，不启动 wallet；生产高可用仍需三节点切主和资金链路验收。
+
 用户前端项目为 `surprising-ex-web`、`surprising-client`，后台管理前端项目为 `surprising-admin-web`，与本仓库分别维护。

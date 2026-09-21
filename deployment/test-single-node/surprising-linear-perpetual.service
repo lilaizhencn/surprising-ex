@@ -1,0 +1,17 @@
+[Unit]
+Description=Surprising EX linear perpetual single-node test stack
+After=network-online.target postgresql.service redis.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/surprising-ex
+EnvironmentFile=/etc/surprising/linear-perpetual.env
+ExecStart=/opt/surprising-ex/scripts/linear-perpetual-single-node.sh up
+ExecStop=/opt/surprising-ex/scripts/linear-perpetual-single-node.sh down
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
