@@ -28,6 +28,7 @@ public class PublicTradeEventMapper {
         this(snapshotCache, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache,
                                   CandlestickProperties properties) {
         this(snapshotCache,
