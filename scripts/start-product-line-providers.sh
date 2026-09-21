@@ -43,6 +43,7 @@ AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-127.0.0.1,127.0.0.1,127.0.0.
 AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
 CORE_AERON_BASE_DIR="${CORE_AERON_BASE_DIR:-${TMPDIR:-/tmp}/surprising-aeron}"
 APP_AERON_DIR="${APP_AERON_DIR:-${TMPDIR:-/tmp}/surprising-app-aeron}"
+SERVICE_HEALTH_TIMEOUT_SECONDS="${SERVICE_HEALTH_TIMEOUT_SECONDS:-120}"
 REALTIME_ENABLED="${REALTIME_ENABLED:-false}"
 TRADE_EXPORT_ENABLED="${TRADE_EXPORT_ENABLED:-false}"
 REALTIME_ROUTER_PORT="${REALTIME_ROUTER_PORT:-9095}"
@@ -352,7 +353,7 @@ start_owned_process() {
   fi
   printf '%s\n' "$pid" > "$PID_DIR/$name.pid"
   if [[ -n "$port" ]]; then
-    local deadline=$((SECONDS + 120))
+    local deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT_SECONDS))
     until port_owned_by_process_tree "$port" "$pid" && curl --fail --silent --max-time 2 \
       "http://127.0.0.1:$port/actuator/health" >/dev/null; do
       kill -0 "$pid" 2>/dev/null || fail "service exited name=$name log=$LOG_DIR/$name.log"
