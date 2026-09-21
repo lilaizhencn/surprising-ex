@@ -121,7 +121,7 @@ class ParallelRiskScanTest {
 
     @Test
     void closingAProfitablePositionBetweenPagesMustNotCountItsProfitTwice() {
-        var reducer = new TradingCoreReducer(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
                 new RegisterInstrumentCommand("ETH-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
@@ -159,7 +159,7 @@ class ParallelRiskScanTest {
 
     @Test
     void anotherSymbolsPriceChangeInvalidatesPartialPortfolioEvenAfterSnapshot() {
-        var reducer = new TradingCoreReducer(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
                 new RegisterInstrumentCommand("ETH-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
@@ -237,7 +237,7 @@ class ParallelRiskScanTest {
     }
 
     private static TradingCoreState source(CoreMarginMode margin, int usersPerLane) {
-        var reducer = new TradingCoreReducer(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));

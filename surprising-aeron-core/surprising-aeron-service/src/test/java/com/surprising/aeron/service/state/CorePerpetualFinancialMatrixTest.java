@@ -157,7 +157,7 @@ class CorePerpetualFinancialMatrixTest {
             "INVERSE_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE",
             "INVERSE_PERPETUAL:ISOLATED:ISOLATED_FREE_COLLATERAL_LEAKAGE");
 
-    private final TradingCoreReducer reducer = new TradingCoreReducer();
+    private final RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
 
     @Test
     void crossLaneFundingReturnsOwnerContributionsBeforeSequencerTreasuryApply() {
@@ -168,7 +168,7 @@ class CorePerpetualFinancialMatrixTest {
                 DEFAULT_WALLET, POSITION_MARGIN);
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
         ApplyFundingCommand command = new ApplyFundingCommand(701, SYMBOL, 100_000);
-        TradingCoreReducer.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
+        RuntimeTestStateTransitions.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities);
         assertThat(runtime.topology().accountLaneId(USER_ID))
@@ -412,7 +412,7 @@ class CorePerpetualFinancialMatrixTest {
     private Row funding(Variant variant, long fundingRatePpm, String scenario) {
         TradingCoreState opening = oppositePositions(variant, DEFAULT_WALLET, DEFAULT_WALLET);
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
-        TradingCoreReducer.FundingApplication application = reducer.applyFundingWithFacts(marked,
+        RuntimeTestStateTransitions.FundingApplication application = reducer.applyFundingWithFacts(marked,
                 new ApplyFundingCommand(300 + (fundingRatePpm > 0 ? 1 : 2), SYMBOL, fundingRatePpm));
         TradingCoreState ending = application.state();
 
@@ -461,7 +461,7 @@ class CorePerpetualFinancialMatrixTest {
         boolean partial = closeQuantity != QUANTITY;
         TradingCoreState opening;
         TradingCoreState marked;
-        TradingCoreReducer.FundingApplication funding = null;
+        RuntimeTestStateTransitions.FundingApplication funding = null;
         long executionPrice;
         long feeRate;
         if (partial) {
@@ -548,7 +548,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState opening = withPosition(variant, USER_ID, -QUANTITY, ENTRY_PRICE, 400, POSITION_MARGIN);
         opening = withPosition(opening, variant, MAKER_ID, QUANTITY, ENTRY_PRICE, 300, POSITION_MARGIN);
         TradingCoreState markedAtEntry = mark(opening, variant, ENTRY_PRICE, 1);
-        TradingCoreReducer.FundingApplication funding = reducer.applyFundingWithFacts(markedAtEntry,
+        RuntimeTestStateTransitions.FundingApplication funding = reducer.applyFundingWithFacts(markedAtEntry,
                 new ApplyFundingCommand(501, SYMBOL, -100_000));
         TradingCoreState marked = mark(funding.state(), variant, 150, 2);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
@@ -783,13 +783,13 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState opening = oppositePositions(variant, DEFAULT_WALLET, DEFAULT_WALLET);
         TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
         UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000301");
-        TradingCoreReducer.FundingApplication first = reducer.applyFundingWithFacts(marked,
+        RuntimeTestStateTransitions.FundingApplication first = reducer.applyFundingWithFacts(marked,
                 new ApplyFundingCommand(301, SYMBOL, 100_000, 0, 1),
                 List.of(USER_ID, MAKER_ID), firstId);
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
         assertThat(restored).isEqualTo(first.state());
-        TradingCoreReducer.FundingApplication second = reducer.applyFundingWithFacts(restored,
+        RuntimeTestStateTransitions.FundingApplication second = reducer.applyFundingWithFacts(restored,
                 new ApplyFundingCommand(301, SYMBOL, 100_000, USER_ID, 1),
                 List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000302"));
         assertThat(first.progress().complete()).isFalse();

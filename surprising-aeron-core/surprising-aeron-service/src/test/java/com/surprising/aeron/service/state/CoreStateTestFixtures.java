@@ -20,7 +20,7 @@ final class CoreStateTestFixtures {
     private CoreStateTestFixtures() {
     }
 
-    static TradingCoreState withInstrument(TradingCoreReducer reducer, ProductLine productLine) {
+    static TradingCoreState withInstrument(RuntimeTestStateTransitions reducer, ProductLine productLine) {
         return reducer.registerInstrument(TradingCoreState.empty(productLine), instrument(productLine,
                 "BTC-USDT", "BTC", "USDT", settleAsset(productLine)));
     }

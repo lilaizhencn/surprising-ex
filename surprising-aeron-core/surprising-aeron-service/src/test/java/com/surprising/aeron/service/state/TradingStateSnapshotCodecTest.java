@@ -27,7 +27,7 @@ class TradingStateSnapshotCodecTest {
 
     @Test
     void roundTripPreservesBusinessAndEntityHashes() {
-        TradingCoreReducer reducer = new TradingCoreReducer();
+        RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
         TradingCoreState state = reducer.adjustBalance(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.OPTION),
                         CoreStateTestFixtures.instrument(ProductLine.OPTION,

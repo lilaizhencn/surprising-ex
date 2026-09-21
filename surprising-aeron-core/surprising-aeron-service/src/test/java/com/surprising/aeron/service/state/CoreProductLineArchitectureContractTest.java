@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreProductLineArchitectureContractTest {
 
-    private final TradingCoreReducer reducer = new TradingCoreReducer();
+    private final RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
 
     @Test
     void everyProductLineUsesOneMappedContractAndOneCoreState() {

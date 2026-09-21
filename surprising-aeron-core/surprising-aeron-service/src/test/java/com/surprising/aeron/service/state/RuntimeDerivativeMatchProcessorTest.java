@@ -44,7 +44,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
-        TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -86,7 +86,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
-        TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
@@ -109,7 +109,7 @@ class RuntimeDerivativeMatchProcessorTest {
         List<MatcherEvent> matches = List.of(
                 trade(12, 8, 100, 1, true, false),
                 trade(13, 9, 100, 1, true, true));
-        TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
@@ -143,7 +143,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200)), Map.of(11L, taker),
                 Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
-        TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", List.of());
+        TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", List.of());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
@@ -153,7 +153,7 @@ class RuntimeDerivativeMatchProcessorTest {
 
     @Test
     void betterPricedSellActiveCloseSettlesExactFeeAndMatchesRuntime() {
-        TradingCoreReducer reducer = new TradingCoreReducer();
+        RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 liveInstrument());
         state = reducer.applyMarkPrice(state,
@@ -229,7 +229,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 Map.of(7L, takerUser, 8L, user(8, maker, 300)), Map.of(11L, taker, 12L, maker),
                 Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 120, quantity, true, true));
-        TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);

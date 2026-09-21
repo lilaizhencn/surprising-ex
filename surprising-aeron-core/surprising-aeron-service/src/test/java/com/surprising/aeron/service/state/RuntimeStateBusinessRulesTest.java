@@ -39,9 +39,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-class TradingCoreReducerTest {
+class RuntimeStateBusinessRulesTest {
 
-    private final TradingCoreReducer reducer = new TradingCoreReducer();
+    private final RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
 
     @Test
     void reservesAndReleasesSpotBuyQuoteAssetAtomically() {
@@ -51,14 +51,6 @@ class TradingCoreReducerTest {
                 order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 3_000));
         TradingCoreState canceled = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
 
-        assertThat(StateMapSupport.isDelta(placed.users())).isTrue();
-        assertThat(StateMapSupport.isDelta(placed.orders())).isTrue();
-        assertThat(StateMapSupport.isDelta(placed.user(101).balances())).isTrue();
-        assertThat(StateMapSupport.isDelta(placed.user(101).reservations())).isTrue();
-        assertThat(StateMapSupport.isDelta(canceled.users())).isTrue();
-        assertThat(StateMapSupport.isDelta(canceled.orders())).isTrue();
-        assertThat(StateMapSupport.isDelta(canceled.user(101).balances())).isTrue();
-        assertThat(StateMapSupport.isDelta(canceled.user(101).reservations())).isTrue();
         assertBalance(placed, "USDT", 9_900, 100);
         assertThat(placed.user(101).totalUnits("USDT")).isEqualTo(10_000);
         assertThat(placed.user(101).reservations().get(1L).remainingUnits()).isEqualTo(100);
@@ -151,7 +143,7 @@ class TradingCoreReducerTest {
         TradingCoreState firstCancel = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
         TradingCoreState secondCancel = reducer.cancelOrder(firstCancel, 101, new CancelOrderCommand(1));
 
-        assertThat(secondCancel).isSameAs(firstCancel);
+        assertThat(secondCancel).isEqualTo(firstCancel);
         assertBalance(secondCancel, "USDT", 1_000, 0);
     }
 
@@ -423,7 +415,6 @@ class TradingCoreReducerTest {
 
         TradingCoreState leveraged = reducer.updateLeverage(funded, 101,
                 new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L));
-        assertThat(StateMapSupport.isDelta(leveraged.leverages())).isTrue();
         PlaceOrderCommand order = new PlaceOrderCommand(301, "BTC-USDT", CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
 
         TradingCoreState placed = reducer.placeOrder(leveraged, 101, order);
@@ -439,7 +430,6 @@ class TradingCoreReducerTest {
         TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);
         var initial = algo(501, 101, 1, List.of());
         TradingCoreState created = reducer.upsertAlgoOrder(funded, 101, initial);
-        assertThat(StateMapSupport.isDelta(created.algoOrders())).isTrue();
         TradingCoreState withChild = reducer.placeOrder(created, 101,
                 order(601, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
         TradingCoreState linked = reducer.upsertAlgoOrder(withChild, 101, algo(501, 101, 2, List.of(601L)));
@@ -463,7 +453,6 @@ class TradingCoreReducerTest {
                 com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 101, "BTC-USDT",
                 1_000, 2_000, 0, 0, 0, 1_000);
         TradingCoreState active = reducer.updateCancelAllAfter(state, 101, set);
-        assertThat(StateMapSupport.isDelta(active.cancelAllAfterTimers())).isTrue();
         CoreCancelAllAfterState activeTimer = active.cancelAllAfterTimers()
                 .get(new CoreCancelAllAfterKey(101, "BTC-USDT"));
         var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(

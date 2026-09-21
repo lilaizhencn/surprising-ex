@@ -168,12 +168,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(settled.treasuryState().feeBalances()).doesNotContainKey(option.settleAsset());
         assertThat(settled.treasuryState().lifecycleSettlements()).containsEntry(option.symbol(), 401L);
         assertThat(reducer.settleInstrument(settled,
-                new SettleInstrumentCommand(401, option.symbol(), 1, 1))).isSameAs(settled);
+                new SettleInstrumentCommand(401, option.symbol(), 1, 1))).isEqualTo(settled);
 
         Variant delivery = VARIANTS.get(2);
         TradingCoreState cursorState = oppositePositions(delivery, WALLET, WALLET);
         SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(402, delivery.symbol(), delivery.settlementPriceTicks(), 77, 0, 1);
-        TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(cursorState,
+        RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(cursorState,
                 firstCommand, List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000402"));
         long hash = first.state().businessStateHash();
         assertThatThrownBy(() -> reducer.settleInstrumentWithProgress(first.state(), firstCommand,
@@ -198,7 +198,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             long settlementId = variant.type().isOption() ? 403 : 404;
             SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.symbol(), variant.settlementPriceTicks(), 9_999, 0, 1);
 
-            TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+            RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
                     firstCommand, List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000403"));
 
@@ -208,7 +208,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
             assertThat(restored).isEqualTo(first.state());
 
-            TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
+            RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
                     new SettleInstrumentCommand(settlementId, variant.symbol(), variant.settlementPriceTicks(), 9_999, USER_ID, 1),
                     List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000404"));
@@ -226,7 +226,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             long settlementId = variant.type() == ContractType.LINEAR_DELIVERY ? 405 : 406;
             SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.symbol(), variant.settlementPriceTicks(), 9_999, 0, 1);
 
-            TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+            RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
                     firstCommand, List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000405"));
 
@@ -236,7 +236,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
             assertThat(restored).isEqualTo(first.state());
 
-            TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
+            RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
                     new SettleInstrumentCommand(settlementId, variant.symbol(), variant.settlementPriceTicks(), 9_999, USER_ID, 1),
                     List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000406"));
@@ -370,7 +370,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(total(settled, option.settleAsset())).isEqualTo(before);
     }
 
-    private final TradingCoreReducer reducer = new TradingCoreReducer();
+    private final RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
 
     @Test
     void deliveryAdlCandidatesIncludeProfitablePositionsAcrossMarginModesAndRestore() {

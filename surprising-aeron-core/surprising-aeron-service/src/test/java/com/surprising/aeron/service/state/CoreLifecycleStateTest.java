@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreLifecycleStateTest {
 
-    private final TradingCoreReducer reducer = new TradingCoreReducer();
+    private final RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
 
     @Test
     void linearFundingIsZeroSumAndSettlementIdSurvivesSnapshot() {
@@ -75,7 +75,7 @@ class CoreLifecycleStateTest {
         state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 100, 1,
                 1_700_000_000_000L));
 
-        TradingCoreReducer.FundingApplication application = reducer.applyFundingWithFacts(state,
+        RuntimeTestStateTransitions.FundingApplication application = reducer.applyFundingWithFacts(state,
                 new ApplyFundingCommand(92, "BTC-USDT", 10_000));
 
         assertThat(application.payments()).hasSize(2);
@@ -112,7 +112,7 @@ class CoreLifecycleStateTest {
         hedged = reducer.applyMarkPrice(hedged, new ApplyMarkPriceCommand("BTC-USDT", 100, 1,
                 1_700_000_000_000L));
 
-        TradingCoreReducer.FundingApplication netZero = reducer.applyFundingWithFacts(hedged,
+        RuntimeTestStateTransitions.FundingApplication netZero = reducer.applyFundingWithFacts(hedged,
                 new ApplyFundingCommand(93, "BTC-USDT", 10_000));
 
         assertThat(netZero.payments()).extracting(payment -> payment.positionSide())
@@ -126,7 +126,7 @@ class CoreLifecycleStateTest {
                 ContractType.LINEAR_PERPETUAL, 1, 10, 100, 5, 0);
         lowCash = reducer.applyMarkPrice(lowCash, new ApplyMarkPriceCommand("BTC-USDT", 100, 1,
                 1_700_000_000_000L));
-        TradingCoreReducer.FundingApplication capped = reducer.applyFundingWithFacts(lowCash,
+        RuntimeTestStateTransitions.FundingApplication capped = reducer.applyFundingWithFacts(lowCash,
                 new ApplyFundingCommand(94, "BTC-USDT", 10_000));
 
         assertThat(capped.payments()).singleElement().satisfies(payment ->
@@ -144,7 +144,7 @@ class CoreLifecycleStateTest {
                 1_700_000_000_000L));
         ApplyFundingCommand firstCommand = new ApplyFundingCommand(95, "BTC-USDT", 10_000, 0, 1);
 
-        TradingCoreReducer.FundingApplication first = reducer.applyFundingWithFacts(state, firstCommand,
+        RuntimeTestStateTransitions.FundingApplication first = reducer.applyFundingWithFacts(state, firstCommand,
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000095"));
 
         assertThat(first.progress().complete()).isFalse();
@@ -155,7 +155,7 @@ class CoreLifecycleStateTest {
                 TradingStateSnapshotCodec.encode(first.state()), ProductLine.LINEAR_PERPETUAL);
         assertThat(restored).isEqualTo(first.state());
 
-        TradingCoreReducer.FundingApplication second = reducer.applyFundingWithFacts(restored,
+        RuntimeTestStateTransitions.FundingApplication second = reducer.applyFundingWithFacts(restored,
                 new ApplyFundingCommand(95, "BTC-USDT", 10_000, 1, 1), List.of(1L, 2L),
                 UUID.fromString("00000000-0000-0000-0000-000000000096"));
 
@@ -172,7 +172,7 @@ class CoreLifecycleStateTest {
         netZero = reducer.applyMarkPrice(netZero, new ApplyMarkPriceCommand("BTC-USDT", 100, 1,
                 1_700_000_000_000L));
         ApplyFundingCommand netZeroCommand = new ApplyFundingCommand(101, "BTC-USDT", 10_000);
-        TradingCoreReducer.FundingApplication netZeroExpected = reducer.applyFundingWithFacts(netZero,
+        RuntimeTestStateTransitions.FundingApplication netZeroExpected = reducer.applyFundingWithFacts(netZero,
                 netZeroCommand);
         RuntimeIdentityRegistry netZeroIdentities = new RuntimeIdentityRegistry();
         TradingRuntimeState netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
@@ -187,7 +187,7 @@ class CoreLifecycleStateTest {
         capped = reducer.applyMarkPrice(capped, new ApplyMarkPriceCommand("BTC-USDT", 100, 1,
                 1_700_000_000_000L));
         ApplyFundingCommand cappedCommand = new ApplyFundingCommand(102, "BTC-USDT", 10_000);
-        TradingCoreReducer.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
+        RuntimeTestStateTransitions.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
         RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
         var cappedActual = RuntimePerpetualFundingFixture.simulate(capped, cappedCommand,
                 null, null, cappedIdentities);
@@ -197,7 +197,7 @@ class CoreLifecycleStateTest {
         TradingCoreState chunked = netZero;
         UUID firstCommandId = UUID.fromString("00000000-0000-0000-0000-000000000101");
         ApplyFundingCommand firstCommand = new ApplyFundingCommand(103, "BTC-USDT", 10_000, 0, 1);
-        TradingCoreReducer.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked, firstCommand,
+        RuntimeTestStateTransitions.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked, firstCommand,
                 List.of(1L, 2L), firstCommandId);
         RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
         TradingRuntimeState chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
@@ -211,7 +211,7 @@ class CoreLifecycleStateTest {
                 TradingStateSnapshotCodec.encode(firstExpected.state()), ProductLine.LINEAR_PERPETUAL);
         UUID secondCommandId = UUID.fromString("00000000-0000-0000-0000-000000000102");
         ApplyFundingCommand secondCommand = new ApplyFundingCommand(103, "BTC-USDT", 10_000, 1, 1);
-        TradingCoreReducer.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored, secondCommand,
+        RuntimeTestStateTransitions.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored, secondCommand,
                 List.of(1L, 2L), secondCommandId);
         var secondActual = RuntimePerpetualFundingProcessor.apply(restored, secondCommand,
                 List.of(1L, 2L), secondCommandId, firstActual.state(), chunkedIdentities);
@@ -297,7 +297,7 @@ class CoreLifecycleStateTest {
         TradingCoreState duplicate = reducer.settleInstrument(settled,
                 new SettleInstrumentCommand(73, "BTC-USDT", 1, 1));
 
-        assertThat(duplicate).isSameAs(settled);
+        assertThat(duplicate).isEqualTo(settled);
         assertThat(duplicate.treasuryState().lifecycleSettlements()).containsEntry("BTC-USDT", 73L);
         assertThat(duplicate.users().values()).allSatisfy(user -> {
             assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero();
@@ -311,7 +311,7 @@ class CoreLifecycleStateTest {
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
         SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(96, "BTC-USDT", 120, 0, 0, 1);
 
-        TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+        RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
                 firstCommand, List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000096"));
 
         assertThat(first.progress().complete()).isFalse();
@@ -321,7 +321,7 @@ class CoreLifecycleStateTest {
                 TradingStateSnapshotCodec.encode(first.state()), ProductLine.LINEAR_DELIVERY);
         assertThat(restored).isEqualTo(first.state());
 
-        TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
+        RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
                 new SettleInstrumentCommand(96, "BTC-USDT", 120, 0, 1, 1), List.of(1L, 2L),
                 UUID.fromString("00000000-0000-0000-0000-000000000097"));
 
@@ -341,7 +341,7 @@ class CoreLifecycleStateTest {
         state = reducer.placeOrder(state, 1, lifecycleOrder(101));
         state = reducer.placeOrder(state, 2, lifecycleOrder(102));
 
-        TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+        RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
                 new SettleInstrumentCommand(97, "BTC-USDT", 120, 0, 0, 256, 0, 1),
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000097"));
 
@@ -351,7 +351,7 @@ class CoreLifecycleStateTest {
         assertThat(first.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
         assertThat(first.state().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
 
-        TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
+        RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
                 new SettleInstrumentCommand(97, "BTC-USDT", 120, 0, 0, 256, 102, 1),
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000098"));
 

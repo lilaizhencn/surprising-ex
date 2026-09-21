@@ -19,7 +19,7 @@ class RuntimeStateTransitionsTest {
 
     @Test
     void productTransferUsesOnlyBoundedRuntimeState() {
-        TradingCoreState before = new TradingCoreReducer().adjustBalance(
+        TradingCoreState before = new RuntimeTestStateTransitions().adjustBalance(
                 TradingCoreState.empty(ProductLine.SPOT), 7,
                 new BalanceAdjustmentCommand("USDT", 1_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -54,7 +54,7 @@ class RuntimeStateTransitionsTest {
 
     @Test
     void adjustsBalanceDirectlyInRuntimeAcrossEveryProductLine() {
-        TradingCoreReducer reference = new TradingCoreReducer();
+        RuntimeTestStateTransitions reference = new RuntimeTestStateTransitions();
         for (ProductLine productLine : ProductLine.values()) {
             TradingCoreState before = TradingCoreState.empty(productLine);
             BalanceAdjustmentCommand command = new BalanceAdjustmentCommand("USDT", 1_000);
@@ -72,7 +72,7 @@ class RuntimeStateTransitionsTest {
 
     @Test
     void rejectedBalanceAdjustmentLeavesRuntimeUnchanged() {
-        TradingCoreState before = new TradingCoreReducer().adjustBalance(
+        TradingCoreState before = new RuntimeTestStateTransitions().adjustBalance(
                 TradingCoreState.empty(ProductLine.SPOT), 7, new BalanceAdjustmentCommand("USDT", 10));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -89,7 +89,7 @@ class RuntimeStateTransitionsTest {
         UpdateRiskScanControlCommand command = new UpdateRiskScanControlCommand(
                 before.riskState().scanControl().version(), "runtime-owner", true,
                 25, 64, "qa", "runtime authority");
-        TradingCoreState expected = new TradingCoreReducer().updateRiskScanControl(before, command, 123);
+        TradingCoreState expected = new RuntimeTestStateTransitions().updateRiskScanControl(before, command, 123);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -104,7 +104,7 @@ class RuntimeStateTransitionsTest {
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(
                 "BTC-USDT", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
-        TradingCoreState expected = new TradingCoreReducer().registerInstrument(before, command);
+        TradingCoreState expected = new RuntimeTestStateTransitions().registerInstrument(before, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -117,7 +117,7 @@ class RuntimeStateTransitionsTest {
     void updatesPositionModeDirectlyInRuntime() {
         TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         UpdatePositionModeCommand command = new UpdatePositionModeCommand(CorePositionMode.HEDGE);
-        TradingCoreState expected = new TradingCoreReducer().updatePositionMode(before, 7, command);
+        TradingCoreState expected = new RuntimeTestStateTransitions().updatePositionMode(before, 7, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -129,7 +129,7 @@ class RuntimeStateTransitionsTest {
 
     @Test
     void updatesLeverageDirectlyInRuntime() {
-        TradingCoreReducer reference = new TradingCoreReducer();
+        RuntimeTestStateTransitions reference = new RuntimeTestStateTransitions();
         TradingCoreState before = reference.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
