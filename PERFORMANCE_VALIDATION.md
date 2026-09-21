@@ -2098,3 +2098,4 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 仅删除六轮已确认属于本轮的data（Cluster/Archive）、aeron、client-aeron、tmp目录，并在确认旧worktree源码clean后移除旧版worktree及其构建产物；当前master及当前版target未删除。
 - 命令、日志、指标、NMT、分析和校验清单已归档至`/Users/atomex/.Trash/surprising-ex-reboot-ab-20260921/`，可恢复；原Desktop/tmp路径仅作历史定位。原始Cluster/Archive已按要求清理，不能再以原路径做恢复测试。未删除其他轮次、快照、用户文件，也未改供电/后台应用配置。
 - 本次仅追加PERFORMANCE_VALIDATION.md，不修改业务源码；`git diff --check`通过。
+- 清理复核补充：服务实际Aeron目录使用派生后缀`aeron-surprising-linear_perpetual-0`；已逐一删除六轮这类映射目录约2.6GiB，归档仅保留命令/日志/指标/分析证据。manifest中这些已删除映射文件条目仅作历史定位。
