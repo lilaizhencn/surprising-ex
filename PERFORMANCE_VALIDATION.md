@@ -1701,3 +1701,36 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 正式轮37次GC加退出前一次metadata-threshold GC，总暂停574ms；暂停p50/p95/p99/max为12.1/48.6/64.9/64.9ms。稳态young GC后堆约427–430MiB，Old region在后半段保持142→142，无promotion/evacuation failure。正式窗口607个RSS样本为4.266–4.295GiB，首末增加21.2MiB；固定4GiB堆已预触页，10分钟内未见持续Old增长。DirectBufferStatistics均为0；本轮未启用NMT，native分类不可用。
 - 正式JFR/result/GC日志SHA-256分别为`1ae1e34a0c0627d83f7606999866fd018b50e8ff329c5ee58587aeb0b4fd83b2`、`3eebc2df6c016bd7d4317dc7cddc0c941f27ca9df6bb447b5c64e111445a4382`、`61a6f38a9e8a74e634f58cee39e59ee63777ecac67d41f1084be2299eb926e35`；独立GC-profiler result为`2d671f34231e764518b921a8959bf8a7acf13fed0de2cd22592e57bcfaebf027`。原始路径仅作清理前定位：`target/linear-perpetual-scenarios/dense-book-async-10m-20260921`和`dense-book-async-gc-20260921`。
 - 正式轮、GC-profiler轮及两次短轮目录均已移动到`/Users/atomex/.Trash/surprising-ex-dense-book-async-20260921/`，可恢复；项目目录无本轮artifact和Java/JMH残留进程，清理后根卷可用544GiB。
+
+## 2026-09-21 ResponseArena伪热点校正与交易热路径对象审计
+
+### 采集前锁定计划
+
+- 上轮JFR把`ResponseArena.acquire`列为Owner有效热点和byte[]主要分配站点；重新核对生产`ClusterServiceEgress/OwnerResponsePublisher`与局部Harness后发现，生产出口会调用`releaseResponse`，而Harness校验终态响应后直接丢弃对象，未释放transport lease。512个arena槽因此永久耗尽，后续命令全部走精确数组fallback；这是压测器生命周期缺失，不是已证实的生产arena缺陷。
+- 本轮只补齐Harness作为终端transport consumer的释放动作，不改生产`ResponseArena`、交易业务状态、线程、barrier或队列。入口仍为异步5000账户、256在途、200档×1,250单、250,000常驻订单；终态校验完成后释放响应槽，ledger引用仍独立保留到淘汰，业务顺序和恢复校验不变。
+- 先执行JDK27定向24项测试与模块打包；性能先跑独立`-prof gc`短轮验证fallback是否消失，再以30秒预热、至少60秒JFR诊断有效CPU和分配站点。通过条件为accepted=terminal、无拒绝/错误/超时/unfinished、满窗且producer starvation为0、teardown与快照恢复通过；若`ResponseArena.acquire`仍有稳态fallback分配才考虑修改arena领取算法。
+- 同轮静态审计`OrderRuntime`、`CoreResponse`、`CoreMatchingResult/MatcherResult`、`ResolvedPlaceOrder`、`ReservationRuntime`和codec数组：按权威长期状态、跨线程不可变交接、协议输出三类标注必要边界，并找出同一事实重复封装/复制。`dispatchPlaceAdmission`在校正Harness后重新归因；不因类名含Runtime/Result就删除资金、FIFO或跨线程可见性边界。
+
+### 修复、测试与性能结果
+
+- Harness现在在即时终态、单条matching排空和批量ready退休三条路径中，完成业务校验及completion callback后调用`TradingCoreRuntime.releaseResponse`。这与生产egress编码完成后的transport lease释放一致；ledger lease仍由`CommandResultLedger`独立持有到替换/淘汰。没有修改生产`ResponseArena`，也没有新增free ring、游标、锁或线程。
+- 首次只指定benchmark模块的定向命令因本地依赖jar落后于源码而编译失败；改用`-am`从当前源码重建依赖后，`LinearPerpetualBenchmarkSupportTest` 24项全部通过，随后benchmark及直接依赖模块JDK27 package通过。
+- 相同`-prof gc`配置（1×20秒预热、3×10秒测量）的前两个正常测量样本从修复前55,575.839/51,525.073提高到**65,815.575/66,130.630 ops/s**，均值约提升23.2%。第三样本仍包含trial teardown的快照物化，不能用于热路径分配。accepted=terminal，满窗约98.44%，producer starvation、拒绝、错误、超时和unfinished均为0。
+- 前两个有效GC-profiler样本为**2,209.827/2,269.732 B/op**，相对修复前2,494.853/2,444.201 B/op均值下降约9.3%。修复后有效JFR中`ResponseArena.acquire`从上轮1.21%总CPU样本降至0.17%，只在启动预热阶段为未初始化的64KiB槽分配10个采样对象；稳态fallback所在源码行的allocation sample为0，`ResponseArena.acquire`不再出现在allocation-by-site前25名。
+- 有效JFR使用独立fork路径，30秒预热、120秒测量，JFR时长180秒、4.0MiB、DataLoss=0，业务分数49,807.770 ops/s。该分数受JFR及当时同机负载影响，只用于归因，不替代无JFR/GC-profiler吞吐。第一次误把控制进程与fork写入同一JFR路径，文件被控制进程覆盖，已判无效且不用于任何结论。
+
+### 对象与`dispatchPlaceAdmission`审计结论
+
+- `OrderRuntime`不是纯包装：它是Account Lane内订单的权威可变状态，承载剩余量、累计手续费、状态、revision和提交位置；整体删除会丢失资金/订单终态。但每个新订单目前还通过`publishedCopy`创建一份Owner mirror，JFR站点占3.40%，另有`preparedOrder` 2.92%。热路径的可消除部分是**Owner镜像和准备副本**，不是Lane权威订单本体。彻底方案是Owner只保留路由/顺序索引，查询与快照通过Lane fence读取权威状态；这是状态所有权改造，不能混在局部对象优化中。
+- `ReservationRuntime`同样是冻结/保证金消耗与释放的权威Lane状态，不能直接删除；其`publishedCopy`占1.43%，表明可消除的是Owner reservation mirror。若Owner不再直接读取完整reservation对象，可只接收终态资金增量和必要索引，冷路径快照在Lane fence物化。
+- `ResolvedPlaceOrder`占3.36%，它把外部下单意图与当时的instrument、mark/index/forward price、手续费及冻结资产绑定成确定性输入，语义必须保留；但没有必要逐单创建record。可把这些已解析primitive/reference直接写进现有`CommandSlot/PlaceAdmissionEvent`固定槽，由Lane和matcher在槽退休前只读，删除record及其二次字段转发。
+- `MatcherResult` 3.60%与`CoreMatchingResult` 3.86%是当前最明确的双层结果：native结果创建事件列表后，service wrapper再次保存同一native对象、events和marketData，并附加命令证据。普通单命令路径应让matcher把primitive结果直接写入现有`MatcherSettlementEvent/CommandSlot`，由该池化事件作为唯一不可变跨线程事实；native sequence/shard保留，command ID/order ID从绑定的slot校验，不再复制进第二个result。批量/跨分片聚合仍单独处理，不能用它迫使普通路径保留包装。
+- `CoreResponse`占4.20%，是egress协议边界，最终对外响应仍需要；内部`MATCHING_PENDING`、终态结果和ledger不必各自物化同构对象。可让Owner命令槽保存status/resultCode/sequence和arena slice，egress最后一步才构造或直接编码协议响应；duplicate/query边界再按需构造。它应后于matcher result去包装实施。
+- codec的`byte[]`总占13.35%，但本地Harness同时承担调用端encode和Core入口，`CoreMessageHeader.command`、`encodePlaceOrder`、`Harness.command/submitCommand`不是纯生产Core成本。真实Aeron异步入口仍必须跨回调保存payload，因为订阅buffer回调后失效；正确优化是复制到256个window slot预分配buffer并就地decode，而不是让异步Core引用Aeron临时buffer。对外`CoreResponse.data()`的防御性copy只留在公开读取边界。
+- 校正后`TradingRuntimeState.dispatchPlaceAdmission`仍为最大Owner有效CPU站点，占总execution samples 4.80%（约单个Owner核的29%），所以它是真热点，但不是因为`PlaceAdmissionEvent`本身多余。该事件池化后承担Owner→Account Lane的唯一资金准入交接，以及`completed/matcherConsumed`两个必要可见性条件；撮合在资金冻结成功前不能生效。
+- 其中存在可删除成本：`ensurePlaceAdmissionDispatchCapacity`带有未使用的`matcherShard`参数；一次下单会在capacity preflight、high-water统计和`submit`中重复读取/扫描Lane depth；`symbolId`同时存在于`ResolvedPlaceOrder`和event；完成后Owner又把Lane状态复制成mirror。推荐顺序是：①删除重复depth读取及无用参数；②把resolved字段并入池化slot/event；③普通matcher结果直接写池化settlement event；④最后以Lane单一权威状态消除order/reservation mirror。前3项是局部热路径减法，第4项是独立架构迁移。
+
+### 证据与清理
+
+- 有效JFR/result/GC日志SHA-256分别为`ce959219f1444122ac8a99f21431f83ffe6f349b70283eaa1b12c76aeeee1ea9`、`4e54e2c470d6b6e831da2de54a8ab3a654d60250dde6a73cba427fc87fb23c86`、`32688d0d80b41955e2603d8dec8a83f69657b85b85b3df0ea61ebf84861f2c39`；GC-profiler result为`fc263c3e736780f13c26df51ba790dfd87fb0e4af4551968d257857182529ef2`。原始路径仅作清理前定位：`response-release-jfr2-20260921`、`response-release-gc-20260921`；被覆盖的无效轮为`response-release-jfr-20260921`。
+- 三个目录均已移动到`/Users/atomex/.Trash/surprising-ex-response-release-20260921/`，可恢复；项目目录无本轮artifact和Java/JMH残留进程，清理后根卷可用544GiB。

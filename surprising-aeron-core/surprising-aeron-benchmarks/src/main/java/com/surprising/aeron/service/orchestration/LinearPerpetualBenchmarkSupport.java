@@ -1289,11 +1289,19 @@ final class LinearPerpetualBenchmarkSupport {
                 submittedMatching.addLast(pending);
                 maxMatchingBacklog = Math.max(maxMatchingBacklog, submittedMatching.size());
             } else {
-                validateTerminal(command, response, operationWeight, "");
-                if (windowEntry != null) retireClusterWindowCommand();
-                terminalMessages = Math.addExact(terminalMessages, operationWeight);
-                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-                if (businessLatencies != null) businessLatencies.terminal(businessLatency);
+                try {
+                    validateTerminal(command, response, operationWeight, "");
+                    if (windowEntry != null) retireClusterWindowCommand();
+                    terminalMessages = Math.addExact(terminalMessages, operationWeight);
+                    terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+                    if (businessLatencies != null) businessLatencies.terminal(businessLatency);
+                } finally {
+                    // The local Harness is the terminal transport consumer. Production egress
+                    // releases the same arena lease after encoding the response; retaining it
+                    // here would exhaust all 512 slots and turn the benchmark into an allocation
+                    // test. CoreResponse status/count fields remain safe for scenario assertions.
+                    state.releaseResponse(response);
+                }
             }
             return pending;
         }
@@ -1365,10 +1373,14 @@ final class LinearPerpetualBenchmarkSupport {
             } while (!matchingCompleted);
             submittedMatching.removeFirst();
             retireClusterWindowCommand();
-            validateTerminal(pending.command, pending.response, pending.operationWeight, nativeMatchingResult);
-            terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
-            terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-            if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
+            try {
+                validateTerminal(pending.command, pending.response, pending.operationWeight, nativeMatchingResult);
+                terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+                if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
+            } finally {
+                state.releaseResponse(pending.response);
+            }
             return pending.submittedAtNanos == 0 ? 0 : System.nanoTime() - pending.submittedAtNanos;
         }
 
@@ -1411,13 +1423,17 @@ final class LinearPerpetualBenchmarkSupport {
                         pending.response = response;
                         submittedMatching.removeFirst();
                         retireClusterWindowCommand();
-                        validateTerminal(pending.command, response, pending.operationWeight, "");
-                        terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
-                        terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-                        if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
-                        long terminalAtNanos = System.nanoTime();
-                        completionConsumer.accept(pending.command.header().userId(),
-                                pending.submittedAtNanos, pending.acceptedAtNanos, terminalAtNanos);
+                        try {
+                            validateTerminal(pending.command, response, pending.operationWeight, "");
+                            terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                            terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+                            if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
+                            long terminalAtNanos = System.nanoTime();
+                            completionConsumer.accept(pending.command.header().userId(),
+                                    pending.submittedAtNanos, pending.acceptedAtNanos, terminalAtNanos);
+                        } finally {
+                            state.releaseResponse(response);
+                        }
                     });
             return completed;
         }
