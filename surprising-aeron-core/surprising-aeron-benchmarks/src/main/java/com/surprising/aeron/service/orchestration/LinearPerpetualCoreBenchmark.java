@@ -407,10 +407,10 @@ public class LinearPerpetualCoreBenchmark {
         @Param("4")
         public int accountLanes;
 
-        @Param("10")
+        @Param("200")
         public int priceLevels;
 
-        @Param("5000")
+        @Param("1250")
         public int ordersPerLevel;
 
         LinearPerpetualBenchmarkSupport.DenseResidentBook book;

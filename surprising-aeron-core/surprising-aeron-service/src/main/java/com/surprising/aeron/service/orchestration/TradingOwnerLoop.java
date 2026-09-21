@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.cluster.ClusterTopology;
 import com.surprising.aeron.service.orchestration.cluster.OwnerIdleStrategy;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -63,7 +64,7 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     /** Starts the Owner thread after the Aeron Cluster service has started. */
-    public void start(Cluster cluster, byte[] restored) {
+    public void start(Cluster cluster, SectionedCoreSnapshotCodec.RecoveryBuffer restored) {
         this.cluster = cluster;
         inputProduced = 0;
         inputConsumed = 0;
@@ -113,6 +114,15 @@ public final class TradingOwnerLoop implements Runnable {
             logContext.position = position;
             logContext.timestamp = timestamp;
             return processor.captureSnapshot(Math.max(1, position));
+        }, true);
+    }
+
+    /** Captures chunks for direct Aeron publication without a second full-size byte array. */
+    public SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(long position, long timestamp) {
+        return boundary(() -> {
+            logContext.position = position;
+            logContext.timestamp = timestamp;
+            return processor.captureSnapshotSections(Math.max(1, position));
         }, true);
     }
 

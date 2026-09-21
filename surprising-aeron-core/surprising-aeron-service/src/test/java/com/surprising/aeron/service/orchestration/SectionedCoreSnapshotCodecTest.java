@@ -122,8 +122,9 @@ class SectionedCoreSnapshotCodecTest {
             assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
                     Arrays.copyOf(snapshot, snapshot.length - 1), ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class);
-            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                    new byte[SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES + 1], ProductLine.SPOT))
+            SectionedCoreSnapshotCodec.RecoveryBuffer bounded =
+                    new SectionedCoreSnapshotCodec.RecoveryBuffer(snapshot.length - 1);
+            assertThatThrownBy(() -> bounded.accept(new UnsafeBuffer(snapshot), 0, snapshot.length))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("maximum size");
             assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(invalidCount, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("section count");
@@ -139,6 +140,13 @@ class SectionedCoreSnapshotCodecTest {
         } finally {
             state.close();
         }
+    }
+
+    @Test
+    void productionSnapshotLimitIsNoLongerTheLegacy64MiBBoundary() {
+        assertThat(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES)
+                .isGreaterThan(64 * 1024 * 1024)
+                .isEqualTo(SectionedCoreSnapshotCodec.DEFAULT_MAX_SNAPSHOT_BYTES);
     }
 
     @Test

@@ -4,9 +4,9 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.orchestration.ClusterServiceEgress;
-import com.surprising.aeron.service.orchestration.TradingCoreOwner;
 import com.surprising.aeron.service.orchestration.TradingOwnerLoop;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
@@ -15,7 +15,6 @@ import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
-import java.io.ByteArrayOutputStream;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -25,7 +24,8 @@ import org.springframework.stereotype.Component;
 /** Aeron Cluster callback adapter for the trading Owner and its session egress. */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
-    private static final long DEADLINE_NS = 30_000_000_000L;
+    private static final long DEADLINE_NS = java.util.concurrent.TimeUnit.SECONDS.toNanos(Long.getLong(
+            "surprising.aeron.snapshot-timeout-seconds", 300L));
 
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
@@ -118,21 +118,23 @@ public final class AeronTradingClusterService implements ClusteredService {
 
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
-        byte[] snapshot = owner.captureSnapshot(cluster.logPosition(), cluster.time());
-        UnsafeBuffer buffer = new UnsafeBuffer(snapshot);
+        var snapshot = owner.captureSnapshotSections(cluster.logPosition(), cluster.time());
         long deadline = System.nanoTime() + DEADLINE_NS;
-        for (int offset = 0; offset < snapshot.length;) {
-            int length = Math.min(publication.maxPayloadLength(), snapshot.length - offset);
-            long result = publication.offer(buffer, offset, length);
-            if (result >= 0) {
-                offset += length;
-            } else {
-                if (result != io.aeron.Publication.BACK_PRESSURED
-                        && result != io.aeron.Publication.ADMIN_ACTION
-                        && result != io.aeron.Publication.NOT_CONNECTED) {
-                    throw new IllegalStateException("snapshot publication failed: " + result);
+        for (byte[] chunk : snapshot.chunks()) {
+            UnsafeBuffer buffer = new UnsafeBuffer(chunk);
+            for (int offset = 0; offset < chunk.length;) {
+                int length = Math.min(publication.maxPayloadLength(), chunk.length - offset);
+                long result = publication.offer(buffer, offset, length);
+                if (result >= 0) {
+                    offset += length;
+                } else {
+                    if (result != io.aeron.Publication.BACK_PRESSURED
+                            && result != io.aeron.Publication.ADMIN_ACTION
+                            && result != io.aeron.Publication.NOT_CONNECTED) {
+                        throw new IllegalStateException("snapshot publication failed: " + result);
+                    }
+                    awaitProgress(deadline);
                 }
-                awaitProgress(deadline);
             }
         }
     }
@@ -161,20 +163,16 @@ public final class AeronTradingClusterService implements ClusteredService {
         cluster.idleStrategy().idle();
     }
 
-    private byte[] readSnapshot(Image snapshot) {
+    private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image snapshot) {
         if (snapshot == null) return null;
-        var bytes = new ByteArrayOutputStream();
+        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
         long deadline = System.nanoTime() + DEADLINE_NS;
         while (!snapshot.isEndOfStream()) {
-            int work = snapshot.poll((buffer, offset, length, header) -> {
-                TradingCoreOwner.ensureSnapshotCapacity(bytes.size(), length);
-                byte[] chunk = new byte[length];
-                buffer.getBytes(offset, chunk);
-                bytes.writeBytes(chunk);
-            }, 10);
+            int work = snapshot.poll((buffer, offset, length, header) ->
+                    recovery.accept(buffer, offset, length), 10);
             if (System.nanoTime() > deadline) throw new IllegalStateException("snapshot recovery deadline");
             cluster.idleStrategy().idle(work);
         }
-        return bytes.toByteArray();
+        return recovery;
     }
 }

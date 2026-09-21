@@ -13,8 +13,22 @@ import org.agrona.DirectBuffer;
 /** 快照协议内部恢复器：按分片校验并组装恢复所需的运行时组件。 */
 public final class SectionedCoreSnapshotRecovery {
 
-    /** 创建一个按分片接收快照的恢复器。 */
+    private final int maximumSnapshotBytes;
+
+    /** 创建一个按部署上限接收快照的恢复器。 */
     public SectionedCoreSnapshotRecovery() {
+        this(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES);
+    }
+
+    /** 创建一个使用显式安全上限的恢复器。 */
+    public SectionedCoreSnapshotRecovery(int maximumSnapshotBytes) {
+        if (maximumSnapshotBytes < SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
+                + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
+                + SectionedCoreSnapshotCodec.FOOTER_LENGTH
+                || maximumSnapshotBytes > SectionedCoreSnapshotCodec.MAX_CONFIGURABLE_SNAPSHOT_BYTES) {
+            throw new IllegalArgumentException("invalid maximum snapshot bytes");
+        }
+        this.maximumSnapshotBytes = maximumSnapshotBytes;
     }
 
     private final byte[] envelope = new byte[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH];
@@ -34,7 +48,7 @@ public final class SectionedCoreSnapshotRecovery {
         if (source == null || offset < 0 || length < 0 || offset > source.capacity() - length) {
             throw new ProtocolException("invalid snapshot fragment");
         }
-        if (length > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - totalLength) {
+        if (length > maximumSnapshotBytes - totalLength) {
             throw new ProtocolException("core snapshot exceeds maximum size");
         }
         int cursor = offset;
@@ -182,7 +196,7 @@ public final class SectionedCoreSnapshotRecovery {
 
     private void ensureTotalCapacity(int additionalLength) {
         if (additionalLength < 0
-                || totalLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - additionalLength) {
+                || totalLength > maximumSnapshotBytes - additionalLength) {
             throw new ProtocolException("core snapshot exceeds maximum size");
         }
     }

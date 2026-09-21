@@ -33,7 +33,8 @@ public final class TradingCoreOwner {
     private static final Logger log = LoggerFactory.getLogger(TradingCoreOwner.class);
 
     /** 快照阶段的最长等待时间；交易命令本身使用命令流水线的截止时间。 */
-    private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
+    private static final long SNAPSHOT_TIMEOUT_SECONDS = Long.getLong(
+            "surprising.aeron.snapshot-timeout-seconds", 300L);
 
     /** 复制日志命令的执行阶段、依赖等待和提交边界的唯一状态持有者。 */
     private final OwnerCommandPipelineState commandPipeline = new OwnerCommandPipelineState();
@@ -490,6 +491,11 @@ public final class TradingCoreOwner {
         return captureSnapshotSections(snapshotId, deadlineNanos).toByteArray();
     }
 
+    /** 捕获分段快照，生产 Aeron 出口直接逐段发布，避免再合并一份完整 byte[]。 */
+    SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(long snapshotId) {
+        return captureSnapshotSections(snapshotId, snapshotDeadline());
+    }
+
     /** 计算快照屏障截止时间。 */
     private long snapshotDeadline() {
         return Math.addExact(System.nanoTime(),
@@ -666,6 +672,12 @@ public final class TradingCoreOwner {
     /** 从完整快照字节恢复交易运行时。 */
     void restoreSnapshot(byte[] snapshot) {
         replaceState(TradingCoreRuntime.fromSnapshot(productLine, snapshot));
+    }
+
+    /** 恢复已按 Aeron fragment 接收和校验的分段快照，不再物化完整输入副本。 */
+    void restoreSnapshot(SectionedCoreSnapshotCodec.RecoveryBuffer recovery) {
+        if (recovery == null) throw new IllegalArgumentException("snapshot recovery is null");
+        replaceState(recovery.decode(productLine));
     }
 
     /** 替换交易运行时，并重新绑定实时捕获器。 */

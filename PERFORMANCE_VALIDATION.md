@@ -1620,3 +1620,19 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 有效JSON SHA-256：常驻订单簿`3363ba7274a31d9fe4b7e8e64a59d5aa1d8b64657fb6d4165c0f6477becd81b5`、深档成交`ca6c5b2c26072248956ae1635286509ae62914f1930f33da74455ef5eaef19be`、稳定持仓`332d51870cb1e4c5c39eb4fe90118b7688e4db5893314c19ff20cbc74ffc7e57`、风险扫描`049afc69e3b22f92f0aa3c1732a1ec4ef5f8d30c8a40e39df70e335df26a9193`、强平批次`21fe7b2d711993804aed905cec0a5d73770286e1ad8591a5db4c211cc2d47d29`、常驻订单簿GC`6c1173a22ba369ad699a18128731bb9611e872c4658f4806b9eee4869ffad3fd`。
 - 采集前后swap均为0，根卷可用546GiB，场景产物合计不足1MiB，无JMH/Aeron/Java残留进程。原始路径仅作历史定位；清理状态见下。
 - 已删除确认属于本轮的8个`target/linear-perpetual-scenarios/*20260921*`失败/主轮/GC轮目录；结果不可从项目目录恢复，关键参数、分数、正确性和校验和已记录在上文，未删除其他轮次产物。清理后swap仍为0、根卷可用546GiB。
+
+## 2026-09-21 大快照与200档订单簿验证
+
+### 改动与验证口径
+
+- 移除生产快照固定64 MiB上限：默认总上限改为1 GiB，可用`surprising.aeron.snapshot.max-bytes`配置，仍保留长度、分段和CRC校验；合法配置范围为64 MiB至Java单数组上限。集群各成员必须使用相同值，堆容量必须覆盖权威状态、分段编码缓冲和恢复缓冲。
+- 生产Aeron写入改为直接发布Owner捕获的分段块，恢复改为fragment逐段写入有界`RecoveryBuffer`，不再先拼出额外的完整快照byte数组；matcher编码也直接复制内部有界缓冲到最终section，删除一次完整matcher快照复制。快照超时默认由30秒调整为300秒，可用`surprising.aeron.snapshot-timeout-seconds`覆盖。
+- 深订单簿模型按生产人口重建：200个价格档、每档1,250单，共250,000个常驻maker订单，默认分布到5,000个账户，平均50单/账户。4账户版本使每账户约62,500个活动订单，准备阶段线程栈停在`MatchingCommandAdmission.preMatchingSelfTradeCancellations`，测到的是单账户自成交预检查的近二次扫描，不是200档订单簿容量，因此该轮作废且不计性能结果。
+
+### 容量、正确性与探索结果
+
+- 精确复现此前失败的人口配置：5,000活跃用户、128个listed/active symbols、每用户最多100个活动订单、约248,725个活动订单和5,004个持仓。初始快照80,304,108 B、最终快照80,317,054 B，均明确超过旧64 MiB边界；捕获2,291.901ms，最终恢复5,488.695ms，资金不变量和恢复校验通过，状态为PASS。该轮峰值已用堆约2,463,105,024 B、swap=0。
+- 200档×1,250单、5,000账户的独立标准轮通过，使用1×2s预热、3×2s测量：`denseResidentBookPlaceCancel`为36,764.121 ± 12,736.228 pair/s，即73,528.242 terminal business ops/s；`deepFillBurst256`为15.675 ± 54.377 burst/s，即4,012.891 taker ops/s、513,650.016 fills/s。两项accepted=terminal、unfinished=0、拒绝/错误/超时均为0。方差仍较大，结果只作为该规模的局部Core基线，不与真实Aeron混合业务吞吐横比，也不提供请求p99。
+- JDK27服务模块全量reactor测试914项：0 failure、0 error、1 skipped；快照定向测试44项全部通过；最终benchmark支持测试24项全部通过。没有运行六产品线真实集群的超64 MiB Archive重启恢复，因此本轮证明的是核心捕获/编码/恢复及Aeron适配层测试正确，生产部署前仍需在目标堆配置下完成真实成员snapshot→Archive→restart验收。
+- 大快照probe日志SHA-256为`e681edb8a8187ccdf96ced3d74f233d04eefc1946339aa7b759a1306d925572f`；200档标准轮summary/常驻订单簿/深度成交结果分别为`0884af4a021845f5d5bd6f00a51ccb597178b8e1c42c81e5b0844b9916cf111e`/`a4a16529174497fcf0df72b08e3b21429dffc614da2e9f8bddc1e47e4a61d457`/`ae8d5c9f6aab5b856dcfb085c5b5adc2eace778be587df200ee8f10ee17581c4`。本轮不提供p99或分配结论；快照probe的堆占用不能解释为每单分配。
+- 本轮JMH、probe及失败的4账户探索产物已移动到`/Users/atomex/.Trash/surprising-ex-large-snapshot-200-levels-20260921/`，可恢复；项目目录无本轮残留Java/Aeron/JMH进程，swap为0，根卷可用545 GiB。

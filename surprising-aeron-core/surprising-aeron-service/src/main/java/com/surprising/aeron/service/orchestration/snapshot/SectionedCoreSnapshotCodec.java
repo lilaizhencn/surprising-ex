@@ -33,7 +33,13 @@ public final class SectionedCoreSnapshotCodec {
     public static final int FOOTER_LENGTH = Long.BYTES;
     public static final int BASE_SECTION_COUNT = 9;
     public static final int MAX_SECTION_COUNT = BASE_SECTION_COUNT + Long.SIZE;
-    public static final int MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+    /** JVM property used to size the bounded snapshot/recovery envelope for the deployed population. */
+    public static final String MAX_SNAPSHOT_BYTES_PROPERTY = "surprising.aeron.snapshot.max-bytes";
+    /** Default allows large production books while retaining a corruption/OOM guard. */
+    public static final int DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024;
+    public static final int MIN_MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+    public static final int MAX_CONFIGURABLE_SNAPSHOT_BYTES = Integer.MAX_VALUE - 8;
+    public static final int MAX_SNAPSHOT_BYTES = configuredMaximumSnapshotBytes();
     public static final int MAX_SECTION_BYTES = MAX_SNAPSHOT_BYTES
             - ENVELOPE_LENGTH - MAX_SECTION_COUNT * SECTION_HEADER_LENGTH;
 
@@ -46,6 +52,22 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     private SectionedCoreSnapshotCodec() {
+    }
+
+    private static int configuredMaximumSnapshotBytes() {
+        String configured = System.getProperty(MAX_SNAPSHOT_BYTES_PROPERTY);
+        if (configured == null || configured.isBlank()) return DEFAULT_MAX_SNAPSHOT_BYTES;
+        final long bytes;
+        try {
+            bytes = Long.parseLong(configured);
+        } catch (NumberFormatException invalid) {
+            throw new ExceptionInInitializerError("invalid " + MAX_SNAPSHOT_BYTES_PROPERTY + ": " + configured);
+        }
+        if (bytes < MIN_MAX_SNAPSHOT_BYTES || bytes > MAX_CONFIGURABLE_SNAPSHOT_BYTES) {
+            throw new ExceptionInInitializerError(MAX_SNAPSHOT_BYTES_PROPERTY + " must be in ["
+                    + MIN_MAX_SNAPSHOT_BYTES + ',' + MAX_CONFIGURABLE_SNAPSHOT_BYTES + "]");
+        }
+        return Math.toIntExact(bytes);
     }
 
     /** 判断字节流是否使用当前分片快照格式。 */
@@ -91,10 +113,16 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     public static final class RecoveryBuffer {
-        private final SectionedCoreSnapshotRecovery delegate = new SectionedCoreSnapshotRecovery();
+        private final SectionedCoreSnapshotRecovery delegate;
 
         /** 创建一个可接收分片快照的恢复缓冲区。 */
         public RecoveryBuffer() {
+            this(MAX_SNAPSHOT_BYTES);
+        }
+
+        /** 创建使用显式安全上限的恢复缓冲区，主要供边界测试和离线工具使用。 */
+        public RecoveryBuffer(int maximumSnapshotBytes) {
+            delegate = new SectionedCoreSnapshotRecovery(maximumSnapshotBytes);
         }
 
         /** 接收一个快照分片。 */

@@ -3,6 +3,7 @@ package com.surprising.aeron.service.matching;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;
 import exchange.core2.core.processors.journaling.InMemorySerializationProcessor.SerializedModule;
@@ -26,16 +27,17 @@ public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
     private static final int VERSION = 8;
-    private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
+    private static final int MAX_SNAPSHOT_BYTES = SectionedCoreSnapshotCodec.MAX_SECTION_BYTES;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
-    private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
+    private static final int MAX_MODULE_BYTES = MAX_SNAPSHOT_BYTES - 128;
 
     private MatcherSnapshotCodec() {
     }
 
     public static byte[] encode(MatcherSnapshot snapshot) {
         try {
-            ByteArrayOutputStream body = new BoundedByteArrayOutputStream(MAX_SNAPSHOT_BYTES - Long.BYTES);
+            BoundedByteArrayOutputStream body =
+                    new BoundedByteArrayOutputStream(MAX_SNAPSHOT_BYTES - Long.BYTES);
             try (DataOutputStream output = new DataOutputStream(body)) {
                 output.writeInt(MAGIC);
                 output.writeInt(VERSION);
@@ -80,14 +82,15 @@ public final class MatcherSnapshotCodec {
                     output.write(data);
                 }
             }
-            byte[] encodedBody = body.toByteArray();
-            if (encodedBody.length > MAX_SNAPSHOT_BYTES - Long.BYTES) {
+            int bodyLength = body.size();
+            if (bodyLength > MAX_SNAPSHOT_BYTES - Long.BYTES) {
                 throw new IllegalArgumentException("matcher snapshot exceeds maximum size");
             }
-            ByteBuffer encoded = ByteBuffer.allocate(encodedBody.length + Long.BYTES);
-            encoded.put(encodedBody);
-            encoded.putLong(Integer.toUnsignedLong(checksum(encodedBody)));
-            return encoded.array();
+            byte[] encoded = new byte[bodyLength + Long.BYTES];
+            body.copyTo(encoded);
+            ByteBuffer.wrap(encoded, bodyLength, Long.BYTES)
+                    .putLong(Integer.toUnsignedLong(checksum(encoded, 0, bodyLength)));
+            return encoded;
         } catch (IOException exception) {
             throw new IllegalStateException("unable to encode matcher snapshot", exception);
         }
@@ -234,6 +237,10 @@ public final class MatcherSnapshotCodec {
             if (additionalBytes < 0 || count > maximumBytes - additionalBytes) {
                 throw new IllegalArgumentException("matcher snapshot exceeds maximum size");
             }
+        }
+
+        private void copyTo(byte[] destination) {
+            System.arraycopy(buf, 0, destination, 0, count);
         }
     }
 }

@@ -62,8 +62,14 @@ Matcher 的普通、撤单、改单和批量直达路径把 exchange-core 生成
 既有 `MatcherSettlementEvent`，Lane 从该事件消费成交事实，不再为跨线程交接复制一层撮合结果。
 撮合恢复游标只保存每个 shard 的严格递增 sequence；已删除热路径 rolling hash/prefix digest，避免维护
 第二套非业务权威状态。快照整体仍保留 CRC32C 传输校验，资金、订单终态、FIFO 和 shard 顺序校验不变。
-对应 matcher 快照格式为 v7，命令结果协议为 v5，Core 响应协议为 v6，分片快照格式为 v23；
+对应 matcher 快照格式为 v8，命令结果协议为 v5，Core 响应协议为 v6，分片快照格式为 v26；
 项目未上线，不兼容读取旧格式。
+
+生产快照不再受旧的64MiB固定上限约束。默认安全上限为1GiB，可按单产品线最大订单、持仓和账户人口
+通过JVM参数`-Dsurprising.aeron.snapshot.max-bytes=<bytes>`调整，合法范围为64MiB至Java单数组上限；所有集群成员
+必须使用同一值。Aeron写入直接发布分段快照，恢复直接把fragment送入分段校验器，不再额外合并一份完整快照；
+CRC32C、分段长度、总长度和恢复完整性校验仍保留。容量规划应至少预留一次快照分段状态及恢复对象空间，不能只按文件大小配置堆。
+大人口快照的捕获、发布和恢复超时统一由`-Dsurprising.aeron.snapshot-timeout-seconds=<seconds>`配置，默认300秒。
 
 系统分为接入与业务服务、交易核心、可靠事件处理、实时推送与查询四个部分。图中的交易集群代表一条产品线，其他产品线按相同边界独立部署。
 

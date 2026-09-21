@@ -205,17 +205,18 @@ final class LinearPerpetualBenchmarkSupport {
 
     static DenseResidentBook denseResidentBook(int accountLanes, int priceLevels, int ordersPerLevel) {
         int residentOrders = Math.multiplyExact(priceLevels, ordersPerLevel);
-        if (priceLevels <= 0 || ordersPerLevel <= 0 || residentOrders > 100_000) {
-            throw new IllegalArgumentException("dense resident book requires 1..100000 orders");
+        if (priceLevels <= 0 || ordersPerLevel <= 0 || residentOrders > 2_000_000) {
+            throw new IllegalArgumentException("dense resident book requires 1..2000000 orders");
         }
         Harness harness = base(accountLanes);
         try {
-            List<Long> makers = usersAcrossLanes(accountLanes, accountLanes, 20_000);
+            int makerCount = Math.max(accountLanes, Math.min(residentOrders, 5_000));
+            List<Long> makers = usersAcrossLanes(accountLanes, makerCount, 20_000);
             for (long maker : makers) harness.adjust(maker, SAFE_BALANCE);
             for (int level = 0; level < priceLevels; level++) {
                 long price = ENTRY_PRICE + 1 + level;
                 for (int index = 0; index < ordersPerLevel; index++) {
-                    long maker = makers.get(index & (accountLanes - 1));
+                    long maker = makers.get((level * ordersPerLevel + index) % makers.size());
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
                             order(harness.nextOrderId(), CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
                 }

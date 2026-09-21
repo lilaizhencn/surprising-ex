@@ -80,18 +80,20 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
-        byte[] snapshot = owner.captureSnapshot(Math.max(1, cluster.logPosition()));
-        UnsafeBuffer buffer = new UnsafeBuffer(snapshot);
-        for (int offset = 0; offset < snapshot.length;) {
-            int length = Math.min(publication.maxPayloadLength(), snapshot.length - offset);
-            long result;
-            while ((result = publication.offer(buffer, offset, length)) < 0) {
-                if (!retryableOffer(result)) {
-                    throw new IllegalStateException("snapshot publication failed: " + result);
+        var snapshot = owner.captureSnapshotSections(Math.max(1, cluster.logPosition()));
+        for (byte[] chunk : snapshot.chunks()) {
+            UnsafeBuffer buffer = new UnsafeBuffer(chunk);
+            for (int offset = 0; offset < chunk.length;) {
+                int length = Math.min(publication.maxPayloadLength(), chunk.length - offset);
+                long result;
+                while ((result = publication.offer(buffer, offset, length)) < 0) {
+                    if (!retryableOffer(result)) {
+                        throw new IllegalStateException("snapshot publication failed: " + result);
+                    }
+                    cluster.idleStrategy().idle();
                 }
-                cluster.idleStrategy().idle();
+                offset += length;
             }
-            offset += length;
         }
     }
 
