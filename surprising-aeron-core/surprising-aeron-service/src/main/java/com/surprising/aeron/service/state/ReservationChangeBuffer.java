@@ -24,9 +24,11 @@ final class ReservationChangeBuffer extends RuntimeChangeBuffer<ReservationRunti
         }
         ReservationRuntime ownerValue = target.get(key);
         if (ownerValue == null) {
-            ownerValue = source.publishedCopy(released[index], consumed[index]);
+            // Publish the canonical Lane reservation after its completion fence; no mirror is
+            // needed for a fact that has the same command dependency and lifetime as the order.
+            ownerValue = source;
             target.put(key, ownerValue);
-        } else {
+        } else if (ownerValue != source) {
             ownerValue.applyPublishedStateInPlace(source, released[index], consumed[index]);
         }
         setValueAt(index, ownerValue);

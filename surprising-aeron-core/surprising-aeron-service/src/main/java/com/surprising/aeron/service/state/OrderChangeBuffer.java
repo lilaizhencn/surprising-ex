@@ -39,10 +39,12 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
         }
         OrderRuntime ownerValue = target.get(key);
         if (ownerValue == null) {
-            ownerValue = source.publishedCopy(executed[index], remaining[index], cumulativeFee[index],
-                    createdAt[index], updatedAt[index], clusterPosition[index], status[index], revision[index]);
+            // The ordered Lane completion is the publication fence. Keep the Lane's canonical
+            // object instead of allocating and maintaining an Owner mirror of the same order.
+            ownerValue = source;
             target.put(key, ownerValue);
-        } else {
+        } else if (ownerValue != source) {
+            // Recovery/control paths can still start from an independent published value.
             ownerValue.applyPublishedStateInPlace(source, executed[index], remaining[index],
                     cumulativeFee[index], createdAt[index], updatedAt[index], clusterPosition[index],
                     status[index], revision[index]);

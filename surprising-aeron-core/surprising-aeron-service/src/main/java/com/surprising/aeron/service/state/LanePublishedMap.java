@@ -6,8 +6,8 @@ import org.agrona.collections.Long2ObjectHashMap;
 /**
  * Lane 交接后的 Owner 可见值。
  *
- * <p>Lane 不直接改表；Owner 在有序提交点应用终态值。发布表只由 Owner 访问，
- * 不需要并发容器或第二个待发布队列。</p>
+ * <p>Lane 不直接改表；Owner 在有序提交点登记Lane权威值。发布表只由 Owner 访问，
+ * 不需要并发容器、对象镜像或第二个待发布队列。</p>
  */
 final class LanePublishedMap<V> {
     // Back-shift deletion retains backing storage under bounded order turnover.

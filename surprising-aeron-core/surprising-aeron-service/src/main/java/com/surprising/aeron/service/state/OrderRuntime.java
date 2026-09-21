@@ -228,16 +228,6 @@ public final class OrderRuntime {
 
     OrderRuntime publicationValue() { return mutable ? snapshot() : this; }
 
-    OrderRuntime publishedCopy(long executed, long remaining, long cumulativeFee,
-                               long createdAt, long updatedAt, long position,
-                               CoreOrderStatus publishedStatus, long publishedRevision) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
-                marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, cumulativeFee, createdAt, updatedAt, position,
-                publishedStatus, publishedRevision, false);
-    }
-
     void applyPublishedStateInPlace(OrderRuntime source, long executed, long remaining,
                                     long cumulativeFee, long createdAt, long updatedAt,
                                     long position, CoreOrderStatus publishedStatus,

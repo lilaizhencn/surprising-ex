@@ -60,13 +60,6 @@ public final class ReservationRuntime {
 
     ReservationRuntime publicationValue() { return mutable ? snapshot() : this; }
 
-    ReservationRuntime publishedCopy(long released, long consumed) {
-        ReservationRuntime copy = new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
-                totalReservedUnits, released, consumed, orderQuantitySteps);
-        copy.mutable = false;
-        return copy;
-    }
-
     void applyPublishedStateInPlace(ReservationRuntime source, long released, long consumed) {
         if (source == null || orderId != source.orderId || userId != source.userId
                 || released < 0 || consumed < 0 || Math.addExact(released, consumed) > totalReservedUnits) {
