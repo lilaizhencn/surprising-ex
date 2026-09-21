@@ -190,7 +190,7 @@ final class MatchingCommandAdmission {
                 case SETTLEMENT -> validatePendingSettlement(decodedCommand);
             }
             preMatchingCancellations = preMatchingCloseCapacityCancellations(
-                    operation, message, decodedCommand, admission);
+                    operation, message, decodedCommand, admission, placeAdmission);
         } catch (CoreStateRejectedException exception) {
             if (owner.commits.commitPublicationDirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
@@ -359,12 +359,15 @@ final class MatchingCommandAdmission {
             CommandSlot.Operation operation,
             CoreMessage message,
             DecodedMatchingCommand decodedCommand,
-            ResolvedMatchingAdmission admission) {
+            ResolvedMatchingAdmission admission,
+            com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission) {
         PlaceOrderCommand placement;
+        ResolvedPlaceOrder resolved = null;
         long excludedOrderId = 0;
         switch (operation) {
             case PLACE -> {
                 placement = decodedCommand.placeOrder();
+                resolved = placeAdmission;
                 excludedOrderId = placement.orderId();
             }
             case TRIGGER -> {
@@ -378,6 +381,7 @@ final class MatchingCommandAdmission {
                 if (admission == null) throw new IllegalStateException("replace admission is missing");
                 excludedOrderId = admission.originalOrderId();
                 placement = admission.command();
+                resolved = admission.resolved();
             }
             default -> {
                 return List.of();
@@ -385,8 +389,12 @@ final class MatchingCommandAdmission {
         }
         List<Long> closeCapacity = preMatchingCloseCapacityCancellations(
                 message.header().userId(), placement, excludedOrderId);
+        long matchingPrice = resolved == null
+                ? CoreOrderDecisionResolver.resolve(owner.runtimeState, owner.identities,
+                        message.header().userId(), placement, owner.currentClusterTimestamp).matchingPriceTicks()
+                : resolved.matchingPriceTicks();
         long[] selfTrade = preMatchingSelfTradeCancellations(
-                message.header().userId(), placement, excludedOrderId);
+                message.header().userId(), placement, excludedOrderId, matchingPrice);
         // Self-trade IDs are already unique and sorted. Usually both sources are empty;
         // no merge set or replacement array is needed for that command.
         if (closeCapacity.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);
@@ -405,9 +413,9 @@ final class MatchingCommandAdmission {
     long[] preMatchingSelfTradeCancellations(
             long userId,
             PlaceOrderCommand placement,
-            long excludedOrderId) {
-        long matchingPrice = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                owner.identities, userId, placement, owner.currentClusterTimestamp).matchingPriceTicks();
+            long excludedOrderId,
+            long matchingPrice) {
+        if (matchingPrice <= 0) throw new IllegalArgumentException("matching price must be positive");
         var candidates = owner.activeOrderIndex.matchingIds(userId, placement.symbol());
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList cancellations = null;
         while (candidates.hasNext()) {
