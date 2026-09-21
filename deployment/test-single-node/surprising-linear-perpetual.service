@@ -10,7 +10,7 @@ WorkingDirectory=/opt/surprising-ex
 EnvironmentFile=/etc/surprising/linear-perpetual.env
 ExecStart=/opt/surprising-ex/scripts/linear-perpetual-single-node.sh up
 ExecStop=/opt/surprising-ex/scripts/linear-perpetual-single-node.sh down
-TimeoutStartSec=300
+TimeoutStartSec=900
 TimeoutStopSec=60
 
 [Install]

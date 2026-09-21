@@ -74,6 +74,8 @@ systemctl start surprising-linear-perpetual
 systemctl status surprising-linear-perpetual --no-pager
 ```
 
+测试服务器首次启动会按顺序拉起多个独立 JVM，unit 的启动超时为 15 分钟；服务进入 `active (exited)` 后才表示整条产品线启动完成。
+
 启动器会在 `/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/` 保存 PID、日志、Core 数据、JFR 和成交导出 checkpoint。检查顺序：
 
 ```bash
