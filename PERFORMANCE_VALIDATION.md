@@ -1533,3 +1533,31 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 真实单成员最终轮固定 LINEAR_PERPETUAL、MIXED batch20、128 symbols、4 Lane、1 matcher、全局/session in-flight=256、Owner/Matcher BUSY_SPIN，30s预热、60s稳定窗和独立排空；目标为 business吞吐≥300,000/s、Core吞吐≥30,000/s、各业务p99≤30ms、零错误/超时/unfinished、资金差0及快照恢复一致。单轮用于当前 master 最终检查，不声称统计稳定容量，也不把历史41.5万峰值当作本轮硬门槛。
 - JFR 重点核对 matcher native/result包装、Owner/Lane分配、GC和线程执行热点。若 `CoreMatchingResult` 仅是 deferred matcher→Owner 生命周期所需且占比很小，第七阶段结论为“不可安全删除并保留”，记录证据而不新增协议；若有重复包装则只删除重复层并复测。
 - 环境为本机 MacBookPro16,1、16逻辑CPU/16GiB、macOS 26.7，HotSpot Corretto JDK 27.0.0.33.1、Maven 3.9.16；采集前 swap 0、磁盘约252GiB可用。桌面进程存在且未绑核。任何 swap 增长、磁盘不足、JFR DataLoss/损坏、正确性失败使对应数据失败或无效。结束后停止本轮进程，只清理本轮生成物并记录状态。
+
+### 七阶段结果与正确性
+
+- 前六阶段生产减法分别由 `2c67377e` 与 `9386fb61` 完成并推送：删除死 `CoreOrderStateView` 结果分支、`LanePublication` 转发包装、Owner 重复订单物化、热路径缓存/rolling audit hash、`CoreRuntimeStateView`/`AccountLaneView`，以及23个不再被生产入口使用的 immutable reducer 写状态类；生产源码净删除约3,492行。保留产品线隔离、Lane状态所有权、严格FIFO、终态发布、响应及槽位释放顺序。
+- service完整reactor为913 tests、0 failure/0 error、1 skip；其中旧reducer的123项资金/持仓/风险规则测试迁移到测试侧适配器后继续通过。六产品线、在途快照恢复、终态订单/冻结/资金校验均覆盖。最终构建时发现 `OwnerPublicationBenchmark` 仍调用已删除的 `LanePublication` API，已在 `542be6f5` 改为直接 `preparePublication`→`commitTerminalToOwner`，benchmarks reactor在JDK27下package成功并已推送。
+- 第七阶段JFR确认普通/批量主路径已直接使用 pooled `MatcherSettlementEvent`：`CoreMatchingResult` 未进入主要分配类或站点。剩余 `exchange-core` 原生 `MatcherResult`/`MatcherEvent` 是撮合事实本体，占局部JMH采样4.09%/1.80%、真实节点7.19%/3.44%；它们必须跨 matcher→Lane 保持不可变，不能作为重复包装删除。deferred/control fallback `CoreMatchingResult` 保留，因为此前强制删除曾复现实际Lane路由扩展和池化事件提前回收竞态；本轮不新增window、barrier、状态副本或线程。
+
+### JMH吞吐、分配与JFR
+
+- 无profiler主轮为 **116.302 ± 21.299 invocation/s**，换算约 **59,546.6 Core messages/s、1,190,932.5 business ops/s**。三次测量115.616–117.650 invocation/s，accepted/terminal business均为10,741,760、Core均为537,088；teardown资金、冻结、订单终态、角色切换和快照恢复通过。
+- 独立GC轮为108.208 invocation/s，`gc.alloc.rate.norm=18,747,069.931 B/invocation`，按10,240 business/512 Core换算为 **1,830.77 B/business、36,615.37 B/Core**；62次GC、总GC时间226ms。相对同配置最新历史1,905.68 B/business再下降 **74.91 B/business（3.93%）**；它仍含命令/batch集合构造、codec、响应解码和JMH框架，不是纯服务节点分配。
+- 独立局部JFR 30s、DataLoss=0；分配前列为byte[] 43.92%、`OrderRuntime` 9.51%、原生`MatcherResult` 4.09%、`ReservationRuntime` 3.96%、`PlaceOrderCommand` 3.54%、查询/响应 `CoreOrderStateView` 3.09%、`ResolvedPlaceOrder` 2.80%、原生`MatcherEvent` 1.80%。byte[]主要位于测试端消息复制/解码；服务侧下一项明确成本是订单双所有权，不是matcher包装。
+- 真实节点JFR 140s、DataLoss=0；稳定窗内 `ThreadAllocationStatistics` 的共同58.652s采样区间合计21,731,600,928B，按同窗业务完成量线性归一约 **1,219.57 B/business、370.52 MB/s**。其中四条Lane约612.34、Owner 279.13、Matcher 230.16、cluster ingress 97.93 B/business。该服务节点口径不含客户端，和JMH 1,830.77 B/business的差额方向一致。
+- 真实节点采样分配：`OrderRuntime` 20.60%（`preparedOrder` 10.17%、`snapshot` 10.10%）、byte[] 10.51%、long[] 8.68%、原生`MatcherResult` 7.19%、`ReservationRuntime` 5.92%、`ResolvedPlaceOrder` 5.64%、原生`MatcherEvent` 3.44%。`preparedOrder`是Lane可变权威订单，`snapshot`是Owner稳定镜像；直接共享会让后续成交/撤单改写已提交视图。copy-on-write虽不必加锁，但会新增shared/mutable状态和首次修改分支，而且在本轮“下单后成交或撤单”的完整生命周期仍需第二份对象，只会延迟分配，因此明确排除、不实施。不能把20.60%全部当作可删除上限。彻底删除第二份只能取消Owner `publishedOrders`全量镜像，以紧凑primitive路由索引承担撤单/撮合字段，并在查询/快照建立Lane fence；这是独立架构改造，也不混入本轮局部减法。
+- 真实节点完整录制共117次GC pause、总672ms，p50/p95/p99/max为5.57/6.30/18.8/19.2ms（包含启动和预热）；没有evacuation/promotion failure。分配按线程为Owner 23.11%、matcher 18.80%、四Lane各约12.46%、cluster service 7.96%。
+
+### 真实单成员结果与结论
+
+| 轮次 | 稳态秒 | business/s | Core/s | fills/s | 最大业务p99 | Lane有效执行均值 | 结果 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| main1 | 60.022 | 282,757.011 | 27,045.051 | 67,303.284 | 47.939ms | 37.05% | 性能门槛失败，正确性通过 |
+| main2 | 60.020 | 318,774.784 | 30,475.772 | 75,870左右 | 32.784ms | 43.77% | 吞吐通过，尾延迟失败，正确性通过 |
+| JFR归因 | 60.003 | 303,810.548 | 29,050.141 | 72,316.036 | 29.573ms | 约41.1% | 仅归因，不作主吞吐验收 |
+
+- 两个无profiler主轮均达到in-flight 256，最终offered=terminal、unfinished=0、backlog=0、`mixedCapacity=PASS`、`mixedVerify=PASS`、fundsDiff=0，population/HFT positions/reservations/loss及快照恢复全部通过；swap始终0，日志无业务ERROR/Exception。两轮平均 **300,765.898 business/s、28,760.412 Core/s**，但范围和p99未达到预锁门槛，整体吞吐/尾延迟结论为失败，不能声称恢复历史37万–41.5万容量。
+- main1→main2在相同代码/配置下由28.3万恢复到31.9万，同时Lane有效执行从37.05%恢复到43.77%，证明当前未绑核桌面机器存在显著调度干扰；它不能解释为死reducer删除后的确定性回归。JFR归因轮在profiler开销下为30.4万business/s，批量撤单p99 29.573ms。当前用户已确认本机有资源占用，因此本轮重点结论限定为“分配下降且主要站点已定位”，吞吐容量待资源空闲后按同命令三轮复验。
+- 主/GC/JFR JSON SHA-256分别为`c91b11826297207261aa090e67444fd1fdae2adc42164d5ebd3b416a74767319`、`560bd161abd25dfd52b688b1bbf8b46c63fcd95fde9506d21dfae8a78a9dc5f8`、局部JFR `c6eb3aeec2014defc8d21f8cfe2565a433e3143aa5d4e1fe4345c2e25a34341c`；真实main1/main2 summary为`124c12c2a5c5f11e9a464d42dfc4f9c9367c7d6bfc918319a0e34020e1206ba2`/`6fcd38de2c5e570dd70ae26f1a60d132de258733bfafe8c918dcb348df66116e`，node JFR为`6fa57109d7a05324a3025dcff1859334793224af882b005630a98eba8da54271`。
+- 一次完整分析脚本试图逐条物化137万Archive `FileWrite`，临时目录增长到21GiB；确认与订单分配无关后已停止并删除该明确属于本轮的临时目录，保留原始JFR及有界class/site/thread汇总。所有本轮Java/Aeron/JMH进程已停止，swap仍为0；约7.9GiB的三轮Cluster/Archive、原始JFR、局部JMH和有界汇总已移动到`/Users/atomex/.Trash/surprising-ex-seven-stage-cleanup-20260921/`，可恢复，未移动或删除其他轮次产物。
