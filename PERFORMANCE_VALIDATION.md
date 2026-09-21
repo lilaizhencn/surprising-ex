@@ -1754,3 +1754,174 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 
 - 有效JFR/result/GC日志SHA-256分别为`ce959219f1444122ac8a99f21431f83ffe6f349b70283eaa1b12c76aeeee1ea9`、`4e54e2c470d6b6e831da2de54a8ab3a654d60250dde6a73cba427fc87fb23c86`、`32688d0d80b41955e2603d8dec8a83f69657b85b85b3df0ea61ebf84861f2c39`；GC-profiler result为`fc263c3e736780f13c26df51ba790dfd87fb0e4af4551968d257857182529ef2`。原始路径仅作清理前定位：`response-release-jfr2-20260921`、`response-release-gc-20260921`；被覆盖的无效轮为`response-release-jfr-20260921`。
 - 三个目录均已移动到`/Users/atomex/.Trash/surprising-ex-response-release-20260921/`，可恢复；项目目录无本轮artifact和Java/JMH残留进程，清理后根卷可用544GiB。
+
+
+## 2026-09-21 当前 master 本机吞吐探索（current-local-20260921）
+
+### 采集前锁定计划
+
+- 用户要求：按 AGENTS-performance.md 在本机压测吞吐。当前 master `ca5934a072a1a5ae3c5b4f5d2e3c023ce72646dd`，采集前工作区干净；对照 commit：不适用（仅验证当前 master）。本轮只追加记录和运行临时驱动，不修改业务实现。
+- 问题：真实单节点网络/Archive下普通连续成交与混合批量负载各能达到多少持续终态吞吐、尾延迟与资源成本。未给业务SLO，因此只做探索诊断，不事后设置吞吐/延迟验收线。正确性门槛：拒绝/错误/超时0，排空后accepted=terminal、unfinished=0、资金差0、冻结/持仓/终态与恢复检查通过；缺指标判部分验证，正确性错误判失败。重复吞吐极差/均值>15%标不稳定；明显换页、磁盘不足10GiB、JFR DataLoss或损坏使对应性能证据无效。
+- 环境：macOS26.7 x86_64，Intel i9-9880H 8物理/16逻辑核，16GiB，Corretto HotSpot27+33-FR，Maven3.9.16。可用磁盘531GiB；既有swap1969MiB、虚拟机约26%物理内存，同机Terminal/Codex存在。每5秒采CPU/RSS、vm_stat/swap、磁盘、进程角色；不停止用户其他进程。
+- 场景：优先LINEAR_PERPETUAL，真实单Aeron成员/网络/Archive、4 Account Lane、1 matcher、global/session window256，Owner/Matcher/Lane BUSY_SPIN，G1，节点512m–1536m，client128m–512m。MIXED batch20/128symbol/1000retail+385支持账户/seed25620，初始化和做市沿用ClusterMixedCapacityMain，终态资金检查沿用finishMeasuredRun。MATCH_STREAM为独立买卖GTC各半，128symbol/1000账户/4连接/4worker/seed25601，行情前置和边界排空保留，不逐单同步等待。
+- 负载：窗口受限持续异步，计划到达率不设定（现有异步驱动不支持恒定到达），达到256后如实报告背压，不声称open-loop容量；混合场景60s预热/60s稳态×3，普通场景60s预热/60s×3，冷却10s。JFR混合独立同配置60+60s，长稳混合60+600s；主要JIT若仍未稳定须标明。MATCH_STREAM现有计时含排空，必须单独标计量缺口，不能冒充严格稳定窗口结果。
+- 采样：无profiler主轮与JFR轮分开；JFR使用owner-commit-profile.jfc，node/client独立文件max256MiB、NMT summary。局部ContinuousOwnerBenchmark.placeCancelWithoutTimers，LINEAR_PERPETUAL/batch20/DISTINCT/BUSY_SPIN，f1/t1/wi5×5s/i5×5s，主与-prof gc独立；只作路径/分配和快照恢复验证，不当网络吞吐。长稳5秒系统采样，10秒业务速率；live/native/FD若无足够同窗采样不作无泄漏结论。
+- 构建及检查：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusterMixedCapacityTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`。真实集群用现有qualify-aeron-async-stages.sh并显式覆盖预热60、window256、BUSY_SPIN、单matcher；普通MATCH_STREAM临时驱动复用相同节点参数。完整实际命令和PID保存在本轮/tmp/surprising-perf-20260921-current及target/aeron-async-stages/current-local-20260921-*，结果分析后追加摘要及校验并清理。
+- 范围/缺口预声明：当前无CodeGraph工具，以已读源码/Maven边界替代；本轮不启动wallet、HTTP网关和WebSocket，API requests/s不适用。其余五产品线、完整风险/触发/资金费/交割/期权混合流量未覆盖，不能外推。恢复先由现有定向测试和局部JMH检查，真实Archive重启需要额外验证，未完成时明确缺口。
+
+
+### 用户收敛范围：复现历史37万/39万的同配置吞吐（采集前追加）
+
+- 用户要求改为查明历史37万/39万条件并使用相同条件压测。原计划60s预热轮current-local-20260921-mixed1在预热阶段主动终止，未形成完整测量或正确性结论，不混入结果；取消本轮普通MATCH_STREAM、10分钟长稳及局部JMH扩展，先完成用户指定同配置三轮。
+- 历史配置来源：本文件owner-dispatch-revision-20260920/racefix1的397308.134 business/s、37955.777 Core/s，以及apfs-cleanup-20260921-main1的378808.445 business/s、36193.466 Core/s。只用于确认负载配置/单位，不检出旧版本、不计算跨版本收益。
+- 正式run ID改为current-local-20260921-historical{1,2,3}：LINEAR_PERPETUAL/MIXED/batch20/128 symbols/1385 users/seed25620/4 Lane/1 matcher/global及session256/全部BUSY_SPIN；节点512m–1536m/client128m–512m/G1/NMT summary，无profiler，30s预热+60s稳态+边界排空，冷却10s，完全复用现有qualify-aeron-async-stages.sh。JMH入口single-shot一轮/f1/t1/wi0，内部业务预热30秒，JMH单次耗时不当吞吐。
+- 沿用历史探索门槛：business≥300000/s、Core≥30000/s、每类p99≤30ms、正确性零错误/超时/unfinished且资金差0；轮间极差/均值≤10%。这些仅为历史探索门槛，必需证据缺失仍按统一标准给部分验证，不能称完整生产验收。
+- 环境差异提前声明：历史高值轮swap0；当前已有swap1937.25MiB，TimeMachine未在运行但有11个本地快照，虚拟机仍占约4GiB。未删除快照或停止用户后台进程。跟踪交换增量，不把宿主环境差异误判为代码回归。
+- 执行前构建成功；ClusterMixedCapacityTest9项通过，ContinuousOwnerBenchmarkTest31项中30通过/1条件跳过，总40项0失败0错误1跳过。测试与吞吐串行，实际构建命令见前计划。未改业务源码。
+- 三轮完整命令（n=1,2,3）：`ASYNC_RUN_ID=current-local-20260921-historical${n} ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHING_ENGINES=1 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。
+
+- 正式三轮进行中补锁独立归因计划：为满足AGENTS-performance必采GC/分配/线程证据，三轮后执行`current-local-20260921-historical-jfr`，仍为相同30s预热/60s稳态/全部业务参数，仅启用`ASYNC_ENABLE_JFR=true`（内置阶段诊断同时开启，属于采样配置）；max256MiB/进程，20ms execution sample，NMT。其吞吐不计入三轮主成绩；相同代码配置下报告采样开销与轮间波动的合计，不能据此精确拆分profiler成本。按JFR summary检查DataLoss，按measurement epoch截取中部两侧各2s保护窗口归因（跨进程时钟未独立校准，边界及延迟分段只能限定证据）。不追加业务优化或旧版本对照。
+
+### 同历史配置三轮无profiler结果
+
+- 采集代码始终为`ca5934a072a1a5ae3c5b4f5d2e3c023ce72646dd`；仅本记录有追加。下表稳态计数来自`steadyCapacity`，排空独立，不使用JMH single-shot的s/op换算。三个窗口均约60s，各指标样本/分位来自各自client.log；延迟是客户端提交到终态响应，含网络/排队，批量按请求计延迟，不伪称每个item独立延迟。
+
+| run | 稳态s | business/s | Core messages/s | fills/s | 最大业务p99(ms) | drain(ms/business/Core) | window阻塞比例 |
+|---|---:|---:|---:|---:|---:|---|---:|
+| historical1 | 60.02847 | 307623.701 | 29413.310 | 73223.922 | 35.586 | 5.919/2688/256 | 81.99% |
+| historical2 | 60.018082 | 318425.705 | 30442.093 | 75795.825 | 34.242 | 15.789/2688/256 | 81.95% |
+| historical3 | 60.009592 | 316320.750 | 30241.682 | 75294.630 | 33.980 | 6.535/2688/256 | 81.19% |
+
+- 三轮均值 **314123.385 business/s、30032.362 Core/s**；business范围307623.701–318425.705，极差/均值3.44%，满足预锁10%重复性线。**未复现历史37万/39万**。三轮business≥300000/s；第一轮Core<30000/s；三轮最大业务p99均>30ms，因此历史吞吐/延迟探索门槛判**失败**，不因脚本saturationGate=PASS改写结论。整体证据覆盖仍是**部分验证**。不报告跨旧commit性能升降百分比。
+
+| run | 业务 | 请求样本数 | items | p50/p90/p95/p99/p99.9/max（ms） |
+|---|---|---:|---:|---|
+| 1 | PLACE_ORDER | 439552 | 439552 | 6.143/11.493/12.558/18.759/53.608/87.949 |
+| 1 | CANCEL_ORDER | 439552 | 439552 | 6.410/8.806/9.732/15.581/40.828/54.788 |
+| 1 | APPLY_MARK_PRICE | 7684 | 7684 | 6.225/11.780/14.794/22.659/52.625/57.278 |
+| 1 | PLACE_ORDER_BATCH | 659328 | 13186560 | 7.364/14.680/15.941/21.069/47.382/63.012 |
+| 1 | CANCEL_ORDER_BATCH | 219776 | 4395520 | 14.983/16.465/17.743/35.586/60.227/62.390 |
+| 2 | PLACE_ORDER | 454912 | 454912 | 5.976/11.534/12.632/15.671/30.064/51.707 |
+| 2 | CANCEL_ORDER | 454912 | 454912 | 6.197/8.253/8.986/14.245/23.724/45.481 |
+| 2 | APPLY_MARK_PRICE | 7684 | 7684 | 5.689/11.853/13.819/22.495/44.990/46.268 |
+| 2 | PLACE_ORDER_BATCH | 682368 | 13647360 | 7.045/14.548/15.802/19.972/37.257/51.576 |
+| 2 | CANCEL_ORDER_BATCH | 227456 | 4549120 | 14.983/16.392/17.448/34.242/41.910/51.281 |
+| 3 | PLACE_ORDER | 451840 | 451840 | 6.070/11.829/12.984/16.826/29.687/42.205 |
+| 3 | CANCEL_ORDER | 451840 | 451840 | 6.197/8.036/8.724/14.950/26.869/30.638 |
+| 3 | APPLY_MARK_PRICE | 7687 | 7687 | 6.230/12.460/13.926/19.136/26.722/32.276 |
+| 3 | PLACE_ORDER_BATCH | 677760 | 13555200 | 6.991/14.778/16.097/19.857/35.749/46.759 |
+| 3 | CANCEL_ORDER_BATCH | 225920 | 4518400 | 15.351/16.891/17.842/33.980/43.024/48.988 |
+
+- 延迟Histogram配置为最高1分钟、3位有效数字；本驱动未导出完整bucket分布。超时上限客户端30s。独立入口→accepted、accepted→terminal分位及真实发压端等待分布缺失；accepted没有独立时间戳计数，完成检查以全部APPLIED及offered=terminal核对，不能伪造独立accepted速率。窗口受限、coordinated omission未补偿，不能声称恒定到达或Core独立容量上限。批量固定20项，PLACE_BATCH/CANCEL_BATCH按item展开，fills另报。批量batches/s可由上表请求数/含排空总秒计算，非严格稳态分类型增量（该细分缺口保留）。
+
+- historical1：窗口epoch(s)=[1790000822.676, 1790000882.705]，steady business/Core=18466180/1765636，排空后offered=terminal business/Core=18468868/1765892，unfinished=0、pending deque/backlog=0，mixedVerify=PASS/fundsDiff0/population/HFT positions/reservations/loss通过，无观察到业务拒绝/错误/超时。窗口峰值256，pipelineHighWater={'matcher': 214, 'completion': 209, 'context': 255, 'lanes': [66, 59, 57, 65]}，Lane累计有效执行占比均值44.88%（包含排空边界）。
+  10秒区间：`progress terminalBusinessOps=3138257 intervalBusinessOpsPerSec=313825.232 requestsInFlight=244`; `progress terminalBusinessOps=6219656 intervalBusinessOpsPerSec=308139.896 requestsInFlight=256`; `progress terminalBusinessOps=9043673 intervalBusinessOpsPerSec=282401.650 requestsInFlight=245`; `progress terminalBusinessOps=12152320 intervalBusinessOpsPerSec=310864.698 requestsInFlight=256`; `progress terminalBusinessOps=15419344 intervalBusinessOpsPerSec=326702.397 requestsInFlight=256`; `progress terminalBusinessOps=18455552 intervalBusinessOpsPerSec=303620.797 requestsInFlight=256`。
+  系统5秒采样、正式窗口两侧各5秒保护共13样本：swap-in/out增量64/0页（4KiB/页），Pageouts增量5，throttled页0；swap used1119.25MiB稳定，未见持续换页/新增swap-out；最低可用磁盘526.83GiB。Java各PID进程CPU和RSS摘要：`{"78651": {"ppid": "78638", "samples": 13, "cpuMean": 937.723076923077, "cpuMin": 729.0, "cpuMax": 985.6, "rssMiBMax": 1770.66015625}, "78668": {"ppid": "78638", "samples": 13, "cpuMean": 0.046153846153846156, "cpuMin": 0.0, "cpuMax": 0.5, "rssMiBMax": 69.12890625}, "78671": {"ppid": "78668", "samples": 13, "cpuMean": 329.7076923076923, "cpuMin": 33.1, "cpuMax": 375.5, "rssMiBMax": 426.8203125}}`。ps为瞬时抽样、CPU100%=1逻辑核，包含busy-spin；不当作业务有效利用率。
+  NMT末值：`Total: reserved=3143910KB, committed=718198KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`；启动baseline差：`Total: reserved=3143910KB -11851KB, committed=718194KB +5125KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`。不是长期native增长率。
+  SHA-256：`metrics.json=6db2c9a7b9772e90f5e62775dfbcce14f2536ed391629477019b54b9fdc62141`; `client.log=ff2e25472193eabe840e2ef68add3ed3c647a34a0d0370e4df0288c612a10879`; `node.log=54f509875f1e02d7702294086413ed0f3e00384d88bad189012ff6e8d3e68ba8`; `node.command=43e255ec3205355988fcfa15a1b361bf3e7209a98d3f684da24ceefe9bbaf74a`; `client.command=a1896c233fafff821ce8f6ab0226379afd773f4306113fdbfc7bb6da8cdf96d9`。
+- historical2：窗口epoch(s)=[1790000966.675, 1790001026.694]，steady business/Core=19111300/1827076，排空后offered=terminal business/Core=19113988/1827332，unfinished=0、pending deque/backlog=0，mixedVerify=PASS/fundsDiff0/population/HFT positions/reservations/loss通过，无观察到业务拒绝/错误/超时。窗口峰值256，pipelineHighWater={'matcher': 221, 'completion': 213, 'context': 255, 'lanes': [58, 57, 60, 59]}，Lane累计有效执行占比均值46.17%（包含排空边界）。
+  10秒区间：`progress terminalBusinessOps=3062850 intervalBusinessOpsPerSec=306284.720 requestsInFlight=255`; `progress terminalBusinessOps=6271140 intervalBusinessOpsPerSec=320828.998 requestsInFlight=256`; `progress terminalBusinessOps=9406229 intervalBusinessOpsPerSec=313508.900 requestsInFlight=256`; `progress terminalBusinessOps=12532558 intervalBusinessOpsPerSec=312632.897 requestsInFlight=256`; `progress terminalBusinessOps=15834781 intervalBusinessOpsPerSec=330221.541 requestsInFlight=253`; `progress terminalBusinessOps=19108959 intervalBusinessOpsPerSec=327417.797 requestsInFlight=256`。
+  系统5秒采样、正式窗口两侧各5秒保护共13样本：swap-in/out增量0/0页（4KiB/页），Pageouts增量3，throttled页0；swap used1119.25MiB稳定，未见持续换页/新增swap-out；最低可用磁盘524.00GiB。Java各PID进程CPU和RSS摘要：`{"79534": {"ppid": "79523", "samples": 13, "cpuMean": 948.6538461538462, "cpuMin": 750.5, "cpuMax": 991.4, "rssMiBMax": 1771.453125}, "79550": {"ppid": "79523", "samples": 13, "cpuMean": 0.06153846153846154, "cpuMin": 0.0, "cpuMax": 0.4, "rssMiBMax": 69.44921875}, "79553": {"ppid": "79550", "samples": 13, "cpuMean": 332.2307692307692, "cpuMin": 36.7, "cpuMax": 369.6, "rssMiBMax": 420.0546875}}`。ps为瞬时抽样、CPU100%=1逻辑核，包含busy-spin；不当作业务有效利用率。
+  NMT末值：`Total: reserved=3141721KB, committed=717289KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`；启动baseline差：`Total: reserved=3141720KB -17605KB, committed=717284KB +2651KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`。不是长期native增长率。
+  SHA-256：`metrics.json=9aceba9ca248fc89d1cee1985c099678fed6241944c083c229d8dfe33ccff68b`; `client.log=6e531532da9a9506a049701e7c9648cba3f20f011b273cfd6c24fbf2de22698a`; `node.log=076c9ba984dcba38e544fedc9617b920b4b0591d9e495f9f33ba16c95555152d`; `node.command=220898e990411eb8425200757eb7ee113b96a9c1b2b39275df2687a06d665c1c`; `client.command=80be37353f56050af435caa7495f1313c4b76e5eecce259c1103fe658de49443`。
+- historical3：窗口epoch(s)=[1790001110.603, 1790001170.614]，steady business/Core=18982279/1814791，排空后offered=terminal business/Core=18984967/1815047，unfinished=0、pending deque/backlog=0，mixedVerify=PASS/fundsDiff0/population/HFT positions/reservations/loss通过，无观察到业务拒绝/错误/超时。窗口峰值256，pipelineHighWater={'matcher': 208, 'completion': 203, 'context': 255, 'lanes': [55, 73, 53, 66]}，Lane累计有效执行占比均值45.79%（包含排空边界）。
+  10秒区间：`progress terminalBusinessOps=2905420 intervalBusinessOpsPerSec=290542.000 requestsInFlight=256`; `progress terminalBusinessOps=6047344 intervalBusinessOpsPerSec=314191.978 requestsInFlight=253`; `progress terminalBusinessOps=9293568 intervalBusinessOpsPerSec=324622.398 requestsInFlight=256`; `progress terminalBusinessOps=12358328 intervalBusinessOpsPerSec=306475.977 requestsInFlight=256`; `progress terminalBusinessOps=15619484 intervalBusinessOpsPerSec=326115.599 requestsInFlight=256`; `progress terminalBusinessOps=18979556 intervalBusinessOpsPerSec=336007.199 requestsInFlight=256`。
+  系统5秒采样、正式窗口两侧各5秒保护共13样本：swap-in/out增量199/0页（4KiB/页），Pageouts增量12，throttled页0；swap used1119.25MiB稳定，未见持续换页/新增swap-out；最低可用磁盘521.20GiB。Java各PID进程CPU和RSS摘要：`{"80375": {"ppid": "80364", "samples": 13, "cpuMean": 948.5846153846154, "cpuMin": 718.2, "cpuMax": 1002.6, "rssMiBMax": 1769.9609375}, "80384": {"ppid": "80364", "samples": 13, "cpuMean": 0.06923076923076923, "cpuMin": 0.0, "cpuMax": 0.8, "rssMiBMax": 69.7421875}, "80391": {"ppid": "80384", "samples": 13, "cpuMean": 332.9230769230769, "cpuMin": 57.6, "cpuMax": 369.7, "rssMiBMax": 417.8203125}}`。ps为瞬时抽样、CPU100%=1逻辑核，包含busy-spin；不当作业务有效利用率。
+  NMT末值：`Total: reserved=3142384KB, committed=716436KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`；启动baseline差：`Total: reserved=3142384KB -3462KB, committed=716432KB +13278KB`; `-                 Java Heap (reserved=1572864KB, committed=524288KB)`。不是长期native增长率。
+  SHA-256：`metrics.json=4c203787fe9b5a69852f1aa58bd8637a55e6bb7cb0a92096d42f21f808f43927`; `client.log=5407f13dcc3298b2eb6422dbd43c7e805ab357fd0f8d937079bb13f2922299b9`; `node.log=be21da946f8f37a8a1c8dd2ab5ab53b64510ef778df9109ba70d0e09661890d6`; `node.command=1ee6a4cc658d0d8397c1149634e171479cc7b147281bf745ee6a29e4cbf7a9c6`; `client.command=3269d9d0ae073fa27fed5e5d1715cf12281efda433a8c51dca710bf36149f811`。
+
+- 已测恢复边界：ContinuousOwnerBenchmarkTest六产品线的在途订单snapshot/role change及批量响应snapshot断言通过；单节点实压后的**真实Archive快照重启未执行**，不能将单测当同一负载恢复证据。1个跳过测试因未启用`core.settlementLatencyDiagnostics`，为诊断事件检查，非资金断言跳过。
+- 当前无profiler三轮不能给GC/分配或方法级根因结论；下节独立JFR补充。未采长稳、FD/Direct/Mapped/native长期斜率，不能宣称无泄漏。未覆盖其他产品线实压、HTTP/WebSocket、控制分页、持续资金费/强平/触发/交割/期权负载。订单簿/资金初始化遵循ClusterMixedCapacityMain.setup，支持账户资金总额1384000000125；测量保持做市批量下撤及成交，不是只有拒单或空Core。
+
+### 同配置独立JFR归因（不混入主成绩）
+
+- 完整命令与主轮相同，仅run ID=`current-local-20260921-historical-jfr`、`ASYNC_ENABLE_JFR=true`；节点PID81379、runner81395、fork81398。measurement epoch ms `[1790001293988,1790001354008]`；归因窗口双方各去2秒，UTC14:34:55.988–14:35:52.008，共56.020秒。未独立校准跨进程时钟，不能用不同进程时间戳直接相减算业务延迟。
+- 稳态312675.393 business/s、29894.648 Core/s、74426.648 fills/s；18,767,250 business/1,794,322 Core/4,467,200 fills。排空6.653ms，另2682 business/250 Core。最终offered=terminal business18,769,932/Core1,794,572，unfinished0、资金及population/HFT/reservations/loss核对通过。相对无profiler三轮均值低约0.46%，这是采样扰动与轮间波动的合计，不能精确归因profiler开销。
+- 业务p99（PLACE/CANCEL/MARK/PLACE_BATCH/CANCEL_BATCH）=15.892/13.811/27.754/19.660/33.980ms。该轮同样未过全部历史探索门槛，不能替代主成绩。
+- JFR同窗线程CPU归一单核Owner98.71%、Matcher98.67%、Lane约98.7%，均有busy-spin。Lane有效执行比平均44.67%，不能宣称Lane计算饱和；matcher/completion/context和Lane高水位={'matcher': 214, 'completion': 209, 'context': 255, 'lanes': [123, 61, 75, 117]}。
+
+#### 暂停、分配、heap/native
+
+- node：
+  `DURATION jdk.Compilation count=48 totalMs=533.965830 p50=1.430184 p95=27.037693 p99=123.763686 max=208.891803`
+  `DURATION jdk.ExecuteVMOperation count=73 totalMs=393.238757 p50=5.479573 p95=6.115646 p99=10.809558 max=13.246992`
+  `DURATION jdk.GCPhasePause count=69 totalMs=391.055685 p50=5.478373 p95=6.093173 p99=10.495610 max=13.173662`
+  `DURATION jdk.GarbageCollection count=69 totalMs=391.055685 p50=5.478373 p95=6.093173 p99=10.495610 max=13.173662`
+  `DURATION jdk.SafepointBegin count=73 totalMs=6.993670 p50=0.087516 p95=0.118382 p99=0.136251 max=0.706575`
+  `RANGE direct.count first,last,min,max,n=[8.0, 8.0, 8.0, 8.0, 55.0]`
+  `RANGE direct.memoryUsed first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 55.0]`
+  `RANGE direct.totalCapacity first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 55.0]`
+  `RANGE heapCommitted first,last,min,max,n=[5.36870912E8, 5.36870912E8, 5.36870912E8, 5.36870912E8, 138.0]`
+  `RANGE heapUsed.After GC first,last,min,max,n=[1.72543752E8, 1.71617352E8, 1.71085208E8, 1.7348264E8, 69.0]`
+- client fork：
+  `DURATION jdk.Compilation count=39 totalMs=177.980521 p50=0.255655 p95=41.623310 p99=42.448480 max=65.802860`
+  `DURATION jdk.ExecuteVMOperation count=361 totalMs=362.431461 p50=1.004507 p95=1.135243 p99=1.233292 max=2.735542`
+  `DURATION jdk.GCPhasePause count=355 totalMs=353.265222 p50=0.981938 p95=1.107541 p99=1.206615 max=2.708105`
+  `DURATION jdk.GarbageCollection count=355 totalMs=353.265222 p50=0.981938 p95=1.107541 p99=1.206615 max=2.708105`
+  `DURATION jdk.SafepointBegin count=359 totalMs=27.203848 p50=0.054670 p95=0.081000 p99=0.247300 max=3.686129`
+  `RANGE direct.count first,last,min,max,n=[6.0, 6.0, 6.0, 6.0, 56.0]`
+  `RANGE direct.memoryUsed first,last,min,max,n=[8522400.0, 8522400.0, 8522400.0, 8522400.0, 56.0]`
+  `RANGE direct.totalCapacity first,last,min,max,n=[8522400.0, 8522400.0, 8522400.0, 8522400.0, 56.0]`
+  `RANGE heapCommitted first,last,min,max,n=[1.34217728E8, 1.34217728E8, 1.34217728E8, 1.34217728E8, 710.0]`
+  `RANGE heapUsed.After GC first,last,min,max,n=[1.3373592E7, 1.3117712E7, 1.2954736E7, 1.3505264E7, 355.0]`
+- 上述GC均为G1New/G1 Evacuation Pause：节点69次/391.056ms，暂停占保护窗0.698%；客户端355次/353.265ms，占0.631%。未观察到FullGC、promotion/evacuation failure事件。节点GC max13.174ms接近部分请求尾延迟量级，可能贡献尾部，但没有逐请求关联不能宣称解释全部p99。SafepointBegin记录到达/同步阶段，不能把其总时间当作完整停顿。
+- 节点测量中仍有48次编译/533.966ms、最长208.892ms和2次deoptimization；客户端39次编译/177.981ms、2次deoptimization。主轮按历史30s预热执行，未证明JIT完全稳定，不能把仍在编译视为充分预热通过。CodeCache/Metaspace事件已采，但类级长期趋势未测。
+- 分配证据：node ThreadAllocationStatistics同线程首末54.765s，Owner78,595,205B/s、Matcher72,014,123B/s、四Lane各约48,431,415–48,453,015B/s、clustered-service30,641,165B/s；全节点观测线程合计约375,030,701B/s。client fork观测线程合计约495,326,510B/s，其中JMH worker233,786,099B/s（55.698s）。各线程覆盖跨度与business稳态计数不完全一致，因此不作精确B/business；本轮未跑-prof gc，无JMH gc.alloc.rate.norm，objects/op也不可用。
+- 四种分配事件均开启：node ObjectAllocationSample/InNewTLAB各43981、OutsideTLAB533、ThreadAllocationStatistics1487。权重是采样估计而非精确对象数。TLAB/非TLAB事件中最大观测allocationSize均65552B，非全局最大对象保证。
+- 节点采样分配权重总量=21017799240B；top class：com.surprising.aeron.service.state.OrderRuntime 20.98%；[B 10.55%；[J 9.28%；exchange.core2.core.common.MatcherResult 7.33%；[Ljava.lang.Object; 5.53%；com.surprising.aeron.service.state.ResolvedPlaceOrder 5.34%；com.surprising.aeron.service.state.ReservationRuntime 4.58%；com.surprising.aeron.protocol.PlaceOrderCommand 3.93%。
+- 主要分配站点：`CoreMessageFlyweightDecoder.decode`、`TradingCommandCodec.decodePlaceOrder`、原生`exchange.core2.core.common.MatcherResult.from`、`OrderRuntime.snapshot/publicationValue`。这是本轮实测热点，不根据旧轮声称分配升降。
+- native类别为JFR每秒采集，以下为保护窗first→last和min/max committed，单位bytes（reserved完整值在node-window.txt）。短窗变化不能判定泄漏：
+
+| NMT类别 | committed first→last | min–max |
+|---|---:|---:|
+| Arena Chunk | 2858600→147400 | 68816–11096792 |
+| Arguments | 90→90 | 90–90 |
+| Class | 6191118→6194038 | 6190878–6194038 |
+| Code | 42622444→42896108 | 42622444–42896108 |
+| Compiler | 415991→414754 | 414530–415991 |
+| GC | 74041607→74042743 | 74041607–74042743 |
+| GCCardSet | 14544→14544 | 14544–14544 |
+| Internal | 590211→589776 | 589038–590211 |
+| JNI | 8792→8792 | 8792–8792 |
+| Java Heap | 536870912→536870912 | 536870912–536870912 |
+| Logging | 32→32 | 32–32 |
+| Metaspace | 28459952→28459952 | 28459952–28459952 |
+| Module | 200768→200768 | 200768–200768 |
+| Native Memory Tracking | 3612968→3615070 | 3563950–3638182 |
+| Object Monitors | 3104→3104 | 3104–3104 |
+| Other | 9639304→9639304 | 9639304–9639304 |
+| Safepoint | 8192→8192 | 8192–8192 |
+| Serviceability | 17264→17264 | 17264–17264 |
+| Shared class space | 14602240→14602240 | 14602240–14602240 |
+| Statistics | 128→128 | 128–128 |
+| String Deduplication | 608→608 | 608–608 |
+| Symbol | 6677864→6677912 | 6677864–6677912 |
+| Synchronization | 1429340→1433340 | 1429340–1433340 |
+| Test | 0→0 | 0–0 |
+| Thread Stack | 1888256→1888256 | 1888256–1888256 |
+| Thread | 149472→147352 | 147352–180080 |
+| Tracing | 19407047→19386218 | 19103396–19606419 |
+
+#### 排队与热点：现象→证据→假设→缺口→下一项验证
+
+- **持续背压与批量撤单尾延迟**：主轮window blocked81%–82%；JFR client worker2203 execution samples中至少1401首帧为`ClusterMixedCapacityMain.space`；节点OwnerTurn稀疏样本20564，其中headWait20441、零退休13558。支持窗口/FIFO推进等待占比较高，不代表所有Owner轮次都如此。Owner执行样本分散于`LaneCommitDelta.publishPreparedToOwner`、`TerminalStateRetention.acceptBatch`、命令decode和活动订单索引删除，没有单一方法已被证实为根因。
+- 阶段样本（本进程nanoTime，单位ms，采样n在原汇总中）：CANCEL_BATCH ingress→admission p99=8.845（n3252），admission execution p99=0.024；PLACE_BATCH对应5.656/0.019（n9791）。Lane执行p99 PLACE0.014904/CANCEL0.022625/PLACE_BATCH0.127347；Lane完成→Owner p99分别0.275536/2.051661/1.311009。排队跨度明显大于多数执行段，但各分位不能相加，稀疏阶段样本也不能取代全请求accepted分段。
+- **资源及I/O**：Owner保护窗内FileRead/FileWrite/SocketRead/SocketWrite事件0，不能扩展成整个trial或生产长期零I/O认证；Archive线程911910次FileWrite/1,577,686,944B/累计13.784s，I/O留在Archive线程。节点无JavaExceptionThrow/JavaErrorThrow/JavaMonitorEnter事件；Matcher awaitMatcherReceipt观测park累计759ns，不支持锁阻塞为当前主瓶颈。Aeron driver/consensus常见park为BackoffIdleStrategy，不能用CPU sample当墙钟阻塞证据。
+- **当前容量偏低的根因未定位**：稳定主轮重复落在30.8–31.8万，但历史和当前宿主状态不同，当前存在桌面负载/虚拟机/既有swap/本地快照；未排除发压端、同机CPU争用、初始化/JIT或Archive影响。pmset单次22:34:19抽查scheduler/speed limit100、16可用CPU，无热告警，只能排除该采样点明显节流。下一项最小验证是保持当前commit及所有负载参数不变，在用户安排的空闲宿主环境重复三轮并同步记录温控、swap及CPU；本任务不擅自重启机器、删除快照或停止用户服务。
+
+#### 采样及复核证据
+
+- JFR配置为仓库`config/owner-commit-profile.jfc`，execution/native sample20ms、CPU/native/direct每1s，分配/GC/safepoint/文件网络/park/exception及Core事件开启，文件和park阈值0。每进程max256MiB；node、runner、fork独立文件。以下完整录制summary均DataLoss0，未损坏；归因使用流式RecordingFile、有界-Xmx256m，避免逐条展开百万Archive事件。
+- 自动汇总完整命令：脚本对每份JFR运行`jfr summary <file>`及`jfr view --width 220 <view> <file>`；view为thread-cpu-load/hot-methods/allocation-by-class/allocation-by-site/allocation-by-thread/contention-by-thread/latencies-by-type/gc/safepoints。额外窗口汇总`javac /tmp/surprising-perf-20260921-current/JfrWindow.java`，再`java -Xmx256m -cp /tmp/surprising-perf-20260921-current JfrWindow <file> 1790001293988 1790001354008`，内部两侧各2s保护。每个完整命令也在*-window.command.json。
+- `client-81395.jfr`：start=2026-09-21 14:33:56 (UTC)，duration=136 s，9339955bytes，SHA256=0953d03566f1d3a687fa14cc595cfdc8376b474268f35aa50339ecf585461d37。
+- `client-81398.jfr`：start=2026-09-21 14:33:57 (UTC)，duration=135 s，107887476bytes，SHA256=2cad3f5adfbf4158e48f3f4fc79a53b7626dba50d8517f331734e95cd31747dc。
+- `node.jfr`：start=2026-09-21 14:33:54 (UTC)，duration=139 s，108393748bytes，SHA256=f9905ac012c2f18d9768174332394ea443035d3a196397f23e5500d486b58176。
+- 限制：本轮缺精确objects/op/B-business、完整accepted分段、上下文切换/FD/Mapped池归还差、old object长期趋势和真实Archive重启；未以零补缺项，也未运行无关微基准替代。由于未修改业务实现，不新增JMH。无长期泄漏或生产容量结论。
+
+- JFR归因轮系统窗口（正式epoch两侧各2秒、系统5秒采样）实测：`{"samples": 12, "swapFirst": "vm.swapusage: total = 2048.00M  used = 1119.25M  free = 928.75M  (encrypted)", "swapLast": "vm.swapusage: total = 2048.00M  used = 1119.25M  free = 928.75M  (encrypted)", "freeGiBMin": 518.2827682495117, "Swapins": {"first": 425565, "last": 425691, "delta": 126}, "Swapouts": {"first": 842189, "last": 842189, "delta": 0}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}}`。本轮未见新增swap-out或明显持续换页，既有swap不是本轮压测产生的全部值。
+- 本轮命令/日志/JSON/NMT/JFR/summary/views共124项证据清单`manifest.json` SHA256=0016ac07b759a32e797d62ffa2bf0dacff8ac30e557af90659f5ac0fca8216bd，含原始路径/字节数/SHA256；清理后移位路径见后。主业务源码和baseline脚本未改，构建日志hash=3469e3f29bdcbb8469facce7b28ef68e5647d5f5bd806923262f252659961873。
+
+### 本轮清理与交付
+
+- 本轮node/client/JMH/JFR分析及临时驱动进程均退出；仅将本轮5个run目录（含用户改计划而终止的mixed1）与临时分析目录共约13GiB移动到`/Users/atomex/.Trash/surprising-ex-current-local-20260921/`，可恢复。分析清单位于其`analysis/manifest.json`；原target/tmp路径仅作历史定位。不清空Trash，不改动其他轮次/用户文件。构建复用了已有target，未删除共享构建目录。
+- 结束检查发现其他会话Maven PID82792于22:38:04在`/private/tmp/surprising-gcp-real-pJa1ZB`启动，晚于本轮全部测量窗口，未停止或清理；不能写“全机无Java进程”。本轮不涉及业务代码改动，交付仅本记录追加内容；`git diff --check`通过。
