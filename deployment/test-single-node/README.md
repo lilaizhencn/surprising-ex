@@ -82,7 +82,7 @@ curl -fsS http://127.0.0.1:9094/actuator/health/readiness
 curl -fsS https://ex-api.tokdou.com/healthz
 ```
 
-Gateway 对外仍只走 9094；Router 的 9095、Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
+Gateway 对外仍只走 9094；realtime-router 是无 HTTP 监听的后台 JVM，Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
 
 停止服务：
 

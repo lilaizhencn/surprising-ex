@@ -486,7 +486,7 @@ start_realtime_router() {
       "$PRODUCT_LINE" "$PRODUCT_LINE" "$REALTIME_CORE_CONTROL_DESTINATION")"
   fi
   java_args_for realtime-router
-  start_owned_process "realtime-router" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
+  start_owned_process "realtime-router" '' "${COMMON_ENV[@]}" \
     AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
     SERVER_PORT="$REALTIME_ROUTER_PORT" SPRING_APPLICATION_JSON="$router_json" \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path realtime)"
