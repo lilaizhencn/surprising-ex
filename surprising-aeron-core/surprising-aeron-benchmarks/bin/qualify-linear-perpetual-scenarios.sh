@@ -294,7 +294,7 @@ run_dense_book() {
   # Build the population once. The timed path only places and cancels at a dense
   # level, preserving the resident order count without snapshot restore noise.
   run_local_jmh_case dense-book-population \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.denseResidentBookPlaceCancel \
+    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.denseResidentBookAsyncPlaceCancel \
     -p accountLanes=4 -p priceLevels="${BOOK_PRICE_LEVELS}" \
     -p ordersPerLevel="${BOOK_ORDERS_PER_LEVEL}"
   run_local_jmh_case dense-level-fill \

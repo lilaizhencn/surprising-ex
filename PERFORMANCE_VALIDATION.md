@@ -1668,3 +1668,36 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - CPU采样主要是独占线程busy spin：`SettlementLaneWorker.run` 61.66%、`MatcherCommandPipeline.run` 16.50%；有效业务站点中`dispatchPlaceAdmission`为6.45%。这是局部单线程驱动场景，空闲Lane/matcher的busy-spin样本不能解释为业务计算瓶颈。
 - 最终result/JFR/GC日志SHA-256分别为`cf1c1c4e9c759cdb4f11b72fb04df612a2cb3e81b50e3123c71ea0647bf04749`/`d63ff8c6f3ca4eada66754671988bedd8bbbc7ead02d4a515a8ab2f106f62d59`/`183a30c8fe5f1707337087a53423ecb8661e017420e619b8276b4b2b4b61eef2`。原始路径仅作清理前定位：`target/linear-perpetual-scenarios/dense-book-10m-continuous-mark-20260921`。
 - 首次失败、主动终止和最终有效轮的三个目录已移动到`/Users/atomex/.Trash/surprising-ex-dense-book-10m-20260921/`，可恢复；项目目录无本轮产物和Java/JMH残留进程，清理后swap仍为0、根卷可用545GiB。
+
+## 2026-09-21 200档订单簿异步生产调用长稳
+
+### 采集前锁定计划
+
+- 前一轮虽然有25万常驻订单和5,000账户，但计时流量固定使用单账户并逐命令等待终态，只能证明串行稳定性，不能定位满载Core瓶颈。本轮把局部Core场景改为5000账户轮转、最多256个matching命令持续在途；每账户最多一个有依赖的命令在途，下单终态后把该订单撤单放入执行窗口，但发压循环不等待撤单完成，持续用其他账户补满窗口。每次JMH invocation异步完成16,384个下单/撤单动作并在边界排空，保证accepted=terminal且不把未完成量虚报为吞吐。
+- mark price仍每1秒墙钟产生同价、递增sequence/generated-at的心跳。局部Harness没有生产Owner的外层FIFO命令队列，因此心跳到期后在当前最多16,384操作的小窗口退休边界应用，避免越过Account Lane matching cursor；短轮曾直接跨在途matching执行并按正确性失败保留，不修改生产顺序约束。
+- 固定200档×1,250单、250,000常驻订单、5,000账户、4 Account Lane、1 matcher、全BUSY_SPIN、4GiB G1、JDK27；30秒预热、600秒单次测量、1 fork/1 JMH线程、JFR profile最大512MiB和GC日志。开始前定向24项测试和重新打包通过；短标准轮3×2秒为57,094.447 async trading ops/s、accepted=terminal约57,095.400/s、拒绝/错误/超时/unfinished为0，teardown和快照恢复通过，只作功能预检。
+- 通过门槛为完整600秒和teardown正常退出、窗口达到256且无producer starvation、accepted=terminal、unfinished/拒绝/错误/超时为0、结束恢复为25万订单并通过快照恢复，无OOM/fatal/GC failure/swap。吞吐不预设门槛；JFR按有效工作线程、Owner/Harness退休、matcher、Lane、分配和GC定位限制点。局部Harness没有真实Aeron网络/Archive和外部API入口，结果不外推真实集群p99。
+
+### 实现与业务顺序
+
+- `DenseResidentBook`保留建簿时创建的5,000个账户并以primitive环形队列轮转，不再固定使用第一个账户。发压线程持续把窗口补到256；某账户下单完成后才为同一订单排入撤单，撤单完成后再排下一笔下单，但该依赖只暂停该账户，其他4,999个账户继续提交，因此没有逐命令或全局等待。
+- 每次JMH invocation提交并退休16,384个业务动作；一次最多批量退休64个连续ready的FIFO头，随后立即补窗。窗口边界完全排空用于JMH计数隔离，未把未完成请求计入吞吐。mark heartbeat仍按1秒墙钟到期，在局部Harness已排空的FIFO边界异步提交；生产Owner拥有统一外层FIFO，不需要这一Harness限制。
+- 新增窗口采样、满窗采样、补窗操作和producer-starvation计数；teardown清理动态订单后核对250,000个常驻订单，并以business-state hash验证快照恢复。没有新增生产线程、业务状态副本、barrier或通用抽象，改动仅限独立基准、测试和脚本入口。
+
+### 测试与结果
+
+- JDK为Corretto HotSpot 27.0.0.33.1，Maven 3.9.16，macOS 26.7 x86_64、16 CPU/16GiB；当前master基线commit为`b042e7f5`，本轮基准改动尚未提交。执行前后根卷可用544GiB，运行中swap为0。定向`LinearPerpetualBenchmarkSupportTest`共24项通过，benchmark模块package通过；短轮1×2秒预热、3×2秒测量为57,094.447 ops/s且恢复校验通过。
+- 正式命令为`denseResidentBookAsyncPlaceCancel -p accountLanes=4 -p priceLevels=200 -p ordersPerLevel=1250 -wi 1 -w 30s -i 1 -r 600s -f 1 -t 1 -foe true -to 900s`，JVM为4GiB G1/AlwaysPreTouch、1 matcher、4 Account Lane、全部BUSY_SPIN，另开512MiB上限JFR和GC日志。完整运行耗时11分钟并正常退出。
+- 正式持续吞吐为**53,408.860个异步下单/撤单业务动作每秒**；同价mark heartbeat使accepted/terminal Core消息为53,409.678/s。accepted=terminal，unfinished business/Core、拒绝、错误和超时均为0，teardown恢复250,000个常驻订单并通过快照恢复。
+- 满窗采样52,577.043/s、总窗口采样53,408.280/s，即**98.44%采样点保持256在途**；补窗53,405.600/s，producer starvation为0，最大backlog达到256。因此53.4k不是发压端未供给，而是该局部Core链路在严格FIFO和256上限下的持续退休能力。
+- 本轮结论为**部分验证**：异步5000账户分布、完成性、10分钟稳定性及局部Core饱和有效；未采集入口→accepted/terminal直方图，也未经过真实Aeron网络、Archive和外部API入口，不能报告请求p99或推导生产集群容量。场景是深订单簿上的不成交下单/撤单，成交、持仓、强平等独立场景不与本结果混算。
+
+### 明确卡点与分配
+
+- JFR共659秒、9.0MiB、DataLoss=0、280,222个execution samples和84,136个allocation samples。4个`SettlementLaneWorker.run`合计61.38%及单matcher的`MatcherCommandPipeline.run` 16.42%主要包含独占CPU busy-spin；4个Lane的有效`peekMatcherSettlement`仅3.71%，没有证据表明Account Lane计算量限制吞吐。
+- 发压/Owner线程同样占满一个核，最大有效站点是`TradingRuntimeState.dispatchPlaceAdmission` 4.39%总样本（约一个核的26%），其后是`Long2ObjectHashMap.getMapped` 1.84%、`ResponseArena.acquire` 1.21%、`PendingMatchingRing.firstDeferred` 0.61%、`readyLaneMask` 0.56%和连续完成/FIFO探测。结合98.44%满窗和producer starvation=0，已定位的主要限制在**单Owner准入与有序退休热路径**，不是5000账户生成器或4个Account Lane。matcher独占核有16.42%自循环样本，但当前采样不能把其busy-spin与有效撮合成本拆开，不能单独判定matcher为第一瓶颈。
+- `ResponseArena.acquire`每次从槽0开始在线性512槽数组上CAS查找；这是明确可消除的Owner扫描成本。下一项最小验证应只把它改成Owner维护的空闲槽游标/primitive free ring，并保持transport/ledger双引用生命周期不变，再看该站点、吞吐和正确性是否同步改善。随后才验证place admission的事件交接和FIFO头重复探测，不应增加线程、barrier或状态副本。
+- 正式JFR分配占比前列为`byte[]` 19.59%、`OrderRuntime` 7.10%、`long[]` 6.73%、`CoreResponse` 4.50%、`CoreMatchingResult` 4.13%、native `MatcherResult` 3.84%、`ResolvedPlaceOrder` 3.59%、`CoreMessageHeader` 3.13%和`ReservationRuntime` 3.05%。独立`-prof gc`轮前两个正常测量迭代为2,494.853和2,444.201 B/op；第三迭代包含trial teardown快照物化，7,852.842 B/op不代表热路径。正式GC日志按13个稳态GC区间、2MiB region估算为125.66MiB/s、**2,467 B/business op**，与前两个profiler样本一致。
+- 正式轮37次GC加退出前一次metadata-threshold GC，总暂停574ms；暂停p50/p95/p99/max为12.1/48.6/64.9/64.9ms。稳态young GC后堆约427–430MiB，Old region在后半段保持142→142，无promotion/evacuation failure。正式窗口607个RSS样本为4.266–4.295GiB，首末增加21.2MiB；固定4GiB堆已预触页，10分钟内未见持续Old增长。DirectBufferStatistics均为0；本轮未启用NMT，native分类不可用。
+- 正式JFR/result/GC日志SHA-256分别为`1ae1e34a0c0627d83f7606999866fd018b50e8ff329c5ee58587aeb0b4fd83b2`、`3eebc2df6c016bd7d4317dc7cddc0c941f27ca9df6bb447b5c64e111445a4382`、`61a6f38a9e8a74e634f58cee39e59ee63777ecac67d41f1084be2299eb926e35`；独立GC-profiler result为`2d671f34231e764518b921a8959bf8a7acf13fed0de2cd22592e57bcfaebf027`。原始路径仅作清理前定位：`target/linear-perpetual-scenarios/dense-book-async-10m-20260921`和`dense-book-async-gc-20260921`。
+- 正式轮、GC-profiler轮及两次短轮目录均已移动到`/Users/atomex/.Trash/surprising-ex-dense-book-async-20260921/`，可恢复；项目目录无本轮artifact和Java/JMH残留进程，清理后根卷可用544GiB。

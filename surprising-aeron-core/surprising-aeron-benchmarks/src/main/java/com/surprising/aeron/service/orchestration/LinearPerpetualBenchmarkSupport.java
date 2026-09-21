@@ -221,7 +221,7 @@ final class LinearPerpetualBenchmarkSupport {
                             order(harness.nextOrderId(), CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
                 }
             }
-            return new DenseResidentBook(harness, makers.getFirst(), ENTRY_PRICE + 1, residentOrders);
+            return new DenseResidentBook(harness, List.copyOf(makers), ENTRY_PRICE + 1, residentOrders);
         } catch (RuntimeException failure) {
             harness.close();
             throw failure;
@@ -229,42 +229,200 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     static final class DenseResidentBook implements AutoCloseable {
-        private static final long MARK_HEARTBEAT_CHECK_MASK = (1L << 12) - 1;
+        private static final int MAX_IN_FLIGHT = 256;
+        private static final int COMPLETION_BATCH_SIZE = 64;
         private static final long MARK_HEARTBEAT_INTERVAL_NANOS = 1_000_000_000L;
 
         private final Harness harness;
-        private final long userId;
+        private final List<Long> users;
         private final long price;
         private final int residentOrders;
+        private final long[] activeOrderIds;
+        private final boolean[] cancelInFlight;
+        private final int[] readyUsers;
+        private final int[] inFlightUsers = new int[MAX_IN_FLIGHT];
+        private final int maxInFlight;
+        private final int completionBatchSize;
+        private int readyHead;
+        private int readyTail;
+        private int readySize;
+        private int inFlightHead;
+        private int inFlightTail;
+        private int inFlightSize;
         private long nextMarkHeartbeatNanos;
+        private long windowSamples;
+        private long fullWindowSamples;
+        private long refillOperations;
+        private long producerStarvationSamples;
 
-        private DenseResidentBook(Harness harness, long userId, long price, int residentOrders) {
+        private DenseResidentBook(Harness harness, List<Long> users, long price, int residentOrders) {
             this.harness = harness;
-            this.userId = userId;
+            this.users = users;
             this.price = price;
             this.residentOrders = residentOrders;
+            this.activeOrderIds = new long[users.size()];
+            this.cancelInFlight = new boolean[users.size()];
+            this.readyUsers = new int[users.size()];
+            this.maxInFlight = Math.min(MAX_IN_FLIGHT, users.size());
+            this.completionBatchSize = Math.min(COMPLETION_BATCH_SIZE, maxInFlight);
+            for (int userIndex = 0; userIndex < users.size(); userIndex++) enqueueReady(userIndex);
             this.nextMarkHeartbeatNanos = System.nanoTime() + MARK_HEARTBEAT_INTERVAL_NANOS;
         }
 
-        long placeAndCancel() {
-            long orderId = harness.nextOrderId();
-            if ((orderId & MARK_HEARTBEAT_CHECK_MASK) == 0) {
-                long now = System.nanoTime();
-                if (now >= nextMarkHeartbeatNanos) {
-                    harness.publishMarkPriceHeartbeat(SYMBOL);
-                    nextMarkHeartbeatNanos = now + MARK_HEARTBEAT_INTERVAL_NANOS;
-                }
+        long runAsync(int operations) {
+            if (operations < maxInFlight || operations % completionBatchSize != 0) {
+                throw new IllegalArgumentException("async dense-book operations must cover the window in batches");
             }
-            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                    order(orderId, CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC)));
-            harness.execute(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
-                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
-            return orderId;
+            int scheduled = 0;
+            int completed = 0;
+            while (completed < operations) {
+                publishMarkHeartbeatIfDue();
+                while (scheduled < operations && inFlightSize < maxInFlight) {
+                    submitNextReadyUser();
+                    scheduled++;
+                }
+                windowSamples++;
+                if (inFlightSize == maxInFlight) fullWindowSamples++;
+                if (scheduled < operations && inFlightSize == 0) producerStarvationSamples++;
+                int retired = 0;
+                long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
+                while (retired == 0) {
+                    retired = harness.awaitReadyMatching(
+                            Math.min(completionBatchSize, operations - completed), this::completeUserCommand);
+                    if (retired == 0) {
+                        if (System.nanoTime() >= deadline) {
+                            throw new IllegalStateException("async dense-book window made no progress");
+                        }
+                        Thread.onSpinWait();
+                    }
+                }
+                completed += retired;
+            }
+            if (scheduled != operations || inFlightSize != 0 || harness.pendingSubmissions() != 0) {
+                throw new IllegalStateException("async dense-book invocation did not fully retire");
+            }
+            publishMarkHeartbeatIfDue();
+            return completed;
+        }
+
+        private void submitNextReadyUser() {
+            int userIndex = dequeueReady();
+            long userId = users.get(userIndex);
+            long orderId = activeOrderIds[userIndex];
+            cancelInFlight[userIndex] = orderId != 0;
+            CoreMessage command;
+            if (orderId == 0) {
+                orderId = harness.nextOrderId();
+                activeOrderIds[userIndex] = orderId;
+                command = harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
+                        order(orderId, CoreOrderSide.SELL, price, 1, CoreTimeInForce.GTC));
+            } else {
+                command = harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
+            }
+            int pendingBefore = harness.pendingSubmissions();
+            harness.submit(command);
+            if (harness.pendingSubmissions() != pendingBefore + 1) {
+                throw new IllegalStateException("async dense-book command did not enter the matching window");
+            }
+            inFlightUsers[inFlightTail] = userIndex;
+            inFlightTail = (inFlightTail + 1) % inFlightUsers.length;
+            inFlightSize++;
+            if (pendingBefore != 0) refillOperations++;
+        }
+
+        private void completeUserCommand(long userId, long entryNanos, long acceptedNanos, long terminalNanos) {
+            if (inFlightSize == 0) throw new IllegalStateException("async dense-book completion underflow");
+            int userIndex = inFlightUsers[inFlightHead];
+            inFlightHead = (inFlightHead + 1) % inFlightUsers.length;
+            inFlightSize--;
+            if (users.get(userIndex) != userId) {
+                throw new IllegalStateException("async dense-book completion crossed FIFO user order");
+            }
+            if (cancelInFlight[userIndex]) activeOrderIds[userIndex] = 0;
+            cancelInFlight[userIndex] = false;
+            enqueueReady(userIndex);
+        }
+
+        private void publishMarkHeartbeatIfDue() {
+            long now = System.nanoTime();
+            if (now < nextMarkHeartbeatNanos || inFlightSize != 0) return;
+            harness.publishMarkPriceHeartbeat(SYMBOL);
+            nextMarkHeartbeatNanos = now + MARK_HEARTBEAT_INTERVAL_NANOS;
+        }
+
+        private void enqueueReady(int userIndex) {
+            if (readySize == readyUsers.length) throw new IllegalStateException("dense-book ready queue overflow");
+            readyUsers[readyTail] = userIndex;
+            readyTail = (readyTail + 1) % readyUsers.length;
+            readySize++;
+        }
+
+        private int dequeueReady() {
+            if (readySize == 0) throw new IllegalStateException("dense-book ready queue exhausted");
+            int userIndex = readyUsers[readyHead];
+            readyHead = (readyHead + 1) % readyUsers.length;
+            readySize--;
+            return userIndex;
+        }
+
+        long acceptedMessages() {
+            return harness.acceptedMessages();
+        }
+
+        long terminalMessages() {
+            return harness.terminalMessages();
+        }
+
+        long acceptedCoreMessages() {
+            return harness.acceptedCoreMessages();
+        }
+
+        long terminalCoreMessages() {
+            return harness.terminalCoreMessages();
+        }
+
+        long windowSamples() {
+            return windowSamples;
+        }
+
+        long fullWindowSamples() {
+            return fullWindowSamples;
+        }
+
+        long refillOperations() {
+            return refillOperations;
+        }
+
+        long producerStarvationSamples() {
+            return producerStarvationSamples;
         }
 
         void verify() {
+            if (inFlightSize != 0 || harness.pendingSubmissions() != 0
+                    || harness.acceptedMessages() != harness.terminalMessages()
+                    || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
+                    || harness.maxMatchingBacklog() != maxInFlight) {
+                throw new IllegalStateException("async dense-book completion invariant failed");
+            }
+            for (int userIndex = 0; userIndex < activeOrderIds.length; userIndex++) {
+                long orderId = activeOrderIds[userIndex];
+                if (orderId == 0) continue;
+                harness.submit(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
+                        users.get(userIndex), TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
+                activeOrderIds[userIndex] = 0;
+                if (harness.pendingSubmissions() == maxInFlight) harness.drainSubmitted();
+            }
+            harness.drainSubmitted();
             if (harness.state().tradingState().orders().size() != residentOrders) {
                 throw new IllegalStateException("dense resident book size changed");
+            }
+            SnapshotTemplate snapshot = harness.snapshotTemplate(
+                    harness.state().laneTopology().accountLaneCount());
+            try (Harness restored = Harness.restore(snapshot)) {
+                if (restored.state().tradingState().businessStateHash() != snapshot.businessStateHash()) {
+                    throw new IllegalStateException("async dense-book snapshot recovery mismatch");
+                }
             }
         }
 
@@ -1026,7 +1184,7 @@ final class LinearPerpetualBenchmarkSupport {
             long now = nextCommandTimestamp();
             var mark = state.runtimeMarkPrice(symbol);
             if (mark == null) throw new IllegalStateException("workload mark price is missing: " + symbol);
-            execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+            submit(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
                             mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now))));
         }

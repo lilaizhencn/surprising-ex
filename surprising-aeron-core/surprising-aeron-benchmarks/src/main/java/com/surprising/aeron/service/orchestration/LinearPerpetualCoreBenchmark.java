@@ -10,6 +10,7 @@ import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
@@ -50,17 +51,31 @@ public class LinearPerpetualCoreBenchmark {
         return state.scenario.run();
     }
 
-    /** Place/cancel against a large resident book without snapshot restore in the timed path. */
+    /** Asynchronous place/cancel traffic across the resident-book population with 256 in flight. */
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
-    public long denseResidentBookPlaceCancel(DenseResidentBookState state, MixedWorkloadCounters counters) {
-        long result = state.book.placeAndCancel();
-        counters.acceptedBusinessOperations += 2;
-        counters.terminalBusinessOperations += 2;
-        counters.acceptedCoreMessages += 2;
-        counters.terminalCoreMessages += 2;
-        counters.terminalTradingOperations += 2;
+    @OperationsPerInvocation(16_384)
+    public long denseResidentBookAsyncPlaceCancel(DenseResidentBookState state, MixedWorkloadCounters counters) {
+        long acceptedBefore = state.book.acceptedMessages();
+        long terminalBefore = state.book.terminalMessages();
+        long acceptedCoreBefore = state.book.acceptedCoreMessages();
+        long terminalCoreBefore = state.book.terminalCoreMessages();
+        long windowSamplesBefore = state.book.windowSamples();
+        long fullWindowSamplesBefore = state.book.fullWindowSamples();
+        long refillOperationsBefore = state.book.refillOperations();
+        long producerStarvationBefore = state.book.producerStarvationSamples();
+        long result = state.book.runAsync(16_384);
+        counters.acceptedBusinessOperations += state.book.acceptedMessages() - acceptedBefore;
+        counters.terminalBusinessOperations += state.book.terminalMessages() - terminalBefore;
+        counters.acceptedCoreMessages += state.book.acceptedCoreMessages() - acceptedCoreBefore;
+        counters.terminalCoreMessages += state.book.terminalCoreMessages() - terminalCoreBefore;
+        counters.terminalTradingOperations += 16_384;
+        counters.matchingWindowSamples += state.book.windowSamples() - windowSamplesBefore;
+        counters.matchingFullWindowSamples += state.book.fullWindowSamples() - fullWindowSamplesBefore;
+        counters.matchingRefillOperations += state.book.refillOperations() - refillOperationsBefore;
+        counters.matchingProducerStarvationSamples +=
+                state.book.producerStarvationSamples() - producerStarvationBefore;
         return result;
     }
 

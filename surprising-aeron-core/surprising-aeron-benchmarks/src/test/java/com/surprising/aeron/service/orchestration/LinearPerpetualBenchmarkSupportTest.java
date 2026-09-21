@@ -13,9 +13,11 @@ import org.junit.jupiter.api.Test;
 class LinearPerpetualBenchmarkSupportTest {
 
     @Test
-    void denseResidentBookKeepsItsPopulationAcrossPlaceCancelCycles() {
+    void denseResidentBookKeepsItsPopulationAcrossAsyncPlaceCancelWindows() {
         try (var book = LinearPerpetualBenchmarkSupport.denseResidentBook(4, 4, 16)) {
-            for (int cycle = 0; cycle < 32; cycle++) book.placeAndCancel();
+            assertThat(book.runAsync(512)).isEqualTo(512);
+            assertThat(book.acceptedMessages()).isEqualTo(book.terminalMessages());
+            assertThat(book.acceptedCoreMessages()).isEqualTo(book.terminalCoreMessages());
             book.verify();
         }
     }
