@@ -1712,6 +1712,16 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 每阶段先用CodeGraph影响面确定测试范围；当前会话未暴露`codegraph_*`工具时，使用源码符号引用、Maven模块依赖和事件边界作保守替代。每阶段执行JDK 27版本检查、受影响service定向测试和benchmark支持测试，正确性通过后独立commit并push；四阶段全部完成后才跑相同异步200档/5000账户/256在途GC-profiler与JFR压测。
 - 通过条件：资金、冻结、持仓、订单终态、matcher顺序、快照恢复和accepted=terminal均不变；测试无失败；性能轮无拒绝、错误、超时和unfinished。若某个包装承载必要跨线程生命周期或恢复语义，允许保留其语义但必须把对象分配并入现有池化槽位，不能用新抽象替代旧抽象。
 
+### 四阶段完成结果
+
+- 四项生产改造已经按依赖顺序完成并推送：`b23542fa`合并place admission容量预检并删除无效matcher shard/重复symbol字段；`9550ebf8`让池化`PlaceAdmissionEvent`直接承载解析后的下单输入；`9e4207cb`强制异步普通PLACE使用池化`MatcherSettlementEvent`，`fe56dc77`同时删除自成交预检中的重复order resolve；`6b4dd525`让Owner发布索引直接引用Account Lane权威`OrderRuntime`/`ReservationRuntime`并删除两个`publishedCopy`。没有增加线程、锁、barrier、业务状态副本或兼容fallback。
+- 最终JFR发现压测器虽维持256个调用在途，却仍通过同步`state.apply()`进入Core，因而错误采到了`CoreMatchingResult`。`00b1138a`在25万订单同步初始化完成后启用已有cluster async ingress；`57452662`使用命令槽已有的`clusterIndependent`事实，在命令跨Owner推进轮次、重新获得matcher shard提交头时恢复异步提交作用域。生产Owner原本整轮处于该作用域，正常路径不会新增切换；只修正延迟恢复命令和本地Harness的语义。
+- JDK27验证通过：`ClusterCommandPipelineTest` 250项、0 failure/error、1 skip；`LinearPerpetualBenchmarkSupportTest` 24项、0 failure/error/skip；benchmark及其reactor依赖package/install成功。最初直接执行子模块曾因本地旧protocol/realtime依赖产物编译失败，改由当前reactor源码安装依赖后通过，不属于代码回归。
+- 最终有效JFR为1×20秒预热、1×30秒测量，200档×1,250单、5,000账户、4 Lane、1 matcher、256在途、BUSY_SPIN；正式窗口为**46,411.424 business ops/s**，accepted=terminal 46,412.313/s，拒绝、错误、超时和unfinished均为0，满窗占窗口采样98.45%，producer starvation为0。该轮带JFR，只用于归因，不作为无profiler容量结论。
+- JFR中47个`CoreMatchingResult`样本全部发生在15:35:51–15:35:58的25万订单同步初始化阶段；之后20秒预热和30秒异步测量窗口内为0，且`CoreMatchingResult.fromNative`已从allocation-by-site前列消失。这证明普通异步PLACE/CANCEL不再生成service结果包装，而是直接写既有池化settlement event。native `MatcherResult`仍占3.21%采样分配，它是exchange-core生成的撮合事实本体，不是被删除的service二次包装。
+- 最终独立GC-profiler前三个测量样本为51,925.717/51,639.750/54,475.574 ops/s；前两个正常热路径样本为2,516.212/2,432.187 B/op，均值**2,474.199 B/business**。第三个7,654.263 B/op包含trial teardown的状态物化，按既定口径排除。该值高于此前2,181.733 B/op，是因为此前场景实际测的是同步Core入口；修正后增加了真实cluster window/decode/异步交接，二者口径不同，不能解释为四项生产减法导致分配回升。
+- 有效JFR result/JFR SHA-256分别为`5bb96ab6a0917710acbab80c65093ee28cd65c195318c1f7b669e544b4c2cc99`/`c6bee6d5cdbddcd9ef25f3e0d8271b20c0f21f138d9ed0c31617ff7eba0dc07`；最终GC result为`a03dc33acef4c13f16ba1e0487745e7ecc58e2f2614bf8a44cb138ef27eb6454`。第一次JFR因控制进程与fork共用路径被覆盖，明确判无效；它及修正前的同步入口轮不用于最终分配归因。采集结束swap仍为0，磁盘约543GiB可用；全部9个`four-stage-*`目录约13MiB已移动到`/Users/atomex/.Trash/surprising-ex-four-stage-20260921/`，可恢复，未移动其他轮次产物。
+
 ## 2026-09-21 ResponseArena伪热点校正与交易热路径对象审计
 
 ### 采集前锁定计划
