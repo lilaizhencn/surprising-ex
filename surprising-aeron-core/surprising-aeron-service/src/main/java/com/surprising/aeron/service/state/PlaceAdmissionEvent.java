@@ -7,17 +7,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 /** One-way place admission owned and completed by exactly one Account Lane. */
-public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
+public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
     private long coreSequence;
     private long timestamp, position;
     private long userId;
-    private ResolvedPlaceOrder order;
     private UUID commandId;
     private long openInterestSteps;
     private boolean lifecycleSettled;
     private boolean fundingInProgress;
     private long preparedClientKey;
-    /** Queued admissions are retained until their command's Matcher continuation consumes them. */
+    /** Queued admissions are retained through terminal command retirement because they own resolved input. */
     private boolean matcherWaitRequired;
     private int assetId;
     private int laneId;
@@ -31,16 +30,28 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private volatile boolean completed;
     private volatile boolean matcherConsumed;
 
-    PlaceAdmissionEvent() {
+    public PlaceAdmissionEvent() {
     }
 
-    PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
+    public void resolve(com.surprising.aeron.protocol.PlaceOrderCommand intent,
+                        com.surprising.aeron.service.state.instrument.CoreInstrument instrument,
+                        int symbolId, long matchingPriceTicks, long reservationPriceTicks,
+                        long markPriceTicks, long indexPriceTicks, long forwardPriceTicks,
+                        com.surprising.aeron.protocol.ReservationKind reservationKind,
+                        String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
+        initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
+                makerFeeRatePpm, takerFeeRatePpm);
+    }
+
+    PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
                                 long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
                                 int assetId, int laneId, boolean matcherWaitRequired,
                                 TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
-        if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
-                || order.symbolId() < 0 || assetId < 0
+        if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
+                || !resolvedOrderInitialized() || commandId == null || openInterestSteps < 0
+                || symbolId() < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
@@ -48,7 +59,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.timestamp = timestamp;
         this.position = position;
         this.userId = userId;
-        this.order = order;
         this.commandId = commandId;
         this.openInterestSteps = openInterestSteps;
         this.lifecycleSettled = lifecycleSettled;
@@ -73,7 +83,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         if (matcherWaitRequired && !matcherConsumed) {
             throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
         }
-        order = null;
+        clearResolvedOrder();
         commandId = null;
         lifecycleSettled = false;
         fundingInProgress = false;
@@ -98,23 +108,23 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
             runtime.enterLaneCommandScope(lane);
             try {
                 preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
-                        identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
+                        identities.prepareClientKeyInLane(lane, userId, clientOrderId()));
                 long positionKey = identities.findPositionKeyValueInLane(
-                        lane, userId, order.instrument(), order.positionSide());
-                int symbolId = order.symbolId();
+                        lane, userId, instrument(), positionSide());
+                int symbolId = symbolId();
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtime, userId, order, openInterestSteps,
+                        runtime, userId, this, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), preparedClientKey, symbolId, positionKey,
                         lifecycleSettled, fundingInProgress);
                 reservedAmount = requiredReservation;
-                runtime.placeOrderInLane(lane, userId, order, commandId,
+                runtime.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedAccountVersion = lane.users.get(userId).revision();
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
-            identities.rollbackClientKeyInLane(lane, userId, order.clientOrderId(), preparedClientKey);
+            identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), preparedClientKey);
             preparedClientKey = 0;
             rejection = failure;
         }
@@ -134,7 +144,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     /** Abort a prepared event that was never submitted to a Lane. */
     void discard() {
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
-        order = null;
+        clearResolvedOrder();
         commandId = null;
         lifecycleSettled = false;
         fundingInProgress = false;
@@ -183,7 +193,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 ? CoreResultCode.fromRejectionCode(stateRejected.code())
                 : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
                 : CoreResultCode.INVALID_COMMAND;
-        target.admissionReceipt(order.orderId(), admittedAccountVersion, reservedAmount,
+        target.admissionReceipt(orderId(), admittedAccountVersion, reservedAmount,
                 rejection == null, resultCode.wireCode());
         // Capture the callback target before publishing consumption. The Owner may observe the
         // volatile flag immediately, clear this pooled event and null runtime before this Matcher
@@ -209,14 +219,13 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }
     public int laneId() { return laneId; }
-    public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
     public long clientKey() { return preparedClientKey; }
     public ResolvedPlaceOrder resolvedOrder() {
-        if (!complete() || order == null || rejection != null) {
+        if (!complete() || !resolvedOrderInitialized() || rejection != null) {
             throw new IllegalStateException("place admission is not accepted");
         }
-        return order;
+        return this;
     }
 
     /**
@@ -225,15 +234,14 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
      * to publish the mutable runtime order just to reconstruct these command fields.
      */
     public ResolvedPlaceOrder matchingOrder() {
-        ResolvedPlaceOrder resolved = order;
-        if (resolved == null) throw new IllegalStateException("place admission is not prepared");
-        return resolved;
+        if (!resolvedOrderInitialized()) throw new IllegalStateException("place admission is not prepared");
+        return this;
     }
 
     /** Owner-only immutable input used to preconstruct a direct settlement before Lane admission. */
     ResolvedPlaceOrder preparedOrder() {
-        if (order == null) throw new IllegalStateException("place admission is not prepared");
-        return order;
+        if (!resolvedOrderInitialized()) throw new IllegalStateException("place admission is not prepared");
+        return this;
     }
 
     public RuntimeException rejection() {

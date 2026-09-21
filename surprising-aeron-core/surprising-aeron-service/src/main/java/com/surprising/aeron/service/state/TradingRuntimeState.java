@@ -1918,8 +1918,21 @@ public final class TradingRuntimeState implements AutoCloseable {
         laneCommitEventPool.addFirst(event);
     }
 
+    public PlaceAdmissionEvent acquirePlaceAdmission() {
+        assertOwner();
+        PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
+        return event == null ? new PlaceAdmissionEvent() : event;
+    }
+
+    public void discardPlaceAdmission(PlaceAdmissionEvent event) {
+        assertOwner();
+        if (event == null) return;
+        event.discard();
+        placeAdmissionEventPool.addFirst(event);
+    }
+
     public PlaceAdmissionEvent dispatchPlaceAdmission(
-            long coreSequence, long userId, ResolvedPlaceOrder order, java.util.UUID commandId,
+            long coreSequence, long userId, PlaceAdmissionEvent event, java.util.UUID commandId,
             long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
             int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
@@ -1944,10 +1957,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (!inline) releaseOwnerLaneAccess();
         int laneId = topology.accountLaneId(userId);
         int laneDepth = ensurePlaceAdmissionDispatchCapacity(laneId);
-        PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
-        if (event == null) event = new PlaceAdmissionEvent();
+        if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
-                coreSequence, userId, order, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
+                coreSequence, userId, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
                 assetId, laneId, !inline, this, identities, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneDepth + 1);

@@ -82,7 +82,22 @@ final class CoreMatchingFlow {
         boolean releasesSubmissionHead = shard >= 0
                 && owner.pendingMatching.isSubmissionHead(sequence, shard);
         CommandSlot current = owner.pendingMatching.get(sequence);
-        if (current != null) current.committed();
+        if (current != null) {
+            if (current.placeAdmission() != null && !current.placeAdmissionOwnerCollected()
+                    && !collectPlaceAdmissionIfReady(current)) {
+                throw new IllegalStateException("terminal command has an incomplete place admission");
+            }
+            current.committed();
+            if (current.placeAdmission() != null && !current.placeAdmission().matcherConsumed()) {
+                // Explicit/test completion can provide the terminal matcher fact without running
+                // the queued continuation. Terminal retirement proves that continuation is dead.
+                current.placeAdmission().cancelMatcherWait();
+            }
+            releasePlaceAdmissionIfConsumed(current);
+            if (current.placeAdmission() != null) {
+                throw new IllegalStateException("terminal command still owns an unconsumed place admission");
+            }
+        }
         CommandSlot removed = owner.pendingMatching.remove(sequence);
         if (releasesSubmissionHead) owner.matchingProgress.submissionHeadReleased(shard);
         refreshCommittedCoreSequence();
@@ -397,7 +412,6 @@ final class CoreMatchingFlow {
         if (!pending.isMatchingSubmitted() && rejection != null && !admission.matcherConsumed()) {
             admission.cancelMatcherWait();
         }
-        releasePlaceAdmissionIfConsumed(pending);
         return true;
     }
 

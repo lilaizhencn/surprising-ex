@@ -184,6 +184,8 @@ class ClusterCommandPipelineTest {
                     var admitted = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                     var resolved = batch ? null : pending.admittedPlaceOrder();
                     assertThat(batch ? admitted : resolved).isNotNull();
+                    long resolvedOrderId = batch ? 0 : resolved.orderId();
+                    var resolvedInstrument = batch ? null : resolved.instrument();
                     if (batch) assertThat(admitted.createdAtEpochMillis())
                             .isEqualTo(command.header().submittedAtEpochMillis());
                     assertThat(state.runtimeState.order(1000))
@@ -193,8 +195,8 @@ class ClusterCommandPipelineTest {
                     assertThat(gate.join()).isTrue();
                     if (batch) assertThat(state.runtimeState.order(1000)).isEqualTo(admitted);
                     else {
-                        assertThat(state.runtimeState.order(1000).orderId()).isEqualTo(resolved.orderId());
-                        assertThat(state.runtimeState.order(1000).instrument()).isSameAs(resolved.instrument());
+                        assertThat(state.runtimeState.order(1000).orderId()).isEqualTo(resolvedOrderId);
+                        assertThat(state.runtimeState.order(1000).instrument()).isSameAs(resolvedInstrument);
                     }
                     serial.apply(command);
                     assertThat(live.responses).hasSize(1);

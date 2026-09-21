@@ -1250,13 +1250,24 @@ public final class TradingCoreRuntime implements AutoCloseable,
     com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence,
             long timestamp, long position) {
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState, identities, userId,
-                command, currentClusterTimestamp);
-        int assetId = identities.assetId(resolved.reservationAsset());
-        return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
-                openInterestIndex.openInterestSteps(resolved.symbol()),
-                runtimeState.treasury().lifecycleSettlement(resolved.symbolId()) != 0,
-                runtimeState.treasury().fundingProgress(resolved.symbolId()) != null,
+        var event = runtimeState.acquirePlaceAdmission();
+        long openInterestSteps;
+        boolean lifecycleSettled;
+        boolean fundingInProgress;
+        int assetId;
+        try {
+            CoreOrderDecisionResolver.resolveInto(event, runtimeState, identities, userId,
+                    command, currentClusterTimestamp);
+            openInterestSteps = openInterestIndex.openInterestSteps(event.symbol());
+            lifecycleSettled = runtimeState.treasury().lifecycleSettlement(event.symbolId()) != 0;
+            fundingInProgress = runtimeState.treasury().fundingProgress(event.symbolId()) != null;
+            assetId = identities.assetId(event.reservationAsset());
+        } catch (RuntimeException | Error failure) {
+            runtimeState.discardPlaceAdmission(event);
+            throw failure;
+        }
+        return runtimeState.dispatchPlaceAdmission(coreSequence, userId, event, commandId,
+                openInterestSteps, lifecycleSettled, fundingInProgress,
                 assetId, identities, timestamp, position);
     }
 
