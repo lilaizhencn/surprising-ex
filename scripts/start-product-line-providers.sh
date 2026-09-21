@@ -479,7 +479,12 @@ start_app_media_driver() {
 
 start_realtime_router() {
   local router_json
-  router_json="${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-{\"surprising\":{\"realtime\":{\"router\":{\"control-channels\":{\"$PRODUCT_LINE\":\"aeron:udp?control-mode=manual\"},\"control-destinations\":{\"$PRODUCT_LINE\":[\"aeron:udp?endpoint=$REALTIME_CORE_CONTROL_DESTINATION\"]}}}}}}"
+  if [[ -n "${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-}" ]]; then
+    router_json="$REALTIME_ROUTER_SPRING_APPLICATION_JSON"
+  else
+    router_json="$(printf '{\"surprising\":{\"realtime\":{\"router\":{\"control-channels\":{\"%s\":\"aeron:udp?control-mode=manual\"},\"control-destinations\":{\"%s\":[\"aeron:udp?endpoint=%s\"]}}}}}' \
+      "$PRODUCT_LINE" "$PRODUCT_LINE" "$REALTIME_CORE_CONTROL_DESTINATION")"
+  fi
   java_args_for realtime-router
   start_owned_process "realtime-router" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
     AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
