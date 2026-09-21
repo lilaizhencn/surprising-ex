@@ -89,8 +89,8 @@ surprising:
       max-sweep-levels: 5
       inventory-threshold-steps: 5000
     reference-market:
-      enabled: false
-      websocket-enabled: false
+      enabled: ${MM_REFERENCE_MARKET_ENABLED:false}
+      websocket-enabled: ${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:false}
       refresh-interval: 500ms
       max-age: 3s
       request-timeout: 2s
@@ -103,7 +103,7 @@ surprising:
         - name: BINANCE_USDM
           enabled: true
           product-line: ${PRODUCT_LINE}
-          symbol: ${MM_SYMBOL:BTC-USDT}
+          symbol: ${MM_SYMBOL:BTC-USDT-SWAP}
           external-symbol: BTCUSDT
           url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
           parser: BINANCE_DEPTH
@@ -112,7 +112,7 @@ surprising:
         - name: OKX_SWAP
           enabled: true
           product-line: ${PRODUCT_LINE}
-          symbol: ${MM_SYMBOL:BTC-USDT}
+          symbol: ${MM_SYMBOL:BTC-USDT-SWAP}
           external-symbol: BTC-USDT-SWAP
           url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
           parser: OKX_BOOKS
@@ -122,7 +122,7 @@ surprising:
         - name: BYBIT_LINEAR
           enabled: true
           product-line: ${PRODUCT_LINE}
-          symbol: ${MM_SYMBOL:BTC-USDT}
+          symbol: ${MM_SYMBOL:BTC-USDT-SWAP}
           external-symbol: BTCUSDT
           url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
           parser: BYBIT_ORDERBOOK
@@ -135,7 +135,7 @@ surprising:
         enabled: true
         account-ids: ${MM_ACCOUNT_IDS:900001,900002}
         symbols:
-          - "${MM_SYMBOL:BTC-USDT}"
+          - "${MM_SYMBOL:BTC-USDT-SWAP}"
         base-quantity-steps: ${MM_BASE_QUANTITY_STEPS:20}
         order-levels: ${MM_ORDER_LEVELS:20}
         margin-mode: CROSS
