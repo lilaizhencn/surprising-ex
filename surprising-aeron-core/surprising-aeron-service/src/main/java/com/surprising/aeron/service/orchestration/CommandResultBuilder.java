@@ -7,7 +7,6 @@ import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
-import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreOrderStateSource;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -28,7 +27,6 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import java.util.UUID;
-import java.util.ArrayList;
 import java.util.AbstractList;
 import java.util.List;
 import java.util.RandomAccess;
@@ -51,9 +49,6 @@ final class CommandResultBuilder {
                 : owner.responseArena;
     }
 
-    /** 当前命令需要返回的订单视图，仅响应边界物化。 */
-    List<CoreOrderStateView> commandOrderViews = List.of();
-
     /** 单订单结果直接借用当前 OrderRuntime，避免每笔响应先物化 CoreOrderStateView。 */
     private OrderRuntime commandSingleOrder;
     private final OrderRuntimeSource commandSingleOrderSource = new OrderRuntimeSource();
@@ -62,7 +57,6 @@ final class CommandResultBuilder {
 
     void clearOrderViews() {
         commandSingleOrder = null;
-        commandOrderViews = List.of();
         commandOrderSources.clear();
     }
 
@@ -96,9 +90,6 @@ final class CommandResultBuilder {
     /** Lane settlement already supplied the exact primitive user keys for this command. */
     private boolean laneCommitIdsSeeded;
 
-    /** 复用批量订单响应的去重集合和临时视图缓冲；List.copyOf 在边界创建稳定结果。 */
-    private final PrimitiveLongChangeSet commandViewOrderIds = new PrimitiveLongChangeSet();
-    private final ArrayList<CoreOrderStateView> commandViewBuffer = new ArrayList<>();
     /** Direct control commands stay on the owner until their response is encoded. Reuse views
      * over the owner workspace instead of copying both sets into a fresh long[] per command. */
     private final MutableLongListView directChangedUsers = new MutableLongListView();
@@ -222,46 +213,13 @@ final class CommandResultBuilder {
             }
             default -> { }
         }
-        // Most batch and liquidation responses have no pre-existing DTO views.  Feed the
-        // reusable runtime sources directly to the protocol encoder instead of creating a
-        // CoreOrderStateView, a temporary ArrayList and a List.copyOf for every command.
-        if (commandOrderViews.isEmpty()) {
-            commandSingleOrder = null;
-            commandOrderSources.clear();
-            for (int index = 0; index < commandChangedOrderIds.size(); index++) {
-                long orderId = primitiveOrderId(commandChangedOrderIds, index);
-                OrderRuntime order = owner.responseOrder(orderId);
-                if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
-            }
-            return;
-        }
-        PrimitiveLongChangeSet orderIds = commandViewOrderIds;
-        orderIds.clear();
-        java.util.ArrayList<CoreOrderStateView> views = commandViewBuffer;
-        views.clear();
-        int expectedSize = commandOrderViews.size() + commandChangedOrderIds.size();
-        views.ensureCapacity(expectedSize);
-        for (CoreOrderStateView view : commandOrderViews) {
-            if (orderIds.add(view.orderId())) views.add(view);
-        }
-        for (int orderIndex = 0; orderIndex < commandChangedOrderIds.size(); orderIndex++) {
-            long orderId = primitiveOrderId(commandChangedOrderIds, orderIndex);
-            var order = owner.responseOrder(orderId);
-            if (order == null) continue;
-            CoreOrderStateView view = owner.orderView(order);
-            if (orderIds.add(orderId)) {
-                views.add(view);
-                continue;
-            }
-            for (int index = 0; index < views.size(); index++) {
-                if (views.get(index).orderId() == orderId) {
-                    views.set(index, view);
-                    break;
-                }
-            }
-        }
-        commandOrderViews = List.copyOf(views);
         commandSingleOrder = null;
+        commandOrderSources.clear();
+        for (int index = 0; index < commandChangedOrderIds.size(); index++) {
+            long orderId = primitiveOrderId(commandChangedOrderIds, index);
+            OrderRuntime order = owner.responseOrder(orderId);
+            if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
+        }
     }
 
     private static long primitiveOrderId(List<Long> orderIds, int index) {
@@ -277,14 +235,12 @@ final class CommandResultBuilder {
         }
         if (orderIds.length > 1) {
             commandSingleOrder = null;
-            commandOrderViews = List.of();
             for (long orderId : orderIds) {
                 OrderRuntime order = owner.responseOrder(orderId);
                 if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
             }
             return;
         }
-        commandOrderViews = List.of();
         commandSingleOrder = null;
     }
 
@@ -296,17 +252,13 @@ final class CommandResultBuilder {
         if (first == null) {
             if (second == null) {
                 commandSingleOrder = null;
-                commandOrderViews = List.of();
             } else {
                 commandSingleOrder = second;
-                commandOrderViews = List.of();
             }
         } else if (second == null) {
             commandSingleOrder = first;
-            commandOrderViews = List.of();
         } else {
             commandSingleOrder = null;
-            commandOrderViews = List.of();
             commandOrderSources.add(first, owner.runtimeOrderSymbol(first));
             commandOrderSources.add(second, owner.runtimeOrderSymbol(second));
         }
@@ -316,7 +268,6 @@ final class CommandResultBuilder {
         commandOrderSources.clear();
         OrderRuntime order = owner.responseOrder(orderId);
         commandSingleOrder = order;
-        commandOrderViews = List.of();
     }
 
     private OrderRuntime responseOrder(CommandSlot pending, long orderId) {
@@ -338,7 +289,6 @@ final class CommandResultBuilder {
     private void materializeResponseOrder(CommandSlot pending, long orderId) {
         commandOrderSources.clear();
         commandSingleOrder = responseOrder(pending, orderId);
-        commandOrderViews = List.of();
     }
 
     private void materializeResponseOrders(CommandSlot pending, long firstOrderId, long secondOrderId) {
@@ -348,17 +298,13 @@ final class CommandResultBuilder {
         if (first == null) {
             if (second == null) {
                 commandSingleOrder = null;
-                commandOrderViews = List.of();
             } else {
                 commandSingleOrder = second;
-                commandOrderViews = List.of();
             }
         } else if (second == null) {
             commandSingleOrder = first;
-            commandOrderViews = List.of();
         } else {
             commandSingleOrder = null;
-            commandOrderViews = List.of();
             commandOrderSources.add(first, responseOrderSymbol(pending, firstOrderId, first));
             commandOrderSources.add(second, responseOrderSymbol(pending, secondOrderId, second));
         }
@@ -395,7 +341,7 @@ final class CommandResultBuilder {
                 return setResponse(prepared, 0, pending.lanePreparedResponseLength());
             }
         }
-        if (commandSingleOrder == null && commandOrderViews.isEmpty() && commandOrderSources.isEmpty()) {
+        if (commandSingleOrder == null && commandOrderSources.isEmpty()) {
             return setResponse(EMPTY_RESULT);
         }
         if (pending == null || matchingResult == null) {
@@ -410,13 +356,6 @@ final class CommandResultBuilder {
                         commandSingleOrderSource, destination, responseOffset);
                 return destination;
             }
-            if (commandOrderViews.size() == 1) {
-                int length = CoreCommandResultCodec.encodedSingleOrderLength(commandOrderViews.get(0));
-                byte[] destination = prepareResponseStorage(length);
-                responseLength = CoreCommandResultCodec.encodeSingleOrderInto(
-                        commandOrderViews.get(0), destination, responseOffset);
-                return destination;
-            }
             if (!commandOrderSources.isEmpty()) {
                 int length = CoreCommandResultCodec.encodedLength(commandOrderSources, List.of());
                 byte[] destination = prepareResponseStorage(length);
@@ -424,11 +363,7 @@ final class CommandResultBuilder {
                         commandOrderSources, List.of(), destination, responseOffset);
                 return destination;
             }
-            int length = CoreCommandResultCodec.encodedLength(commandOrderViews, List.of());
-            byte[] destination = prepareResponseStorage(length);
-            responseLength = CoreCommandResultCodec.encodeInto(
-                    commandOrderViews, List.of(), destination, responseOffset);
-            return destination;
+            return setResponse(EMPTY_RESULT);
         } catch (IllegalArgumentException exception) {
             return setResponse(EMPTY_RESULT);
         }

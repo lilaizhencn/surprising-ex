@@ -44,8 +44,6 @@ final class SectionedCoreSnapshotValidation {
         long clusterPosition = header.getLong();
         long businessStateHash = header.getLong();
         long globalFundsHash = header.getLong();
-        long auditBusinessStateHash = header.getLong();
-        long auditFundsStateHash = header.getLong();
         long sourceSequenceDigest = header.getLong();
         if (header.hasRemaining()) throw new ProtocolException("snapshot header section has trailing garbage");
         if (snapshotId <= 0) throw new ProtocolException("snapshot id mismatch");
@@ -59,8 +57,7 @@ final class SectionedCoreSnapshotValidation {
         return new HeaderManifest(productLine, topology, snapshotId, coreSequence,
                 projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount, probeValue,
-                businessStateHash, globalFundsHash, auditBusinessStateHash, auditFundsStateHash,
-                sourceSequenceDigest);
+                businessStateHash, globalFundsHash, sourceSequenceDigest);
     }
 
     static void validatePairing(
@@ -117,7 +114,6 @@ final class SectionedCoreSnapshotValidation {
             long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
             long businessStateHash, long globalFundsHash,
-            long auditBusinessStateHash, long auditFundsStateHash,
             long sourceSequenceDigest) {
     }
 }

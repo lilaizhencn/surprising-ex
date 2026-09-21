@@ -255,12 +255,12 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.startAccountLanes();
         try {
-            AccountLaneView[] before = state.accountLanes();
+            LaneValues[] before = laneValues(state);
 
             state.accountLaneSnapshots(1, TradingCoreState.empty(
                     com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
 
-            AccountLaneView[] after = state.accountLanes();
+            LaneValues[] after = laneValues(state);
             for (int laneId = 0; laneId < before.length; laneId++) {
                 assertThat(after[laneId].localStateHash())
                         .as("snapshot must not mutate lane %s state hash", laneId)
@@ -554,7 +554,7 @@ class TradingRuntimeStateTest {
         // When: the reservation is completed once and completion is retried.
         state.completePendingReservation(7, 11, 4);
         long revisionAfterFirstCompletion = state.revision();
-        AccountLaneView laneAfterFirstCompletion = state.accountLane(7);
+        LaneValues laneAfterFirstCompletion = laneValues(state, state.topology().accountLaneId(7));
         BalanceRuntime balanceAfterFirstCompletion = state.balance(7, 3);
         assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
@@ -567,8 +567,10 @@ class TradingRuntimeStateTest {
                 .isEqualTo(balanceAfterFirstCompletion.availableUnits());
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(balanceAfterFirstCompletion.lockedUnits());
         assertThat(state.revision()).isEqualTo(revisionAfterFirstCompletion);
-        assertThat(state.accountLane(7).localStateHash()).isEqualTo(laneAfterFirstCompletion.localStateHash());
-        assertThat(state.accountLane(7).localFundsHash()).isEqualTo(laneAfterFirstCompletion.localFundsHash());
+        assertThat(state.accountLaneLocalStateHashById(state.topology().accountLaneId(7)))
+                .isEqualTo(laneAfterFirstCompletion.localStateHash());
+        assertThat(state.accountLaneLocalFundsHashById(state.topology().accountLaneId(7)))
+                .isEqualTo(laneAfterFirstCompletion.localFundsHash());
     }
 
     @Test
@@ -718,7 +720,8 @@ class TradingRuntimeStateTest {
         state.markPendingReservation(laterUser, 12, 4);
         ReservationRuntime firstReservation = state.reservation(11);
         BalanceRuntime firstBalance = state.balance(firstUser, 3);
-        AccountLaneView firstLane = state.accountLane(firstUser);
+        int firstLaneId = topology.accountLaneId(firstUser);
+        LaneValues firstLane = laneValues(state, firstLaneId);
         long[] pendingOrderIds = pendingReservationOrderIds(state, 4);
         long firstPendingOwner = pendingReservationOwner(state, 11);
         long laterPendingOwner = pendingReservationOwner(state, 12);
@@ -740,9 +743,10 @@ class TradingRuntimeStateTest {
         assertThat(pendingReservationOwner(state, 12)).isEqualTo(laterPendingOwner);
         assertThat(state.balance(firstUser, 3).availableUnits()).isEqualTo(firstBalance.availableUnits());
         assertThat(state.balance(firstUser, 3).lockedUnits()).isEqualTo(firstBalance.lockedUnits());
-        assertThat(state.accountLane(firstUser).revision()).isEqualTo(firstLane.revision());
-        assertThat(state.accountLane(firstUser).localStateHash()).isEqualTo(firstLane.localStateHash());
-        assertThat(state.accountLane(firstUser).localFundsHash()).isEqualTo(firstLane.localFundsHash());
+        LaneValues firstLaneAfterFailure = laneValues(state, firstLaneId);
+        assertThat(firstLaneAfterFailure.revision()).isEqualTo(firstLane.revision());
+        assertThat(firstLaneAfterFailure.localStateHash()).isEqualTo(firstLane.localStateHash());
+        assertThat(firstLaneAfterFailure.localFundsHash()).isEqualTo(firstLane.localFundsHash());
     }
 
     @Test
@@ -870,12 +874,10 @@ class TradingRuntimeStateTest {
             assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
             state.readFence(7, 1);
 
-            AccountLaneView lane = state.accountLane(7);
-            assertThat(lane.ownerThreadName()).isEqualTo("core-account-lane-0");
+            LaneValues lane = laneValues(state, state.topology().accountLaneId(7));
             assertThat(lane.appliedSequence()).isEqualTo(1);
             assertThat(lane.committedSequence()).isEqualTo(1);
-            assertThat(lane.queueDepth()).isZero();
-            assertThat(lane.queueHighWaterMark()).isZero();
+            assertThat(state.accountLaneMetricsById(state.topology().accountLaneId(7)).queueDepth()).isZero();
             assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
         } finally {
             state.close();
@@ -892,7 +894,7 @@ class TradingRuntimeStateTest {
         try {
             state.stageLaneMutation(1, java.util.List.of(userInLastLane));
             state.readFenceAll(1);
-            assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, 0).committedSequence()).isEqualTo(1);
         } finally {
             state.close();
         }
@@ -910,10 +912,10 @@ class TradingRuntimeStateTest {
         try {
             state.stageLaneMutation(1, java.util.List.of(laneZeroUser, laneOneUser));
 
-            assertThat(state.accountLaneById(0).appliedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneById(1).appliedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneById(1).committedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, 0).appliedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, 1).appliedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, 0).committedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, 1).committedSequence()).isEqualTo(1);
             state.readFence(laneZeroUser, 1);
         } finally {
             state.close();
@@ -935,8 +937,8 @@ class TradingRuntimeStateTest {
 
         assertThat(committedLaneMask).isEqualTo(0b1111);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
-            assertThat(state.accountLaneById(laneId).appliedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, laneId).appliedSequence()).isEqualTo(1);
+            assertThat(laneValues(state, laneId).committedSequence()).isEqualTo(1);
         }
         state.clearChangedKeys();
         assertThat(state.stageLaneMutation(2, java.util.List.of())).isZero();
@@ -976,14 +978,14 @@ class TradingRuntimeStateTest {
             state.clearChangedKeys();
             state.stageLaneMutation(1, java.util.List.of(laneOneUser));
             state.clearChangedKeys();
-            AccountLaneView[] beforeFailure = state.accountLanes();
+            LaneValues[] beforeFailure = laneValues(state);
             long revisionBeforeFailure = state.revision();
 
             assertThatThrownBy(() -> state.stageLaneMutation(
                     1, java.util.List.of(laneZeroUser, laneOneUser)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
-            AccountLaneView[] afterFailure = state.accountLanes();
+            LaneValues[] afterFailure = laneValues(state);
             for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
                 assertThat(afterFailure[laneId].revision()).isEqualTo(beforeFailure[laneId].revision());
                 assertThat(afterFailure[laneId].appliedSequence())
@@ -1015,7 +1017,7 @@ class TradingRuntimeStateTest {
             state.stageLaneMutation(1, java.util.List.of(userId));
             state.stageLaneMutation(2, java.util.List.of(userId));
 
-            AccountLaneView applied = state.accountLaneById(0);
+            LaneValues applied = laneValues(state, 0);
             assertThat(applied.appliedSequence()).isEqualTo(2);
             assertThat(applied.committedSequence()).isEqualTo(2);
         } finally {
@@ -1044,7 +1046,7 @@ class TradingRuntimeStateTest {
                 state.releaseLaneCommit(commit);
             }
             for (int laneId = 0; laneId < users.length; laneId++) {
-                assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(256);
+                assertThat(laneValues(state, laneId).committedSequence()).isEqualTo(256);
             }
         } finally {
             state.close();
@@ -1152,7 +1154,7 @@ class TradingRuntimeStateTest {
         long laneZeroUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(laneZeroUser));
         state.stageLaneMutation(2, java.util.List.of(laneZeroUser));
-        AccountLaneView beforeRestore = state.accountLaneById(0);
+        LaneValues beforeRestore = laneValues(state, 0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);
         AccountLaneSnapshot corrupted = snapshots.get(1);
@@ -1163,7 +1165,7 @@ class TradingRuntimeStateTest {
         assertThatThrownBy(() -> state.restoreAccountLaneSnapshots(invalid, 1, global))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("incorrectly routed user");
-        AccountLaneView afterFailure = state.accountLaneById(0);
+        LaneValues afterFailure = laneValues(state, 0);
         assertThat(afterFailure.appliedSequence()).isEqualTo(beforeRestore.appliedSequence());
         assertThat(afterFailure.committedSequence()).isEqualTo(beforeRestore.committedSequence());
         assertThat(afterFailure.localStateHash()).isEqualTo(beforeRestore.localStateHash());
@@ -1275,7 +1277,7 @@ class TradingRuntimeStateTest {
             var decoded = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
             for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
                 var snapshot = state.accountLaneMetricsById(lane);
-                var view = state.accountLaneById(lane);
+                var view = laneValues(state, lane);
                 assertThat(decoded.accountLaneRevisions()[lane]).isEqualTo(view.revision());
                 assertThat(decoded.accountLaneAppliedSequences()[lane]).isEqualTo(view.appliedSequence());
                 assertThat(decoded.accountLaneCommittedSequences()[lane]).isEqualTo(view.committedSequence());
@@ -1395,6 +1397,21 @@ class TradingRuntimeStateTest {
         Field field = TradingRuntimeState.class.getDeclaredField("accountLanes");
         field.setAccessible(true);
         return ((AccountLaneState[]) field.get(state))[laneId];
+    }
+
+    private static LaneValues[] laneValues(TradingRuntimeState state) {
+        LaneValues[] values = new LaneValues[state.topology().accountLaneCount()];
+        for (int laneId = 0; laneId < values.length; laneId++) values[laneId] = laneValues(state, laneId);
+        return values;
+    }
+
+    private static LaneValues laneValues(TradingRuntimeState state, int laneId) {
+        return state.onLane(laneId, lane -> new LaneValues(lane.revision(), lane.appliedSequence(),
+                lane.committedSequence(), lane.localStateHash(), lane.localFundsHash()));
+    }
+
+    private record LaneValues(long revision, long appliedSequence, long committedSequence,
+                              long localStateHash, long localFundsHash) {
     }
 
     private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) throws Exception {

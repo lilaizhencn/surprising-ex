@@ -427,24 +427,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         return topology;
     }
 
-    public AccountLaneView accountLane(long userId) {
-        assertOwner();
-        return accountLaneById(topology.accountLaneId(userId));
-    }
-
-    public AccountLaneView[] accountLanes() {
-        assertOwner();
-        AccountLaneView[] views = new AccountLaneView[accountLanes.length];
-        for (int laneId = 0; laneId < views.length; laneId++) views[laneId] = accountLaneById(laneId);
-        return views;
-    }
-
-    public AccountLaneView accountLaneById(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
-        return onLane(laneId, lane -> laneView(laneId, lane));
-    }
-
     public long accountLaneLocalStateHashById(int laneId) {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length) {
@@ -635,14 +617,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 return null;
             });
         }
-    }
-
-    static AccountLaneView laneView(int laneId, AccountLaneState lane) {
-        String ownerThreadName = Thread.currentThread().getName();
-        if (ownerThreadName.isBlank()) ownerThreadName = "product-core-owner";
-        return new AccountLaneView(laneId, lane.revision(), lane.appliedSequence(), lane.committedSequence(),
-                lane.localStateHash(), lane.localFundsHash(), lane.userCount(),
-                0, lane.queueCapacity(), 0, ownerThreadName);
     }
 
     <T> T onLane(long userId, LaneOperation<T> operation) {
@@ -1236,7 +1210,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 changes.positions.putPrepared(positionKey,
                         position == null ? null : RuntimePositionIndexValue.from(position, identities));
             });
-            changes.preparePublication(runtime);
+            changes.preparePublication();
             prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
         }
 
@@ -1282,20 +1256,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    void applyLanePublication(LanePublication publication) {
-        if (publication == null) return;
-        // The Owner is the only reader of the published maps. Apply and reclaim the batch here;
-        // a second cleanup command on the Account Lane only added queue pressure.
-        publication.publish();
-    }
-
-    void applyLanePublication(LanePublication publication,
-                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
-                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
-        if (publication == null) return;
-        publication.publish(changedUsers, changedOrders);
-    }
-
     static <V> void putOrRemove(Long2ObjectHashMap<V> values, long key, V value) {
         if (value == null) values.remove(key); else values.put(key, value);
     }
@@ -1306,8 +1266,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public static final class LaneCommitDelta {
         /** 本 Lane 的实体键与原语 after-image；Owner 原地更新自己的独立镜像。 */
-        LanePublication publication;
-        private LanePublication publicationBuffer;
+        private boolean publicationPrepared;
         /** Lane 准备的终态原语收据；Owner 不再重新遍历订单或创建 OrderRuntime 快照。 */
         private long[] terminalOrderIds = new long[4];
         private long[] terminalOrderUsers = new long[4];
@@ -1333,25 +1292,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             terminalOrderCount++;
         }
 
-        void preparePublication(TradingRuntimeState state) {
-            if (publication != null) throw new IllegalStateException("Lane publication already prepared");
-            if (publicationBuffer == null) publicationBuffer = new LanePublication();
-            publication = publicationBuffer;
-            // Normal matcher settlement captures these fields in prepareLaneTerminal. Direct
-            // commit/recovery callers enter here instead, so capture again from the final values;
-            // the retained primitive arrays make this allocation-free and idempotent.
+        void preparePublication() {
+            if (publicationPrepared) throw new IllegalStateException("Lane publication already prepared");
             orders.capturePublicationValues();
             reservations.capturePublicationValues();
-            // Standalone/recovery callers do not pass through prepareLaneTerminal;
-            // preserve their terminal callback contract without making the Owner rescan orders.
             if (terminalOrderCount == 0) {
                 orders.forEach((orderId, order) -> {
                     if (order != null && order.status().terminal()) recordTerminalOrder(order);
                 });
             }
-            // The publication borrows these already populated change buffers instead of
-            // copying every entity into a second maps/keys/values array.
-            publication.bind(state, this);
+            publicationPrepared = true;
         }
 
         /** Returns terminal identity data already collected by the Lane; only indices below count are valid. */
@@ -1426,17 +1376,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                              LanePublishedMap<ReservationRuntime> targetReservations,
                              LanePublishedMap<PositionRuntime> targetPositions,
                              LongObjectHashMap<LiquidationRuntime> targetLiquidations,
-                             LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots) {
-            drainTo(laneId, targetUsers, targetOrders, targetReservations, targetPositions,
-                    targetLiquidations, targetRiskSnapshots, null, null);
-        }
-
-        void drainTo(int laneId,
-                             LanePublishedMap<UserRuntime> targetUsers,
-                             LanePublishedMap<OrderRuntime> targetOrders,
-                             LanePublishedMap<ReservationRuntime> targetReservations,
-                             LanePublishedMap<PositionRuntime> targetPositions,
-                             LongObjectHashMap<LiquidationRuntime> targetLiquidations,
                              LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                              com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
@@ -1475,11 +1414,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         void commitTerminalToOwner(TradingRuntimeState state, int laneId,
-                                           TerminalOrderSink terminalOrderSink, long coreSequence) {
-            commitTerminalToOwner(state, laneId, terminalOrderSink, coreSequence, null, null);
-        }
-
-        void commitTerminalToOwner(TradingRuntimeState state, int laneId,
                                            TerminalOrderSink terminalOrderSink, long coreSequence,
                                            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                                            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
@@ -1489,45 +1423,14 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.revision = Math.addExact(state.revision, closedTriggerCount);
                 closedTriggerCount = 0;
             }
-            // 发布时同遍消费账户/冻结缓冲；订单/持仓缓冲保留到下方直接交给Owner。
+            if (!publicationPrepared) throw new IllegalStateException("Lane terminal publication is not prepared");
             long started = timing == null ? 0 : System.nanoTime();
-            if (publication != null) publication.publish(changedUsers, changedOrders, timing);
+            publishPreparedToOwner(state, changedUsers, changedOrders, timing);
             if (timing != null) timing.publicationNanos = System.nanoTime() - started;
-            if (publication == null) {
-                users.drainTo((userId, user) -> {
-                    if (changedUsers != null) changedUsers.add(userId);
-                    state.changedUsers.add(userId);
-                    putOrRemove(state.publishedUsers, userId, user);
-                });
-            }
-            if (publication == null) {
-                orders.forEach((orderId, order) -> {
-                    if (changedOrders != null) changedOrders.add(orderId);
-                    if (order != null && order.status().terminal()) recordTerminalOrder(order);
-                    putOrRemove(state.publishedOrders, orderId, order);
-                });
-            }
             if (timing != null) { timing.terminalOrders = terminalOrderCount; started = System.nanoTime(); }
             if (terminalOrderSink != null && terminalOrderCount != 0)
                 terminalOrderSink.acceptBatch(this, coreSequence);
             if (timing != null) timing.terminalIndexNanos = System.nanoTime() - started;
-            if (publication == null) {
-                reservations.drainTo((orderId, reservation) -> {
-                    if (changedOrders != null) changedOrders.add(orderId);
-                    if (changedUsers != null && reservation != null) changedUsers.add(reservation.userId());
-                    state.changedReservations.add(orderId);
-                    putOrRemove(state.publishedReservations, orderId, reservation);
-                });
-            }
-            // 已由 Lane 准备发布版本时，publication 已经完成持仓发布。
-            if (publication == null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
-                if (changedUsers != null && position != null) changedUsers.add(position.userId());
-                if (position == null && state.realtimeCapture != null) {
-                    try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
-                    catch (RuntimeException failure) { state.realtimeCapture.failed(); }
-                }
-                putOrRemove(state.publishedPositions, positionKey, position);
-            });
             liquidations.drainTo((id, value) -> {
                 state.changedLiquidations.put(id, value);
                 putOrRemove(state.publishedLiquidations, id, value);
@@ -1536,15 +1439,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedRiskSnapshots.put(key, value);
                 putOrRemove(state.publishedRiskSnapshots, key, value);
             });
-            if (publication == null) {
-                removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
-                removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
-            }
-            if (changedOrders != null) {
-                removedOrderRoutes.forEach(changedOrders::add);
-            }
-            if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
-            if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
             if (timing != null) started = System.nanoTime();
             state.changedOrders.adopt(laneId, orders);
             state.changedPositions.adopt(laneId, positions);
@@ -1553,6 +1447,69 @@ public final class TradingRuntimeState implements AutoCloseable {
                 timing.completed = true;
                 timing.finish();
             }
+        }
+
+        private void publishPreparedToOwner(
+                TradingRuntimeState state,
+                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders,
+                OwnerSettlementMergeEvent timing) {
+            long started = timing == null ? 0 : System.nanoTime();
+            users.drainTo((id, value) -> {
+                if (changedUsers != null) changedUsers.add(id);
+                state.publishedUsers.applyPublished(id, value);
+                state.changedUsers.add(id);
+            });
+            if (timing != null) { timing.usersNanos = System.nanoTime() - started; started = System.nanoTime(); }
+            for (int index = 0; index < orders.size(); index++) {
+                long id = orders.keyAt(index);
+                if (changedOrders != null) changedOrders.add(id);
+                if (timing != null && timing.mapTiming) timing.ordersVisited++;
+                if (!removedOrderRoutes.contains(id))
+                    orders.applyPublished(index, state.publishedOrders,
+                            timing != null && timing.mapTiming ? timing : null);
+                else if (timing != null && timing.mapTiming) timing.ordersSkipped++;
+            }
+            if (timing != null) { timing.ordersNanos = System.nanoTime() - started; started = System.nanoTime(); }
+            for (int index = 0; index < reservations.size(); index++) {
+                long id = reservations.keyAt(index);
+                ReservationRuntime value = reservations.valueAt(index);
+                if (changedOrders != null) changedOrders.add(id);
+                if (changedUsers != null && value != null) changedUsers.add(value.userId());
+                if (!removedReservationRoutes.contains(id))
+                    reservations.applyPublished(index, state.publishedReservations);
+                state.changedReservations.add(id);
+            }
+            reservations.clear();
+            if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
+            for (int index = 0; index < positions.size(); index++) {
+                long id = positions.keyAt(index);
+                PositionRuntime value = positions.valueAt(index);
+                if (changedUsers != null && value != null) changedUsers.add(value.userId());
+                if (value == null && state.realtimeCapture != null) {
+                    try { state.realtimeCapture.removedPosition(state.publishedPositions.get(id)); }
+                    catch (RuntimeException failure) { state.realtimeCapture.failed(); }
+                }
+                if (value == null) {
+                    state.publishedPositions.applyPublished(id, null);
+                    continue;
+                }
+                PositionRuntime published = state.publishedPositions.get(id);
+                if (published == null) published = value.publicationValue();
+                else published.copyStateFrom(value);
+                state.publishedPositions.applyPublished(id, published);
+                positions.setValueAt(index, published);
+            }
+            if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }
+            removedOrderRoutes.forEach(id -> {
+                state.publishedOrders.removePublished(id, timing);
+                if (changedOrders != null) changedOrders.add(id);
+            });
+            removedReservationRoutes.forEach(id -> state.publishedReservations.removePublished(id, timing));
+            removedOrderRoutes.clear();
+            removedReservationRoutes.clear();
+            publicationPrepared = false;
+            if (timing != null) timing.removalsNanos = System.nanoTime() - started;
         }
 
         /**
@@ -1605,8 +1562,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         void clear() {
             closedTriggerCount = 0;
             if (triggers != null) triggers.clear();
-            if (publication != null) publication.clear();
-            publication = null;
+            publicationPrepared = false;
             java.util.Arrays.fill(terminalOrderClients, 0, terminalOrderCount, null);
             // 原语列不持有引用；count 是唯一有效边界，recordTerminalOrder 先完整覆盖再递增。
             terminalOrderCount = 0;
@@ -2336,6 +2292,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
                 ? event.takeChanges() : null;
         try {
+            // Admission already created the immutable Owner candidate needed by Matcher and Lane
+            // settlement. Adopt that same object before applying the terminal primitive after-image
+            // instead of allocating a third OrderRuntime solely for Owner publication.
+            if (changes != null) {
+                for (int index = 0; index < event.planCount(); index++) {
+                    OrderRuntime admitted = event.admittedOrder(index);
+                    if (admitted != null
+                            && changes.laneDeltas[topology.accountLaneId(admitted.userId())]
+                                    .orders.containsKey(admitted.orderId())
+                            && publishedOrders.get(admitted.orderId()) == null) {
+                        publishedOrders.put(admitted.orderId(), admitted);
+                    }
+                }
+            }
             long remainingLanes = laneMask;
             int completed = 0;
             while (remainingLanes != 0) {
@@ -2597,18 +2567,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedPosition(positionKey);
     }
 
-    public java.util.List<AccountLaneView> accountLaneViews(long laneMask) {
-        assertOwner();
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        if ((laneMask & ~validMask) != 0) throw new IllegalArgumentException("invalid account lane mask");
-        java.util.List<AccountLaneView> selected = new java.util.ArrayList<>(Long.bitCount(laneMask));
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((laneMask & (1L << laneId)) == 0) continue;
-            selected.add(accountLaneById(laneId));
-        }
-        return java.util.List.copyOf(selected);
-    }
-
     void rebuildAccountLaneHashes() {
         assertOwner();
         for (AccountLaneState lane : accountLanes) {
@@ -2636,12 +2594,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence)));
         }
         for (AccountLaneSnapshot snapshot : snapshots) {
-            AccountLaneView view = accountLaneById(snapshot.laneId());
-            if (view.revision() != snapshot.revision()
-                    || view.appliedSequence() != snapshot.appliedSequence()
-                    || view.committedSequence() != snapshot.committedSequence()
-                    || view.localStateHash() != snapshot.localStateHash()
-                    || view.localFundsHash() != snapshot.localFundsHash()) {
+            boolean unchanged = onLane(snapshot.laneId(), lane ->
+                    lane.revision() == snapshot.revision()
+                            && lane.appliedSequence() == snapshot.appliedSequence()
+                            && lane.committedSequence() == snapshot.committedSequence()
+                            && lane.localStateHash() == snapshot.localStateHash()
+                            && lane.localFundsHash() == snapshot.localFundsHash());
+            if (!unchanged) {
                 throw new IllegalStateException("account lane changed during snapshot capture");
             }
         }

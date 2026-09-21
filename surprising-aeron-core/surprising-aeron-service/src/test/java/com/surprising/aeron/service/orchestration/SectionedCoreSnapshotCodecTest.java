@@ -356,7 +356,7 @@ class SectionedCoreSnapshotCodecTest {
         mismatches.put("projection sequence", mutateHeaderLong(snapshot, 69));
         mismatches.put("business state hash", mutateHeaderLong(snapshot, 109));
         mismatches.put("funds hash", mutateHeaderLong(snapshot, 117));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 141));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 125));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> SectionedCoreSnapshotCodec.decode(mutated, ProductLine.SPOT));

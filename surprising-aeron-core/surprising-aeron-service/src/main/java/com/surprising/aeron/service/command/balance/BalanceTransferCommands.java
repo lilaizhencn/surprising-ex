@@ -49,7 +49,6 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
     }
 
     private void completeTransferPublication() {
-        owner.refreshTransferHash();
         owner.requestCommitPublication();
     }
 
@@ -66,7 +65,6 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
     public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
         RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(),
                 TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId());
-        owner.refreshTransferHash();
         owner.requestCommitPublication();
     }
 }

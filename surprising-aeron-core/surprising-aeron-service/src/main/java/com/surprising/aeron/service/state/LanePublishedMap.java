@@ -6,8 +6,8 @@ import org.agrona.collections.Long2ObjectHashMap;
 /**
  * Lane 交接后的 Owner 可见值。
  *
- * <p>Lane 不直接改表，而是把 primitive key/value 写入一个 {@link LanePublication}；Owner
- * 在有序提交点一次应用整批发布。发布表只由 Owner 访问，不需要并发容器或第二个待发布队列。</p>
+ * <p>Lane 不直接改表；Owner 在有序提交点应用终态值。发布表只由 Owner 访问，
+ * 不需要并发容器或第二个待发布队列。</p>
  */
 final class LanePublishedMap<V> {
     // Back-shift deletion retains backing storage under bounded order turnover.
@@ -132,10 +132,5 @@ final class LanePublishedMap<V> {
     }
 
     Collection<V> values() { return values.values(); }
-
-    void stage(LanePublication publication, long key, V value) {
-        if (publication == null) throw new IllegalArgumentException("publication is required");
-        publication.add(this, key, value);
-    }
 
 }

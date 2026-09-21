@@ -57,7 +57,6 @@ public final class SectionedCoreSnapshotWriter {
         return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
                 state.sourceSequenceDigest(), snapshotId, coreSequence, state.snapshotProjectionSequence(),
                 businessStateHash, fundsStateHash,
-                state.snapshotBusinessAuditBaseHash(), state.snapshotFundsStateHash(),
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
                 state.feePolicies(), state.pendingTransfers(),
@@ -148,8 +147,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putLong(image.clusterPosition())
                 .putLong(image.businessStateHash())
                 .putLong(image.fundsStateHash())
-                .putLong(image.auditBusinessStateHash())
-                .putLong(image.auditFundsStateHash())
                 .putLong(image.sourceSequenceDigest());
         return buffer.array();
     }

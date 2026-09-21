@@ -181,7 +181,7 @@ class CommandSlotRingTest {
     void ownsSuspendedCommitStateBySequence() {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
-                ProductLine.LINEAR_PERPETUAL, initial, initial.businessStateHash(), 0)) {
+                ProductLine.LINEAR_PERPETUAL, initial)) {
             CommandSlotRing ring = new CommandSlotRing(4, 4);
             CommandSlot context = ring.claim(2);
             RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();

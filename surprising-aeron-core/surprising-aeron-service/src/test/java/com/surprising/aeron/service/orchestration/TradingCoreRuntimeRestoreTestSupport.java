@@ -42,7 +42,7 @@ final class TradingCoreRuntimeRestoreTestSupport {
             MatcherSnapshot matcherSnapshot) {
         TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
                 commandResults, lastSourceSequences, snapshotState, new TerminalStateRetention(),
-                matcherSnapshot, appliedCommandCount, Map.of(), Map.of(), 0, 0);
+                matcherSnapshot, appliedCommandCount, Map.of(), Map.of());
         try {
             long projectionSequence = candidate.snapshotProjectionSequence();
             var accountLanes = candidate.accountLaneSnapshots(projectionSequence, snapshotState);

@@ -33,7 +33,7 @@ class SettlementChangesReuseTest {
                     long id = nextId++;
                     delta.orders.put(id, CoreStateTestFixtures.order(id, id + 100, 0, 1, true).snapshot());
                 }
-                delta.preparePublication(runtime);
+                delta.preparePublication();
                 assertThat(delta.terminalOrderCount()).isEqualTo(count);
                 for (int i = 0; i < delta.terminalOrderCount(); i++) {
                     assertThat(delta.terminalOrderId(i)).isEqualTo(firstId + i);

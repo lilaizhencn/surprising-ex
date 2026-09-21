@@ -41,7 +41,6 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CommandSource;
@@ -153,7 +152,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 撮合在途命令、Matcher 提交及 Lane 结算事件的完整流程。 */
     final CoreMatchingFlow matchingFlow = new CoreMatchingFlow(this);
     /** 已提交状态的查询与快照读视图。 */
-    final CoreRuntimeStateView stateView = new CoreRuntimeStateView(this);
+    final RuntimeStateMaterializationCache materializedState = new RuntimeStateMaterializationCache(this);
     /** Owner 绑定、启动、健康检查和释放顺序。 */
     final CoreRuntimeLifecycle lifecycle = new CoreRuntimeLifecycle(this);
 
@@ -313,13 +312,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long terminalTradeCount;
     /** 已终结订单及触发身份的有界保留区，防止短期重复执行。 */
     final TerminalStateRetention terminalRetention;
-    /** 审计用业务状态摘要，用于快照和重放核对。 */
-    long auditBusinessStateHash;
-    /** 审计用资金状态摘要，用于守恒和恢复核对。 */
-    long auditFundsStateHash;
-    /** 缓存审计摘要对应的命令序号。 */
-    long auditHashCoreSequence;
-
     /** 提交日志与快照版本边界；与交易日志共同约束恢复。 */
     final com.surprising.aeron.service.state.RuntimeCommitJournal runtimeProjectionJournal;
     /** 当前已发布状态序号；Owner 单线程递增，不为每次发布创建 fence 对象。 */
@@ -335,19 +327,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
     RuntimeException commitPublicationFailure;
     /** 协议探测命令的持久化值；不参与订单或资金计算。 */
     long probeValue;
-    /** 当前业务状态摘要缓存，提交边界更新。 */
-    long cachedBusinessStateHash;
     /**
      * Owner-only materialized read view.  The live runtime is authoritative; callers that ask
      * for a TradingCoreState read view must not rebuild the complete immutable graph repeatedly
      * while the committed state is unchanged (which used to recreate TreeMap entries, user
      * records and order snapshots on every query/verification call).
      */
-    /** 手续费策略摘要缓存，策略变化时更新。 */
-    long cachedFeePolicyHash;
-    /** 待完成转账摘要缓存，转账状态变化时更新。 */
-    long cachedTransferHash;
-
     /** 字符串与 primitive 标识的唯一字典；生命周期覆盖该运行时。 */
     final RuntimeIdentityRegistry identities;
     /** 唯一权威运行时状态；账户可变数据由所属 Lane 维护。 */
@@ -409,12 +394,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
         resultBuilder.commandTriggerOrderView = trigger;
     }
-    @Override public void refreshTransferHash() {
-        cachedTransferHash = computeTransferHash(runtimeState.pendingTransfersSnapshot());
-    }
-    @Override public void refreshFeePolicyHash() {
-        cachedFeePolicyHash = computeFeePolicyHash(runtimeState.feePoliciesSnapshot());
-    }
     @Override public PositionUserIndex positionUserIndex() { return positionUserIndex; }
     @Override public OpenInterestIndex openInterestIndex() { return openInterestIndex; }
     @Override public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
@@ -451,20 +430,20 @@ public final class TradingCoreRuntime implements AutoCloseable,
     public TradingCoreRuntime(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), 0, 0, null, null);
+                0, Map.of(), Map.of(), null, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, null);
+                0, Map.of(), Map.of(), matcherSnapshotCapture, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
                    SnapshotEncoder snapshotEncoder) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, snapshotEncoder);
+                0, Map.of(), Map.of(), matcherSnapshotCapture, snapshotEncoder);
     }
 
     TradingCoreRuntime(
@@ -479,8 +458,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> restoredFeePolicies,
             Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> restoredPendingTransfers,
-            long restoredAuditBusinessStateHash,
-            long restoredAuditFundsStateHash,
             MatcherSnapshotCapture matcherSnapshotCapture,
             SnapshotEncoder snapshotEncoder) {
         this.productLine = productLine;
@@ -537,21 +514,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
-        this.cachedFeePolicyHash = computeFeePolicyHash(restoredFeePolicies);
-        this.cachedTransferHash = computeTransferHash(restoredPendingTransfers);
-        this.auditBusinessStateHash = restoredAuditBusinessStateHash == 0
-                ? snapshotState.businessStateHash()
-                : restoredAuditBusinessStateHash;
-        this.auditFundsStateHash = restoredAuditFundsStateHash == 0
-                ? com.surprising.aeron.service.state.FundsStateHash.compute(snapshotState)
-                : restoredAuditFundsStateHash;
-        this.auditHashCoreSequence = Long.MIN_VALUE;
-        this.cachedBusinessStateHash = currentBusinessStateHash();
         commits.initializeCommitPublication(snapshotState.revision());
         this.factIndexes.rebuild(snapshotState, identities);
         this.runtimeProjectionJournal = com.surprising.aeron.service.state.RuntimeCommitJournal.passive(
-                productLine, snapshotState, cachedBusinessStateHash, auditFundsStateHash,
-                projectionSequence);
+                productLine, snapshotState, projectionSequence);
         this.publicationSequence = runtimeProjectionJournal.publishedSequence();
         runtimeState.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();
@@ -568,9 +534,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers,
-            long auditBusinessStateHash,
-            long auditFundsStateHash) {
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers) {
         if (projectionSequence < 0 || appliedCommandCount < 0 || commandResults == null
                 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS || lastSourceSequences == null
                 || lastSourceSequences.size() > MAX_SOURCE_SEQUENCES
@@ -583,7 +547,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return new TradingCoreRuntime(productLine, appliedCommandCount, probeValue,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
                 snapshotState, terminalRetention, matcherSnapshot, projectionSequence,
-                feePolicies, pendingTransfers, auditBusinessStateHash, auditFundsStateHash, null, null);
+                feePolicies, pendingTransfers, null, null);
     }
 
     public CoreResponse apply(CoreMessage message) {
@@ -1167,14 +1131,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return committedCoreSequence;
     }
 
-    long committedBusinessHashCoreSequence() {
-        return auditHashCoreSequence;
-    }
-
-    long committedFundsHashCoreSequence() {
-        return auditHashCoreSequence;
-    }
-
     long committedProjectionSequence() {
         return runtimeProjectionJournal.publishedSequence();
     }
@@ -1183,41 +1139,60 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return probeValue;
     }
 
-    public TradingCoreState tradingState() { return stateView.tradingState(); }
+    public TradingCoreState tradingState() { return materializedState.current(); }
 
-    int incompleteRiskScanCount() { return stateView.incompleteRiskScanCount(); }
-    int incompleteFundingCount() { return stateView.incompleteFundingCount(); }
-    int activeOrderCount() { return stateView.activeOrderCount(); }
-    int positionCount() { return stateView.positionCount(); }
-    int triggerOrderCount() { return stateView.triggerOrderCount(); }
+    int incompleteRiskScanCount() { return runtimeState.incompleteRiskScanCount(); }
+    int incompleteFundingCount() { return runtimeState.treasury().incompleteFundingCount(); }
+    int activeOrderCount() { return activeOrderIndex.count(); }
+    int positionCount() { return runtimeState.publishedPositionCount(); }
+    int triggerOrderCount() { return triggerOrderIndex.ids().size(); }
 
-    TradingCoreState snapshotTradingState() { return stateView.snapshotTradingState(); }
-    long snapshotBusinessStateHash() { return stateView.snapshotBusinessStateHash(); }
-    long snapshotBusinessAuditBaseHash() { return stateView.snapshotBusinessAuditBaseHash(); }
-    long snapshotFundsStateHash() { return stateView.snapshotFundsStateHash(); }
-    long snapshotProjectionSequence() { return stateView.snapshotProjectionSequence(); }
-    boolean runtimeRiskScanComplete() { return stateView.runtimeRiskScanComplete(); }
-    boolean runtimeRiskScanComplete(String symbol) { return stateView.runtimeRiskScanComplete(symbol); }
-    RiskScanRuntime runtimeRiskScan(String symbol) { return stateView.runtimeRiskScan(symbol); }
-    MarkPriceRuntime runtimeMarkPrice(String symbol) { return stateView.runtimeMarkPrice(symbol); }
-    long runtimeFundingSettlement(String symbol) { return stateView.runtimeFundingSettlement(symbol); }
-    long runtimeInsurance(String asset) { return stateView.runtimeInsurance(asset); }
-    LiquidationRuntime runtimeLiquidation(long liquidationId) { return stateView.runtimeLiquidation(liquidationId); }
-    PositionRuntime runtimePosition(long userId, String positionKey) {
-        return stateView.runtimePosition(userId, positionKey);
+    TradingCoreState snapshotTradingState() { return materializedState.snapshot(); }
+    long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
+    long snapshotFundsStateHash() {
+        return com.surprising.aeron.service.state.FundsStateHash.compute(snapshotTradingState());
     }
-    boolean snapshotHasPendingCommands() { return stateView.snapshotHasPendingCommands(); }
+    long snapshotProjectionSequence() { return runtimeProjectionJournal.publishedSequence(); }
+    boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
+    boolean runtimeRiskScanComplete(String symbol) {
+        RiskScanRuntime scan = runtimeRiskScan(symbol);
+        return scan == null || scan.complete();
+    }
+    RiskScanRuntime runtimeRiskScan(String symbol) {
+        Integer symbolId = identities.findSymbolId(symbol);
+        return symbolId == null ? null : runtimeState.riskScan(symbolId);
+    }
+    MarkPriceRuntime runtimeMarkPrice(String symbol) {
+        Integer symbolId = identities.findSymbolId(symbol);
+        return symbolId == null ? null : runtimeState.markPrice(symbolId);
+    }
+    long runtimeFundingSettlement(String symbol) {
+        Integer symbolId = identities.findSymbolId(symbol);
+        return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
+    }
+    long runtimeInsurance(String asset) {
+        Integer assetId = identities.findAssetId(asset);
+        return assetId == null ? 0 : runtimeState.treasury().insurance(assetId);
+    }
+    LiquidationRuntime runtimeLiquidation(long liquidationId) { return runtimeState.liquidation(liquidationId); }
+    PositionRuntime runtimePosition(long userId, String positionKey) {
+        Long key = identities.findPositionKey(userId, positionKey);
+        return key == null ? null : runtimeState.position(key);
+    }
+    boolean snapshotHasPendingCommands() {
+        return factContextActive || directCommand.active() || laneCommandContexts.inFlight() != 0;
+    }
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
-        return stateView.feePolicies();
+        return runtimeState.feePoliciesSnapshot();
     }
     void restoreFeePolicies(Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies) {
-        stateView.restoreFeePolicies(policies);
+        runtimeState.restoreFeePolicies(policies);
     }
     Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
-        return stateView.pendingTransfers();
+        return runtimeState.pendingTransfersSnapshot();
     }
     void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
-        stateView.restorePendingTransfers(transfers);
+        runtimeState.restorePendingTransfers(transfers);
     }
     long sourceSequenceDigest() {
         return lastSourceSequences.digest();
@@ -1349,11 +1324,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     String runtimeOrderSymbol(OrderRuntime order) {
         return identities.symbol(order.symbolId());
-    }
-
-    CoreOrderStateView runtimeOrderView(long orderId) {
-        OrderRuntime order = runtimeOrder(orderId);
-        return order == null ? null : orderView(order);
     }
 
     String runtimeLiquidationSymbol(
@@ -1600,16 +1570,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return changed == null ? runtimeOrder(orderId) : changed;
     }
 
-    CoreOrderStateView orderView(OrderRuntime order) {
-        return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
-                runtimeOrderSymbol(order), order.side(), order.priceTicks(),
-                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
-                order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
-                order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
-                order.updatedAtEpochMillis(), order.clusterPosition(), order.status().name(), order.revision());
-    }
-
     CoreResponse orderStateResponse(long orderId) {
         return orderStateResponse(com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
                 runtimeState, identities, orderId));
@@ -1626,12 +1586,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     long currentBusinessStateHash() {
-        return canonicalBusinessStateHash(auditBusinessStateHash);
-    }
-
-    long canonicalBusinessStateHash(long base) {
-        if (cachedFeePolicyHash != 0) base = mix(base, cachedFeePolicyHash);
-        return cachedTransferHash == 0 ? base : mix(base, cachedTransferHash);
+        TradingCoreState state = materializedState.current();
+        return canonicalBusinessStateHash(state.businessStateHash(),
+                runtimeState.feePoliciesSnapshot(), runtimeState.pendingTransfersSnapshot());
     }
 
     static long canonicalBusinessStateHash(

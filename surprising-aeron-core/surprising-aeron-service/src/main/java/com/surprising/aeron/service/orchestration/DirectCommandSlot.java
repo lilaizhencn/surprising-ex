@@ -447,7 +447,6 @@ final class DirectCommandSlot {
                 case TRANSFER -> {
                     complete = transfer.poll();
                     if (complete) {
-                        ((BalanceCommandContext) owner).refreshTransferHash();
                         owner.requestCommitPublication();
                     }
                 }

@@ -1040,6 +1040,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public boolean complete() { return ready() && completedLaneMask() == routedLaneMask(); }
     public MatcherSettlementPlan plan() { return plan; }
     int planCount() { return batchPlans == null ? 1 : batchPlanCount; }
+    OrderRuntime admittedOrder(int index) {
+        if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
+        return batchStorage == null ? null : batchStorage.admittedOrders[index];
+    }
     MatcherSettlementPlan plan(int index) {
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
         return batchPlans == null ? plan : batchPlans[index];

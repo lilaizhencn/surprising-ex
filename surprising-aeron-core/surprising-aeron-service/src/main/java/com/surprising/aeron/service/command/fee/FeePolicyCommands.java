@@ -14,7 +14,6 @@ public final class FeePolicyCommands {
     public void executeUpsertFeePolicy(CoreMessage message, long clusterTimestamp) {
         owner.runtimeState().upsertFeePolicy(
                 TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe()));
-        owner.refreshFeePolicyHash();
         owner.requestCommitPublication();
     }
 }

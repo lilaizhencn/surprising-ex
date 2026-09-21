@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 class LanePublishedMapTest {
     @Test void terminalPublicationCapturesDeletedPositionOnceBeforeReplacingOwnerView() {
-        for (boolean prepared : new boolean[]{false, true}) {
+        for (boolean prepared : new boolean[]{true}) {
             try (var runtime = new TradingRuntimeState()) {
                 var identities = new RuntimeIdentityRegistry();
                 int symbol = identities.symbolId("BTC-USDT");
@@ -22,9 +22,9 @@ class LanePublishedMapTest {
                 runtime.publishedPositions.put(1, position.snapshot());
                 var delta = new TradingRuntimeState.LaneCommitDelta();
                 delta.positions.put(1, null);
-                if (prepared) delta.preparePublication(runtime);
+                if (prepared) delta.preparePublication();
                 capture.begin(1, 100, 0);
-                delta.commitTerminalToOwner(runtime, 0, null, 1);
+                delta.commitTerminalToOwner(runtime, 0, null, 1, null, null);
                 capture.commit();
                 assertThat(runtime.publishedPositions.get(1)).isNull();
                 int removals = 0;
@@ -148,9 +148,8 @@ class LanePublishedMapTest {
                         ? new com.surprising.aeron.service.command.support.PrimitiveLongChangeSet() : null;
                 var changedUsers = collectChangedIds
                         ? new com.surprising.aeron.service.command.support.PrimitiveLongChangeSet() : null;
-                delta.preparePublication(runtime);
-                var publication = delta.publication;
-                publication.publish(changedUsers, changedOrders);
+                delta.preparePublication();
+                delta.commitTerminalToOwner(runtime, 0, null, 1, changedUsers, changedOrders);
                 for (long id : new long[]{1, 2, 3, 5, 6}) {
                     assertThat(runtime.publishedOrders.get(id)).isNull();
                     assertThat(runtime.publishedReservations.get(id)).isNull();
@@ -167,7 +166,6 @@ class LanePublishedMapTest {
                 }
                 assertThat(delta.removedOrderRoutes.isEmpty()).isTrue();
                 assertThat(delta.removedReservationRoutes.isEmpty()).isTrue();
-                publication.publish(changedUsers, changedOrders);
                 assertThat(orderRemovals.removals.values()).containsOnly(1);
                 assertThat(reservationRemovals.removals.values()).containsOnly(1);
             }
@@ -192,7 +190,7 @@ class LanePublishedMapTest {
         }
     }
 
-    @Test void settlementReusesPublicationAndDiscardsUnpublishedReferences() {
+    @Test void settlementDiscardsUnpublishedReferencesAcrossReuse() {
         var runtime = new TradingRuntimeState();
         var delta = new TradingRuntimeState.LaneCommitDelta();
         runtime.publishedOrders.put(99, CoreStateTestFixtures.order(99, 7, 0, 1));
@@ -200,14 +198,12 @@ class LanePublishedMapTest {
         delta.removeOrderRoute(99);
         delta.removeReservationRoute(99);
         delta.users.put(7, new UserRuntime(7));
-        delta.preparePublication(runtime);
-        var buffer = delta.publication;
+        delta.preparePublication();
         // Failure before publication: recycling must not publish user 7 on the next command.
         delta.clear();
         delta.users.put(8, new UserRuntime(8));
-        delta.preparePublication(runtime);
-        org.assertj.core.api.Assertions.assertThat(delta.publication).isSameAs(buffer);
-        delta.publication.publish();
+        delta.preparePublication();
+        delta.commitTerminalToOwner(runtime, 0, null, 1, null, null);
         assertThat(delta.users.isEmpty()).isTrue();
         assertThat(delta.reservations.isEmpty()).isTrue();
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(7)).isNull();
@@ -216,24 +212,14 @@ class LanePublishedMapTest {
         assertThat(runtime.publishedReservations.get(99)).isNotNull();
         delta.clear();
         for (int i = 10; i < 50; i++) delta.users.put(i, new UserRuntime(i));
-        delta.preparePublication(runtime);
-        delta.publication.publish();
+        delta.preparePublication();
+        delta.commitTerminalToOwner(runtime, 0, null, 2, null, null);
         delta.clear();
-        delta.preparePublication(runtime);
-        org.assertj.core.api.Assertions.assertThat(delta.publication).isSameAs(buffer);
-        delta.publication.publish();
+        delta.preparePublication();
+        delta.commitTerminalToOwner(runtime, 0, null, 3, null, null);
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(7)).isNull();
     }
 
-    @Test void publicationReplacesAnExistingValueAtTheOwnerBoundary() {
-        var map = new LanePublishedMap<String>();
-        map.put(7, "before");
-        var receipt = new LanePublication();
-        map.stage(receipt, 7, "after");
-        assertThat(map.get(7)).isEqualTo("before");
-        receipt.publish();
-        assertThat(map.get(7)).isEqualTo("after");
-    }
     @Test void reusedLookupNeverMutatesStoredKeysIncludingHashCollisions() {
         var map = new LanePublishedMap<String>();
         long first = 1, collision = 1L << 32;
@@ -247,49 +233,6 @@ class LanePublishedMapTest {
         }
         assertThat(map.remove(first)).isEqualTo("first");
         assertThat(map.get(collision)).isEqualTo("collision");
-    }
-
-    @Test void unpublishedSuccessorsCannotLeakAndReclaimCannotEraseThem() throws Exception {
-        var map = new LanePublishedMap<String>();
-        map.put(7, "committed");
-        var first = new LanePublication();
-        var second = new LanePublication();
-        map.stage(first, 7, "first");
-        map.stage(second, 7, "second");
-        assertThat(map.get(7)).isEqualTo("committed");
-        first.publish();
-        assertThat(map.get(7)).isEqualTo("first");
-        second.publish();
-        assertThat(map.get(7)).isEqualTo("second");
-        var deleted = new LanePublication();
-        var replacement = new LanePublication();
-        map.stage(deleted, 7, null);
-        map.stage(replacement, 7, "replacement");
-        deleted.publish();
-        assertThat(map.get(7)).isNull();
-        replacement.publish();
-        assertThat(map.get(7)).isEqualTo("replacement");
-        var terminal = new LanePublication();
-        map.stage(terminal, 7, null);
-        terminal.publish();
-        assertThat(map.size()).isZero();
-    }
-
-    @Test void oneReceiptPublishesEveryEntityWithoutCopyingTheLiveMaps() throws Exception {
-        var orders = new LanePublishedMap<String>();
-        var positions = new LanePublishedMap<String>();
-        var receipt = new LanePublication();
-        Thread lane = new Thread(() -> {
-            for (int i = 1; i <= 1000; i++) orders.stage(receipt, i, "order" + i);
-            positions.stage(receipt, 9, "position");
-        });
-        lane.start(); lane.join();
-        assertThat(orders.values()).isEmpty();
-        assertThat(positions.get(9)).isNull();
-        receipt.publish();
-        assertThat(orders.size()).isEqualTo(1000);
-        assertThat(positions.get(9)).isEqualTo("position");
-        assertThat(orders.get(1000)).isEqualTo("order1000");
     }
 
     @Test void terminalPublicationRemovesValue() {

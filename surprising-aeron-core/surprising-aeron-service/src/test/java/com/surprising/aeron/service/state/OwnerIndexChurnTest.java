@@ -45,14 +45,9 @@ class OwnerIndexChurnTest {
                 keyStorage.setAccessible(true); valueStorage.setAccessible(true);
                 Object keysBefore = keyStorage.get(table), valuesBefore = valueStorage.get(table);
                 for (long base = 1; base < 8192; base += 32) {
-                    var admission = new LanePublication();
-                    for (long key = base; key < base + 32; key++) map.stage(admission, key, value);
-                    assertThat(map.size()).isZero();
-                    admission.publish();
+                    for (long key = base; key < base + 32; key++) map.applyPublished(key, value);
                     assertThat(map.size()).isEqualTo(32);
-                    var terminal = new LanePublication();
-                    for (long key = base; key < base + 32; key++) map.stage(terminal, key, null);
-                    terminal.publish();
+                    for (long key = base; key < base + 32; key++) map.applyPublished(key, null);
                     assertThat(map.size()).isZero();
                 }
                 assertThat(keyStorage.get(table)).as(name + " key array").isSameAs(keysBefore);

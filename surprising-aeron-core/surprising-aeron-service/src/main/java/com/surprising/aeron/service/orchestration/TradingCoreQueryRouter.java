@@ -39,11 +39,9 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && (message.header().messageType() == CoreMessageType.STATE_HASH_QUERY
                 || message.header().messageType() == CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
-            // Full hashes are explicit audit queries. The hot-path cached value is a snapshot
-            // audit anchor and does not track mutable account/order changes.
+            // Full hashes are explicit audit queries and are calculated from authoritative state.
             return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                    CoreStateQueryCodec.encodeStateHash(
-                            runtime.canonicalBusinessStateHash(runtime.tradingState().businessStateHash())));
+                    CoreStateQueryCodec.encodeStateHash(runtime.currentBusinessStateHash()));
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY) {

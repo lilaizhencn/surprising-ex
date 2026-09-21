@@ -109,8 +109,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
             assertThat(actual.complete()).isTrue();
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
-            assertThat(runtime.accountLane(USER_ID).queueDepth()).isZero();
-            assertThat(runtime.accountLane(SECOND_MAKER_ID).queueDepth()).isZero();
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID)).queueDepth()).isZero();
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID)).queueDepth()).isZero();
         } finally {
             runtime.close();
         }

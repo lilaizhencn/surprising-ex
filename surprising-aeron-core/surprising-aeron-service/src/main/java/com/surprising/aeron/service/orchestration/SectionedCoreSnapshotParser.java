@@ -207,8 +207,7 @@ final class SectionedCoreSnapshotParser {
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
                         commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
-                        manifest.projectionSequence(), feePolicies, pendingTransfers,
-                        manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());
+                        manifest.projectionSequence(), feePolicies, pendingTransfers);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
                 candidate.activate();
                 return candidate;

@@ -1071,7 +1071,6 @@ class CoreOrderedOrderBatchTest {
         assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isLessThan(availableBefore);
         assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
         assertThat(runtime.revision()).isGreaterThan(revisionBefore);
-        assertThat(runtime.accountLane(1001).ownerThreadName()).isEqualTo(Thread.currentThread().getName());
         assertThat(identities.positionCheckpoint()).isEqualTo(identityBefore);
         assertThat(identities.findClientKey(1001, "close-first")).isNotNull();
         assertThat(state.snapshotHasPendingCommands()).isFalse();
@@ -1111,11 +1110,8 @@ class CoreOrderedOrderBatchTest {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             TradingRuntimeState runtime = field(state, "runtimeState");
-            var lanesBefore = List.of(runtime.accountLanes());
             var indexesBefore = allIndexSnapshots(state);
             long revisionBefore = runtime.revision();
-            long businessBefore = state.snapshotBusinessStateHash();
-            long fundsBefore = state.snapshotFundsStateHash();
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
             UUID commandId = UUID.randomUUID();
@@ -1133,8 +1129,10 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class);
             assertThat(runtime.order(15_201)).isNotNull();
             assertThat(runtime.revision()).isGreaterThan(revisionBefore);
-            assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessBefore);
-            assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsBefore);
+            assertThatThrownBy(state::snapshotBusinessStateHash)
+                    .hasMessageContaining("unfinished reservation or patch work");
+            assertThatThrownBy(state::snapshotFundsStateHash)
+                    .hasMessageContaining("unfinished reservation or patch work");
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
@@ -1156,7 +1154,6 @@ class CoreOrderedOrderBatchTest {
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
             var identityBefore = identities.snapshot();
-            var lanesBefore = List.of(runtime.accountLanes());
             var indexesBefore = allIndexSnapshots(state);
             var treasuryBefore = treasurySnapshot(runtime);
             long businessBefore = state.snapshotBusinessStateHash();

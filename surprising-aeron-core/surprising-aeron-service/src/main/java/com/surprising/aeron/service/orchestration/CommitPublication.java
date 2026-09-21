@@ -89,9 +89,7 @@ final class CommitPublication {
                 if (owner.runtimeState.committedRevision() < runtimePatchRevision)
                     throw new IllegalStateException("runtime changed-index commit is out of order");
                 owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
-                owner.runtimeProjectionJournal.publish(sequence,
-                        owner.runtimeProjectionJournal.auditBusinessStateHash(),
-                        owner.runtimeProjectionJournal.auditFundsStateHash());
+                owner.runtimeProjectionJournal.publish(sequence);
                 owner.publicationSequence = sequence;
                 runtimePatchRevision = owner.runtimeState.committedRevision();
                 owner.runtimeState.clearCommittedChanges(owner.identities);

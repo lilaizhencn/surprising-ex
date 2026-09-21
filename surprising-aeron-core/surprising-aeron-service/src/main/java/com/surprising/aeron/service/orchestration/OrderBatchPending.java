@@ -4,7 +4,6 @@ import com.surprising.aeron.service.command.order.OrderBatchKind;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.MatchingResult;
-import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;

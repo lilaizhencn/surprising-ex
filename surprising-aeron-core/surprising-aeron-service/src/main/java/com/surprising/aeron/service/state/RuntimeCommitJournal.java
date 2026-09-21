@@ -13,40 +13,31 @@ import com.surprising.product.api.ProductLine;
 public final class RuntimeCommitJournal implements AutoCloseable {
 
     private long publishedSequence;
-    private long businessStateHash;
-    private long fundsStateHash;
     private boolean activated;
     private boolean closed;
     private int publicationBatchDepth;
 
-    public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial,
-                                long businessStateHash, long fundsStateHash) {
-        this(productLine, initial, businessStateHash, fundsStateHash, 0, true);
+    public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial) {
+        this(productLine, initial, 0, true);
     }
 
-    public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial,
-                                long businessStateHash, long fundsStateHash, long initialSequence) {
-        this(productLine, initial, businessStateHash, fundsStateHash, initialSequence, true);
+    public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial, long initialSequence) {
+        this(productLine, initial, initialSequence, true);
     }
 
-    private RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial,
-                                 long businessStateHash, long fundsStateHash, long initialSequence,
+    private RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial, long initialSequence,
                                  boolean activateImmediately) {
         if (productLine == null || initial == null || initial.productLine() != productLine) {
             throw new IllegalArgumentException("invalid commit journal state");
         }
         if (initialSequence < 0) throw new IllegalArgumentException("initial commit sequence is negative");
         publishedSequence = initialSequence;
-        this.businessStateHash = businessStateHash;
-        this.fundsStateHash = fundsStateHash;
         if (activateImmediately) activate();
     }
 
     public static RuntimeCommitJournal passive(ProductLine productLine, TradingCoreState initial,
-                                               long businessStateHash, long fundsStateHash,
                                                long initialSequence) {
-        return new RuntimeCommitJournal(productLine, initial, businessStateHash, fundsStateHash,
-                initialSequence, false);
+        return new RuntimeCommitJournal(productLine, initial, initialSequence, false);
     }
 
     public void activate() {
@@ -57,13 +48,11 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public boolean activated() { return activated; }
 
-    public long publish(long sequence, long businessStateHash, long fundsStateHash) {
+    public long publish(long sequence) {
         requireHealthy();
         long next = Math.incrementExact(publishedSequence);
         if (sequence != next) throw new IllegalStateException("invalid fact frame publication");
         publishedSequence = next;
-        this.businessStateHash = businessStateHash;
-        this.fundsStateHash = fundsStateHash;
         return next;
     }
 
@@ -80,17 +69,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     public long publishedSequence() { return publishedSequence; }
-    public long auditBusinessStateHash() { return businessStateHash; }
-    public long auditFundsStateHash() { return fundsStateHash; }
-
-    public void rebaseInitialBusinessStateHash(long expectedBefore, long after) {
-        if (closed) throw new IllegalStateException("runtime commit journal is closed");
-        if (publishedSequence != 0 || businessStateHash != expectedBefore) {
-            throw new IllegalStateException("commit journal is past its initial sequence");
-        }
-        businessStateHash = after;
-    }
-
     public void assertHealthy() { requireHealthy(); }
 
     private void requireHealthy() {

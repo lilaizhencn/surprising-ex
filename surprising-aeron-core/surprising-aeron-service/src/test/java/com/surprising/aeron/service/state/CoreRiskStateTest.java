@@ -418,7 +418,7 @@ class CoreRiskStateTest {
             RuntimeDerivativeRiskProcessor.applyMarkPrice(
                     state, command, state.users().keySet(), runtime, identities);
             for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
-                assertThat(runtime.accountLaneById(laneId).queueDepth()).isZero();
+                assertThat(runtime.accountLaneMetricsById(laneId).queueDepth()).isZero();
             }
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(first);

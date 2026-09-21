@@ -18,18 +18,18 @@ class LaneTerminalSummaryTest {
             }
             changes.putOrder(id, order);
         }
-        changes.preparePublication(state);
+        changes.preparePublication();
         var actual = new ArrayList<Long>();
         changes.commitTerminalToOwner(state, 0,
-                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 9);
+                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 9, null, null);
         assertThat(actual).containsExactlyElementsOf(expected);
         state.clearChangedKeys();
         changes.clear();
         changes.putOrder(41, CoreStateTestFixtures.order(41, 7, 5, 10));
-        changes.preparePublication(state);
+        changes.preparePublication();
         actual.clear();
         changes.commitTerminalToOwner(state, 0,
-                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 10);
+                (orderId, userId, clientOrderId, sequence) -> actual.add(orderId), 10, null, null);
         assertThat(actual).isEmpty();
     }
     @Test void publishedOpenTerminalAndRemovedOrdersRemainCorrectAcrossReuse() {
@@ -42,9 +42,9 @@ class LaneTerminalSummaryTest {
         for (var status : new CoreOrderStatus[]{CoreOrderStatus.OPEN, CoreOrderStatus.FILLED,
                 CoreOrderStatus.OPEN, CoreOrderStatus.CANCELED, CoreOrderStatus.REJECTED}) {
             changes.putOrder(11, open.withStatus(status, 2));
-            changes.preparePublication(state);
+            changes.preparePublication();
             retained.clear();
-            changes.commitTerminalToOwner(state, 0, sink, 9);
+            changes.commitTerminalToOwner(state, 0, sink, 9, null, null);
             if (status.terminal()) assertThat(retained).containsExactly(11L);
             else assertThat(retained).isEmpty();
             assertThat(state.publishedOrders.get(11).status()).isEqualTo(status);
@@ -52,20 +52,21 @@ class LaneTerminalSummaryTest {
             changes.clear();
         }
         changes.putOrder(11, null);
-        changes.preparePublication(state);
+        changes.preparePublication();
         retained.clear();
-        changes.commitTerminalToOwner(state, 0, sink, 10);
+        changes.commitTerminalToOwner(state, 0, sink, 10, null, null);
         assertThat(retained).isEmpty();
         assertThat(state.publishedOrders.get(11)).isNull();
     }
 
-    @Test void directPublicationStillVisitsTerminalOrdersWithoutLaneSummary() {
+    @Test void preparedPublicationVisitsTerminalOrdersWithoutLaneSummary() {
         var state = new TradingRuntimeState();
         var changes = new TradingRuntimeState.LaneCommitDelta();
         changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2));
+        changes.preparePublication();
         var retained = new ArrayList<Long>();
         changes.commitTerminalToOwner(state, 0,
-                (orderId, userId, clientOrderId, sequence) -> retained.add(orderId), 9);
+                (orderId, userId, clientOrderId, sequence) -> retained.add(orderId), 9, null, null);
         assertThat(retained).containsExactly(11L);
         assertThat(state.publishedOrders.get(11).status()).isEqualTo(CoreOrderStatus.CANCELED);
     }

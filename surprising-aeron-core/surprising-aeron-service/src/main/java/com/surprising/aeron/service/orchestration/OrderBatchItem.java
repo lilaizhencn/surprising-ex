@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
