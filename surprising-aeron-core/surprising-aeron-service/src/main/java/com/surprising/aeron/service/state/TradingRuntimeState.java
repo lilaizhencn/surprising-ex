@@ -858,15 +858,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    void ensurePlaceAdmissionDispatchCapacity(int laneId, int matcherShard) {
-        if (!accountLanesStarted || ownerLaneAccess) return;
+    int ensurePlaceAdmissionDispatchCapacity(int laneId) {
+        if (!accountLanesStarted || ownerLaneAccess) return 0;
         assertAccountLanesHealthy();
-        if (!laneWorkers[laneId].hasAdmissionCapacity()) {
+        int laneDepth = laneWorkers[laneId].admissionDepthIfAvailable();
+        if (laneDepth < 0) {
             throw new java.util.concurrent.RejectedExecutionException("Account Lane admission queue is full");
         }
         if (!placeAdmissionReadyQueues[laneId].hasCapacity()) {
             throw new java.util.concurrent.RejectedExecutionException("place admission ready queue is full");
         }
+        return laneDepth;
     }
 
     void ensureMatcherSettlementDispatchCapacity(long laneMask) {
@@ -1919,7 +1921,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, ResolvedPlaceOrder order, java.util.UUID commandId,
             long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
-            int symbolId, int assetId, int matcherShard, RuntimeIdentityRegistry identities,
+            int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
         if (!accountLanesStarted) {
@@ -1941,20 +1943,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (!inline) releaseOwnerLaneAccess();
         int laneId = topology.accountLaneId(userId);
-        ensurePlaceAdmissionDispatchCapacity(laneId, matcherShard);
+        int laneDepth = ensurePlaceAdmissionDispatchCapacity(laneId);
         PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceAdmissionEvent();
         event.prepare(
                 coreSequence, userId, order, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
-                symbolId, assetId, laneId, matcherShard, !inline, this, identities, timestamp, position);
+                assetId, laneId, !inline, this, identities, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
+                accountLaneQueueHighWaterMarks[laneId], laneDepth + 1);
         try {
             if (inline) {
                 event.execute(accountLanes[laneId]);
                 releaseOwnerLaneAccess();
             } else {
-                laneWorkers[laneId].submit(event);
+                laneWorkers[laneId].submitAdmission(event);
             }
         } catch (RuntimeException | Error failure) {
             if (!event.complete()) event.discard();

@@ -1702,6 +1702,16 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - 正式JFR/result/GC日志SHA-256分别为`1ae1e34a0c0627d83f7606999866fd018b50e8ff329c5ee58587aeb0b4fd83b2`、`3eebc2df6c016bd7d4317dc7cddc0c941f27ca9df6bb447b5c64e111445a4382`、`61a6f38a9e8a74e634f58cee39e59ee63777ecac67d41f1084be2299eb926e35`；独立GC-profiler result为`2d671f34231e764518b921a8959bf8a7acf13fed0de2cd22592e57bcfaebf027`。原始路径仅作清理前定位：`target/linear-perpetual-scenarios/dense-book-async-10m-20260921`和`dense-book-async-gc-20260921`。
 - 正式轮、GC-profiler轮及两次短轮目录均已移动到`/Users/atomex/.Trash/surprising-ex-dense-book-async-20260921/`，可恢复；项目目录无本轮artifact和Java/JMH残留进程，清理后根卷可用544GiB。
 
+## 2026-09-21 交易热路径四阶段减法
+
+### 实施前锁定计划
+
+- 目标按依赖顺序完成四项减法：先消除place admission重复深度扫描、无效参数和重复字段；再把`ResolvedPlaceOrder`的不可变字段写入已有池化事件；随后让matcher普通下单结果直接写入池化`MatcherSettlementEvent`，删除中间`CoreMatchingResult`包装；最后把订单和预留状态统一为Account Lane权威来源，移除Owner侧`publishedCopy`镜像。不得增加线程、锁、barrier、业务状态副本或fallback/legacy路径。
+- 业务顺序保持为：Owner解析并校验下单输入 → Account Lane预留资金并发布准入回执 → matcher按确定性顺序撮合 → 对应Lane逐条应用不可变成交结果并发布终态 → Owner按FIFO退休和响应。资金预留必须先于matcher消费；同一账户仍只由所属Lane写入；池化对象只能在Lane、matcher和Owner都完成消费后复用。
+- 当前基线为`master=c4aa8f83`。性能对照沿用修复Harness租约后的异步场景：前两个有效GC-profiler样本65,815.575/66,130.630 ops/s和2,209.827/2,269.732 B/op；有效JFR中`dispatchPlaceAdmission`占4.80%，主要分配对象包含`OrderRuntime`、`CoreMatchingResult/MatcherResult`、`ResolvedPlaceOrder`和`ReservationRuntime`。
+- 每阶段先用CodeGraph影响面确定测试范围；当前会话未暴露`codegraph_*`工具时，使用源码符号引用、Maven模块依赖和事件边界作保守替代。每阶段执行JDK 27版本检查、受影响service定向测试和benchmark支持测试，正确性通过后独立commit并push；四阶段全部完成后才跑相同异步200档/5000账户/256在途GC-profiler与JFR压测。
+- 通过条件：资金、冻结、持仓、订单终态、matcher顺序、快照恢复和accepted=terminal均不变；测试无失败；性能轮无拒绝、错误、超时和unfinished。若某个包装承载必要跨线程生命周期或恢复语义，允许保留其语义但必须把对象分配并入现有池化槽位，不能用新抽象替代旧抽象。
+
 ## 2026-09-21 ResponseArena伪热点校正与交易热路径对象审计
 
 ### 采集前锁定计划

@@ -1253,12 +1253,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState, identities, userId,
                 command, currentClusterTimestamp);
         int assetId = identities.assetId(resolved.reservationAsset());
-        int matcherShard = matchingAdapter.matcherShardId(resolved.symbol());
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
                 openInterestIndex.openInterestSteps(resolved.symbol()),
                 runtimeState.treasury().lifecycleSettlement(resolved.symbolId()) != 0,
                 runtimeState.treasury().fundingProgress(resolved.symbolId()) != null,
-                resolved.symbolId(), assetId, matcherShard, identities, timestamp, position);
+                assetId, identities, timestamp, position);
     }
 
     @Override public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,

@@ -129,21 +129,35 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
-        boolean admission = command instanceof com.surprising.aeron.service.state.PlaceAdmissionEvent;
-        PaddedSequence producer = admission ? admissionProducerSequence : producerSequence;
-        PaddedSequence consumer = admission ? admissionConsumerSequence : consumerSequence;
-        Command[] queue = admission ? admissionCommands : commands;
-        int mask = admission ? admissionIndexMask : indexMask;
-        long next = producer.value;
-        long consumed = consumer.value;
-        if (next - consumed >= queue.length || depth() >= queue.length) {
+        long next = producerSequence.value;
+        long consumed = consumerSequence.value;
+        if (next - consumed >= commands.length || depth() >= commands.length) {
             throw new RejectedExecutionException("settlement lane queue is full");
         }
-        queue[(int) next & mask] = command;
-        producer.value = next + 1;
+        commands[(int) next & indexMask] = command;
+        producerSequence.value = next + 1;
         // The consumer announces parking BEFORE rechecking producerSequence. These volatile
         // accesses ensure either it sees this publication or we observe its wake-up request.
         // Do not replace this handshake with an empty-queue check on consumerSequence.
+        signalWork();
+        return next + 1;
+    }
+
+    /**
+     * Owner-only admission publication after {@link #admissionDepthIfAvailable()} succeeds.
+     * The Owner is the sole producer, so only the physical mailbox needs rechecking here;
+     * consumers can only increase the available capacity between probe and publication.
+     */
+    public long submitAdmission(Command command) {
+        if (command == null) throw new IllegalArgumentException("admission command is required");
+        rethrowFailure();
+        if (!running) throw new RejectedExecutionException("settlement lane is closed");
+        long next = admissionProducerSequence.value;
+        if (next - admissionConsumerSequence.value >= admissionCommands.length) {
+            throw new RejectedExecutionException("settlement lane admission queue is full");
+        }
+        admissionCommands[(int) next & admissionIndexMask] = command;
+        admissionProducerSequence.value = next + 1;
         signalWork();
         return next + 1;
     }
@@ -195,11 +209,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return running && failure == null && depth() < commands.length;
     }
 
-    /** Capacity probe for the dedicated Lane admission mailbox. */
-    public boolean hasAdmissionCapacity() {
-        return running && failure == null
-                && admissionProducerSequence.value - admissionConsumerSequence.value < admissionCommands.length
-                && depth() < admissionCommands.length;
+    /** Returns the sampled total depth, or -1 when the dedicated admission mailbox is full. */
+    public int admissionDepthIfAvailable() {
+        if (!running || failure != null
+                || admissionProducerSequence.value - admissionConsumerSequence.value >= admissionCommands.length) {
+            return -1;
+        }
+        int currentDepth = depth();
+        return currentDepth < admissionCommands.length ? currentDepth : -1;
     }
 
     public Throwable failure() {

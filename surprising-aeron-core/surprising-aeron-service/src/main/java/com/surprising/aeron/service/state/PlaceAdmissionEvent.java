@@ -17,8 +17,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private boolean lifecycleSettled;
     private boolean fundingInProgress;
     private long preparedClientKey;
-    private int symbolId;
-    private int matcherShard;
     /** Queued admissions are retained until their command's Matcher continuation consumes them. */
     private boolean matcherWaitRequired;
     private int assetId;
@@ -38,12 +36,12 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                                 long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
-                                int symbolId, int assetId, int laneId, int matcherShard, boolean matcherWaitRequired,
+                                int assetId, int laneId, boolean matcherWaitRequired,
                                 TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
-                || symbolId < 0 || assetId < 0
-                || laneId < 0 || matcherShard < 0 || runtime == null) {
+                || order.symbolId() < 0 || assetId < 0
+                || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
         this.coreSequence = coreSequence;
@@ -58,10 +56,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.preparedClientKey = 0;
         this.identities = identities;
         identityAllocations = 0;
-        this.symbolId = symbolId;
         this.assetId = assetId;
         this.laneId = laneId;
-        this.matcherShard = matcherShard;
         this.matcherWaitRequired = matcherWaitRequired;
         this.runtime = runtime;
         admittedAccountVersion = 0;
@@ -87,7 +83,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedAccountVersion = 0;
         rejection = null;
         reservedAmount = 0;
-        matcherShard = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
     }
@@ -106,6 +101,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                         identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
                 long positionKey = identities.findPositionKeyValueInLane(
                         lane, userId, order.instrument(), order.positionSide());
+                int symbolId = order.symbolId();
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, userId, order, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), preparedClientKey, symbolId, positionKey,
@@ -152,7 +148,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         coreSequence = 0;
         userId = 0;
         laneId = 0;
-        matcherShard = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
         completed = false;
@@ -172,7 +167,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         while (!completed) {
             if (System.nanoTime() >= deadline) {
                 throw new IllegalStateException("timed out waiting for place admission sequence="
-                        + coreSequence + " lane=" + laneId + " matcher=" + matcherShard);
+                        + coreSequence + " lane=" + laneId);
             }
             if (spins++ < 1_024) Thread.onSpinWait();
             else {
