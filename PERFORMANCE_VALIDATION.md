@@ -1503,3 +1503,21 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 - `racefix1` 分业务p99：PLACE 11.960ms、CANCEL 11.780ms、MARK 12.476ms、PLACE_BATCH 15.425ms、CANCEL_BATCH 26.050ms；`racefix2` 分别为13.066/12.107/15.491/16.465/28.377ms，均通过30ms探索门槛。两轮 window blocked 49.341s/49.310s，说明256窗口持续背压，吞吐仍主要受跨线程完成与严格FIFO推进 cadence 限制。
 - 本轮真实集群主轮未启用JFR/`-prof gc`，因此不从其推导分配；分配仍引用本节独立GC JMH的约5,972 B/business及其“包含harness、不是纯Core”的限制。主轮 summary SHA-256：失败轮 `e2e5658bbb8f7be5733b93a0aa2722a4730a2fdb02e031b50d3f835accd5b7ac`，racefix1 `b7e510d09723e165d246d25b4890857d1fbd93a0b7d8889113c61ce78abd5bfa`，racefix2 `6f288d54001baf48d21c4b12190978521d370c7666f0d832fb5b81067f0efd7d`。压测前后swap total/used均为0，磁盘最低约253GiB；结果只代表本机单成员，不外推三节点生产容量。
 - 全部本轮 Java/Aeron/JMH 进程已退出；失败轮、两次修复后主轮及本轮临时 JFR/测试日志共约9.2GiB，已移动到 `/Users/atomex/.Trash/surprising-ex-owner-dispatch-revision-20260920/`，可恢复，未移动或删除其他轮次产物。原 target/tmp 路径仅作历史定位。
+
+## 2026-09-21 最新 master batch20 分配复测（owner-allocation-20260921）
+
+### 采集前锁定计划
+
+- 只测当前干净 `master=91964956f6f5ffa918d572af7ef824cadfa07e5e`，不检出旧版本；对照使用此前同一基准、同一参数的当前分支历史结果 **2194.2 B/business**，仅用于判断分配是否下降，不比较跨配置吞吐。
+- 场景固定为 `ContinuousOwnerBenchmark.placeCancelWithoutTimers`、LINEAR_PERPETUAL、batch20、DISTINCT、BUSY_SPIN、1 matcher、4 Account Lane、owner window 256；每 invocation 为512 Core messages、10,240 business operations。该内存闭环包含负载构造、codec、响应与恢复校验，不含真实网络/Archive，结果不是纯 Core 分配或实际集群容量。
+- HotSpot Corretto JDK 27.0.0.33.1、G1、512MiB固定堆；1 fork/1 thread，3×3s预热、3×3s测量，独立 `-prof gc`。记录JMH主分数、`gc.alloc.rate.norm`、换算B/business与B/Core、分配率、GC次数/时间；accepted/terminal business/Core必须相等，teardown资金、冻结、订单终态和恢复检查不得失败。
+- 本轮问题是“最新代码同口径分配是否低于2194.2 B/business”。小于该值且测量有效才判下降；相同或更高则判未下降。单fork短轮不证明长稳、对象存活量、泄漏或真实Aeron精确B/business。采集前swap为0、磁盘253GiB可用、无残留Java/Aeron进程；结束后停止进程并只清理本轮生成物。
+
+### 结果与结论
+
+- JDK 27 benchmarks reactor `-DskipTests package` 成功，使用当前 master 重新生成 `product-core-benchmarks.jar`。最终有效命令在上述固定参数外使用 `-wi 3 -w 3s -i 3 -r 3s -f 1 -t 1 -foe true -prof gc`，JVM参数为512MiB固定堆/G1及既有JDK模块开放；补充 `java.lang.reflect` 开放后，最终轮无 Chronicle模块访问ERROR。
+- 最终GC轮主分数 **109.731 ± 10.806 invocation/s**；三次测量109.053–110.146 invocation/s。`gc.alloc.rate.norm=19,514,138.247 B/invocation`，三次范围19,351,709.146–19,838,491.480 B/invocation；按每invocation 10,240 business / 512 Core换算为 **1,905.68 B/business、38,113.55 B/Core**。分配率1577.123 MB/s；65次GC、总GC时间234ms。
+- 三次测量合计 accepted/terminal business均为10,137,600，accepted/terminal Core均为506,880，逐项相等；trial teardown未失败，日志无ERROR/Exception/failure。相对此前同基准同参数 `22,468,371 B/invocation = 2,194.18 B/business`，本轮减少 **288.50 B/business，下降13.15%**，因此“最新代码同口径分配已下降”成立。
+- 该1,905.68 B/business仍包含命令与batch集合构造、codec、响应和JMH harness，不是纯Owner/Core分配；它也不证明真实Aeron、对象存活量、old/live set或长期泄漏表现。最新普通MATCH_STREAM约5,972 B/business属于batch1式固定成本未摊薄场景，不能与本次batch20数值直接比较。
+- 最终JSON/日志SHA-256分别为 `84adfa9dd9233707310aff904a34aa60b44eae3dca2c1d36b53873ce3c925f3f` / `22991ec663bb9352cc586fdaa9f2da1d9f1653155f4e8a2a3c8631d94b132bd7`。结束后无Java/Aeron/JMH进程，swap total/used均为0，磁盘约252GiB可用。
+- 本轮构建日志、两次GC JSON及日志共约104KiB，已移动到 `/Users/atomex/.Trash/surprising-ex-owner-allocation-20260921/`，可恢复；未移动或删除其他轮次产物。
