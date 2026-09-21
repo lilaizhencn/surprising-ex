@@ -1970,3 +1970,131 @@ JFR客户端测量epoch约 `[1789746131077,1789746191105]`；归因取中部 `[1
 
 - 重启续接证据已复制到持久路径`/Users/atomex/Desktop/surprising-perf-resume-20260921/`（仅日志/命令/指标/分析，不含临时Archive），避免/tmp清空后丢失；后续按RESUME.txt和本节恢复。
 - 清理完成：验证旧worktree无源码改动及本轮Java已退出后，移除本轮detached worktree、临时Archive/target及/tmp分析副本；持久续接证据保留。当前master和当前版构建未改动。
+
+
+## 2026-09-21 重启冷却后新旧版本交替压测（reboot-ab-20260921）
+
+### 采集前锁定计划
+
+- 用户已重启并授权继续新旧对照。旧版6e52dfb89e36b415f01640cc958647ab65184356；新版8bef5baae2fea2042f3d215561275bf1005b1020（相对ca5934a0仅文档）。主工作区master不切换，旧版detached worktree=/tmp/surprising-ex-reboot-old-20260921。按用户明确要求进行历史版本对比，覆盖默认“仅当前master”的限制。
+- 问题：同次重启后的相近宿主资源/温控状态下，旧版是否重现39.73万，新版是否有可重复差异。顺序预锁old1/new1/new2/old2/old3/new3，共各3轮；报告每轮值和分布，不以不同代码历史值直接判断回归。若有效样本同方向差异>10%且大于各版自身波动，才作为版本相关差异证据，具体代码根因仍待定位；否则不得声称已证明无回归。
+- 固定历史条件：LINEAR_PERPETUAL、单真实Aeron节点/网络/Archive、MIXED batch20/128symbol/1385users/seed25620、4 Account Lane/1matcher、global/session window256、Owner/Matcher/Lane BUSY_SPIN、G1，节点512m–1536m/client128m–512m，NMT summary，30s预热/60s稳态/独立排空，JMH single-shot/f1/t1/wi0，无profiler。两版script/baseline/ClusterMixedCapacityMain相同。业务及延迟口径沿用前轮。
+- 探索门槛仍为business≥300000/s、Core≥30000/s、各业务p99≤30ms，正确性零拒绝/错误/超时、offered=terminal business/Core、unfinished/backlog0、fundsDiff0及订单/持仓/冻结核对。每版极差/均值≤10%。限频（测量窗CPU_Speed_Limit<100）、新swap-out/明显持续换页、空间<10GiB使对应性能无效，业务错误仍为失败；无效轮保留且不混入版本有效均值。
+- 环境：Mac i9-9880H/16逻辑CPU/16GiB/macOS26.7、HotSpot Corretto27+33-FR、Maven3.9.16；重启后uptime1min、swap0、SpeedLimit100，磁盘518GiB。启动阶段Spotlight/Xprotect繁忙，先构建两版，再等待后台负载下降和冷却，不立即采集。
+- 两版先串行执行定向构建：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusterMixedCapacityTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`；依赖exchange-core版本与provenance SHA沿用此前已核验的ad920d88，不替换共享jar。每版service/benchmark jar独立路径并记录sha256。
+- 冷却：构建后及每轮之间至少120s，期间每5s记录pmset/vm_stat/swap/ps/磁盘；开始新一轮前需连续3个采样SpeedLimit100、SchedulerLimit100且宿主抽样总CPU<200%（100%=一逻辑核）；最多等待10分钟仍不满足则暂停发压并报告环境阻塞，不能无限重复无效采集。不停止用户后台应用、不改供电/系统设置。测量中继续5s温控采样，30s历史预热保持不改。
+- 完整命令模板：`ASYNC_RUN_ID=reboot-ab-20260921-<old1|new1|new2|old2|old3|new3> ASYNC_ONLY_STAGE=end_to_end ASYNC_WINDOWS=256 ASYNC_OWNER_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY=BUSY_SPIN ASYNC_MATCHING_ENGINES=1 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=60 ASYNC_ENABLE_JFR=false ASYNC_SKIP_BUILD=true bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`，cwd按版本独立选择；产物根通过ASYNC_ARTIFACT_DIR指定到/Users/atomex/Desktop/surprising-perf-reboot-20260921/runs/<run>，每轮完整env/command、PID和epoch保留。
+- 本轮聚焦同条件吞吐对照，无业务实现改动；不将无profiler结果伪装成已采GC/分配/JFR。本轮不覆盖长稳、真实Archive快照重启、HTTP/WebSocket及其余五产品线实压，资金/快照单测与实压后资金检查分别报告；只能给部分验证结论。结束分析入档后只清理本轮临时集群/旧worktree，保留足以复核的日志/摘要。
+
+### 交替六轮结果：观测吞吐恢复，正式版本对照受限频影响
+
+- 两版均为独立源码/独立service及benchmark JAR，先串行构建再运行，未修改业务实现；两版各40项定向测试，39通过/1诊断条件跳过、0失败0错误。旧源码worktree保持clean；当前业务源码相对ca5934a0不变。
+- 严格按old1→new1→new2→old2→old3→new3执行，每轮至少120秒冷却，连续3个采样SpeedLimit/SchedulerLimit100、后台总CPU<200%后启动。下表为实际终态增量除以约60秒稳态窗口，排空不计入；business按batch20的item展开，不是普通单笔下单TPS。
+
+| 顺序/版本 | 稳态s | business/s | Core/s | fills/s | 最慢业务p99 ms | 测量内SpeedLimit | 判定 |
+|---|---:|---:|---:|---:|---:|---|---|
+| old1 | 60.002664 | 396276.989 | 37856.636 | 94331.812 | 25.198 | 66–70% | 限频，性能证据无效 |
+| new1 | 60.007757 | 416670.614 | 39799.871 | 99187.177 | 21.577 | 70–72% | 限频，性能证据无效 |
+| new2 | 60.017518 | 407465.902 | 38922.836 | 96995.681 | 18.792 | 70–72% | 限频，性能证据无效 |
+| old2 | 60.019049 | 409784.251 | 39143.523 | 97547.697 | 20.709 | 70–72% | 限频，性能证据无效 |
+| old3 | 60.013114 | 407137.213 | 38891.300 | 96917.484 | 23.740 | 70–81% | 限频，性能证据无效 |
+| new3 | 60.015992 | 409267.718 | 39094.380 | 97424.700 | 21.430 | 70–75% | 限频，性能证据无效 |
+
+| 版本 | 三轮观测business/s均值 | 观测范围 | 极差/均值 | 观测Core/s均值 | 不受限频有效轮数 |
+|---|---:|---|---:|---:|---:|
+| old | 404399.484 | 396276.989–409784.251 | 3.34% | 38630.486 | 0 |
+| new | 411134.745 | 407465.902–416670.614 | 2.24% | 39272.362 | 0 |
+
+- **回答用户的问题**：旧版已重新观测到约39万–41万，当前版也恢复到40万以上的同量级；没有观察到当前代码固定只能31万、稳定比旧版低约20%的现象。同一当前业务代码在重启前约31.41万、重启冷却后恢复，支持运行环境/运行状态对先前低值有显著影响，不能把先前差距直接归因于新版代码。
+- **边界必须保留**：所有轮次在满载时仍有CPU_Speed_Limit<100，因此按统一标准没有可用的不限频正式版本对照样本。上表均值和范围仅描述观测，不作为“新版提升若干%”或“两版严格等效”的证明。重启同时改变swap、后台任务、冷页、温控/JIT状态，无法把改善唯一归因于其中一项。CPU_Speed_Limit不是实测MHz，也不能线性外推不限频吞吐。
+- 数值上各轮均越过历史business≥300000/Core≥30000/p99≤30ms探索线，业务检查通过，但**不标记性能验收通过**：采集受限频影响，正式A/B结论无效；总体业务及观测结果为部分验证。不存在对应有效均值/置信区间，不用零补缺。
+
+### 正确性、分业务尾延迟与稳态边界
+
+| run | 业务 | 请求样本数 | items | p50/p90/p95/p99/p99.9/max ms |
+|---|---|---:|---:|---|
+| old1 | PLACE_ORDER | 566016 | 566016 | 4.804/9.158/10.027/12.017/22.577/30.834 |
+| old1 | CANCEL_ORDER | 566016 | 566016 | 4.968/7.102/7.766/10.207/17.743/29.917 |
+| old1 | APPLY_MARK_PRICE | 7691 | 7691 | 4.751/9.158/10.469/15.319/25.706/36.110 |
+| old1 | PLACE_ORDER_BATCH | 849024 | 16980480 | 5.894/11.485/12.492/14.745/28.049/37.421 |
+| old1 | CANCEL_ORDER_BATCH | 283008 | 5660160 | 11.821/12.943/13.541/25.198/31.211/37.814 |
+| new1 | PLACE_ORDER | 595200 | 595200 | 4.616/8.675/9.461/11.051/21.708/46.956 |
+| new1 | CANCEL_ORDER | 595200 | 595200 | 4.653/6.569/7.184/9.756/16.605/22.626 |
+| new1 | APPLY_MARK_PRICE | 7736 | 7736 | 4.607/8.204/9.363/12.943/20.217/21.528 |
+| new1 | PLACE_ORDER_BATCH | 892800 | 17856000 | 5.545/11.149/12.115/14.229/27.131/68.616 |
+| new1 | CANCEL_ORDER_BATCH | 297600 | 5952000 | 11.419/12.500/13.017/21.577/33.439/64.749 |
+| new2 | PLACE_ORDER | 582144 | 582144 | 4.710/8.658/9.437/11.182/21.839/43.810 |
+| new2 | CANCEL_ORDER | 582144 | 582144 | 4.796/6.995/7.614/10.846/19.120/28.852 |
+| new2 | APPLY_MARK_PRICE | 7718 | 7718 | 4.624/8.568/10.362/15.925/29.179/31.358 |
+| new2 | PLACE_ORDER_BATCH | 873216 | 17464320 | 5.877/11.198/12.165/14.819/26.836/54.722 |
+| new2 | CANCEL_ORDER_BATCH | 291072 | 5821440 | 11.345/12.541/13.090/18.792/32.096/55.377 |
+| old2 | PLACE_ORDER | 585472 | 585472 | 4.669/8.642/9.445/11.337/21.282/26.705 |
+| old2 | CANCEL_ORDER | 585472 | 585472 | 4.755/7.131/7.770/10.723/21.938/25.313 |
+| old2 | APPLY_MARK_PRICE | 7722 | 7722 | 4.558/8.318/9.519/13.639/20.676/22.331 |
+| old2 | PLACE_ORDER_BATCH | 878208 | 17564160 | 5.857/10.952/11.927/14.745/24.150/45.350 |
+| old2 | CANCEL_ORDER_BATCH | 292736 | 5854720 | 11.206/12.361/12.935/20.709/28.327/44.728 |
+| old3 | PLACE_ORDER | 581632 | 581632 | 4.677/8.609/9.388/11.526/21.839/134.479 |
+| old3 | CANCEL_ORDER | 581632 | 581632 | 4.837/7.176/7.745/11.329/18.300/73.334 |
+| old3 | APPLY_MARK_PRICE | 7715 | 7715 | 4.694/8.626/10.330/15.835/19.972/20.447 |
+| old3 | PLACE_ORDER_BATCH | 872448 | 17448960 | 6.017/10.928/11.878/14.475/29.097/161.873 |
+| old3 | CANCEL_ORDER_BATCH | 290816 | 5816320 | 11.141/12.279/12.853/23.740/35.225/148.373 |
+| new3 | PLACE_ORDER | 584704 | 584704 | 4.706/8.503/9.289/10.903/20.217/32.980 |
+| new3 | CANCEL_ORDER | 584704 | 584704 | 4.702/7.065/7.602/10.452/15.777/25.542 |
+| new3 | APPLY_MARK_PRICE | 7728 | 7728 | 4.415/8.257/9.658/13.459/21.823/28.934 |
+| new3 | PLACE_ORDER_BATCH | 877056 | 17541120 | 5.939/11.091/12.042/14.286/24.657/34.963 |
+| new3 | CANCEL_ORDER_BATCH | 292352 | 5847040 | 11.182/12.345/12.845/21.430/29.835/35.520 |
+
+- 延迟来自客户端请求→终态响应，Histogram最高1分钟/3位有效数字、客户端超时30秒，包含网络和排队；按请求统计批量延迟。未导出完整bucket分布、独立入口→accepted和accepted→terminal分段。offered=terminal加APPLIED校验不冒充独立accepted时间戳速率。全局/session在途峰值均256，窗口背压受限、未补偿coordinated omission。以下是每轮稳态、排空和最终核对原始计数。
+
+- old1：epoch=[1790003359.985, 1790003419.988]；稳态business/Core/fills=23777675/2271499/5660160；drain=4.743ms、另完成2688business/256Core/0fills；排空后offered=terminal business/Core=23780363/2271755，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.128746s/485801次，占81.88%；pipeline高水位={'matcher': 216, 'completion': 207, 'context': 255, 'lanes': [56, 56, 58, 60]}；Lane累计有效执行占比均值45.77%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：389859.079, 398255.214, 405190.297, 378683.699, 399221.162, 406542.899。
+  温控正式窗5秒采样SpeedLimit：`[70, 70, 66, 70, 66, 68, 68, 68, 68, 68, 70, 70]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 13, "freeGiBMin": 514.1579818725586, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 0, "last": 0, "delta": 0}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"2049": {"ppid": "2038", "n": 12, "cpuMean": 996.925, "rssMaxMiB": 1769.42578125}, "2052": {"ppid": "2038", "n": 12, "cpuMean": 0.058333333333333334, "rssMaxMiB": 69.2109375}, "2055": {"ppid": "2052", "n": 12, "cpuMean": 360.1166666666667, "rssMaxMiB": 417.73046875}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3146873KB, committed=720889KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3146872KB -11385KB, committed=720884KB +5251KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+- new1：epoch=[1790003616.347, 1790003676.355]；稳态business/Core/fills=25003469/2388301/5952000；drain=6.249ms、另完成2667business/235Core/0fills；排空后offered=terminal business/Core=25006136/2388536，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.277083s/494823次，占82.12%；pipeline高水位={'matcher': 209, 'completion': 206, 'context': 255, 'lanes': [76, 75, 72, 76]}；Lane累计有效执行占比均值43.18%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：426116.897, 409413.998, 425033.999, 419966.299, 397482.597, 422048.396。
+  温控正式窗5秒采样SpeedLimit：`[72, 72, 72, 70, 72, 72, 72, 72, 72, 70, 72, 70]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 14, "freeGiBMin": 510.61901092529297, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 0, "last": 82, "delta": 82}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"2626": {"ppid": "2609", "n": 12, "cpuMean": 994.7666666666667, "rssMaxMiB": 1770.6171875}, "2629": {"ppid": "2609", "n": 12, "cpuMean": 0.0, "rssMaxMiB": 68.23828125}, "2632": {"ppid": "2629", "n": 12, "cpuMean": 355.475, "rssMaxMiB": 419.6953125}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3144054KB, committed=718310KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3144053KB -13953KB, committed=718305KB +2991KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+- new2：epoch=[1790003874.006, 1790003934.024]；稳态business/Core/fills=24455092/2336052/5821440；drain=6.237ms、另完成2674business/242Core/0fills；排空后offered=terminal business/Core=24457766/2336294，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.453286s/468330次，占82.40%；pipeline高水位={'matcher': 218, 'completion': 210, 'context': 255, 'lanes': [54, 46, 53, 46]}；Lane累计有效执行占比均值44.42%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：418182.698, 417683.696, 397334.087, 408958.755, 410105.598, 392525.04。
+  温控正式窗5秒采样SpeedLimit：`[72, 72, 72, 72, 70, 72, 70, 72, 72, 72, 72, 72]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 14, "freeGiBMin": 507.1593589782715, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 85, "last": 85, "delta": 0}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"3219": {"ppid": "3208", "n": 12, "cpuMean": 978.475, "rssMaxMiB": 1770.95703125}, "3222": {"ppid": "3208", "n": 12, "cpuMean": 0.008333333333333333, "rssMaxMiB": 68.5546875}, "3225": {"ppid": "3222", "n": 12, "cpuMean": 351.25, "rssMaxMiB": 418.96875}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3142514KB, committed=717746KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3142514KB -15221KB, committed=717742KB +2699KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+- old2：epoch=[1790004134.266, 1790004194.285]；稳态business/Core/fills=24594861/2349357/5854720；drain=5.381ms、另完成2685business/253Core/0fills；排空后offered=terminal business/Core=24597546/2349610，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.394318s/472111次，占82.30%；pipeline高水位={'matcher': 214, 'completion': 213, 'context': 255, 'lanes': [61, 58, 61, 53]}；Lane累计有效执行占比均值45.09%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：398719.599, 417438.098, 419151.9, 398532.299, 412501.5, 412416.412。
+  温控正式窗5秒采样SpeedLimit：`[72, 72, 72, 72, 72, 72, 72, 70, 72, 72, 72]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 13, "freeGiBMin": 503.68885040283203, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 85, "last": 85, "delta": 0}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"3786": {"ppid": "3775", "n": 11, "cpuMean": 974.709090909091, "rssMaxMiB": 1770.80859375}, "3800": {"ppid": "3775", "n": 11, "cpuMean": 0.045454545454545456, "rssMaxMiB": 68.63671875}, "3804": {"ppid": "3800", "n": 11, "cpuMean": 347.52727272727276, "rssMaxMiB": 421.1875}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3142894KB, committed=718414KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3142893KB -22821KB, committed=718409KB -4677KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+- old3：epoch=[1790004395.051, 1790004455.065]；稳态business/Core/fills=24433572/2333988/5816320；drain=5.332ms、另完成2687business/255Core/0fills；排空后offered=terminal business/Core=24436259/2334243，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.423925s/470944次，占82.36%；pipeline高水位={'matcher': 217, 'completion': 212, 'context': 255, 'lanes': [61, 58, 57, 57]}；Lane累计有效执行占比均值44.58%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：414323.997, 398527.296, 407447.497, 413640.869, 394486.599, 414307.897。
+  温控正式窗5秒采样SpeedLimit：`[70, 75, 70, 72, 81, 70, 72, 72, 72, 72, 72]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 13, "freeGiBMin": 500.2180862426758, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 85, "last": 85, "delta": 0}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"4380": {"ppid": "4369", "n": 11, "cpuMean": 980.5454545454545, "rssMaxMiB": 1775.22265625}, "4390": {"ppid": "4369", "n": 11, "cpuMean": 0.03636363636363637, "rssMaxMiB": 68.3125}, "4393": {"ppid": "4390", "n": 11, "cpuMean": 348.8363636363636, "rssMaxMiB": 420.72265625}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3142525KB, committed=718277KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3142524KB -18887KB, committed=718272KB +553KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+- new3：epoch=[1790004652.911, 1790004712.938]；稳态business/Core/fills=24562608/2346288/5847040；drain=6.173ms、另完成2688business/256Core/0fills；排空后offered=terminal business/Core=24565296/2346544，unfinished/backlog0、fundsDiff0、population/HFT positions/reservations/loss全部通过，未观察到拒绝/错误/超时。
+  windowBlocked=49.511651s/504373次，占82.50%；pipeline高水位={'matcher': 211, 'completion': 210, 'context': 255, 'lanes': [63, 59, 61, 61]}；Lane累计有效执行占比均值43.48%（包含排空边界），不能与busy-spin CPU混为一谈。
+  10秒区间business/s：419199.999, 414376.698, 399639.9, 416116.499, 413120.697, 393181.897。
+  温控正式窗5秒采样SpeedLimit：`[75, 72, 72, 72, 72, 72, 72, 72, 72, 75, 70, 75]`；资源采用同机epoch两侧5秒保护窗：`{"sampleCount": 14, "freeGiBMin": 496.7728080749512, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 85, "last": 117, "delta": 32}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"4968": {"ppid": "4957", "n": 12, "cpuMean": 992.2416666666667, "rssMaxMiB": 1776.11328125}, "4978": {"ppid": "4957", "n": 12, "cpuMean": 0.0, "rssMaxMiB": 68.296875}, "4981": {"ppid": "4978", "n": 12, "cpuMean": 352.9166666666667, "rssMaxMiB": 418.08984375}}}`。ps CPU100%=一逻辑核，含busy-spin。
+  NMT末值/启动基线差（包含初始化，非长期斜率）：`Total: reserved=3144036KB, committed=718812KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)` / `Total: reserved=3144036KB -17750KB, committed=718808KB -350KB; -                 Java Heap (reserved=1572864KB, committed=524288KB)`。
+
+### 证据、缺口和下一步
+
+- 本轮主吞吐刻意保持历史无profiler条件，未新采JFR/-prof gc，因此GC次数/停顿、allocation bytes/s或bytes/op、方法热点/锁争用及对象数不可用；不能把重启前当前版的JFR归因当作本轮新旧版本证据。NMT描述末值与初始化增量，非泄漏测试。未测长稳、Direct/Mapped池释放差、FD/上下文切换、old/live set长期斜率。
+- 资金检查在真实单节点实压结束后完成；快照/角色变更检查来自六产品线ContinuousOwnerBenchmarkTest等定向测试，**未做每轮真实Archive snapshot重启**。未启动HTTP/WebSocket/wallet，未对其余五产品线或全生命周期做容量测试。两版业务测试无失败，不代表完整发布验收。
+- 主要现象→证据→假设→缺口→下一验证：两个版本都恢复到约40万，测量内依然有限频且窗口背压强，不能从总CPU判定业务计算饱和。环境变化是先前低值的重要影响因素；具体温控、OS调度、缓存或JIT贡献未拆分。若需要严谨的代码收益评估，应在能持续维持相同频率/配额的隔离宿主上重复相同交替流程；本任务不更改1matcher/256窗口、不删用户快照或停止应用来凑高分。
+- JMH为SingleShotTime，单次分数是60秒业务测量耗时，不作invocations/s或误差/CI性能结论；主数字来自steadyCapacity，全部完整node.command/client.command及env在artifact内。
+- 构建artifact SHA256：`{   "old": {     "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {       "bytes": 62675827,       "sha256": "20afa09900af6f71124a69817f780f1424174cb164e5a0d30302eaaff2d605b1"     },     "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {       "bytes": 81879619,       "sha256": "15099b43d9ac2ba45e65f97e1b211b41213cda2e7168031992a6983bfc761622"     }   },   "new": {     "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {       "bytes": 62555861,       "sha256": "661d81eeeb990ea395753905e71c9eda42cb23309995b7047337bfb6010acdef"     },     "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {       "bytes": 81809672,       "sha256": "fbc01cc5508b8761ed070722ef1c615b1715bac1aabc85d9a7605acd7c135036"     }   } }`。
+- artifact清单manifest.json（原路径/大小/SHA256）共184项，SHA256=9836fa9b12c046ae17ab3a3cced7d45e6e57e8ed1e63f8f206d2f55f1f39c913；完整结果和温控时间线在`/Users/atomex/Desktop/surprising-perf-reboot-20260921/`。
+- old1 关键证据SHA256：`{"metrics.json": "e39416e23ddb48b1df1d93bca461b6e5c953d9fac977c4f2ed98c9212cf00f75", "client.log": "c8719ab49c40f3a105b251ea2d6255ea46c1de024481e155c3d7e09e2877691f", "node.log": "2f72fcb67264110c84b269e0e909c1476b088362d15410095c1c227b2624e124", "node.command": "d075dcecc9cc9d11dfa1d01f8a349bd24efbdae8479bb48740c3644f2e064d81", "client.command": "a6a4c427c25e965f0d6dc2bf624abcad077b46ffff7962279fe596f8a38ea563"}`。
+- new1 关键证据SHA256：`{"metrics.json": "ce6f65440a7858fe9c98ff79e9f90b22523968cadfbb5e0c8d13fa74a71b0930", "client.log": "c5148a2e64fccf9495dcaa9f202df6d0b2a2d5af36ddfe47c1b6f17c2083ff85", "node.log": "7a25f2517e084d5c93023e36f78be69f8364bad014d85c92f744f32829f288c8", "node.command": "56cf0db9d10e392af6d4db13358c24eea45d1377d1256cebc38ddb72b9d6bf6c", "client.command": "79ed77fc39408b33b0d8682073b031bbed73cd1b8b2fd12d5a1e2e4d09f75bb9"}`。
+- new2 关键证据SHA256：`{"metrics.json": "3b96d22304e4caf1459c07001c8596f282b0ffcc8bb2929704480a15b9ac01d0", "client.log": "3c8962a0fba250ddf9075cbdb0f7d0252a67e603640aec98271a667956bae022", "node.log": "7ad2c94f0ec1a138be48ddc4ea83d1929391f3a508cf3ab624cca6b03a570128", "node.command": "bcf35d60e72f125aa56df9340b696730837e6423df098075c13504da7c3d564e", "client.command": "f9ed4071f51a1d8a8ab34d265aea12b8bc7639423747da1eb2e1e37c0b6e3c28"}`。
+- old2 关键证据SHA256：`{"metrics.json": "02de10d9937a7f052726072723947ef5c9b786a97e72b6b938b044f6757e482c", "client.log": "dff3c4e4fb120c3435d9420bd284195d4144983016ed32f9bb114e8c983c30e7", "node.log": "ca500e8edf7b015ab1de2657dd868e33dbaa13c4de29d6a2517124da8bf51fd0", "node.command": "a69cf1d59c2d3ff845cb98a48fcc6275d61f32404cfe473f7b886b8026b2f279", "client.command": "cf77645628e4ff072fe31fdb6325d5c6b34c733641822d2e060e6ebb710cfeb8"}`。
+- old3 关键证据SHA256：`{"metrics.json": "137e5885425a011348b3cdf808680cb046be45dd9ab39b7884eae872f4cfa0c7", "client.log": "8b94c358d5921c7a3cc252614187192e6ed0fb409d5856000e0cb97116694ba8", "node.log": "e3fd7ea8ac3deb271e9e55e762e988d23565aab4ad5a6f631df296db79c91204", "node.command": "53d94aae33f23b010aea33b1d75b1edac2b258c14d2b50285b79c2c09c9d2ae2", "client.command": "eb216a2b4738a63a28fcc9fcad4d43da6d06411eb97ffb60b31d618422217f1c"}`。
+- new3 关键证据SHA256：`{"metrics.json": "e1862b48b810815af00be41843a69845ca0237ddde20255c667cd026615b2c8e", "client.log": "f86a260e8bc284b0c31ee6174c31064c3a7fa46d52ff8256ead40022cf1f2d4d", "node.log": "67d8562f9825bb2af024a38b0f5ab0ad96c48131d50c7df28432d10edce4c2d1", "node.command": "a24df316ff6436c6f4db57b10863691abd5dc80dd9110b4336fd2fbdde20c85b", "client.command": "dfe1c327443582251ac56b302351992e7562703454ab8b9979c961d5c9916ef4"}`。
+
+### 本轮清理与交付
+
+- 验证两版JAR采集前后SHA256不变，六轮offered/terminal相等、unfinished0，node/client日志无ERROR/Exception，全部本轮发压/node/client/JMH进程退出。
+- 仅删除六轮已确认属于本轮的data（Cluster/Archive）、aeron、client-aeron、tmp目录，并在确认旧worktree源码clean后移除旧版worktree及其构建产物；当前master及当前版target未删除。
+- 命令、日志、指标、NMT、分析和校验清单已归档至`/Users/atomex/.Trash/surprising-ex-reboot-ab-20260921/`，可恢复；原Desktop/tmp路径仅作历史定位。原始Cluster/Archive已按要求清理，不能再以原路径做恢复测试。未删除其他轮次、快照、用户文件，也未改供电/后台应用配置。
+- 本次仅追加PERFORMANCE_VALIDATION.md，不修改业务源码；`git diff --check`通过。
