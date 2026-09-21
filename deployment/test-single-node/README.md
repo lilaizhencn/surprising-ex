@@ -51,6 +51,8 @@ cp deployment/test-single-node/linear-perpetual.env.example \
 chmod 600 /etc/surprising/linear-perpetual.env
 ```
 
+Core 的 Maven 校验还要求本地仓库中的 `exchange-core-0.5.18-emporia.jar` 带有父 POM 指定的 clean fork provenance。不能用来源不明的同版本 jar，也不能通过关闭校验绕过；若服务器构建报 `exchange-core artifact provenance does not match`，应从受信任的 JDK 27 构建机复制已验证 artifact，或使用已经打包好的 release。
+
 必须把数据库密码和 `GATEWAY_JWT_SECRET` 改成服务器实际值。测试环境也不要继续使用默认 JWT secret。
 
 ## 启停与验收

@@ -115,8 +115,11 @@ core_aeron_directory() {
 }
 
 archive_control_channel() {
-  local port=$((20000 + $(product_line_ordinal) * 1000 + 1))
-  printf 'aeron:udp?term-length=65536|endpoint=%s:%s\n' "$AERON_EGRESS_HOSTNAME" "$port"
+  local hosts=() archive_host port
+  IFS=',' read -r -a hosts <<< "$AERON_CLUSTER_HOSTNAMES"
+  archive_host="${hosts[0]//[[:space:]]/}"
+  port=$((20000 + $(product_line_ordinal) * 1000 + 1))
+  printf 'aeron:udp?term-length=65536|endpoint=%s:%s\n' "$archive_host" "$port"
 }
 
 cluster_id() {
