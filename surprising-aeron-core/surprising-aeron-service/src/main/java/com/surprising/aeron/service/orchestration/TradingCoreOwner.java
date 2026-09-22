@@ -168,6 +168,7 @@ public final class TradingCoreOwner {
     /** 按“队首提交、异步控制、命令准入”的业务顺序执行一轮流水线。 */
     private void progressCommandsInScope() {
         boolean awaitingCompletion = false;
+        int admissionsSinceHeadCheck = 0;
         // 每轮先推进异步工作；随后连续 ready 的队首直接退休，不重复收集整个窗口。
         boolean advanceMatching = true;
         ClusterCommandWindow window = commandPipeline.commandWindow();
@@ -185,6 +186,7 @@ public final class TradingCoreOwner {
                         continue;
                     }
                     awaitingCompletion = true;
+                    admissionsSinceHeadCheck = 0;
                     if (turn != null) turn.headWait = true;
                 }
                 if (window.size() == window.capacity()) return;
@@ -247,6 +249,17 @@ public final class TradingCoreOwner {
                 }
                 if (turn != null) turn.admitted++;
                 advanceMatching = true;
+                // 等待时每8次准入只检查队首完成条件；ready 才复查提交，不重扫整个窗口。
+                if (awaitingCompletion && ++admissionsSinceHeadCheck == 8) {
+                    admissionsSinceHeadCheck = 0;
+                    if (turn != null) turn.headRechecks++;
+                    if (state.commits.matchingCommitReady(
+                            state.pendingMatching(commandPipeline.committingHead().sequence))) {
+                        awaitingCompletion = false;
+                        advanceMatching = false;
+                        if (turn != null) turn.readyHeadRechecks++;
+                    }
+                }
             }
             if (turn != null) turn.budgetExhausted = true;
         } finally {

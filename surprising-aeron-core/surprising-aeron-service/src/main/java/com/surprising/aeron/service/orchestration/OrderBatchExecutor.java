@@ -1037,6 +1037,8 @@ final class OrderBatchExecutor {
                 ? batch.preparedResponse : TradingOrderBatchCodec.encodeResultSource(batch);
         int responseLength = batch.preparedResponse != null
                 ? batch.preparedResponseLength : responseData.length;
+        CoreMatchingPhaseMetrics.recordBoundary("ownerBatchResponsePreparation", timingHeader, terminalStart);
+        long ledgerStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
@@ -1044,6 +1046,8 @@ final class OrderBatchExecutor {
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 batch.sequence, responseData, 0, responseLength);
         if (batch.hasPreparedResponseSlot()) batch.transferPreparedResponseOwnership();
+        CoreMatchingPhaseMetrics.recordBoundary("ownerBatchResultLedger", timingHeader, ledgerStart);
+        long cleanupStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.runtimeState.endOrderBatchMutationScope();
         if (pending.takePipelinedSettlementCounted()) {
             owner.commits.dispatchedSettlementInFlight--;
@@ -1059,6 +1063,7 @@ final class OrderBatchExecutor {
                 CoreResultCode.NONE, batch.sequence,
                 responseData, 0, responseLength);
         releaseOrderBatchPending(batch);
+        CoreMatchingPhaseMetrics.recordBoundary("ownerBatchTerminalCleanup", timingHeader, cleanupStart);
         CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
         return owner.finishFactContext(response);
     }

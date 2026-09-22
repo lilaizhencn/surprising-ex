@@ -72,4 +72,5 @@
   <event name="surprising.OwnerHead"><setting name="enabled">true</setting></event>
   <event name="surprising.OwnerTurn"><setting name="enabled">true</setting></event>
   <event name="surprising.OwnerSettlementMerge"><setting name="enabled">true</setting></event>
+  <event name="surprising.OwnerPublication"><setting name="enabled">true</setting><setting name="stackTrace">false</setting></event>
 </configuration>

@@ -45,7 +45,8 @@ public class ClusterOperationalBenchmark {
 
     /** 20项批量包含新单完全成交、部分成交及挂单，覆盖 Owner 按 Lane 删除标记跳过临时订单发布；
      * 同时覆盖 Owner 观察 Matcher/Lane 游标的准入容量检查、Lane 持仓身份保护和事件池复用；币对数量由外部负载配置指定。
-     * 测量后按完整生命周期核对资金、持仓、冻结及终态计数；外部驱动执行真实Archive快照重启校验。 */
+     * 独立在途命令覆盖 Owner 等待时的小批准入/队首复查，JFR OwnerTurn记录实际复查命中。
+     * 测量后核对资金、持仓、冻结及终态计数；本方法本身不执行真实Archive重启。 */
     @Benchmark
     public long continuousOperations() { return workload.measureRun(); }
 

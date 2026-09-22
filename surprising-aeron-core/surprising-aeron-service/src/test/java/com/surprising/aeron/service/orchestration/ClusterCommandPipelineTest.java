@@ -83,6 +83,7 @@ class ClusterCommandPipelineTest {
             recording.enable(CoreMatchingPhaseMetrics.OwnerHead.class);
             recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
             recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
+            recording.enable(CoreMatchingPhaseMetrics.OwnerPublication.class);
             recording.enable("surprising.OwnerSettlementMerge");
             recording.start();
             for (boolean batch : new boolean[]{false, true}) {
@@ -135,6 +136,18 @@ class ClusterCommandPipelineTest {
             for (var turn : turns) {
                 assertThat(turn.getInt("retired") + turn.getInt("admitted")).isBetween(0, 64);
                 assertThat(turn.getInt("windowAtStart")).isPositive();
+            }
+            var publications = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerPublication")).toList();
+            assertThat(publications).isNotEmpty();
+            for (var publication : publications) {
+                assertThat(publication.getBoolean("completed")).isTrue();
+                long parts = 0;
+                for (String field : List.of("fundsNanos", "realtimeCaptureNanos", "indexesNanos", "journalNanos", "clearNanos")) {
+                    assertThat(publication.getLong(field)).isNotNegative();
+                    parts += publication.getLong(field);
+                }
+                assertThat(parts).isLessThanOrEqualTo(publication.getLong("totalNanos"));
             }
             var heads = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.OwnerHead")).toList();

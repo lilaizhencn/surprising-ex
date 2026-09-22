@@ -3956,3 +3956,160 @@ JFR配置为归档owner-commit-profile.jfc，所有进程maxsize256m，完整sum
 原始路径为本轮运行定位；归档目标`/Users/atomex/.Trash/surprising-owner-predecessor-20260922`。诊断结果可由HeadResidence/HeadWait/HeadPauses源码、文本分布及manifest复核；完整GC/CPU/分配/native/JVM/I/O视图另存，不以本节短表替代。
 
 - 清理完成：确认本轮节点/客户端/驱动已退出；删除本轮Archive/runtime/Aeron/tmp及3份原始JFR，其他项目与用户进程未触碰。保留脚本/分析器源码、完整命令与日志、测试/构建校验、时间序列、JFR摘要/视图/分布及清理清单，归档至`/Users/atomex/.Trash/surprising-owner-predecessor-20260922`，共5,306,052bytes。原始/tmp路径仅作历史定位。
+
+
+## 2026-09-22 Owner每8条准入复查：采集前计划
+
+- 当前master fea1e67b；对照commit不适用（仅当前master，不重跑旧版本）。目标：验证等待队首时每8次成功准入进行一次现有matchingCommitReady只读检查，命中才恢复提交；仍保持FIFO/工作预算64/inflight256/资金与响应边界。未就绪时不重跑全窗口推进。仅新增方法栈内计数，无持久状态/队列/线程。CodeGraph工具不可用，核对本地源码调用路径。
+- 同时分析而不修改终态收集、索引和结果发布业务：既有OwnerSettlementMerge分段保留；新增抽样OwnerPublication拆funds/realtimeCapture/indexes/journal/clear，projection sequence不冒充matching sequence；批量响应拆准备/资金校验及ledger/清理。稀疏事件Owner本地生命周期，默认关闭，不影响恢复和业务条件；OwnerTurn记录复查与ready命中。计时是经过时间（含抢占/诊断），嵌套时间不相加。
+- 预期：真实负载记录到同轮ready复查，分段时间恒等关系成立、终态与资金正确。若ready检查导致错误/乱序或无效空轮询则失败；观察post-Lane准入重叠与ready→collect残余，但没有有效同机对照不能宣称提高吞吐。没有用户给定吞吐/延迟SLO，本轮为优化探索及回归，不事后制定通过阈值。CPU限频/swap使性能结论无效，DataLoss/关联异常使对应归因无效；错误及资金差额容限0。
+- 真实单Aeron成员/网络/Archive，LINEAR_PERPETUAL MIXED/batch20/128symbols/1385用户/seed25620，4Lane/1Matcher，global/session inflight256，Owner/Matcher pipeline/settlement BUSY_SPIN/input64，G1节点512m–1536m/客户端128m–512m，HotSpot27 Corretto27+33-FR/Maven3.9.16，i9-9880H/16GiB/macOS26.7。保持现有模拟做市/零售/对手成交、清算损失/保险/ADL和边界排空校验。
+- 3轮顺序执行：main无profiler且关闭owner-poll日志；gc相同配置单独-prof gc；owner独立JFR+owner-poll，所有进程独立JFR/max256m。每轮冷却60s/预热30s/稳定60s，排空另报；持续异步但256窗口受背压，不作无限open-loop或coordinated omission校正。主成绩只取main稳定窗口终态；JMH single shot整个round时长不是business吞吐，GC profiler仅度量client fork。
+- 复现python3 /tmp/surprising-owner-recheck-20260922/run.py；驱动/env/命令/PID/5s ps、vm_stat、swap、pmset、磁盘记录均入档。磁盘510GiB，低于10GiB停止；不停止用户进程。只跑当前master+本次diff，源码校验SHA256 d548beef1ce53fa7b3d3189abf543e912ff97419c102b73dd3cbbc2c3d4d8536. 初次编译在OrderBatchExecutor插入计时位置错误（变量不在作用域），已修正，失败日志保留，不隐去。
+- 回归：窗口/pipeline/批量订单/RuntimeCommitRecovery/六产品线ContinuousOwnerBenchmark，开启diagnostics核对互斥分段、同轮ready命中和64预算；真实JMH覆盖新的调度路径，驱动新增显式gc profiler支持。无真实Archive重启/长稳/三节点/外围HTTP认证和WebSocket全链路，本次无持久状态改动；不能宣称这些场景通过或无泄漏。分析归档后删除本轮runtime/Archive/rawJFR。
+
+- 采集前回归修正：短时ContinuousOwner测试稀疏样本readyHeadRechecks为0，新增“必须命中”断言失败（其他317项通过）。该测试未控制Lane完成相对准入时序，不能保证1/64采样命中；移除不稳定的正数断言，保留复查预算/响应/资金/恢复校验。真实长负载单独检查命中；若仍为0，判方案机制未验证，不伪造成功。失败日志保留。
+
+- 最终采集代码diff（不含追加记录）SHA256 a84a12a19a08443238d4af7d2c441b8c0735c4d46a7fa0b4cfdfb95434b818a6；上项校验是修正短测断言之前的计划快照。
+
+- 首次main启动失败：macOS Bash3在set -u下展开空JMH_PROFILE_ARGS数组报unbound variable，客户端未发压；驱动检测缺失metrics停止，没有形成性能样本。已用Bash3兼容的有定义数组展开修复，保留startup-failed-main目录/日志。本次仅改脚本，Java产物不变；最终diff SHA256 253e9e0c43a5114a79d0d75240751e979ea93ad4ebb9961fe49a7a5337c47261。
+
+
+### Owner复查实验结果与串行提交分析（2026-09-22）
+
+**结论：调度改动和资金/完成性回归部分验证，性能验收无效；串行提交成本尚未优化。** 已落地每8条准入复查现有队首完成条件，真实负载记录到了ready命中；未新增线程、队列、业务状态或持久化字段。CPU限频使本轮不能证明吞吐提升，不能与历史39万或前次诊断作性能对照。新的分段计时用于分析，终态合并/索引/账本业务逻辑保持不变。
+
+1. `TradingCoreOwner.progressCommandsInScope`等待时局部计数累计8次成功准入，调用既有`matchingCommitReady`；命中才允许下一次循环提交并设置advanceMatching=false。未命中继续准入，不重扫全部窗口。保留64次工作预算、原通知门控、FIFO、每命令事实/实时边界、资金校验与响应序号。最后一次预算内检查命中也可能到下一轮才提交，所以ready命中次数不冒充同轮提交次数。
+2. JFR保护窗03:13:55.419–03:14:51.445 UTC，共56.026s。19,412个抽样非空OwnerTurn：3,119次复查、2,653次ready命中（85.059%），805个轮次发生复查、705个轮次命中ready；admitted30489/retired31965。所有样本满足复查<=admitted/8、ready<=复查、admitted+retired<=64。机制确实被真实负载覆盖，但没有有效同环境对照，不能把命中率换算成吞吐收益。
+3. 完整OwnerHead31,941个，其中27,953个SettlementLatency全部关联成功，重复/缺失/未完成/时间分区异常/overlap越界0，3份JFR DataLoss0。普通下单/撤单/批量下单的ready→collect均值分别8.568/2.812/8.154μs，p99分别75.456/34.543/113.304μs。这里ready时间仍指Lane结束时间戳（位于release完成位之前），不是整个区间完成位都已可见。
+4. 有后续准入重叠的普通下单2868个、撤单635个、批量下单640个；平均ready→collect分别21.891/25.792/75.337μs，其中后续准入重叠18.984/23.588/72.374μs。间隔8条仍有延后，不能声称清零。批量撤单缺独立Lane完成绝对时间，不能据post-Lane字段0认定没有延后。首次未就绪标签是瞬时观察，不等于完整等待原因。
+5. >=1ms驻留24个（普通下单1，批量下单23）；5个与GC重叠，共24.986ms。最大队首驻留5.834ms，其中GC重叠5.525ms。没有GC重叠的其余19个仍有准入/提交/OS调度残余，不由CPU样本推断纯计算。`head-pauses.txt`保留逐条对齐。
+
+**串行成本，按同一条命令聚合各Lane的Owner合并事件：**
+
+以下为经过时间μs，collection包含其内层lane.total/publication/terminalIndex，不能跨层相加。scope=lane表示Owner处理一个Lane输出，不表示Lane工作线程执行。剔除mapTiming/mapShape的额外诊断样本；collection全部按sequence匹配OwnerHead，missingHead0。Boundary与collection抽样规则不同，不能直接相减算未解释成本。
+
+|环节|批量下单 均值 / p99 μs|批量撤单 均值 / p99 μs|
+|---|---:|---:|
+|终态收集合并（collection外层）|15.467 / 36.583|13.996 / 31.773|
+|其中各Lane公共状态发布|6.178 / 14.563|5.788 / 15.158|
+|其中终态订单保留索引|2.086 / 6.269|3.073 / 8.278|
+|Fact发布外层|3.975 / 10.632|5.673 / 14.158|
+|批量响应数据准备|0.109 / 0.178|0.100 / 0.165|
+|资金校验/序号/结果账本|0.765 / 1.603|0.732 / 1.374|
+|批量清理及后续提交|2.053 / 5.284|1.387 / 3.538|
+|完整成功提交尝试外层|24.935 / 66.434|24.329 / 52.980|
+|响应交接及窗口退休|1.075 / 3.016|0.836 / 2.454|
+
+- collection样本批量下单11238、批量撤单3735；Boundary样本11977/3992。批量下单collection均值15.467μs中，各Lane内部阶段合计9.055μs、外层trim0.526μs、release0.917μs，其余约4.969μs包含准入对象采用、资金/余额补丁、身份释放和计时/事件开销，尚未完全细分，不把余数直接归到某一个方法。批量撤单对应13.996/9.443/0.717/0.273μs，余数3.563μs。
+- 公共状态发布6.178/5.788μs中，删除订单/冻结路由2.350/3.543μs，冻结变更1.480/0.947μs，订单更新1.041/0.479μs。优先定位这些具体遍历和map操作，而不是笼统重构Owner。
+- 终态保留2.086/3.073μs用于`TerminalStateRetention.acceptBatch→TerminalTombstoneStore`的订单ID/客户ID终态去重与有界淘汰；它承担幂等边界，不能直接删除。结果账本`storeOwnedResult`保留arena引用、复用记录，响应准备均值约0.1μs，证据不支持把大块响应复制当成当前主要瓶颈。
+
+OwnerPublication独立按projection sequence抽样32,046次（该序号不是matching sequence，不能直接相连）；互斥子步骤如下，外层均值3.595μs/p99 10.306μs：
+
+|步骤|均值 μs|p99 μs|累计占外层比例|
+|---|---:|---:|---:|
+|资金差额累计|0.259|0.640|7.19%|
+|实时变更捕获|0.056|0.141|1.56%|
+|订单/持仓等查询索引|2.210|7.167|61.48%|
+|发布序号与版本|0.063|0.153|1.75%|
+|已提交变更清理/身份释放|0.679|2.271|18.90%|
+|计时/间隙及其他|0.328|0.553|9.11%|
+
+- `CommitPublication.publish`的索引阶段约61.48%，不是整个Owner成本的61.48%。索引包括活跃订单、持仓用户、open-interest、ADL等；目前没有各索引独立计时。`RuntimeCommitJournal.publish`只是内存序号推进，无磁盘/网络写；其余清理释放身份必须在发布之后。
+- Owner1855个CPU执行样本，批量解码57、TerminalStateRetention.acceptBatch直接路径42及另一批量路径26、LaneCommitDelta.publishPreparedToOwner42、published-map compactChain29、ActiveOrderIndex.compactChain28等。它们支持方法定位，不是墙钟占比，也不足以证明某个HashMap实现导致容量上限。
+- 下一步最小验证方向：先针对collectMatcherSettlement内公共状态删除/冻结变更和终态保留做单因素分析，确认是否有重复访问或无效删除；随后才考虑将已经准备好的变更在现有提交边界一次消费。必须保留幂等、跨账户索引、查询/恢复与身份释放顺序，不引入第二套状态或把索引直接异步外移。每8条是这次实验值，没有证明最优，也不再本轮追加调参，以免混淆因素。
+
+**三轮完成性与吞吐：** main无profiler为唯一主观测，gc只采客户端fork，owner开启JFR和owner-poll；不横比三轮绝对吞吐或从中挑最高值。
+
+|轮次|稳定秒|business/s|Core/s|fills/s|稳定终态business/Core|排空ms / business/Core|CPU speed limit|
+|---|---:|---:|---:|---:|---|---|---|
+|main|60.020459|373588.915|35696.662|88929.677|22422978/2142530|6.709561 / 2674/242|66–70|
+|gc|60.005569|403963.239|38589.152|96161.741|24240044/2315564|4.338669 / 2667/235|70–75|
+|owner|60.010928|384756.124|36759.772|91588.652|23089572/2205988|4.581299 / 2683/251|72–72|
+
+- main最终offered=terminal business 22425652、Core 2142772，unfinished0、资金差额0、冻结/持仓/population/loss/insurance/ADL检查PASS。窗口峰256；客户端窗口阻塞488090次/49.400s（82.31%测量时长），队列峰{"matcher": 210, "completion": 208, "context": 254, "lanes": [61, 72, 58, 69]}。
+- gc最终offered=terminal business 24242711、Core 2315799，unfinished0、资金差额0、冻结/持仓/population/loss/insurance/ADL检查PASS。窗口峰256；客户端窗口阻塞508711次/49.441s（82.39%测量时长），队列峰{"matcher": 218, "completion": 205, "context": 255, "lanes": [78, 84, 81, 79]}。
+- owner最终offered=terminal business 23092255、Core 2206239，unfinished0、资金差额0、冻结/持仓/population/loss/insurance/ADL检查PASS。窗口峰256；客户端窗口阻塞608764次/49.670s（82.77%测量时长），队列峰{"matcher": 213, "completion": 213, "context": 255, "lanes": [58, 53, 54, 48]}。
+
+分业务入口→响应延迟如下（μs）。items与request分开，batch均20；请求数含边界排空，不能冒充稳定分类型速率。无全量入口→accepted/accepted→terminal直方图，也未校正coordinated omission，256窗口负载受背压。
+
+|轮次/业务|items|requests|p50|p90|p95|p99|p99.9|max|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+|main/PLACE_ORDER|533760|533760|5169|9543|10444|12058|23003|41910|
+|main/CANCEL_ORDER|533760|533760|5304|7819|8429|10444|21250|29818|
+|main/APPLY_MARK_PRICE|7732|7732|5013|9314|10805|15884|33751|35258|
+|main/PLACE_ORDER_BATCH|16012800|800640|6520|11927|13000|16973|31031|46792|
+|main/CANCEL_ORDER_BATCH|5337600|266880|12271|13778|15859|26230|37552|44269|
+|gc/PLACE_ORDER|577024|577024|4788|8880|9740|11796|21020|36569|
+|gc/CANCEL_ORDER|577024|577024|4907|7249|7884|11411|23134|38797|
+|gc/APPLY_MARK_PRICE|7703|7703|4644|8536|10133|13959|25395|27475|
+|gc/PLACE_ORDER_BATCH|17310720|865536|6012|11026|12001|14729|25935|43614|
+|gc/CANCEL_ORDER_BATCH|5770240|288512|11378|12681|13336|22495|31490|43614|
+|owner/PLACE_ORDER|549632|549632|4988|9076|9912|12812|24608|122290|
+|owner/CANCEL_ORDER|549632|549632|5238|7704|8368|12132|26623|132120|
+|owner/APPLY_MARK_PRICE|7711|7711|5136|9412|12132|15065|27164|28147|
+|owner/PLACE_ORDER_BATCH|16488960|824448|6406|11313|12296|16244|33423|218628|
+|owner/CANCEL_ORDER_BATCH|5496320|274816|11575|12894|13656|24592|37814|170655|
+
+**资源、采样有效性和缺口：**
+
+- 3轮都有明显限频，性能验收无效；不能声称已达39万或提升百分比。swap及swapin/out均0；pageout计数main/gc/owner增长452/422/12191，不能忽略宿主影响；磁盘最低498.7GiB。节点RSS峰main1770.3MiB/gc1764.2MiB/owner1792.0MiB，客户端423.9/431.2/431.9MiB，干扰进程与机器采样在system.jsonl。Owner/Matcher/Lane的JFR CPU约97.8%，含busy spin；Lane usefulExecution均值main44.90%/gc44.21%/owner44.03%，不能由CPU满核断言有用计算饱和。main/gc未采线程JFR CPU，不补零。
+- JFR保护窗节点G1 85次/453.193ms（0.809%），pause p50/p95/p99/max=5.199/6.087/6.563/8.234ms；客户端437次/354.042ms，max1.823ms。节点编译83次/472.143ms/max99.662ms，仍有编译，不能声称预热后完全稳定；VM operation92次/455.178ms/max8.250ms。GC同窗长尾关联另见上文和head-pauses.txt。
+- 节点ThreadAllocationStatistics端点估计（55.670s）：Owner95.333MB/s、Matcher88.412MB/s、4Lane各60.0–60.15MB/s、service37.614MB/s；客户端JMH worker295.404MB/s（54.618s）。TLAB新建54056/非TLAB642事件，最大观测对象65552B；sample weight不能当精确对象数量，不伪造objects/op或与不完全同窗的business增量相除。
+- 独立GC profiler报告client fork分配411.454MiB/s、56,540,854,360B/JMH invocation、720次GC/649ms。JMH一个invocation是整个测量调用，profiler生命周期口径还受setup/teardown影响；这些不是节点分配，更不是每笔订单56GB。JMH SingleShot每轮只有1个样本，无有效误差/置信区间；原始json/log保留。诊断采样开销未做有效同环境量化。
+- 节点heap committed512MiB，GC后used174442912→174125760B，区间173001696–175775904B；Direct8个/9575136B稳定。NMT末main reserved3142919KiB/committed718115KiB、gc3144463/717779、owner3167374/743794；各类峰值和diff保留。没有长稳/多轮趋势/完整FD与mapped池分配释放证据，不声明无泄漏。
+- Owner JFR轮有33次Console FileWrite、12464B/4.626ms，对应显式owner-poll采样日志，不能声称主链路无IO验收通过。无profiler/GC轮已关闭该日志，但未采JFR，不反向推断其所有IO均为0。ownerToEgress均值19.076μs/p99 163.714μs、max10.306ms，终点是ClusterServiceEgress取出响应，未包含网络deferred.offer完成。Archive/file/socket/park/monitor/异常与各线程栈完整视图入档；CPU样本不替代墙钟或OS抢占证据。
+- 318回归全部通过：ClusterCommandPipeline250、CoreOrderedOrderBatch28、ClusterCommandWindowRouting1、RuntimeCommitRecovery8、ContinuousOwnerBenchmark31（六产品线连续交易/响应不可变/快照及角色切换）。初次编译计时变量作用域错误、短测抽样命中断言失败、Bash3空数组启动失败均已记录并修复，未混作性能样本。没有真实Archive重启/长稳/三节点/外围REST认证及WebSocket端到端验证；资金/冻结/持仓与恢复测试范围不能外推这些缺口。
+
+业务分析入口：TradingCoreOwner、TradingRuntimeState.collectMatcherSettlement/LaneCommitDelta、CommitPublication、RuntimeFactIndexes/ActiveOrderIndex、TerminalStateRetention/TerminalTombstoneStore、OrderBatchExecutor.finishOrderBatch、CommandResultLedger.storeOwnedResult。新增诊断只有已有事件字段及一个Owner本地Publication事件；不新增业务类/队列/状态副本，新增局部计数只活一轮。详细源代码职责记录在归档source-findings.md。
+
+构建与复现：
+```sh
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dcore.settlementLatencyDiagnostics=true -Dtest=ClusterCommandWindowRoutingTest,ClusterCommandPipelineTest,CoreOrderedOrderBatchTest,RuntimeCommitRecoveryTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package
+python3 /tmp/surprising-owner-recheck-20260922/run.py
+```
+
+main实际命令（完整env、PID和起止时间见main.command.json/events.jsonl）：
+```sh
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.owner.poll-diagnostics=false -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN -Dsurprising.aeron.owner-input-batch-size=64 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/surprising-owner-recheck-20260922/main/window-256/end_to_end/data -Daeron.dir=/tmp/surprising-owner-recheck-20260922/main/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/surprising-owner-recheck-20260922/main/window-256/end_to_end/tmp -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/surprising-owner-recheck-20260922/main/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 180s -rf json -rff /tmp/surprising-owner-recheck-20260922/main/window-256/end_to_end/jmh.json
+```
+
+gc实际命令（完整env、PID和起止时间见gc.command.json/events.jsonl）：
+```sh
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.owner.poll-diagnostics=false -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN -Dsurprising.aeron.owner-input-batch-size=64 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/surprising-owner-recheck-20260922/gc/window-256/end_to_end/data -Daeron.dir=/tmp/surprising-owner-recheck-20260922/gc/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/surprising-owner-recheck-20260922/gc/window-256/end_to_end/tmp -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/surprising-owner-recheck-20260922/gc/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -prof gc -wi 0 -i 1 -f 1 -t 1 -to 180s -rf json -rff /tmp/surprising-owner-recheck-20260922/gc/window-256/end_to_end/jmh.json
+```
+
+owner实际命令（完整env、PID和起止时间见owner.command.json/events.jsonl）：
+```sh
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.owner.poll-diagnostics=true -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN -Dsurprising.aeron.owner-input-batch-size=64 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/data -Daeron.dir=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/tmp -Dcore.settlementLatencyDiagnostics=true -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/node.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/client-%p.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 180s -rf json -rff /tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/jmh.json
+```
+
+构建产物校验：
+```json
+{
+  "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {
+    "bytes": 62561697,
+    "sha256": "e2af0fe99adb0ec8e991712022d9094c9485ccd5d7d822807f8316b0f609a271"
+  },
+  "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {
+    "bytes": 81828271,
+    "sha256": "101199927415b11751920cdab3686a2061a6494b6f28de4d2e5e31703b9e193f"
+  }
+}
+```
+
+JFR配置owner-commit-profile.jfc包含新OwnerPublication，每进程max256m；summary/view、窗口聚合、分布、Java分析器、测试与失败日志留存：
+
+|原始文件|字节|SHA256|DataLoss|
+|---|---:|---|---:|
+|/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/client-52446.jfr|10013459|7141d32c5dea45329323df6fce3f32ba0e9dc4043273ae2f957dbf39814b4f88|0|
+|/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/client-52460.jfr|124030007|f4ab3da6726cdb842186b06d5c25b96dd093130ef7dd3c80ee034deb25d8c864|0|
+|/tmp/surprising-owner-recheck-20260922/owner/window-256/end_to_end/node.jfr|142193144|bd5ccfeb751d3a04c78b9aed42840f3f6a24f2813dc712cc613eb6e97b358382|0|
+
+归档目标`/Users/atomex/.Trash/surprising-owner-recheck-20260922`；原始/tmp路径仅用于历史定位。主结论所用分布在serial-cost.txt、head-residence.txt、head-wait.txt、head-pauses.txt，资源证据在各进程window/summary/view文本；原始JFR删除后仍可核对本节数字与分析方法。
+
+- 清理完成：确认本轮节点/客户端/驱动退出；清理失败启动和3轮成功运行的runtime/Archive/Aeron/tmp、3份原始JFR及分析class文件。保留源码、脚本、完整命令/日志、分析/测试/校验/系统时序与cleanup.json，归档`/Users/atomex/.Trash/surprising-owner-recheck-20260922`共13,272,181bytes。未停止或删除其他项目/用户进程与文件。

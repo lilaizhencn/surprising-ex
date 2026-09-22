@@ -13,6 +13,7 @@ final class CoreMatchingPhaseMetrics {
         private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(OwnerTurn.class);
         public int retired;
         public int admitted;
+        public int headRechecks, readyHeadRechecks;
         public int windowAtStart;
         public int windowAtEnd;
         public boolean headWait;
@@ -27,6 +28,27 @@ final class CoreMatchingPhaseMetrics {
                 || !OwnerTurn.TYPE.isEnabled()) return null;
         var event = new OwnerTurn();
         event.windowAtStart = windowSize;
+        event.begin();
+        return event;
+    }
+
+    /** Exclusive substeps of Owner publication; sequence is the projection sequence, not matching. */
+    @jdk.jfr.Name("surprising.OwnerPublication")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class OwnerPublication extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(OwnerPublication.class);
+        public long publicationSequence;
+        public long fundsNanos, realtimeCaptureNanos, indexesNanos, journalNanos, clearNanos, totalNanos;
+        public boolean completed;
+    }
+
+    static OwnerPublication sampleOwnerPublication(long sequence) {
+        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS
+                || (Long.hashCode(sequence * 0x9e3779b97f4a7c15L) & 63) != 0
+                || !OwnerPublication.TYPE.isEnabled()) return null;
+        var event = new OwnerPublication();
+        event.publicationSequence = sequence;
         event.begin();
         return event;
     }

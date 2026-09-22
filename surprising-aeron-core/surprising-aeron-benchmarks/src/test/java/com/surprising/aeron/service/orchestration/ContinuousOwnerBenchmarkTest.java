@@ -46,6 +46,7 @@ class ContinuousOwnerBenchmarkTest {
         var path = java.nio.file.Files.createTempFile("command-boundaries-", ".jfr");
         try (var recording = new jdk.jfr.Recording()) {
             recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
+            recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
             recording.start();
             try (var workload = new ContinuousOwnerBenchmark()) {
                 workload.productLine = ProductLine.LINEAR_PERPETUAL;
@@ -60,6 +61,19 @@ class ContinuousOwnerBenchmarkTest {
                     .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
             org.assertj.core.api.Assertions.assertThat(events).extracting(e -> e.getString("stage"))
                     .contains("transportToOwner", "ingressToAdmission", "admissionExecution", "ownerToEgress");
+            var turns = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerTurn")).toList();
+            org.assertj.core.api.Assertions.assertThat(turns).isNotEmpty();
+            for (var turn : turns) {
+                org.assertj.core.api.Assertions.assertThat(turn.getInt("headRechecks"))
+                        .isBetween(0, turn.getInt("admitted") / 8);
+                org.assertj.core.api.Assertions.assertThat(turn.getInt("readyHeadRechecks"))
+                        .isBetween(0, turn.getInt("headRechecks"));
+                org.assertj.core.api.Assertions.assertThat(turn.getInt("admitted") + turn.getInt("retired"))
+                        .isBetween(0, 64);
+            }
+            // A short 1/64 recording need not catch a ready transition during an ingress burst.
+            // The sustained external Cluster run measures hit counts; this test checks budget and response safety.
             for (var event : events) org.assertj.core.api.Assertions.assertThat(event.getLong("elapsedNanos"))
                     .isBetween(0L, java.util.concurrent.TimeUnit.SECONDS.toNanos(30));
         } finally { java.nio.file.Files.deleteIfExists(path); }

@@ -39,6 +39,14 @@ OWNER_WAIT_STRATEGY="${ASYNC_OWNER_WAIT_STRATEGY:-${AERON_BASELINE_OWNER_WAIT_ST
 OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
 COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
 ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
+# Keep profiler scores separate from the unprofiled terminal-throughput round.
+JMH_PROFILER="${ASYNC_JMH_PROFILER:-}"
+JMH_PROFILE_ARGS=()
+case "${JMH_PROFILER}" in
+  "") ;;
+  gc) JMH_PROFILE_ARGS=(-prof gc) ;;
+  *) echo "ASYNC_JMH_PROFILER must be empty or gc" >&2; exit 2 ;;
+esac
 OWNER_POLL_DIAGNOSTICS="${ASYNC_OWNER_POLL_DIAGNOSTICS:-false}"
 LANE_STAGE_LANES="${ASYNC_LANE_STAGE_LANES:-1}"
 MATCHER_STAGE_LANES="${ASYNC_MATCHER_STAGE_LANES:-1}"
@@ -147,11 +155,11 @@ run_stage() {
   fi
   printf '%q ' "${JAVA}" "${client_args[@]}" -jar "${BENCHMARK_JAR}" org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations \
     -p controlPageSize=0 -p inFlightWindow="${window}" -p tradingProfile="${profile}" -p batchSize="${batch}" \
-    -wi 0 -i 1 -f 1 -t 1 -to "$((WARMUP_SECONDS + MEASURE_SECONDS + 90))s" -rf json -rff "${dir}/jmh.json" > "${dir}/client.command"
+    ${JMH_PROFILE_ARGS[@]+"${JMH_PROFILE_ARGS[@]}"} -wi 0 -i 1 -f 1 -t 1 -to "$((WARMUP_SECONDS + MEASURE_SECONDS + 90))s" -rf json -rff "${dir}/jmh.json" > "${dir}/client.command"
   set +e
   "${JAVA}" "${client_args[@]}" -jar "${BENCHMARK_JAR}" org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations \
     -p controlPageSize=0 -p inFlightWindow="${window}" -p tradingProfile="${profile}" -p batchSize="${batch}" \
-    -wi 0 -i 1 -f 1 -t 1 -to "$((WARMUP_SECONDS + MEASURE_SECONDS + 90))s" -rf json -rff "${dir}/jmh.json" > "${dir}/client.log" 2>&1
+    ${JMH_PROFILE_ARGS[@]+"${JMH_PROFILE_ARGS[@]}"} -wi 0 -i 1 -f 1 -t 1 -to "$((WARMUP_SECONDS + MEASURE_SECONDS + 90))s" -rf json -rff "${dir}/jmh.json" > "${dir}/client.log" 2>&1
   local client_status=$?; set -e; printf '%s\n' "${client_status}" > "${dir}/client.exit"
   if kill -0 "${NODE_PID}" 2>/dev/null; then
     "${JCMD}" "${NODE_PID}" Thread.print -l > "${dir}/threads.txt" 2>&1 || true
