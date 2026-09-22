@@ -4,7 +4,6 @@ import com.surprising.account.provider.service.AccountRequestService;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -31,19 +30,19 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 供独立 maker 和跨产品线账户操作使用的内部 HTTP 契约；必须携带业务内部凭证。公共用户入口由 GatewayProxyController 提供。
+ * 供独立 maker 和跨产品线账户操作使用的内部 HTTP 契约；内部调用无需凭证。公共用户入口由 GatewayProxyController 提供。
  */
 @RestController
 public class AccountInternalController {
 
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/balance-adjustments")
-    public BalanceResponse adjustBalance(@RequestHeader(value = "X-Internal-Service", required = false) String service, @RequestHeader(value = "X-Internal-Timestamp", required = false) String timestamp, @RequestHeader(value = "X-Internal-Signature", required = false) String signature, @Valid @RequestBody BalanceAdjustmentRequest request) {
-        return requests.adjustBalance(service, timestamp, signature, request);
+    public BalanceResponse adjustBalance(@Valid @RequestBody BalanceAdjustmentRequest request) {
+        return requests.adjustBalance(request);
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments")
-    public ProductBalanceResponse adjustProductBalance(@RequestHeader(value = "X-Internal-Service", required = false) String service, @RequestHeader(value = "X-Internal-Timestamp", required = false) String timestamp, @RequestHeader(value = "X-Internal-Signature", required = false) String signature, @RequestHeader(value = "X-Internal-Audience", required = false) String audience, @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
-        return requests.adjustProductBalance(service, timestamp, signature, audience, request);
+    public ProductBalanceResponse adjustProductBalance(@Valid @RequestBody ProductBalanceAdjustmentRequest request) {
+        return requests.adjustProductBalance(request);
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balance")

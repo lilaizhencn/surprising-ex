@@ -52,11 +52,7 @@ public final class AccountLocalRoutes {
 
     public Object invoke(LocalApiRequest r) {
         if (r.matches(HttpMethod.POST, ACCOUNT_CONTROLLER_ADJUSTPRODUCTBALANCE)) {
-            return accountRequests.adjustProductBalance(r.header("X-Internal-Service", String.class, null, false),
-                    r.header("X-Internal-Timestamp", String.class, null, false),
-                    r.header("X-Internal-Signature", String.class, null, false),
-                    r.header("X-Internal-Audience", String.class, null, false),
-                    r.body(ProductBalanceAdjustmentRequest.class, true, true));
+            return accountRequests.adjustProductBalance(r.body(ProductBalanceAdjustmentRequest.class, true, true));
         }
         if (r.matches(HttpMethod.POST, ACCOUNT_CONTROLLER_ADMINADJUSTPRODUCTBALANCE)) {
             return accountRequests.adminAdjustProductBalance(r.header("X-Admin-User-Id", String.class, null, false),
@@ -67,10 +63,7 @@ public final class AccountLocalRoutes {
             return accountRequests.adjustPositionMargin(r.body(PositionMarginAdjustmentRequest.class, true, false));
         }
         if (r.matches(HttpMethod.POST, ACCOUNT_CONTROLLER_ADJUSTBALANCE)) {
-            return accountRequests.adjustBalance(r.header("X-Internal-Service", String.class, null, false),
-                    r.header("X-Internal-Timestamp", String.class, null, false),
-                    r.header("X-Internal-Signature", String.class, null, false),
-                    r.body(BalanceAdjustmentRequest.class, true, true));
+            return accountRequests.adjustBalance(r.body(BalanceAdjustmentRequest.class, true, true));
         }
         if (r.matches(HttpMethod.POST, ACCOUNT_CONTROLLER_ADMINADJUSTBALANCE)) {
             return accountRequests.adminAdjustBalance(r.header("X-Admin-User-Id", String.class, null, false),

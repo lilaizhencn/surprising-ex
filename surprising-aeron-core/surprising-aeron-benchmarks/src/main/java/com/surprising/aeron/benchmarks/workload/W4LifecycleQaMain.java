@@ -15,7 +15,6 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -218,13 +217,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(base + path))
                 .timeout(Duration.ofSeconds(20));
-        if (List.of("instrument", "account", "trading", "command").contains(service)) {
-            String internalToken = System.getenv("BUSINESS_INTERNAL_TOKEN");
-            if (internalToken == null || internalToken.isBlank()) {
-                throw new IllegalStateException("BUSINESS_INTERNAL_TOKEN is required for merged business RPC");
-            }
-            builder.header("X-Business-Internal-Token", internalToken);
-        }
+
         headers.forEach(builder::header);
         if (body == null) {
             builder.method(method, HttpRequest.BodyPublishers.noBody());

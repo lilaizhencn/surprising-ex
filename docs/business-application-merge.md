@@ -45,12 +45,9 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
 路由配置中的 `base-url: "local:"` 是现有路由契约的本地标识，不是监听地址。
 `LocalBusinessApiTest` 检查业务公开 Mapping 均有本地路由，新增接口时必须同步该协议入口。
 
-`BusinessEndpointConfiguration` 拦截原始业务 Controller URL，未持内部凭证返回 404；
-伪造 `X-User-Id`、`X-Admin-User-Id` 不能绕过 Gateway。
-独立后台服务通过 `X-Business-Internal-Token` 使用原有 RPC 契约，其他既有身份、签名校验仍执行。
-部署时给业务应用及对应后台实例配置同一个非空 `BUSINESS_INTERNAL_TOKEN`；
-不要把它放进前端，也不要将普通外部请求的同名头转发到内部服务。
-外部应用的 Feign 默认地址已改为 `9094`，默认请求头从该环境变量读取。
+内部服务调用不要求业务 token 或账户 HMAC 签名，也不发送内部身份、时间戳、audience 请求头。
+maker 等独立进程通过 InternalController 使用 HTTP 契约，默认地址为 `9094`。
+公共 gateway 入口继续执行用户/管理员身份、权限和审批校验；账户请求仍执行参数、产品线与业务校验。
 
 ## 首期产品及托管资金
 
@@ -61,7 +58,7 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
 首期跨产品划转默认关闭：`GATEWAY_PRODUCT_TRANSFER_ENABLED=false`。
 托管钱包仍默认关闭。本次没有把原本入现货/FUNDING 的充值改为直接入永续保证金。
 启用托管时，现货业务实例可在本地完成调整；永续实例必须显式配置独立现货业务实例的
-`GATEWAY_SPOT_ACCOUNT_BASE_URL`、原有内部签名配置及业务内部凭证。
+`GATEWAY_SPOT_ACCOUNT_BASE_URL`，无需额外的内部签名或 token 配置。
 跨产品划转的目标 URL 也必须显式配置；缺配置时拒绝执行，不能回退到当前产品。
 
 ## 构建及启动
@@ -71,7 +68,7 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
 ```bash
 mvn -pl surprising-gateway -am package -DskipTests
 # 先启动 PostgreSQL、Kafka、Redis 和独立 Aeron Core。
-# 为所有相关进程配置 PRODUCT_LINE、BUSINESS_INTERNAL_TOKEN、数据库和 Kafka 地址。
+# 为所有相关进程配置 PRODUCT_LINE、数据库和 Kafka 地址。
 java --enable-native-access=ALL-UNNAMED \
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
@@ -117,7 +114,7 @@ java --enable-native-access=ALL-UNNAMED \
 
 真实环境使用隔离 PostgreSQL `55392`、Kafka `59092`、Redis `56379`、业务 HTTP `59994`，
 另起一个本机 Aeron 成员（`LINEAR_PERPETUAL`、cluster id 101）。
-Core 和业务应用为不同 PID；业务应用 liveness 正常，合约查询成功，原始业务 URL 无内部凭证返回 404。
+Core 和业务应用为不同 PID；业务应用 liveness 正常，合约查询成功，当轮原始业务 URL 无内部凭证返回 404（该内部凭证机制已于 2026-09-22 按新要求删除）。
 真实 HTTP 测试包含两次成交（开仓、平仓）及一笔额外挂单撤销。两用户最终持仓、冻结均为零，
 初始余额总计 `2,000,000,000,000,000` 单位，最终余额加手续费 `1,400,000,000` 单位等于初始总额。
 最后还在重启后的最终业务包上复验本地路由、编码路径的管理员限制、资金结果分类和公共命令查询 URL。

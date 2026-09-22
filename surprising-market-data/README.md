@@ -5,7 +5,7 @@
 - 盘口查询实现迁入 `surprising-gateway` 的 `com.surprising.trading.matching` 包。
   公共 URL `/api/v1/gateway/trading-market/orderbook` 不变，网关本地调用原 Controller/Service，
   使用现有 `OrderAeronGateway` 查询 Core；没有复制订单簿或把行情状态写入账户。
-  旧内部 `/api/v1/trading/market/orderbook` 由 gateway 9094 承接，独立调用方须带 `X-Business-Internal-Token`。
+  旧内部 `/api/v1/trading/market/orderbook` 由 gateway 9094 承接，独立内部调用方无需凭证。
 - K 线实现和测试迁入 `surprising-realtime-provider` 的 `com.surprising.candlestick.provider` 包，
   与实时路由同进程，默认 HTTP 9095。原 `/api/v1/candlestick/**` 和网关公共 URL 保持不变。
 - 旧 `surprising-market-data-provider` 启动类、POM、配置及单独盘口 Aeron 连接池已移除。

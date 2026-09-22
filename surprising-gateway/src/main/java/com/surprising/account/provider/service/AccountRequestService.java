@@ -1,6 +1,5 @@
 package com.surprising.account.provider.service;
 
-import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
@@ -26,12 +25,6 @@ import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountCommandTimeoutException;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.Instant;
-import java.util.Base64;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.stereotype.Service;
@@ -41,12 +34,6 @@ import org.springframework.stereotype.Service;
  */
 @Service()
 public class AccountRequestService {
-
-    private static final String INTERNAL_SERVICE = "surprising-gateway";
-
-    private static final String PRODUCT_BALANCE_AUDIENCE = AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments";
-
-    private static final long MAX_CLOCK_SKEW_SECONDS = 300L;
 
     private final AccountService accountService;
 
@@ -60,8 +47,7 @@ public class AccountRequestService {
         this.properties = properties;
     }
 
-    public BalanceResponse adjustBalance(String service, String timestamp, String signature, BalanceAdjustmentRequest request) {
-        requireInternalService(service, timestamp, signature, request);
+    public BalanceResponse adjustBalance(BalanceAdjustmentRequest request) {
         try {
             return commandGateway.adjustBalance(request, null, null);
         } catch (AccountCommandTimeoutException ex) {
@@ -84,8 +70,7 @@ public class AccountRequestService {
         }
     }
 
-    public ProductBalanceResponse adjustProductBalance(String service, String timestamp, String signature, String audience, ProductBalanceAdjustmentRequest request) {
-        requireInternalProductService(service, timestamp, signature, audience, request);
+    public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request) {
         try {
             return commandGateway.adjustProductBalance(request, null, null);
         } catch (AccountCommandTimeoutException ex) {
@@ -305,87 +290,5 @@ public class AccountRequestService {
         if (adminUserId == null || adminUserId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin gateway header is required");
         }
-    }
-
-    private void requireInternalService(String service, String timestamp, String signature, BalanceAdjustmentRequest request) {
-        if (!INTERNAL_SERVICE.equals(service) || timestamp == null || timestamp.isBlank() || signature == null || signature.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service authentication is required");
-        }
-        String secret = properties.getInternalServiceSecret();
-        if (secret == null || secret.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "internal service authentication is not configured");
-        }
-        long timestampSeconds;
-        try {
-            timestampSeconds = Long.parseLong(timestamp);
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is invalid", ex);
-        }
-        if (Math.abs(Instant.now().getEpochSecond() - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is expired");
-        }
-        String expected = sign(secret, timestampSeconds, request);
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
-        }
-    }
-
-    private String sign(String secret, long timestamp, BalanceAdjustmentRequest request) {
-        String canonical = INTERNAL_SERVICE + "\n" + timestamp + "\n" + request.userId() + "\n" + request.asset().trim().toUpperCase(java.util.Locale.ROOT) + "\n" + request.amountUnits() + "\n" + request.referenceId() + "\n" + (request.reason() == null ? "" : request.reason());
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return "v1=" + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "internal service signing is unavailable", ex);
-        }
-    }
-
-    private void requireInternalProductService(String service, String timestamp, String signature, String audience, ProductBalanceAdjustmentRequest request) {
-        requireInternalHeaders(service, timestamp, signature);
-        if (!PRODUCT_BALANCE_AUDIENCE.equals(audience == null ? "" : audience.trim())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service audience is invalid");
-        }
-        long timestampSeconds = parseInternalTimestamp(timestamp);
-        if (Math.abs(Instant.now().getEpochSecond() - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is expired");
-        }
-        String secret = properties.getInternalServiceSecret();
-        if (secret == null || secret.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "internal service authentication is not configured");
-        }
-        String canonical = field(INTERNAL_SERVICE) + field(PRODUCT_BALANCE_AUDIENCE) + field(Long.toString(timestampSeconds)) + field(Long.toString(request.userId())) + field(request.accountType().name()) + field(request.asset().trim().toUpperCase(java.util.Locale.ROOT)) + field(Long.toString(request.amountUnits())) + field(request.referenceId()) + field(request.reason() == null ? "" : request.reason());
-        if (!MessageDigest.isEqual(signCanonical(secret, canonical).getBytes(StandardCharsets.UTF_8), signature.trim().getBytes(StandardCharsets.UTF_8))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
-        }
-    }
-
-    private void requireInternalHeaders(String service, String timestamp, String signature) {
-        if (!INTERNAL_SERVICE.equals(service == null ? "" : service.trim()) || timestamp == null || timestamp.isBlank() || signature == null || signature.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service authentication is required");
-        }
-    }
-
-    private long parseInternalTimestamp(String timestamp) {
-        try {
-            return Long.parseLong(timestamp.trim());
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is invalid", ex);
-        }
-    }
-
-    private String signCanonical(String secret, String canonical) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return "v1=" + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "internal service signing is unavailable", ex);
-        }
-    }
-
-    private String field(String value) {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        return bytes.length + ":" + value;
     }
 }

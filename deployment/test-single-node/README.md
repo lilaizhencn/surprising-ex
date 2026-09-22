@@ -36,7 +36,7 @@ mvn -pl \
 ```
 
 `gateway` 现在包含身份、订单、账户、合约四个业务包，不再部署三个 provider 进程。
-所有业务和后台实例的环境文件需配置相同的 `BUSINESS_INTERNAL_TOKEN`；不要将该凭证发送给客户端。
+内部服务调用无需配置业务 token 或账户签名密钥。公共 gateway 登录、管理员权限和业务校验继续生效。
 Core 先启动，随后业务应用完成 liveness，再启动价格和其他后台服务。
 
 将同一 Git 提交的代码和 `target` 产物放到服务器 `/opt/surprising-ex`，并创建：

@@ -14,7 +14,6 @@ import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
-import java.time.Instant;
 import java.util.EnumMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -43,7 +42,6 @@ class ProductAccountAccessTest {
                 new GatewayProperties.ProductRoute("http://account-linear:9186", "/api/v1/accounts"));
         account.setProductRoutes(productRoutes);
         properties.setRoutes(Map.of("account", account));
-        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("{}"));
@@ -59,13 +57,7 @@ class ProductAccountAccessTest {
         assertThat(uri.getValue()).isEqualTo(URI.create(
                 "http://account-linear:9186" + AccountApiPaths.TRANSFER_OUT_PATH));
         assertThat(request.getValue().getBody()).isEqualTo(operation);
-        String timestamp = request.getValue().getHeaders().getFirst("X-Internal-Timestamp");
-        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Service"))
-                .isEqualTo("surprising-gateway");
-        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Audience"))
-                .isEqualTo(AccountApiPaths.TRANSFER_OUT_PATH);
-        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Signature")).startsWith("v1=");
-        assertThat(Math.abs(Instant.now().getEpochSecond() - Long.parseLong(timestamp))).isLessThanOrEqualTo(1L);
+        assertThat(request.getValue().getHeaders().toSingleValueMap()).doesNotContainKeys("X-Business-Internal-Token", "X-Internal-Service", "X-Internal-Timestamp", "X-Internal-Audience", "X-Internal-Signature");
     }
 
     @Test
@@ -76,7 +68,6 @@ class ProductAccountAccessTest {
         account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
                 new GatewayProperties.ProductRoute("http://account-linear:9186", "")));
         properties.setRoutes(Map.of("account", account));
-        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("{}"));
@@ -93,7 +84,6 @@ class ProductAccountAccessTest {
     @Test
     void mapsProviderClientErrorsToPermanentRejection() {
         GatewayProperties properties = propertiesWithLinearRoute();
-        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.CONFLICT,
@@ -108,7 +98,6 @@ class ProductAccountAccessTest {
     @Test
     void keepsAuthenticationAndRateLimitErrorsRecoverable() {
         GatewayProperties properties = propertiesWithLinearRoute();
-        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
@@ -125,7 +114,6 @@ class ProductAccountAccessTest {
         GatewayProperties properties = new GatewayProperties();
         properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
                 "http://account:9086", "/api/v1/accounts", true)));
-        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
 
         assertThatThrownBy(() -> new ProductAccountAccess(properties, mock(RestTemplate.class), mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
                 .transferOut("USDT_PERPETUAL", operation()))

@@ -11,7 +11,7 @@ public class AccountProperties {
 
     private Kafka kafka = new Kafka();
     private Aeron aeron = new Aeron();
-    private String internalServiceSecret = "";
+
 
     public Kafka getKafka() {
         return kafka;
@@ -30,13 +30,7 @@ public class AccountProperties {
         this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
-    public String getInternalServiceSecret() {
-        return internalServiceSecret;
-    }
 
-    public void setInternalServiceSecret(String internalServiceSecret) {
-        this.internalServiceSecret = internalServiceSecret;
-    }
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";

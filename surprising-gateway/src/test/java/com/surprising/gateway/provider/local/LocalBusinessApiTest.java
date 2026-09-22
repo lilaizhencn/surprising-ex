@@ -3,8 +3,6 @@ package com.surprising.gateway.provider.local;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.controller.AccountInternalController;
-import com.surprising.gateway.provider.config.BusinessEndpointConfiguration;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import jakarta.validation.Validation;
@@ -204,17 +202,5 @@ class LocalBusinessApiTest {
         assertThat(actual).containsExactlyInAnyOrderElementsOf(expected);
     }
 
-    @Test
-    void rawBusinessUrlsRejectForgedIdentityHeadersWithoutInternalCredential() throws Exception {
-        var interceptor = new BusinessEndpointConfiguration("test-internal-token");
-        var handler = new org.springframework.web.method.HandlerMethod(new AccountInternalController(new com.surprising.account.provider.service.AccountRequestService(null, null, accountProperties)), AccountInternalController.class.getMethod("balance", long.class, String.class));
-        var request = new MockHttpServletRequest("GET", "/api/v1/accounts/balance");
-        request.addHeader("X-Admin-User-Id", "7");
-        request.addHeader("X-User-Id", "42");
-        var response = new org.springframework.mock.web.MockHttpServletResponse();
-        assertThat(interceptor.preHandle(request, response, handler)).isFalse();
-        assertThat(response.getStatus()).isEqualTo(404);
-        request.addHeader("X-Business-Internal-Token", "test-internal-token");
-        assertThat(interceptor.preHandle(request, new org.springframework.mock.web.MockHttpServletResponse(), handler)).isTrue();
-    }
+
 }

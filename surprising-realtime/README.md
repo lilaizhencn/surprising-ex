@@ -27,7 +27,7 @@ Kafka Streams 线程只做聚合、持久化与非阻塞入队；路由线程负
   `CANDLESTICK_STATE_DIR` 指向原状态目录，或在空目录从原 changelog 恢复，不能误改 application-id 后当成无损迁移。
   本地脚本默认使用本轮运行目录下 `candlestick-state`。
 - `TRADE_EXPORT_ENABLED=true` 在本进程启动成交导出线程，才能持续获得真实成交 K 线；它与 `REALTIME_ENABLED` 独立。Core 仍独立，行情中的回放状态不是交易权威账本。
-- 部署数据源、Kafka、Valkey、`BUSINESS_INTERNAL_TOKEN` 和当前产品配置。RocksDB 原有 native 内存预算仍需保留，合并不表示这些缓存消失。
+- 部署数据源、Kafka、Valkey 和当前产品配置。RocksDB 原有 native 内存预算仍需保留，合并不表示这些缓存消失。
 
 ## 实时行情、私有状态和 Valkey 查询
 

@@ -1,6 +1,6 @@
 # surprising-trading
 
-本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
 
 Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-gateway` 中的 订单业务包 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。行情查询投影已迁入 `surprising-market-data-provider`。

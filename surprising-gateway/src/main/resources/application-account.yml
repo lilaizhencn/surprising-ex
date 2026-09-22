@@ -1,6 +1,5 @@
 surprising:
   account:
-    internal-service-secret: ${ACCOUNT_INTERNAL_SERVICE_SECRET:}
     aeron:
       source-identity: account-${HOSTNAME:node}
       hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}

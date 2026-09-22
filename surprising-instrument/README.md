@@ -1,6 +1,6 @@
 # surprising-instrument
 
-本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
 
 Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
@@ -74,33 +74,33 @@ gateway 内的 instrument 业务包
 查询当前配置：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:9094/api/v1/instruments/latest?symbol=BTC-USDT'
+curl 'http://localhost:9094/api/v1/gateway/instrument/latest?symbol=BTC-USDT'
 ```
 
 查询列表：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:9094/api/v1/instruments/list?type=PERPETUAL&status=TRADING'
+curl 'http://localhost:9094/api/v1/gateway/instrument/list?type=PERPETUAL&status=TRADING'
 ```
 
 服务间初始化（业务模块使用内部入口，不应由网关公开）：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" -H 'X-Product-Line: LINEAR_PERPETUAL' \
-  'http://localhost:9094/internal/v1/instruments/snapshot'
+curl -H 'X-Product-Line: LINEAR_PERPETUAL' \
+  'http://localhost:9094/internal/v1/instruments/snapshot?productLine=LINEAR_PERPETUAL'
 ```
 
 后台分页查询当前产品：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:9094/api/v1/instruments/admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
 ```
 
 后台查询当前产品详情和操作日志：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:9094/api/v1/instruments/admin/BTC-USDT'
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:9094/api/v1/instruments/admin/BTC-USDT/changes?productLine=SPOT&limit=50&beforeId=0'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT/changes?productLine=SPOT&limit=50&beforeId=0'
 ```
 
 后台列表支持 `limit/cursor/sort` 游标分页。当前配置列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；日志按操作 ID 倒序，使用 `beforeId` 继续读取。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
@@ -108,10 +108,10 @@ curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" 'http://localhost:
 更新状态：
 
 ```bash
-curl -H "X-Business-Internal-Token: $BUSINESS_INTERNAL_TOKEN" -X POST 'http://localhost:9094/api/v1/instruments/admin/BTC-USDT/status?status=HALT'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -X POST 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT/status?status=HALT'
 ```
 
-完整 upsert 使用 `POST /api/v1/instruments/admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统通过 gateway 后台代理调用 admin API，产品配置和状态变更必须经过审批流、权限校验和操作审计。
+完整 upsert 使用 `POST /api/v1/admin/gateway/instrument-admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统通过 gateway 后台代理调用 admin API，产品配置和状态变更必须经过审批流、权限校验和操作审计。
 
 ## Kafka 事件
 
@@ -200,5 +200,5 @@ Operational audit entries preserve actor, reason, time and before/after values. 
 
 合并后初始化说明：账户包原先无人读取的独立 Instrument 快照已删除；订单规则缓存、
 `InstrumentCoreSyncService` 注册及独立行情/价格/衍生品进程的快照加载仍保留。
-本文直接访问 gateway 内部业务 URL 的示例需先设置 `BUSINESS_INTERNAL_TOKEN`；普通用户通过 gateway 公共代理入口访问。
+服务间内部查询无需凭证；公共及管理查询通过 gateway 入口，管理操作仍需要管理员登录和权限。
 数据库建表和种子数据初始化不是重复的 JVM 缓存初始化，不能一并删除。

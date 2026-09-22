@@ -30,7 +30,7 @@
 mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am package -DskipTests
 ```
 
-设置 `PRODUCT_LINE=LINEAR_PERPETUAL`（或其他目标衍生品）、数据源、Kafka、Aeron 和 `BUSINESS_INTERNAL_TOKEN`。
+设置 `PRODUCT_LINE=LINEAR_PERPETUAL`（或其他目标衍生品）、数据源、Kafka和 Aeron。
 `/api/v1/funding` 保留，网关及 FundingRpcApi 默认目标改为 `9087`；自定义 `GATEWAY_ROUTE_FUNDING_BASE_URL` /
 `surprising.clients.funding.base-url` 需同步指向此实例。停用原 funding 进程，避免两套部署并存。
 

@@ -204,7 +204,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 交割/行权使用的逐条确认 listener factory 和无限重试设置不变。
 删除 YAML 中无对应字段的 account.cache / account.position-margin，
 以及 account group-id/各业务 topic、trading fee-schedule-events-topic 的无效字段/setter（topic 实际始终按 ProductLine 生成）。
-业务内部凭证和实际使用的 account.aeron 参数保留，不改变认证及 Core 连接。
+实际使用的 account.aeron 参数保留；内部凭证机制已于 2026-09-22 删除，Core 连接不变。
 
 `initialize_database` 的数据库建表/种子初始化和 Core 合约注册仍是必要步骤，不能因为 instrument 合入 gateway 就删除。
 其他独立进程的合约快照初始化也保留。
@@ -219,8 +219,10 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 
 公共请求统一从 `GatewayProxyController` / `BinanceApiController` 进入，完成鉴权后由本地路由绑定参数并调用 Service，不再调用其他 Controller。原订单、账户、合约等 Controller 的请求校验、业务编排和结果转换已迁到相应 `*RequestService`；重复的公共/管理 HTTP Controller 已删除。盘口、合约同步和 WebSocket 指标直接调用已有 Service/Registry；没有新增状态、接口或异步阶段。
 
-独立 maker 仍需要 HTTP 接入，故保留 `OrderInternalController`、`AccountInternalController`、`MarketDataInternalController`，原始地址仅允许携带业务内部凭证的进程访问。账户内部入口还服务跨产品线资金操作，已去掉不再使用的管理端别名。`InstrumentInternalController` 等原有内部查询/划转接口继续保留。管理 WebSocket 指标仅从 gateway 管理路由进入，原始 `/api/v1/admin/websocket/metrics` HTTP 映射已删除。
+独立 maker 仍需要 HTTP 接入，故保留 `OrderInternalController`、`AccountInternalController`、`MarketDataInternalController`，内部调用无需凭证。账户内部入口还服务跨产品线资金操作，已去掉不再使用的管理端别名。`InstrumentInternalController` 等原有内部查询/划转接口继续保留。管理 WebSocket 指标仅从 gateway 管理路由进入，原始 `/api/v1/admin/websocket/metrics` HTTP 映射已删除。
 
 合并业务和 `websocket-admin` 默认路由均为 `local:`。`AdminSystemService` 将同 JVM 路由聚合为一次本地 `HealthEndpoint` 检查，返回实际健康状态，本地结果 `httpStatus` 为 null；远程服务仍通过 HTTP 探测。跨产品线现货资金接入必须显式配置远端地址。
 
 测试以删除前的 81 个 API 路径作为本地分派契约基线，并检查 maker 的三个 Feign 契约均仍有内部 HTTP 映射。本轮不改变 Core 协议、事件可靠投递、产品线隔离或资金结算规则。
+
+内部认证清理：删除 `BusinessEndpointConfiguration`、业务 token 请求头、账户内部 HMAC/时间戳/audience 校验及发送端签名。`BUSINESS_INTERNAL_TOKEN`、`ACCOUNT_INTERNAL_SERVICE_SECRET`、`GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET` 不再需要。内部控制器仍执行 DTO 校验、产品线检查和原有业务拒绝处理；公共用户 JWT、管理员权限/审批及外部托管钱包签名保持原有行为。

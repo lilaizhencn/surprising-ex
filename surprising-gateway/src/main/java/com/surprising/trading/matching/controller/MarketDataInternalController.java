@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 独立 maker 使用的内部 HTTP 契约，由 BusinessEndpointConfiguration 校验内部凭证。 */
+/** 独立 maker 使用的内部 HTTP 契约，内部调用无需凭证。 */
 @RestController
 public class MarketDataInternalController {
 

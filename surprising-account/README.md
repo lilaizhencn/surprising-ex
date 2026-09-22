@@ -1,6 +1,6 @@
 # surprising-account
 
-本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
 
 Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础余额、产品账户、余额流水、成交幂等处理、现货资产结算、永续/交割/期权持仓更新、成交后订单保证金到持仓保证金的迁移、期权买卖双方权利金、maker/taker 手续费结算、资金费结算、强平成交后的强平费收取和保险基金入账，以及带不可变结算价的交割结算和欧式现金行权。

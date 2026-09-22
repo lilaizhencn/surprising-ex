@@ -1,7 +1,6 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.account.api.AccountApiPaths;
-import com.surprising.account.api.ProductTransferInternalAuth;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PendingProductTransfersRequest;
 import com.surprising.account.api.model.PendingProductTransfersResponse;
@@ -9,12 +8,7 @@ import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -29,15 +23,14 @@ import org.springframework.web.client.RestTemplate;
 public final class ProductAccountAccess implements ProductAccountClient {
 
     private final com.surprising.account.provider.service.AccountCommandGateway commands;
+
     private final com.surprising.account.provider.config.AccountProperties accountProperties;
-    @org.springframework.beans.factory.annotation.Value("${surprising.business.internal-token:}")
-    private String businessInternalToken;
+
     private final GatewayProperties properties;
+
     private final RestTemplate restTemplate;
 
-    public ProductAccountAccess(GatewayProperties properties, RestTemplate restTemplate,
-            com.surprising.account.provider.service.AccountCommandGateway commands,
-            com.surprising.account.provider.config.AccountProperties accountProperties) {
+    public ProductAccountAccess(GatewayProperties properties, RestTemplate restTemplate, com.surprising.account.provider.service.AccountCommandGateway commands, com.surprising.account.provider.config.AccountProperties accountProperties) {
         this.commands = commands;
         this.accountProperties = accountProperties;
         this.properties = properties;
@@ -66,13 +59,8 @@ public final class ProductAccountAccess implements ProductAccountClient {
         }
         PendingProductTransfersRequest request = new PendingProductTransfersRequest(productLine, limit);
         String audience = AccountApiPaths.TRANSFER_PENDING_PATH;
-        long timestamp = Instant.now().getEpochSecond();
         try {
-            ResponseEntity<PendingProductTransfersResponse> response = restTemplate.exchange(
-                    target(productLine, audience), HttpMethod.POST,
-                    new HttpEntity<>(request, headers(audience, timestamp,
-                            ProductTransferInternalAuth.canonical(audience, timestamp, request))),
-                    PendingProductTransfersResponse.class);
+            ResponseEntity<PendingProductTransfersResponse> response = restTemplate.exchange(target(productLine, audience), HttpMethod.POST, new HttpEntity<>(request, headers()), PendingProductTransfersResponse.class);
             PendingProductTransfersResponse body = response.getBody();
             return response.getStatusCode().is2xxSuccessful() && body != null ? body.transfers() : List.of();
         } catch (RestClientException exception) {
@@ -80,16 +68,19 @@ public final class ProductAccountAccess implements ProductAccountClient {
         }
     }
 
-    private ProductAccountAdjustment operation(String accountType, String audience,
-                                               ProductTransferOperationRequest request) {
+    private ProductAccountAdjustment operation(String accountType, String audience, ProductTransferOperationRequest request) {
         ProductLine productLine = ProductTransferCoordinator.productLine(AccountType.valueOf(accountType));
         if (productLine == accountProperties.getKafka().getProductLine()) {
             try {
-                switch (audience) {
-                    case AccountApiPaths.TRANSFER_OUT_PATH -> commands.transferOut(request);
-                    case AccountApiPaths.TRANSFER_IN_PATH -> commands.transferIn(request);
-                    case AccountApiPaths.TRANSFER_COMPLETE_PATH -> commands.completeTransfer(request);
-                    default -> throw new IllegalArgumentException("unsupported transfer operation");
+                switch(audience) {
+                    case AccountApiPaths.TRANSFER_OUT_PATH ->
+                        commands.transferOut(request);
+                    case AccountApiPaths.TRANSFER_IN_PATH ->
+                        commands.transferIn(request);
+                    case AccountApiPaths.TRANSFER_COMPLETE_PATH ->
+                        commands.completeTransfer(request);
+                    default ->
+                        throw new IllegalArgumentException("unsupported transfer operation");
                 }
                 return ProductAccountAdjustment.applied(null);
             } catch (com.surprising.account.provider.service.AccountCommandRejectedException exception) {
@@ -101,11 +92,8 @@ public final class ProductAccountAccess implements ProductAccountClient {
                 return ProductAccountAdjustment.unknown("local account transfer outcome is unknown");
             }
         }
-        long timestamp = Instant.now().getEpochSecond();
         try {
-            ResponseEntity<String> response = restTemplate.exchange(target(productLine, audience), HttpMethod.POST,
-                    new HttpEntity<>(request, headers(audience, timestamp,
-                            ProductTransferInternalAuth.canonical(audience, timestamp, request))), String.class);
+            ResponseEntity<String> response = restTemplate.exchange(target(productLine, audience), HttpMethod.POST, new HttpEntity<>(request, headers()), String.class);
             if (response.getStatusCode().is2xxSuccessful()) {
                 return ProductAccountAdjustment.applied(response.getBody());
             }
@@ -124,41 +112,20 @@ public final class ProductAccountAccess implements ProductAccountClient {
         return ProductAccountAdjustment.unknown("account provider transfer outcome is unknown HTTP " + status);
     }
 
-    private HttpHeaders headers(String audience, long timestamp, String canonical) {
+    private HttpHeaders headers() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("X-Business-Internal-Token", businessInternalToken);
-        headers.set("X-Internal-Service", ProductTransferInternalAuth.SERVICE);
-        headers.set("X-Internal-Timestamp", Long.toString(timestamp));
-        headers.set("X-Internal-Audience", audience);
-        headers.set("X-Internal-Signature", sign(canonical));
         return headers;
     }
 
     private URI target(ProductLine productLine, String audience) {
         GatewayProperties.BackendRoute account = properties.getRoutes().get("account");
         GatewayProperties.ProductRoute configured = account == null ? null : account.getProductRoutes().get(productLine);
-        GatewayProperties.BackendRoute route = configured == null || configured.getBaseUrl() == null
-                || configured.getBaseUrl().isBlank() ? null : account.resolve(productLine);
+        GatewayProperties.BackendRoute route = configured == null || configured.getBaseUrl() == null || configured.getBaseUrl().isBlank() ? null : account.resolve(productLine);
         if (route == null || route.getBaseUrl() == null || route.getBaseUrl().isBlank()) {
             throw new IllegalStateException("account route is not configured for " + productLine);
         }
         return URI.create(trimTrailingSlash(route.getBaseUrl()) + audience);
-    }
-
-    private String sign(String canonical) {
-        String secret = properties.getCustodyWallet().getSpotAccountInternalSecret();
-        if (secret == null || secret.isBlank()) {
-            throw new IllegalStateException("account provider internal secret is not configured");
-        }
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return "v1=" + Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception exception) {
-            throw new IllegalStateException("account provider internal signing failed", exception);
-        }
     }
 
     private String trimTrailingSlash(String value) {

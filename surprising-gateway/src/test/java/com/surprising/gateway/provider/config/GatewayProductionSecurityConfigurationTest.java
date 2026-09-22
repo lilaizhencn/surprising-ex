@@ -61,7 +61,6 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
         wallet.setSpotAccountBaseUrl("https://account.example.com");
-        wallet.setSpotAccountInternalSecret("spot-account-internal-secret-with-at-least-thirty-two-characters");
         wallet.setAssetScales(Map.of("USDT", 6L));
         wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
@@ -154,8 +153,6 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("SW_WALLET_ADMIN_USERNAME", "wallet-admin");
         testEnvironment.put("SW_WALLET_ADMIN_PASSWORD", "wallet-admin-secret");
         testEnvironment.put("GATEWAY_SPOT_ACCOUNT_BASE_URL", "https://account.example.com");
-        testEnvironment.put("GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET",
-                "spot-account-internal-secret-with-at-least-thirty-two-characters");
         testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT", "50000");
         testEnvironment.put("GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT", "10000");
