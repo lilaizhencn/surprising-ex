@@ -1,0 +1,444 @@
+{
+  "date": "2026-09-22",
+  "baseCommit": "48a8ef0da486731c2922c84268924735286f93f2",
+  "java": "Amazon Corretto HotSpot 27+33",
+  "maven": "3.9.16",
+  "tests": [
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleMathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.006,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickPropertiesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 14.179,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.012,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.repository.PostgresCandleSinkTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleHotCacheTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.074,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.PublicTradeEventMapperTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.004,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.SymbolRegistryServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 11.847,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 6.774,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.501,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 12.458,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.ReliableTradeKafkaSinkTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.134,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.TradeExportCheckpointTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.088,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.TradeExportServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.203,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-tools",
+      "class": "com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.007,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-tools",
+      "class": "com.surprising.aeron.tools.instrument.InstrumentSeedCoreContractTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": 0.0,
+      "skipReasons": [
+        "Environment variable [INSTRUMENT_SEED_TEST_JDBC_URL] does not exist"
+      ]
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-tools",
+      "class": "com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.344,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-tools",
+      "class": "com.surprising.aeron.tools.replay.OfflineReplayMainTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.395,
+      "skipReasons": []
+    }
+  ],
+  "totals": {
+    "tests": 67,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "passed": 66
+  },
+  "realtimeArtifact": {
+    "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+    "bytes": 179280233,
+    "sha256": "6d9d99e1b150fb4a8f8501ea01127a47e6a3843f08e533bf20e620568e1c2e40",
+    "manifest": "Manifest-Version: 1.0\r\nCreated-By: Maven JAR Plugin 3.5.1\r\nJava-Version: 27\r\nBuild-Jdk-Spec: 27\r\nImplementation-Title: surprising-realtime-provider\r\nImplementation-Version: 1.0.0-SNAPSHOT\r\nMain-Class: org.springframework.boot.loader.launch.JarLauncher\r\nStart-Class: com.surprising.realtime.provider.RealtimeApplication\r\nSpring-Boot-Version: 4.1.1\r\nSpring-Boot-Classes: BOOT-INF/classes/\r\nSpring-Boot-Lib: BOOT-INF/lib/\r\nSpring-Boot-Classpath-Index: BOOT-INF/classpath.idx\r\nSpring-Boot-Layers-Index: BOOT-INF/layers.idx\r\n\r\n"
+  },
+  "dryRuns": [
+    {
+      "product": "SPOT",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,app-media-driver,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    }
+  ],
+  "shutdownFixture": "Mock process signals: realtime TERM and observed exit precede Core TERM; no real process killed.",
+  "covered": [
+    "Real Aeron MediaDriver/Archive and embedded Kafka KRaft: committed fence, incomplete fragment, cooperative stop/resume, checkpoint lock, crash-window duplicate identity, Spring-owned worker start/stop.",
+    "Kafka Streams TopologyTestDriver: repeated exported trade produces no second candle update; existing rollup/DB retry tests pass.",
+    "Real Redis/Aeron Router subscription and snapshot recovery regression.",
+    "Six products: disabled exporter does not require storage; enabled exporter configuration loads without starting Core components; missing required config fails.",
+    "Worker retry/state and shutdown join, Kafka producer closed after init failure."
+  ],
+  "notCovered": [
+    "No full externally deployed Core/Kafka/PostgreSQL/WebSocket end-to-end run.",
+    "No sustained throughput, p99, shared-JVM heap/native budget or prolonged archive catch-up benchmark. No capacity or zero-latency-cost claim.",
+    "Instrument seed database contract skipped because INSTRUMENT_SEED_TEST_JDBC_URL is absent.",
+    "No JMH: live Core/protocol/state/replay algorithm unchanged; change is deployment and worker lifecycle."
+  ],
+  "commands": [
+    "mvn -pl surprising-realtime/surprising-realtime-provider -am -DskipTests install",
+    "mvn -pl surprising-realtime/surprising-realtime-provider,surprising-aeron-core/surprising-aeron-tools clean test",
+    "mvn -pl surprising-realtime/surprising-realtime-provider -Dtest=CommittedTradeExportIntegrationTest,MarketApplicationContextTest test",
+    "mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-realtime/surprising-realtime-provider -DskipTests package",
+    "mvn -pl surprising-aeron-core/surprising-aeron-tools clean package"
+  ],
+  "toolsArtifact": {
+    "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+    "bytes": 63756006,
+    "sha256": "282a55dcd77275072cc4d1de5282e3c71d750903d852dc0e8d09354f55e1a146",
+    "checks": "Old exporter classes absent; MediaDriver retained."
+  },
+  "logs": [
+    {
+      "path": "/tmp/trade-merge-build.log",
+      "bytes": 37326,
+      "sha256": "e63eb49e33afa47e114a00f8b5a62a44ec3ec9d0b19e7ae9fade90f4c0f8597a"
+    },
+    {
+      "path": "/tmp/trade-merge-final-focused.log",
+      "bytes": 712526,
+      "sha256": "a0931c4f5b8d3a159d1a72509da91f9dd2931f0b415caa52a63c067fa2fe1ee0"
+    },
+    {
+      "path": "/tmp/trade-merge-final-tests.log",
+      "bytes": 752769,
+      "sha256": "43386301787a29dcb4ad66e4abc62ea59ce2e50a740a9f629b04109bc0899847"
+    },
+    {
+      "path": "/tmp/trade-merge-package.log",
+      "bytes": 17045,
+      "sha256": "94b35412c67c07465e14ccd3ce2e232f846f09326c3d6ed37bb519dbc7605ad7"
+    },
+    {
+      "path": "/tmp/trade-merge-test.log",
+      "bytes": 760993,
+      "sha256": "a36bd9c3f68c2498a8a4e77f9289f671f3d5c62aeec5d4c9a3a916779f2e09a0"
+    },
+    {
+      "path": "/tmp/trade-merge-tools-final.log",
+      "bytes": 12673,
+      "sha256": "e4ca30a31b16654eaf1b476d3d9e0535205d7947ba273b32de64dfa7df2adb6d"
+    }
+  ],
+  "processCount": {
+    "fullSingleMemberLinearPerpetual": 7,
+    "baseSingleMemberLinearPerpetual": 6,
+    "excluded": "PostgreSQL, Kafka, Redis/Valkey"
+  },
+  "cleanup": "Test resources shut down by fixtures; this run temporary logs and summarized affected-module Surefire reports removed after archival; build artifacts retained. No real production stack was launched."
+}

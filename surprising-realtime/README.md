@@ -1,11 +1,11 @@
-# 统一行情应用：K 线与实时路由
+# 统一行情应用：成交导出、K 线与实时路由
 
-`surprising-realtime-provider` 现在同时运行 K 线与实时路由，默认 HTTP 端口 **9095**。
+`surprising-realtime-provider` 现在同时运行可靠成交导出、K 线与实时路由，默认 HTTP 端口 **9095**。
 盘口查询已迁入 gateway；不再部署 market-data provider。原有实时协议、Valkey 查询视图和 Core 权威状态保持不变。
 
 ## K 线链路
 
-`CommittedTradeExportMain` → 产品成交 Kafka topic → `CandlestickStreamConfiguration` →
+`TradeExportService`（独立线程）→ 产品成交 Kafka topic → `CandlestickStreamConfiguration` →
 RocksDB 聚合/去重/水位线 → PostgreSQL 历史与 K 线 Kafka 事件。
 K 线更新同时以本地方法进入 `RealtimeRouter.offer` 的有界队列，由路由线程按订阅推送。
 不再创建本进程的 `RealtimeJsonPublisher` 或通过 Aeron 将 K 线回送给自己。
@@ -26,7 +26,7 @@ Kafka Streams 线程只做聚合、持久化与非阻塞入队；路由线程负
 - 保留旧 market-data 数据库、Kafka Streams application-id、topic/changelog；迁移前停止旧实例。
   `CANDLESTICK_STATE_DIR` 指向原状态目录，或在空目录从原 changelog 恢复，不能误改 application-id 后当成无损迁移。
   本地脚本默认使用本轮运行目录下 `candlestick-state`。
-- 继续运行成交导出器才能获得新的真实成交 K 线；Core 仍独立，资金账本不在行情应用中。
+- `TRADE_EXPORT_ENABLED=true` 在本进程启动成交导出线程，才能持续获得真实成交 K 线；它与 `REALTIME_ENABLED` 独立。Core 仍独立，行情中的回放状态不是交易权威账本。
 - 部署数据源、Kafka、Valkey、`BUSINESS_INTERNAL_TOKEN` 和当前产品配置。RocksDB 原有 native 内存预算仍需保留，合并不表示这些缓存消失。
 
 ## 实时行情、私有状态和 Valkey 查询
@@ -144,22 +144,47 @@ Aeron Sender/Outbox 同时提供 sent/dropped/failures/droppedBatches 计数。�
 
 ## 可靠成交与 K 线
 
-`CommittedTradeExportMain` 是独立进程，从 Aeron Archive **已提交**范围回放 Core 命令，恢复确定性成交，写入原有各产品线 `match.trades.v1` topic。
-它不消费可丢失的 realtime outbox，不在 live Core 内等待 Kafka。
+`com.surprising.realtime.provider.export.TradeExportService` 通过 Spring 生命周期管理独立的
+`committed-trade-export` 线程；`CommittedTradeExporter` 从 Aeron Archive **已提交**范围回放 Core 命令，
+恢复确定性成交，写入原有各产品线 `match.trades.v1` topic。原 tools 中的独立 Main 已删除。
+它不消费可丢失的 realtime outbox，不在 live Core 或 Router 线程内等待 Kafka。
 
-```text
-java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
-  --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
-  -cp surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar \
-  com.surprising.aeron.tools.CommittedTradeExportMain \
-  PRODUCT_LINE CLUSTER_DIR AERON_DIR ARCHIVE_CONTROL_CHANNEL KAFKA_BOOTSTRAP CHECKPOINT [CLUSTER_ID]
-```
+统一启动脚本自动传入下列环境变量；直接启动行情 JAR 时也需要配置：
+
+| 配置 | 含义 |
+| --- | --- |
+| `TRADE_EXPORT_ENABLED` | 默认 false；U 永续完整部署脚本默认 true |
+| `TRADE_EXPORT_CLUSTER_DIR` | 本产品 Core 成员的 cluster 目录（RecordingLog） |
+| `TRADE_EXPORT_AERON_DIR` | 同一 Core 成员的 Aeron 目录，**不是** app MediaDriver 目录 |
+| `TRADE_EXPORT_ARCHIVE_CHANNEL` | 同一成员的 Archive 控制通道 |
+| `TRADE_EXPORT_CHECKPOINT` | 原导出 checkpoint 文件路径，迁移时保留 |
+| `TRADE_EXPORT_CLUSTER_ID` | 可选；默认使用本产品的 ProductLineClusterLayout ID |
+| `TRADE_EXPORT_KAFKA_CONFIG` | 可选 Kafka 安全配置文件，不更换 checkpoint/topic/事务身份 |
+
+产品线和 Kafka bootstrap 复用本应用 `surprising.candlestick.kafka` 配置。
+`surprising.trade-export.checkpoint-interval` 默认 60s；`retry-interval` 默认 5s。
+异常时关闭本次资源，从持久化 checkpoint 重试；损坏 checkpoint 或缺失历史不会跳过，需人工修复。
+`/actuator/health/tradeExport` 提供导出组件状态（整体 health 同时包含该组件）；
+状态 UP 表示资源已连接且找到本产品 commit counter，**不表示导出已追平**。
+默认 liveness/readiness 探针保持独立，避免导出故障触发整个行情进程反复重启。
+
+停止时先请求导出线程结束，在完整 Cluster 消息边界发送剩余成交并保存 checkpoint，再关闭资源。
+线程等待上限 90s，Spring 每阶段关闭预算 120s；脚本先向 realtime 发 TERM 并等待最多 120s，
+之后才停止 Core/Archive。超时强制终止仍按最后持久化 checkpoint 恢复。
+Kafka 默认 max.block=10s、request.timeout=10s、delivery.timeout=30s；自定义 Kafka 配置若增大阻塞时间，
+需要相应评估关闭预算。正常线程退出不通过 interrupt 打断 Kafka 提交或快照写入。
+
+迁移前先停止旧 trade-export（避免事务 producer 相互 fencing），将 `TRADE_EXPORT_CHECKPOINT` 指向原文件；
+同产品只开一个导出线程。旧 checkpoint 格式、topic、tradeId/sequence 与事务 ID 均不变。
+realtime 现在依赖 Core service 的**回放库**，显式组件扫描不包含 Core 配置，不会启动交易集群；
+权威交易 Core 仍是独立进程。回放状态、Kafka、RocksDB 和实时队列共享 heap/GC，需要重新评估行情内存预算。
+关闭内嵌导出不影响实时 WebSocket 成交链路，但 K 线失去该来源的新成交。
 
 checkpoint 是 exporter 自己的 Core 快照/已处理logPosition/tradeSequence，SHA-256校验，Kafka事务确认后才原子保存。
 commit counter 暂停在 Aeron 分片中间时，恢复游标保留在前一个完整 Cluster 命令后；后续重读未完成命令，不从中间分片续读。
 Crash 在 Kafka确认与保存之间会重发相同 tradeId/sequence；K线按 sequence 去重，Kafka消费者使用 read_committed。
 Kafka长时间故障会使 exporter 落后，不能推进 checkpoint；Archive 保留期必须覆盖 exporter 的恢复位置。
-新 exporter 从0开始，需要完整保留的记录；缺失历史直接失败，不默默跳到当前。此进程读取本机/共享目录 RecordingLog 和 commit counter，部署在可访问这些数据的集群成员旁。
+新 exporter 从0开始，需要完整保留的记录；缺失历史直接失败，不默默跳到当前。行情进程需要访问该成员的 RecordingLog、Aeron 共享内存目录和 Archive，部署时必须保留这些挂载/权限。
 不同产品有独立 topic、checkpoint、transactional.id；同产品只允许一个活动 exporter。
 
 ## 验证
@@ -215,3 +240,21 @@ TASK1_TEST_ROOT="$PWD/.local-logs/market-merge-preflight-20260922" bash scripts/
 同时启用应用 MediaDriver 与成交导出后共 8 个。与此前完整链路的 9 个 JVM 相比减少一个；不计 PostgreSQL/Kafka/Valkey。
 
 最终 JAR 检查通过：gateway 包含盘口入口且无 K 线聚合，realtime 包含 K 线与 Router 且无旧 market-data 启动入口；两者均不包含 Core service 运行依赖。测试进程已结束，真实 Redis/Aeron 测试资源已关闭，临时日志、preflight 数据及已汇总测试报告已清理。构建包 SHA-256 保存在上述验证摘要。
+
+## 2026-09-22 成交导出合入行情验证
+
+基线 `48a8ef0d`；HotSpot Corretto JDK 27、Maven 3.9.16。
+realtime provider 最终 47 项通过，tools 19 项通过、1 项因缺少 `INSTRUMENT_SEED_TEST_JDBC_URL` 跳过；无失败。
+真实 Aeron Archive + 内嵌 Kafka 检查已提交范围、分片停机恢复、重复成交身份、checkpoint 排他锁和线程启停。
+Kafka Streams 拓扑验证重复成交不重复更新 K 线；真实 Redis/Aeron Router 回归通过。
+六产品应用上下文验证导出开关、配置必填及不启动 Core；24 组脚本 dry-run 与模拟停机顺序通过。
+
+完整单成员 U 永续从 8 个减至 **7 个 JVM**：Core、gateway、price、realtime、derivatives-lifecycle、maker、app-media-driver。
+基础配置仍为 6 个；成交导出开关不增加进程。原来的独立 exporter Main 与 tools 专用依赖已删除。
+realtime JAR 的启动类仍为 RealtimeApplication；增加 Core 回放库，不扫描/启动 Core 配置。
+
+未执行完整外部 Core/Kafka/PostgreSQL/WebSocket 端到端部署、历史追赶压力、长稳、共享 JVM 内存及 p99 验收；
+不能据此声称吞吐提升或无延迟影响。Core 主链路、协议及确定性回放算法未改，本轮未做 Core JMH。
+验证命令、逐类测试、24 组启动顺序和构建 SHA-256 见
+[验证摘要](../docs/validation/trade-export-realtime-merge-20260922.json)。
+本轮测试资源已关闭，临时日志和已汇总测试报告已清理，保留构建产物。

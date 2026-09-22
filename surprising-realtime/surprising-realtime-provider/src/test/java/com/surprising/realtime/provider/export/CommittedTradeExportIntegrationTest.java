@@ -1,4 +1,4 @@
-package com.surprising.aeron.tools.export;
+package com.surprising.realtime.provider.export;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -57,7 +57,6 @@ class CommittedTradeExportIntegrationTest {
         String control = "aeron:udp?endpoint=127.0.0.1:" + port;
         Path clusterDir = temp.resolve("cluster"), checkpoint = temp.resolve("export/checkpoint");
         Files.createDirectories(clusterDir);
-        String previous = System.getProperty("surprising.trade-export.stop-after-position");
         try (var driver =
                         MediaDriver.launch(
                                 new MediaDriver.Context()
@@ -163,6 +162,16 @@ class CommittedTradeExportIntegrationTest {
                         beforeTrade
                                 + 128); // Only the first fragment of the taker command is
                                         // committed.
+                // Stop after observing an incomplete committed command, then resume from the last full message.
+                var cancel = new java.util.concurrent.atomic.AtomicBoolean(true);
+                var observations = new java.util.concurrent.atomic.AtomicInteger();
+                var partialConfig = new TradeExportProperties(clusterDir, directory, control, checkpoint, 0, null, null, null);
+                new CommittedTradeExporter(partialConfig, ProductLine.SPOT, broker.getBrokersAsString())
+                        .run(cancel, ready -> {
+                            if (ready && observations.incrementAndGet() == 2) cancel.set(false);
+                        }, Long.MAX_VALUE);
+                assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).logPosition()).isEqualTo(beforeTrade);
+                assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).tradeSequence()).isZero();
                 var export =
                         java.util.concurrent.CompletableFuture.runAsync(
                                 () -> {
@@ -191,6 +200,25 @@ class CommittedTradeExportIntegrationTest {
                 export.get(15, TimeUnit.SECONDS);
                 assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).tradeSequence())
                         .isEqualTo(1);
+                // Spring-owned thread can resume the same checkpoint and stop without a JVM shutdown hook.
+                var config = new TradeExportProperties(clusterDir, directory, control, checkpoint, 0, null, null, null);
+                var candles = new com.surprising.candlestick.provider.config.CandlestickProperties();
+                candles.getKafka().setProductLine(ProductLine.SPOT);
+                candles.getKafka().setBootstrapServers(broker.getBrokersAsString());
+                var service = new TradeExportService(config, candles);
+                try {
+                    service.start();
+                    long readyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+                    while (!service.health().getStatus().equals(org.springframework.boot.health.contributor.Status.UP)
+                            && System.nanoTime() < readyDeadline) Thread.sleep(10);
+                    assertThat(service.health().getStatus()).isEqualTo(org.springframework.boot.health.contributor.Status.UP);
+                    assertThatThrownBy(() -> runExport(clusterDir, directory, control,
+                            broker.getBrokersAsString(), checkpoint, afterTrade))
+                            .isInstanceOf(java.nio.channels.OverlappingFileLockException.class);
+
+                } finally { service.stop(); }
+                assertThat(service.isRunning()).isFalse();
+                assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).logPosition()).isEqualTo(afterTrade);
                 // Simulate Kafka commit succeeding just before the local checkpoint rename.
                 Files.write(checkpoint, beforeCheckpoint);
                 runExport(
@@ -228,20 +256,16 @@ class CommittedTradeExportIntegrationTest {
             }
         } finally {
             broker.destroy();
-            if (previous == null)
-                System.clearProperty("surprising.trade-export.stop-after-position");
-            else System.setProperty("surprising.trade-export.stop-after-position", previous);
+
         }
     }
 
     private static void runExport(
             Path cluster, String directory, String control, String kafka, Path checkpoint, long end)
             throws Exception {
-        System.setProperty("surprising.trade-export.stop-after-position", Long.toString(end));
-        CommittedTradeExportMain.main(
-                new String[] {
-                    "SPOT", cluster.toString(), directory, control, kafka, checkpoint.toString()
-                });
+        var config = new TradeExportProperties(cluster, directory, control, checkpoint, 0, null, null, null);
+        new CommittedTradeExporter(config, ProductLine.SPOT, kafka)
+                .run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, end);
     }
 
     private static long offer(ExclusivePublication publication, CoreMessage command)

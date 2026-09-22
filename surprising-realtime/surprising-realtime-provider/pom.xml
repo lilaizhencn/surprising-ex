@@ -8,6 +8,13 @@
     </parent>
     <artifactId>surprising-realtime-provider</artifactId>
     <dependencies>
+        <!-- Deterministic replay library only; RealtimeApplication does not scan or start Core. -->
+        <dependency>
+            <groupId>com.surprising</groupId><artifactId>surprising-aeron-service</artifactId><version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId><artifactId>spring-kafka-test</artifactId><scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-client</artifactId>

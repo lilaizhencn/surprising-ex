@@ -71,6 +71,11 @@ class CandlestickRollupTopologyTest {
             trades.pipeInput("BTC-USDT", new PublicTradeEvent(
                     "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace"));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
+            // Export can repeat the same identity after Kafka commit / checkpoint crash window.
+            trades.pipeInput("BTC-USDT", new PublicTradeEvent(
+                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace"));
+            assertThat(output.isEmpty()).isTrue();
+
 
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.isEmpty()).isTrue();

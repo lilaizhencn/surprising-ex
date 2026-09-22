@@ -1,4 +1,4 @@
-package com.surprising.aeron.tools.export;
+package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.*;
@@ -25,7 +25,14 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
         this.product = product;
         this.tradeSequence = tradeSequence;
         topic = ProductTopicNames.of(product).matchTradesTopic();
-        producer.initTransactions();
+        try {
+            producer.initTransactions();
+        } catch (RuntimeException failure) {
+            // A failed constructor is not closed by try-with-resources; retries must not leak producers.
+            try { producer.close(java.time.Duration.ofSeconds(10)); }
+            catch (RuntimeException closing) { failure.addSuppressed(closing); }
+            throw failure;
+        }
     }
 
     void publish(List<RealtimeFrame> frames) {

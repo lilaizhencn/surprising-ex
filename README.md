@@ -146,3 +146,8 @@ flowchart TB
 测试服务器单节点永续部署见 [deployment/test-single-node/README.md](deployment/test-single-node/README.md)。该入口只启用 `LINEAR_PERPETUAL`，不启动 wallet；生产高可用仍需三节点切主和资金链路验收。
 
 用户前端项目为 `surprising-ex-web`、`surprising-client`，后台管理前端项目为 `surprising-admin-web`，与本仓库分别维护。
+
+
+当前 U 永续单节点完整部署：gateway、Core、price、realtime（含 K 线与可靠成交导出）、
+derivatives-lifecycle（含 funding）、maker、应用侧 MediaDriver，共 7 个 Java 进程。
+成交导出由 `TRADE_EXPORT_ENABLED` 控制，配置与迁移要求见 [行情应用说明](surprising-realtime/README.md)。

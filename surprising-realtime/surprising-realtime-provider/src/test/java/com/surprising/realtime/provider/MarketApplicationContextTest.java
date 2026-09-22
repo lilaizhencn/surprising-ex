@@ -21,11 +21,46 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class MarketApplicationContextTest {
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path temp;
+
+    @org.junit.jupiter.api.Test
+    void exportRequiresExplicitStorageConfiguration() {
+        context(ProductLine.LINEAR_PERPETUAL, false)
+                .withPropertyValues("surprising.trade-export.enabled=true")
+                .run(ctx -> assertThat(ctx).hasFailed());
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void exportEnabledWithoutRouterDoesNotStartCore(ProductLine line) {
+        context(line, false).withPropertyValues("surprising.trade-export.enabled=true",
+                "surprising.trade-export.cluster-directory=" + temp,
+                "surprising.trade-export.aeron-directory=" + temp.resolve("driver"),
+                "surprising.trade-export.archive-control-channel=aeron:ipc",
+                "surprising.trade-export.checkpoint=" + temp.resolve("checkpoint"))
+            .withBean("disableExportWorker", BeanPostProcessor.class, () -> new BeanPostProcessor() {
+                @Override public Object postProcessAfterInitialization(Object bean, String name) {
+                    if (bean instanceof com.surprising.realtime.provider.export.TradeExportService)
+                        return mock(com.surprising.realtime.provider.export.TradeExportService.class);
+                    return bean;
+                }
+            }).run(ctx -> {
+                assertThat(ctx).hasNotFailed()
+                    .hasSingleBean(com.surprising.realtime.provider.export.TradeExportService.class)
+                    .hasSingleBean(com.surprising.realtime.provider.export.TradeExportProperties.class)
+                    .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class)
+                    .doesNotHaveBean(RealtimeRouter.class);
+                assertThat(ctx.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class)
+                    .getKafka().getProductLine()).isEqualTo(line);
+            });
+    }
+
     @ParameterizedTest @EnumSource(ProductLine.class)
     void candlesRemainAvailableWithRouterDisabled(ProductLine line) {
         context(line, false).run(ctx -> {
             assertThat(ctx).hasNotFailed().hasSingleBean(CandleQueryService.class)
-                    .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class);
+                    .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class)
+                    .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
+                    .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class);
             MockMvcBuilders.webAppContextSetup(ctx).build()
                     .perform(get("/api/v1/candlestick/candles").param("symbol", "BTC-USDT")
                             .param("period", "1m").param("startTime", "2026-09-20T00:00:00Z")

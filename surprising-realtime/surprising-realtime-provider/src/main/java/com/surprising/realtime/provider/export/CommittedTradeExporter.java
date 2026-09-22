@@ -1,4 +1,4 @@
-package com.surprising.aeron.tools.export;
+package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.orchestration.CommittedTradeReplay;
@@ -18,21 +18,25 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
-/** Dedicated process: committed Archive -> deterministic replay -> reliable trade Kafka topic. */
-public final class CommittedTradeExportMain {
-    private CommittedTradeExportMain() {}
+/** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
+final class CommittedTradeExporter {
+    private final TradeExportProperties config;
+    private final ProductLine product;
+    private final String bootstrapServers;
 
-    public static void main(String[] args) throws Exception {
-        if (args.length < 6 || args.length > 7)
-            throw new IllegalArgumentException(
-                    "usage: CommittedTradeExportMain PRODUCT_LINE CLUSTER_DIR AERON_DIR"
-                            + " ARCHIVE_CONTROL_CHANNEL KAFKA_BOOTSTRAP CHECKPOINT [CLUSTER_ID]");
-        ProductLine product = ProductLine.requireExternalCode(args[0]);
-        Path checkpointPath = Path.of(args[5]).toAbsolutePath();
+    CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers) {
+        this.config = config;
+        this.product = product;
+        this.bootstrapServers = bootstrapServers;
+    }
+
+    void run(java.util.concurrent.atomic.AtomicBoolean running, java.util.function.Consumer<Boolean> connected, long stopAfter) throws Exception {
+        Path checkpointPath = config.checkpoint().toAbsolutePath();
         Files.createDirectories(checkpointPath.getParent());
-        int clusterId = args.length == 7 ? Integer.parseInt(args[6]) : 0;
+        int clusterId = config.clusterId() == null
+                ? com.surprising.aeron.protocol.ProductLineClusterLayout.clusterId(product) : config.clusterId();
         Properties props = new Properties();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, args[4]);
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringSerializer");
@@ -45,9 +49,12 @@ public final class CommittedTradeExportMain {
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.LINGER_MS_CONFIG, "2");
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, "10000");
+        props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "10000");
+        props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, "30000");
         // Optional Kafka security settings are loaded from a file, never printed.
-        String kafkaConfig = System.getProperty("surprising.trade-export.kafka-config");
-        if (kafkaConfig != null)
+        String kafkaConfig = config.kafkaConfig();
+        if (kafkaConfig != null && !kafkaConfig.isBlank())
             try (var input = Files.newInputStream(Path.of(kafkaConfig))) {
                 props.load(input);
             }
@@ -56,28 +63,7 @@ public final class CommittedTradeExportMain {
                 "surprising-committed-trades-" + product.name());
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         props.put(ProducerConfig.ACKS_CONFIG, "all");
-        long stopAfter =
-                Long.getLong("surprising.trade-export.stop-after-position", Long.MAX_VALUE);
-        long checkpointInterval =
-                TimeUnit.MILLISECONDS.toNanos(
-                        Math.max(
-                                1000,
-                                Long.getLong("surprising.trade-export.checkpoint-millis", 60000L)));
-        var running = new java.util.concurrent.atomic.AtomicBoolean(true);
-        Thread owner = Thread.currentThread();
-        Thread hook =
-                new Thread(
-                        () -> {
-                            running.set(false);
-                            LockSupport.unpark(owner);
-                            try {
-                                owner.join(60_000);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
-                        },
-                        "trade-export-shutdown");
-        Runtime.getRuntime().addShutdownHook(hook);
+        long checkpointInterval = config.checkpointInterval().toNanos();
         try (var lockChannel =
                         FileChannel.open(
                                 checkpointPath.resolveSibling(
@@ -94,19 +80,19 @@ public final class CommittedTradeExportMain {
                                     new KafkaProducer<String, String>(props),
                                     product,
                                     checkpoint.tradeSequence());
-                    var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(args[2]));
+                    var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(config.aeronDirectory()));
                     var archive =
                             AeronArchive.connect(
                                     new AeronArchive.Context()
                                             .aeron(aeron)
                                             .ownsAeronClient(false)
-                                            .controlRequestChannel(args[3])
+                                            .controlRequestChannel(config.archiveControlChannel())
                                             .controlResponseChannel("aeron:ipc"));
-                    var log = new RecordingLog(Path.of(args[1]).toFile(), false)) {
+                    var log = new RecordingLog(config.clusterDirectory().toFile(), false)) {
                 long cursor = checkpoint.logPosition();
                 long lastPartialCommit = -1;
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
-                while (running.get()
+                exportLoop: while (running.get()
                         && !Thread.currentThread().isInterrupted()
                         && cursor < stopAfter) {
                     int counter =
@@ -115,9 +101,11 @@ public final class CommittedTradeExportMain {
                                     AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID,
                                     clusterId);
                     if (counter < 0) {
+                        connected.accept(false);
                         LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(100));
                         continue;
                     }
+                    connected.accept(true);
                     long committed =
                             Math.min(aeron.countersReader().getCounterValue(counter), stopAfter);
                     if (committed <= cursor || committed == lastPartialCommit) {
@@ -237,12 +225,13 @@ public final class CommittedTradeExportMain {
                                     22001)) {
                         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                         while (subscription.imageCount() == 0) {
+                            if (!running.get()) break exportLoop;
                             if (System.nanoTime() > deadline)
                                 throw new IllegalStateException("archive replay image unavailable");
                             LockSupport.parkNanos(100_000);
                         }
                         Image image = subscription.imageAtIndex(0);
-                        while (image.position() < safeEnd && !image.isClosed()) {
+                        while (running.get() && image.position() < safeEnd && !image.isClosed()) {
                             int work =
                                     image.poll(
                                             (buffer, offset, length, header) -> {
@@ -262,12 +251,12 @@ public final class CommittedTradeExportMain {
                                 LockSupport.parkNanos(100_000);
                             } else deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                         }
-                        if (image.position() != safeEnd)
+                        if (running.get() && image.position() != safeEnd)
                             throw new IllegalStateException("incomplete committed archive replay");
                         sink.publish(trades);
                         // A commit counter can stop at a fragment boundary. Resume from the last
                         // complete Cluster message, never from the middle of a fragmented command.
-                        cursor = partialMessage[0] ? delivered[0] : safeEnd;
+                        cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
                         lastPartialCommit = partialMessage[0] ? committed : -1;
                         if (partialMessage[0])
                             LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
@@ -285,11 +274,6 @@ public final class CommittedTradeExportMain {
                 }
                 new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                         .write(checkpointPath);
-            }
-        } finally {
-            try {
-                Runtime.getRuntime().removeShutdownHook(hook);
-            } catch (IllegalStateException shutdown) {
             }
         }
     }

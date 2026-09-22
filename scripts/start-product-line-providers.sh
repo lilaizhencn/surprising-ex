@@ -490,24 +490,13 @@ start_realtime_service() {
   java_args_for realtime
   start_owned_process "realtime" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
     REALTIME_ENABLED="$REALTIME_ENABLED" CANDLESTICK_STATE_DIR="$RUN_DIR/candlestick-state" \
+    TRADE_EXPORT_ENABLED="$TRADE_EXPORT_ENABLED" TRADE_EXPORT_CHECKPOINT="$TRADE_EXPORT_CHECKPOINT" \
+    TRADE_EXPORT_CLUSTER_DIR="$RUN_DIR/aeron/$(product_line_data_name)/node0/cluster" \
+    TRADE_EXPORT_AERON_DIR="$(core_aeron_directory)" \
+    TRADE_EXPORT_ARCHIVE_CHANNEL="$(archive_control_channel)" TRADE_EXPORT_CLUSTER_ID="$(cluster_id)" \
     AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
     SERVER_PORT="$REALTIME_ROUTER_PORT" SPRING_APPLICATION_JSON="$router_json" \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path realtime)"
-}
-
-start_trade_export() {
-  mkdir -p "$(dirname "$TRADE_EXPORT_CHECKPOINT")"
-  java_args_for trade-export
-  start_owned_process "trade-export" '' "${COMMON_ENV[@]}" \
-    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -cp "$(jar_path tools)" \
-    com.surprising.aeron.tools.export.CommittedTradeExportMain \
-    "$PRODUCT_LINE" \
-    "$RUN_DIR/aeron/$(product_line_data_name)/node0/cluster" \
-    "$(core_aeron_directory)" \
-    "$(archive_control_channel)" \
-    "$KAFKA_BOOTSTRAP_SERVERS" \
-    "$TRADE_EXPORT_CHECKPOINT" \
-    "$(cluster_id)"
 }
 
 start_stack() {
@@ -521,7 +510,6 @@ start_stack() {
   if [[ "$REALTIME_ENABLED" == true ]]; then
     start_app_media_driver
   fi
-  [[ "$TRADE_EXPORT_ENABLED" == true ]] && start_trade_export
   start_http_service gateway
   start_http_service price
   start_realtime_service
@@ -534,6 +522,13 @@ start_stack() {
 stop_processes() {
   [[ -d "$PID_DIR" ]] || return 0
   local pid_file pid deadline launchctl_bin
+  # Finish the embedded exporter while Core Archive and its MediaDriver are still available.
+  if [[ -f "$PID_DIR/realtime.pid" ]]; then
+    pid="$(<"$PID_DIR/realtime.pid")"
+    kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
+    deadline=$((SECONDS + 120))
+    while kill -0 "$pid" 2>/dev/null && (( SECONDS < deadline )); do sleep 1; done
+  fi
   for pid_file in "$PID_DIR"/*.pid; do
     [[ -e "$pid_file" ]] || continue
     pid="$(<"$pid_file")"
@@ -602,7 +597,6 @@ print_status() {
     required_services+=("core-node$index")
   done
   [[ "$REALTIME_ENABLED" == true ]] && required_services+=(app-media-driver)
-  [[ "$TRADE_EXPORT_ENABLED" == true ]] && required_services+=(trade-export)
   for service in "${SERVICES[@]}"; do
     service_enabled "$service" && required_services+=("$service")
   done
@@ -660,7 +654,6 @@ print_dry_run() {
   local index
   for ((index = 0; index < member_count; index++)); do (( index > 0 )) && printf ','; printf 'host-core-node%s' "$index"; done
   [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver'
-  [[ "$TRADE_EXPORT_ENABLED" == true ]] && printf ',trade-export'
   printf ',gateway,price,realtime'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \

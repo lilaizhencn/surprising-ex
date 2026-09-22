@@ -96,3 +96,14 @@ systemctl stop surprising-linear-perpetual
 ## 当前不包含的验收
 
 这套 unit 只解决单节点测试启动，不等于生产高可用。尚未完成三节点切主、长期容量、真实外部指数源稳定性、完整下单/成交/持仓/强平/资金费资金守恒验收；在这些验收完成前，不应把该服务器当作生产交易节点。
+
+
+### 成交导出合入行情进程（2026-09-22）
+
+`TRADE_EXPORT_ENABLED=true` 现在在 realtime 内启动独立导出线程，不再创建 trade-export PID/JAR 进程。
+U 永续单 Core 成员的完整部署为 7 个 JVM：Core、gateway、price、realtime、derivatives-lifecycle、maker、app-media-driver。
+基础部署为 6 个，开启成交导出不再增加 JVM；不计 PostgreSQL/Kafka/Valkey。
+脚本使用原 `$RUN_DIR/trade-export/checkpoint.bin`，迁移运行目录时必须显式指定旧 `TRADE_EXPORT_CHECKPOINT`。
+先停止旧 exporter，再开启合并后的实例；保持原产品线、数据库、Kafka Streams application-id 和状态目录。
+停机先等待 realtime 关闭导出，再停止 Core/Archive。行情和回放共享内存，原独立 exporter 的状态内存不会凭空消失。
+详细配置及恢复边界见 [realtime README](../../surprising-realtime/README.md)。

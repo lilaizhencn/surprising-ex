@@ -2,6 +2,8 @@ server:
   port: ${REALTIME_ROUTER_PORT:9095}
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 120s
   cloud:
     openfeign:
       client:
@@ -48,6 +50,16 @@ management:
         enabled: true
 
 surprising:
+  trade-export:
+    enabled: ${TRADE_EXPORT_ENABLED:false}
+    cluster-directory: ${TRADE_EXPORT_CLUSTER_DIR:}
+    aeron-directory: ${TRADE_EXPORT_AERON_DIR:}
+    archive-control-channel: ${TRADE_EXPORT_ARCHIVE_CHANNEL:}
+    checkpoint: ${TRADE_EXPORT_CHECKPOINT:}
+    cluster-id: ${TRADE_EXPORT_CLUSTER_ID:}
+    kafka-config: ${TRADE_EXPORT_KAFKA_CONFIG:}
+    checkpoint-interval: 60s
+    retry-interval: 5s
   candlestick:
     periods: [ "1m", "5m", "15m", "30m", "1h", "4h", "1d" ]
     kafka:
