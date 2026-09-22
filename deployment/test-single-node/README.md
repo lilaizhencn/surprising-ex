@@ -6,9 +6,8 @@
 
 1. 连接现有数据库、Kafka 和 Redis，确认依赖可用并初始化缺失 schema。
 2. 启动一个 Aeron Core 节点；节点成为单节点 Leader 后，ClusterProbe 才算就绪。
-3. 启动应用级 Aeron MediaDriver；行情 Router 在 gateway 就绪后随行情应用启动。
-4. 启动成交导出器，从 Aeron Archive 的已提交位置恢复可靠 `match.trades` 事件。
-5. 按 `gateway（身份/订单/账户/合约）→ price → realtime（K 线/路由）→ derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
+3. 启动 gateway（身份/订单/账户/合约），由它内嵌启动应用侧共享 Aeron MediaDriver。
+4. gateway 就绪后，按 `price → realtime（成交导出/K 线/路由）→ derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
 
 Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍生品后台。资金权威状态仍由独立 Core 持有，各业务的 Kafka consumer group 和资金费/强平调度边界保留。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
 
@@ -107,3 +106,12 @@ U 永续单 Core 成员的完整部署为 7 个 JVM：Core、gateway、price、r
 先停止旧 exporter，再开启合并后的实例；保持原产品线、数据库、Kafka Streams application-id 和状态目录。
 停机先等待 realtime 关闭导出，再停止 Core/Archive。行情和回放共享内存，原独立 exporter 的状态内存不会凭空消失。
 详细配置及恢复边界见 [realtime README](../../surprising-realtime/README.md)。
+
+
+### 应用侧 Driver 合入 gateway（2026-09-22）
+
+当前完整部署继续减少到 6 个 JVM：Core、gateway、price、realtime、derivatives-lifecycle、maker。
+`REALTIME_ENABLED=true` 时 gateway 管理共享 Driver，`APP_AERON_DIR` 的目录含义不变；
+不再有 app-media-driver PID/log，Driver 诊断进入 gateway 日志。
+迁移先停止旧 Driver，再启动新 gateway；旧进程仍占有目录时启动会失败，不会强制覆盖。
+此变更不合并 Core 的 Driver，也不改变成交导出连接的 Core Archive 目录。

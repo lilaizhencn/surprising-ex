@@ -149,5 +149,5 @@ flowchart TB
 
 
 当前 U 永续单节点完整部署：gateway、Core、price、realtime（含 K 线与可靠成交导出）、
-derivatives-lifecycle（含 funding）、maker、应用侧 MediaDriver，共 7 个 Java 进程。
+derivatives-lifecycle（含 funding）、maker，共 6 个 Java 进程。应用侧共享 MediaDriver 内嵌在 gateway 中。
 成交导出由 `TRADE_EXPORT_ENABLED` 控制，配置与迁移要求见 [行情应用说明](surprising-realtime/README.md)。

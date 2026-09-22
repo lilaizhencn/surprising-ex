@@ -165,3 +165,29 @@ surprising:
 mvn -pl :surprising-gateway -am test
 mvn -pl :surprising-gateway -am spring-boot:run
 ```
+
+
+## 内嵌应用侧 Aeron MediaDriver（2026-09-22）
+
+`config/GatewayMediaDriverConfiguration.java` 在 `surprising.realtime.enabled=true` 时，
+于 gateway JVM 内启动 `appMediaDriver`，模式固定 SHARED。
+必填 `surprising.realtime.directory`（环境变量 `SURPRISING_REALTIME_DIRECTORY`）；
+统一脚本从 `APP_AERON_DIR` 设置，price/realtime 继续连接相同目录。
+关闭实时功能不创建 Driver，也不要求配置该目录。
+
+`RealtimeWebSocketBridge` 明确依赖此 Driver：先创建 Driver，再启动接收器；Spring 关闭时先关闭接收器，再关闭 Driver。
+不强制删除现有目录，Aeron 检查心跳后拒绝覆盖活跃 Driver；正常重启复用目录，启动失败也由 Spring 清理已创建资源。
+Core 及订单客户端池原有 Driver 保持各自生命周期，交易主链路不迁移到应用侧 Driver。
+
+迁移先停止旧独立 app-media-driver，再启动新 gateway；同目录只允许一个所有者。
+启动顺序为 Core → gateway（内嵌 Driver）→ price → realtime（含成交导出/K 线）→ derivatives-lifecycle → maker。
+完整 U 永续单节点为 6 个 Java 进程，不包含 PostgreSQL/Kafka/Valkey。
+gateway 重启时，同机共享该 Driver 的实时链路会暂时断开；共享 JVM 的 GC/CPU/内存故障域也扩大，未据此承诺性能提升。
+
+验证：HotSpot Corretto JDK 27 / Maven 3.9.16。gateway 525 项通过、34 项外部环境条件跳过；
+realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 跳过、无失败**。
+7 项新 Driver 测试覆盖开关/必填目录、跨 JVM 的 IPC/UDP、WebSocket 关闭顺序、活跃目录排他及重启重连。
+24 组产品线/开关 dry-run 通过，U 永续均为 6 个 JVM；打包确认包含内嵌 Driver 配置且不包含 Core service 运行依赖。
+未测完整部署、共享 JVM 内存预算、持续吞吐及 p99，不能据此声称零性能影响。
+命令、逐类结果/跳过原因和 JAR SHA-256 见
+[验证摘要](../docs/validation/gateway-media-driver-20260922.json)。本轮测试进程已结束，临时日志及已汇总报告已清理。

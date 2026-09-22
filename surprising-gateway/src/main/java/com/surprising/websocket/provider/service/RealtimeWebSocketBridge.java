@@ -20,6 +20,7 @@ import java.time.*;
 import java.util.*;
 
 @Component
+@org.springframework.context.annotation.DependsOn("appMediaDriver")
 @ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
 public final class RealtimeWebSocketBridge
         implements SubscriptionRegistry.RouteLifecycle, AutoCloseable {

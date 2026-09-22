@@ -1,0 +1,1531 @@
+{
+  "date": "2026-09-22",
+  "baseCommit": "cb17d821a2ecf19904a9fdbdc49f1e1e37b2cefc",
+  "java": "Amazon Corretto HotSpot 27+33",
+  "maven": "3.9.16",
+  "tests": [
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.config.AccountKafkaConfigurationTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.023,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.AccountControllerInternalAuthTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.079,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.PerpetualAccountStateInternalControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.06,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.ProductTransferInternalControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.096,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.repository.SingleTableRepositoryBoundaryTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.026,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountAeronGatewayTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.068,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountCommandGatewayTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.016,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountMarginReleaseMathTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.007,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountServiceLocalSnapshotTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.092,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.ExpiringContractSettlementConsumerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.094,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.ExpiringContractSettlementFanoutServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.118,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.MarginTransferMathTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.011,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.PnlSettlementMathTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.01,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.TradeFeeMathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.005,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.aeron.service.orchestration.MaintenanceIntegrationTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 10,
+      "seconds": 0.001,
+      "skipReasons": [
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist",
+        "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.074,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AdminCursorPageTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.006,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.386,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.131,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ClientIpResolverTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.304,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.108,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.049,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.014,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.PasswordResetServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.005,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.008,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.TotpServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.009,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.097,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.187,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.AdminIpWhitelistFilterTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.009,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.AdminPermissionFilterTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.092,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayCorsConfigTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayHttpConfigurationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.016,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayMediaDriverConfigurationTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 4.597,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.327,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.037,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayTraceFilterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.001,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.AdminSupportControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.067,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.BinanceApiControllerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.144,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.099,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.612,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.085,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.MergedBusinessHttpIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": 0.0,
+      "skipReasons": [
+        "Environment variable [MERGED_BUSINESS_IT_BASE_URL] does not exist"
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.AdminSystemServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.01,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWalletClientTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.016,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.101,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 22,
+      "seconds": 0.0,
+      "skipReasons": [
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist",
+        "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.092,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.14,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.241,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductAccountAccessTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.013,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferCoordinatorTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.009,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.055,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.049,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.SpotAccountClientTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.004,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.OkxInstrumentSeedContractTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.059,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.config.InstrumentKafkaConfigurationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.01,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.repository.InstrumentRepositoryTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.031,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.repository.InstrumentSingleTableRepositoryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.206,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.034,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": 0.0,
+      "skipReasons": [
+        "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist"
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.091,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentOutboxPublisherTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.153,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentServiceTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.142,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentStorageServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.355,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentValidatorTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.024,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.maintenance.AdminMaintenanceControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.845,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.matching.MarketDataLocalTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.015,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TraceIdFilterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.018,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TradingOrderKafkaConfigurationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.017,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TradingOrderPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.controller.AdminOrderControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.controller.OrderControllerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.162,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.191,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.07,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.059,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.ProjectionWatermarkWaiterTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.006,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.043,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.045,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.CancelAllAfterServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.122,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.007,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.755,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentOrderDrainServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.044,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.009,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.LeverageServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.068,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderBatchServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.025,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderMarginMathTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.014,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.015,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderServiceTest",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.392,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderValidatorTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.03,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.StableOrderIdentityTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.009,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.213,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.config.TriggerPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.controller.TriggerOrderControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.01,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.055,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.12,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.239,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketPropertiesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.017,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.011,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.AdminWebSocketMetricsControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.092,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.ClientConnectionIsolationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.083,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.058,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.468,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.884,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.SubscriptionRegistryTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.142,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.SubscriptionTopicTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.019,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-api",
+      "class": "com.surprising.realtime.api.ValkeyReadViewIntegrationTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 1.201,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleMathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.006,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickPropertiesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.002,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 14.441,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.011,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.repository.PostgresCandleSinkTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleHotCacheTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.004,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.074,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.PublicTradeEventMapperTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.candlestick.provider.service.SymbolRegistryServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.003,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 11.464,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 6.878,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.488,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 13.366,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.ReliableTradeKafkaSinkTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.132,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.TradeExportCheckpointTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.086,
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.export.TradeExportServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.2,
+      "skipReasons": []
+    }
+  ],
+  "totals": {
+    "tests": 613,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 34,
+    "passed": 579
+  },
+  "commands": [
+    "mvn -pl surprising-gateway -Dtest=GatewayMediaDriverConfigurationTest test",
+    "mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider test",
+    "mvn -pl surprising-gateway -Dtest=GatewayMediaDriverConfigurationTest test (added reconnect scenario)",
+    "mvn -pl surprising-gateway -DskipTests package",
+    "bash -n scripts/start-product-line-providers.sh"
+  ],
+  "dryRuns": [
+    {
+      "product": "SPOT",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "SPOT",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "true",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "true",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "false",
+      "export": "true",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    },
+    {
+      "product": "OPTION",
+      "realtime": "false",
+      "export": "false",
+      "startOrder": "host-core-node0,gateway,price,realtime,derivatives-lifecycle,maker"
+    }
+  ],
+  "verified": [
+    "Driver absent when realtime disabled; enabled driver requires directory.",
+    "Real child JVM publishes IPC and UDP through embedded driver and parent receives payload.",
+    "SHARED mode retained; context close stops driver; next gateway can reuse directory.",
+    "Active directory collision fails without replacing original driver.",
+    "Real WebSocket bridge closes before driver.",
+    "Long-lived AeronRealtimeReceiver detects outage and reconnects after driver restart.",
+    "Existing Redis/Aeron Router and Archive/Kafka trade export regressions pass."
+  ],
+  "limitations": [
+    "No full deployed gateway-price-realtime-Core stack. External environment skips recorded per class.",
+    "No shared-JVM GC/CPU/native memory, sustained throughput, p99 or long-duration validation; no performance improvement claim.",
+    "Core/client-pool drivers unchanged. No Core JMH: only app-side driver deployment/lifecycle changed, same transport/threading mode.",
+    "Gateway restart interrupts shared app transport; live events during outage are not guaranteed to replay.",
+    "One driver owner per local directory; deployment assumes co-located applications."
+  ],
+  "initialCorrections": [
+    "New test first used unavailable Context.isClosed(); replaced with CnC heartbeat activity check and reran tests.",
+    "Artifact check initially did not unfold wrapped JAR Start-Class manifest line; corrected checker, packaging itself succeeded."
+  ],
+  "artifact": {
+    "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+    "bytes": 79614925,
+    "sha256": "e7885a8c64f71ced24a1ed7400d62a6a450afd548f5fc3517fdeb7a1f81c6a40",
+    "unfoldedManifest": "Manifest-Version: 1.0\r\nCreated-By: Maven JAR Plugin 3.5.1\r\nJava-Version: 27\r\nBuild-Jdk-Spec: 27\r\nImplementation-Title: surprising-gateway\r\nImplementation-Version: 1.0.0-SNAPSHOT\r\nMain-Class: org.springframework.boot.loader.launch.JarLauncher\r\nStart-Class: com.surprising.gateway.provider.SurprisingGatewayApplication\r\nSpring-Boot-Version: 4.1.1\r\nSpring-Boot-Classes: BOOT-INF/classes/\r\nSpring-Boot-Lib: BOOT-INF/lib/\r\nSpring-Boot-Classpath-Index: BOOT-INF/classpath.idx\r\nSpring-Boot-Layers-Index: BOOT-INF/layers.idx\r\n\r\n",
+    "coreServiceDependency": false
+  },
+  "logs": [
+    {
+      "path": "/tmp/media-embed-focused.log",
+      "bytes": 4741,
+      "sha256": "e84c7727d4b66e3d47f579bef233dc75db919c800985133e80669864cd324e62"
+    },
+    {
+      "path": "/tmp/media-embed-focused2.log",
+      "bytes": 5196,
+      "sha256": "e0763a0d353c77eb9507e5d569336f69ab00406d6fe3b3ba7af47cb1fd101be4"
+    },
+    {
+      "path": "/tmp/media-embed-package.log",
+      "bytes": 3035,
+      "sha256": "9a922d605df41fbf7ccbe31b202ee3734ae6e87e0f18473a9af4771b6050441a"
+    },
+    {
+      "path": "/tmp/media-embed-restart-test.log",
+      "bytes": 5345,
+      "sha256": "20e12c47d8774ba0afcbdb4a83d384c9d2d450e58feecda42c2a3d267aa7780f"
+    },
+    {
+      "path": "/tmp/media-embed-tests.log",
+      "bytes": 837275,
+      "sha256": "bce6f8aa9ee52b37b2dc67666f46c8e3c3de440579e3fcb1be2ab850ca0eafae"
+    }
+  ],
+  "cleanup": "Test child JVMs, driver contexts and fixtures closed; own temporary logs and summarized reports removed after archival; build artifacts retained. No production stack changed."
+}

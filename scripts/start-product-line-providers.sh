@@ -471,14 +471,6 @@ start_core() {
   mark_ready core-cluster
 }
 
-start_app_media_driver() {
-  java_args_for app-media-driver
-  start_owned_process "app-media-driver" '' "${COMMON_ENV[@]}" \
-    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
-    "-Daeron.dir=$APP_AERON_DIR" "-Daeron.threading.mode=SHARED" \
-    -cp "$(jar_path tools)" io.aeron.driver.MediaDriver
-}
-
 start_realtime_service() {
   local router_json
   if [[ -n "${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-}" ]]; then
@@ -507,9 +499,6 @@ start_stack() {
   trap 'cleanup_failed_start' EXIT ERR INT TERM
   initialize_database
   start_core "$core_action"
-  if [[ "$REALTIME_ENABLED" == true ]]; then
-    start_app_media_driver
-  fi
   start_http_service gateway
   start_http_service price
   start_realtime_service
@@ -596,7 +585,6 @@ print_status() {
   for ((index = 0; index < member_count; index++)); do
     required_services+=("core-node$index")
   done
-  [[ "$REALTIME_ENABLED" == true ]] && required_services+=(app-media-driver)
   for service in "${SERVICES[@]}"; do
     service_enabled "$service" && required_services+=("$service")
   done
@@ -653,7 +641,6 @@ print_dry_run() {
   printf 'START_ORDER='
   local index
   for ((index = 0; index < member_count; index++)); do (( index > 0 )) && printf ','; printf 'host-core-node%s' "$index"; done
-  [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver'
   printf ',gateway,price,realtime'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \

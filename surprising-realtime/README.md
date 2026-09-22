@@ -21,7 +21,7 @@ Kafka Streams 线程只做聚合、持久化与非阻塞入队；路由线程负
 ## 启动与迁移
 
 - `REALTIME_ROUTER_PORT` 默认 9095；K 线 Feign 和 gateway 路由默认已改为此端口。自定义地址需同步修改。
-- `REALTIME_ENABLED=false` 只关闭 Router，K 线聚合和 HTTP 查询仍启用；开启 Router 时先启动 MediaDriver。
+- `REALTIME_ENABLED=false` 只关闭 Router，K 线聚合和 HTTP 查询仍启用；开启 Router 时先启动 gateway，由 gateway 内嵌启动共享 MediaDriver。
 - 先启动 gateway 并等待 liveness，再启动 price 和本行情应用，以便 `SymbolRegistryService` 拉取合约快照。
 - 保留旧 market-data 数据库、Kafka Streams application-id、topic/changelog；迁移前停止旧实例。
   `CANDLESTICK_STATE_DIR` 指向原状态目录，或在空目录从原 changelog 恢复，不能误改 application-id 后当成无损迁移。
@@ -38,7 +38,7 @@ Valkey 只保存可重建的查询视图，不裁决余额、风控或成交。�
 
 ## 进程配置
 
-所有组件使用同一协议版本和相互隔离的六产品线标识。Aeron MediaDriver 需要先启动，并向对应 Java 进程提供
+所有组件使用同一协议版本和相互隔离的六产品线标识。同机部署先启动 gateway（内嵌应用侧 MediaDriver），再启动 price/realtime，并向对应 Java 进程提供
 `--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。
 只配置内网端点，Aeron 数据面及控制面不直接面向公网；它们不承担用户身份验证。
 
@@ -258,3 +258,20 @@ realtime JAR 的启动类仍为 RealtimeApplication；增加 Core 回放库，�
 验证命令、逐类测试、24 组启动顺序和构建 SHA-256 见
 [验证摘要](../docs/validation/trade-export-realtime-merge-20260922.json)。
 本轮测试资源已关闭，临时日志和已汇总测试报告已清理，保留构建产物。
+
+
+## 应用侧 MediaDriver 内嵌 gateway（2026-09-22）
+
+当前完整单成员 U 永续为 **6 个 JVM**：Core、gateway、price、realtime、derivatives-lifecycle、maker。
+上面 8→7 的记录是成交导出合并时的历史；本次继续删除独立 app-media-driver 进程。
+
+`GatewayMediaDriverConfiguration` 在 `surprising.realtime.enabled=true` 时创建共享 Driver，
+`surprising.realtime.directory` 必须显式设置；统一脚本继续通过 `APP_AERON_DIR` 传给各应用。
+realtime/price/gateway 仍使用同一目录，不改 Aeron channel、stream 或业务协议。
+Core 与可靠成交导出使用 Core 侧 Driver，不连接这个应用侧 Driver。
+
+gateway 重启会中断共用 Driver 的实时传输；现有 Sender/Receiver/Router 循环负责重连，
+期间逐笔实时消息不保证补齐，私有状态仍按快照恢复；可靠成交/K 线来源不变。
+Driver 仍使用 SHARED 模式，线程、共享内存与 term buffer 开销保留；仅减少独立 JVM 的开销。
+迁移前停止旧独立 Driver；同一个目录只允许一个活跃 Driver，不能让多个 gateway 同时占用。
+这是同机共享目录的部署方式；跨主机不能用目录字符串代替各主机本地的 Driver。
