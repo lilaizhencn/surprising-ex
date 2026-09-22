@@ -4542,3 +4542,13 @@ JFR分配来自ThreadAllocationStatistics与ObjectAllocationSample/事件，不�
 采集与分析入口run-all.py/postprocess.py/compare.py/report.py，逐轮run.py记录完整环境；command/JFR设置/源diff/CPU与UDP时序/逐UUID CSV/GC映射检查/尾部JSON/原始hash保留在归档。bash -n、7个非法参数拒绝、三轮真实JMH新参数路径及git diff --check通过；Java实现未变，不重复无关Maven全量。
 
 - 本轮清理完成：节点/客户端/watch全部退出，清理3轮runtime/Archive/Aeron/tmp、9份rawJFR、CNC/loss二进制及分析class；保留命令/配置/日志/CSV/JSON/分析源码/检查与hash清单。归档`/Users/atomex/.Trash/surprising-udp-confirm-20260922`（69,388,879bytes），原/tmp路径仅为历史定位。未停止或删除其他项目进程/文件；raw录制删除后只能复核保留的导出数据，不能重新扫描原JFR。
+
+## 2026-09-22 饱和报告判定修正（不新增压测轮次）
+
+- 当前master c0862cf5上的离线报告修正，不改交易Java、发压负载或固定inflight256，不产生新的吞吐成绩。CodeGraph工具未暴露，检查汇总脚本及仓库内`saturationGate`消费者；运行脚本不依赖旧状态值，未发现其他代码消费者。
+- 原end_to_end门槛仅业务PASS且peakInFlight>=80%窗口，Owner/Matcher门槛采用高CPU+队列峰值，Lane采用CPU与墙钟执行区间阈值；上述都不足以证明持续业务饱和，BUSY_SPIN尤其会导致误判。删除此类PASS/NOT_SATURATED及thresholds推断，不改历史报告。
+- 新输出分为loadEvidence与saturationGate：分别记录窗口是否达到上限、是否发生背压、windowBlockedTimeRatio、时长是否有效以及队列证据仅有HIGH_WATER_ONLY/MISSING。缺失值保留null，超过测量时长的阻塞区间不截断伪装成100%。业务完成检查失败/缺失为INVALID，其余当前证据只能为UNCONFIRMED；不能据此反推“未饱和”。未合并其他热控、资金或恢复验收结论。
+- Lane的usefulNanos/usefulExecutionRatio改为executionWallNanos/executionWallRatio，汇总为laneExecutionWallRatioMin/Avg，明确含调度/GC的墙钟区间；README记录字段变更。没有新增业务抽象、状态容器或热路径埋点。
+- 7项unittest通过，覆盖四stage在99%CPU/队列满峰/高Lane执行占比下仍未确认、低负载不反推无瓶颈、缺失CPU/null、业务失败、非法阻塞时长、Lane墙钟命名及空输入。git diff --check通过。测试仅报告Python，不涉及Java编译/执行，无需重复Maven/JMH。
+- 使用上轮A1/B/A2真实client.log离线复核，CPU注入先前导出的metrics（rawJFR已按要求删除，未重新解析JFR）；三个新报告均UNCONFIRMED，窗口等待比例83.2299%/82.8823%/82.9112%，业务吞吐及全量P99保持一致。复核导出位于/Users/atomex/.Trash/surprising-saturation-report-20260922，未覆盖原始证据。临时目录自动清理，无新增集群/Java进程或运行数据。
+- 尚缺持续队列占用和有效处理/空转/依赖等待分段，以及递增负载下吞吐平台证据。本次修正的是判定可信度，未声称已经补齐这些采集或让所有线程业务饱和；后续负载对照需另行锁定计划，遵循全局inflight256约束。

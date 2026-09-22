@@ -52,10 +52,48 @@ def parse_jfr(path: Path, start: datetime | None, end: datetime | None):
     return result
 
 
+def add_saturation_assessment(metric):
+    """Report observed load separately from unproven business saturation.
+
+    CPU includes idle spinning; high-water marks contain no duration; Lane
+    execution intervals include preemption/GC and are not useful CPU time.
+    None of these alone, or together, proves a stage's processing capacity.
+    """
+    seconds = metric["steadyMeasurementSeconds"]
+    blocked = metric["windowBlockedNanos"]
+    valid_window = isinstance(seconds, (int, float)) and math.isfinite(seconds) and seconds > 0
+    ratio = blocked / (seconds * 1e9) if valid_window and blocked >= 0 else None
+    valid_blocked = ratio is not None and 0 <= ratio <= 1
+    metric["loadEvidence"] = {
+        "windowReached": (metric["peakInFlight"] >= metric["window"]
+                          if metric["peakInFlight"] is not None else None),
+        "windowBackpressureObserved": blocked > 0 if blocked >= 0 else None,
+        "windowBlockedTimeRatio": ratio if valid_blocked else None,
+        "windowBlockedTimeValid": valid_blocked,
+        "queueEvidence": "HIGH_WATER_ONLY" if metric["pipelineHighWater"] else "MISSING",
+    }
+    reasons = [
+        "sustained-queue-occupancy-not-measured",
+        "useful-processing-idle-and-dependency-wait-not-separated",
+        "throughput-plateau-under-increasing-load-not-established",
+    ]
+    if metric["jfr"]["threadCpuSamples"] == 0:
+        reasons.append("thread-cpu-evidence-missing")
+    if not valid_blocked:
+        reasons.append("window-blocked-time-missing-or-invalid")
+    if not metric["clientPass"]:
+        reasons.insert(0, "client-functional-check-failed-or-missing")
+    metric["saturationGate"] = {
+        "status": "UNCONFIRMED" if metric["clientPass"] else "INVALID",
+        "target": metric["stage"],
+        "reasons": reasons,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stage_dir", type=Path)
-    ap.add_argument("--stage", required=True)
+    ap.add_argument("--stage", required=True, choices=("owner", "matcher", "lane", "end_to_end"))
     ap.add_argument("--window", type=int, required=True)
     args = ap.parse_args()
     root = args.stage_dir
@@ -73,12 +111,11 @@ def main():
     lane_work = {}
     for m in re.finditer(r"laneWork lane=(\d+) operation=(\d+) completed=(\d+) executionNanos=(\d+) measuredNanos=(\d+)", client):
         lane, op, completed, execution, measured = map(int, m.groups())
-        lane_work.setdefault(lane, {"operations": {}, "usefulNanos": 0, "measuredNanos": measured})
+        lane_work.setdefault(lane, {"operations": {}, "executionWallNanos": 0, "measuredNanos": measured})
         lane_work[lane]["operations"][op] = {"completed": completed, "executionNanos": execution}
-        lane_work[lane]["usefulNanos"] += execution
+        lane_work[lane]["executionWallNanos"] += execution
     for value in lane_work.values():
-        value["usefulExecutionRatio"] = value["usefulNanos"] / value["measuredNanos"] if value["measuredNanos"] else 0.0
-    p99s = [f(r"business=[^\n]*p99us=(\d+)", client)]
+        value["executionWallRatio"] = value["executionWallNanos"] / value["measuredNanos"] if value["measuredNanos"] else 0.0
     p99_matches = [float(x) for x in re.findall(r"business=[^\n]*p99us=(\d+)", client)]
     high = re.search(r"pipelineHighWater matcher=(\d+) completion=(\d+) context=(\d+) lanes=\[([^]]*)\]", client)
     mixed = re.search(r"steadyCapacity[^\n]*businessOpsPerSec=([0-9.]+)[^\n]*coreMessagesPerSec=([0-9.]+)[^\n]*peakInFlight=(\d+)", client)
@@ -104,42 +141,16 @@ def main():
         "jfr": {"threadCpuSamples": jfr["samples"], "logicalCpus": jfr["logicalCpus"]},
     }
     if lane_work:
-        ratios = [v["usefulExecutionRatio"] for v in lane_work.values()]
-        metric["laneUsefulExecutionRatioMin"] = min(ratios)
-        metric["laneUsefulExecutionRatioAvg"] = sum(ratios) / len(ratios)
+        ratios = [v["executionWallRatio"] for v in lane_work.values()]
+        metric["laneExecutionWallRatioMin"] = min(ratios)
+        metric["laneExecutionWallRatioAvg"] = sum(ratios) / len(ratios)
     else:
-        metric["laneUsefulExecutionRatioMin"] = None
-        metric["laneUsefulExecutionRatioAvg"] = None
-    owner = metric["cpu"]["ownerSingleCorePercent"]
-    matcher = metric["cpu"]["matcherSingleCorePercent"]
-    lane = metric["cpu"]["laneSingleCorePercentMax"]
+        metric["laneExecutionWallRatioMin"] = None
+        metric["laneExecutionWallRatioAvg"] = None
     def finite(value):
         return value if isinstance(value, (int, float)) and math.isfinite(value) else None
     metric["cpu"] = {key: ([finite(item) for item in value] if isinstance(value, list) else finite(value)) for key, value in metric["cpu"].items()}
-    owner = owner if math.isfinite(owner) else 0.0
-    matcher = matcher if math.isfinite(matcher) else 0.0
-    lane = lane if math.isfinite(lane) else 0.0
-    useful = metric["laneUsefulExecutionRatioMin"] or 0.0
-    high_matcher = metric["pipelineHighWater"]["matcher"] if metric["pipelineHighWater"] else 0
-    thresholds = {"owner": owner >= 80.0, "matcher": matcher >= 80.0, "lane": lane >= 80.0 and useful >= 0.70}
-    reasons = []
-    if args.stage == "owner":
-        gate = thresholds["owner"] and high_matcher >= args.window * 0.8
-        if not thresholds["owner"]: reasons.append("owner-single-core-below-80-percent")
-        if high_matcher < args.window * 0.8: reasons.append("matcher-high-water-below-80-percent")
-    elif args.stage == "matcher":
-        gate = thresholds["matcher"] and high_matcher >= args.window * 0.8
-        if not thresholds["matcher"]: reasons.append("matcher-single-core-below-80-percent")
-        if high_matcher < args.window * 0.8: reasons.append("matcher-high-water-below-80-percent")
-        if owner >= 80.0: reasons.append("owner-upstream-is-already-saturated")
-    elif args.stage == "lane":
-        gate = thresholds["lane"]
-        if lane < 80.0: reasons.append("lane-single-core-below-80-percent")
-        if useful < 0.70: reasons.append("lane-useful-execution-below-70-percent")
-    else:
-        gate = metric["clientPass"] and (metric["peakInFlight"] or 0) >= args.window * 0.8
-        if not metric["clientPass"]: reasons.append("client-functional-check-failed")
-    metric["saturationGate"] = {"status": "PASS" if gate else "NOT_SATURATED", "target": args.stage, "thresholds": thresholds, "reasons": reasons}
+    add_saturation_assessment(metric)
     (root / "metrics.json").write_text(json.dumps(metric, indent=2, allow_nan=False) + "\n")
     print(json.dumps(metric, indent=2, allow_nan=False))
 

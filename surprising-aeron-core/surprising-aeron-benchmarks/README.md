@@ -2,6 +2,16 @@
 
 执行前遵循仓库根目录的 [AGENTS-performance.md](../../AGENTS-performance.md)，采集前锁定条件并追加到 [PERFORMANCE_VALIDATION.md](../../PERFORMANCE_VALIDATION.md)。正式吞吐与 JFR 诊断分别采集。
 
+## 饱和判定的证据边界
+
+`summarize-aeron-async-stage.py` 将负载事实放在 `loadEvidence`：是否达到窗口上限、是否观察到窗口背压、等待窗口的时间比例，以及队列证据是否只有高水位。峰值不代表持续积压，BUSY_SPIN 的高 CPU 不代表业务处理饱和。
+
+`saturationGate.status` 为 `UNCONFIRMED`（尚不能确认饱和）或 `INVALID`（客户端完成性检查失败或缺失）。当前采集缺少持续队列占用、有效处理/空转/依赖等待的区分和递增负载下的吞吐平台证据，因此四种 stage 均不能输出饱和 `PASS`；`UNCONFIRMED` 也不表示已经证明未饱和。该判定不代替热控、GC、资金和恢复验收。
+
+Lane 字段改为 `executionWallNanos`、`executionWallRatio` 和 `laneExecutionWallRatioMin/Avg`；它们衡量业务执行区间的墙钟时间，可能包含抢占及 GC，不再命名为 `useful`。历史报告保持原样，读取新报告的工具应使用新字段；不再输出旧的 CPU 阈值判定 `thresholds`。
+
+判定回归：`python3 -B -m unittest discover -s surprising-aeron-core/surprising-aeron-benchmarks/bin/tests -v`（仓库根目录运行）。
+
 ## UDP 接收缓冲单因素对照
 
 `bin/qualify-aeron-async-stages.sh` 支持 `ASYNC_SOCKET_RCVBUF_BYTES`：
