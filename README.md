@@ -135,11 +135,11 @@ flowchart TB
 | [surprising-instrument](surprising-instrument/) | 合约共享 API；业务实现位于 gateway 的 instrument 包 |
 | [surprising-trading](surprising-trading/) | 订单和触发单共享 API；业务实现位于 gateway 的 trading 包 |
 | [surprising-account](surprising-account/) | 账户共享 API；业务实现位于 gateway 的 account 包 |
-| [surprising-market-data](surprising-market-data/) | 盘口、成交行情与市场数据服务 |
+| [surprising-market-data](surprising-market-data/) | K 线 API 契约；盘口实现已入 gateway，K 线实现已入 realtime |
 | [surprising-price](surprising-price/) | 指数价格、标记价格及价格分发 |
 | [surprising-funding](surprising-funding/) | 资金费 API 契约；运行实现已合入 derivatives-lifecycle |
 | [surprising-derivatives-lifecycle](surprising-derivatives-lifecycle/) | 衍生品风险、强平、保险及交割行权相关业务 |
-| [surprising-realtime](surprising-realtime/) | 实时路由、订阅目录、状态快照与 Valkey 查询视图 |
+| [surprising-realtime](surprising-realtime/) | K 线聚合/查询、实时路由、状态快照与 Valkey 查询视图 |
 | [surprising-gateway](surprising-gateway/) | 统一身份、订单、账户、合约业务应用，以及 HTTP / WebSocket 接入 |
 | [surprising-maker](surprising-maker/) | 做市程序与相关业务支持 |
 

@@ -48,7 +48,7 @@ class GatewayProxyServiceTest {
     }
 
     @Test
-    void publicTradingMarketRouteProxiesOrderBookSnapshotToMatchingProvider() {
+    void publicTradingMarketRouteResolvesLocally() {
         GatewayProperties properties = properties();
         GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
@@ -58,7 +58,7 @@ class GatewayProxyServiceTest {
         URI target = controller.targetUri("trading-market", properties.getRoutes().get("trading-market"), request);
 
         assertThat(target.toString())
-                .isEqualTo("http://matching:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50");
+                .isEqualTo("local:/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50");
         assertThat(properties.getRoutes().get("trading-market").isPrivateRoute()).isFalse();
     }
 
@@ -289,19 +289,19 @@ class GatewayProxyServiceTest {
     @Test
     void productLineQueryRoutesTradingRequestToProductBackend() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
                 new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading-market");
+                "POST", "/api/v1/gateway/remote-market");
         request.setQueryString("productLine=LINEAR_DELIVERY");
         request.addParameter("productLine", "LINEAR_DELIVERY");
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-linear-delivery:9184/api/v1/trading/orders?productLine=LINEAR_DELIVERY");
@@ -317,7 +317,7 @@ class GatewayProxyServiceTest {
                                                 String productLineName,
                                                 String backendUrl) {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.valueOf(productLineName),
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.valueOf(productLineName),
                 new GatewayProperties.ProductRoute(backendUrl,
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
@@ -327,7 +327,7 @@ class GatewayProxyServiceTest {
                 "POST", requestPath);
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo(backendUrl + "/api/v1/trading/orders");
@@ -336,10 +336,10 @@ class GatewayProxyServiceTest {
     @Test
     void explicitProductLineOverridesBinancePathDefault() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
                 new GatewayProperties.ProductRoute("http://order-linear-perpetual:9084",
                         "/api/v1/trading/orders"));
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.OPTION,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.OPTION,
                 new GatewayProperties.ProductRoute("http://order-option:9284",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
@@ -351,7 +351,7 @@ class GatewayProxyServiceTest {
         request.addParameter("productLine", "OPTION");
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-option:9284/api/v1/trading/orders?productLine=OPTION");
@@ -360,18 +360,18 @@ class GatewayProxyServiceTest {
     @Test
     void productLineBodyRoutesTradingRequestToProductBackend() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.OPTION,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.OPTION,
                 new GatewayProperties.ProductRoute("http://order-option:9284",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading-market");
+                "POST", "/api/v1/gateway/remote-market");
         request.addHeader("Authorization", "Bearer user");
         byte[] body = "{\"productLine\":\"option\",\"symbol\":\"BTC-USDT-260925-70000-C\"}".getBytes();
 
-        controller.proxy("trading-market", HttpMethod.POST, request, body);
+        controller.proxy("remote-market", HttpMethod.POST, request, body);
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-option:9284/api/v1/trading/orders");
@@ -381,17 +381,17 @@ class GatewayProxyServiceTest {
     @Test
     void productLineHeaderCanUseAccountTypeCode() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.INVERSE_DELIVERY,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.INVERSE_DELIVERY,
                 new GatewayProperties.ProductRoute("http://matching-inverse-delivery:9185",
                         "/api/v1/trading/market"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/trading-market/orderbook");
+                "GET", "/api/v1/gateway/remote-market/orderbook");
         request.addHeader("X-Account-Type", "COIN_DELIVERY");
         request.setQueryString("symbol=BTC-USD-260925&depth=50");
 
-        controller.proxy("trading-market", HttpMethod.GET, request, null);
+        controller.proxy("remote-market", HttpMethod.GET, request, null);
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://matching-inverse-delivery:9185/api/v1/trading/market/orderbook?symbol=BTC-USD-260925&depth=50");
@@ -400,18 +400,18 @@ class GatewayProxyServiceTest {
     @Test
     void configuredProductRouteMissingForRequestedLineFailsClosed() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+        properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
                 new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
                         "/api/v1/trading/orders"));
         GatewayProxyService controller = gateway(properties, new RestTemplate(),
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading-market");
+                "POST", "/api/v1/gateway/remote-market");
         request.setQueryString("productLine=OPTION");
         request.addParameter("productLine", "OPTION");
         request.addHeader("Authorization", "Bearer user");
 
-        assertThatThrownBy(() -> controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes()))
+        assertThatThrownBy(() -> controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.NOT_FOUND))
@@ -439,10 +439,10 @@ class GatewayProxyServiceTest {
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
+                "GET", "/api/v1/gateway/remote-market/BTC-USDT/1m");
         request.setAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE, "trace-gateway-1");
 
-        controller.proxy("candlestick", HttpMethod.GET, request, null);
+        controller.proxy("remote-market", HttpMethod.GET, request, null);
 
         assertThat(restTemplate.requestEntity.getHeaders().getFirst(GatewayTraceFilter.TRACE_ID_HEADER))
                 .isEqualTo("trace-gateway-1");
@@ -454,10 +454,10 @@ class GatewayProxyServiceTest {
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/trading-market/orderbook");
+                "GET", "/api/v1/gateway/remote-market/orderbook");
         request.addHeader("X-Product-Line", "SPOT");
 
-        controller.proxy("trading-market", HttpMethod.GET, request, null);
+        controller.proxy("remote-market", HttpMethod.GET, request, null);
 
         assertThat(restTemplate.requestEntity.getHeaders().getFirst("X-Product-Line"))
                 .isEqualTo("SPOT");
@@ -466,16 +466,16 @@ class GatewayProxyServiceTest {
     @Test
     void routeBasicAuthOverridesIncomingAuthorizationHeader() {
         GatewayProperties properties = properties();
-        GatewayProperties.BackendRoute route = properties.getRoutes().get("candlestick");
+        GatewayProperties.BackendRoute route = properties.getRoutes().get("remote-market");
         route.setBasicAuthUsername("wallet");
         route.setBasicAuthPassword("secret");
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
+                "GET", "/api/v1/gateway/remote-market/BTC-USDT/1m");
         request.addHeader("Authorization", "Bearer browser-token");
 
-        controller.proxy("candlestick", HttpMethod.GET, request, null);
+        controller.proxy("remote-market", HttpMethod.GET, request, null);
 
         assertThat(restTemplate.requestEntity.getHeaders().getFirst("Authorization"))
                 .isEqualTo("Basic d2FsbGV0OnNlY3JldA==");
@@ -485,9 +485,9 @@ class GatewayProxyServiceTest {
     void mapsBackendReadTimeoutToGatewayTimeout() {
         GatewayProxyService controller = gateway(properties(), new TimeoutRestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
+                "GET", "/api/v1/gateway/remote-market/BTC-USDT/1m");
 
-        assertThatThrownBy(() -> controller.proxy("candlestick", HttpMethod.GET, request, null))
+        assertThatThrownBy(() -> controller.proxy("remote-market", HttpMethod.GET, request, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.GATEWAY_TIMEOUT));
@@ -525,8 +525,10 @@ class GatewayProxyServiceTest {
         Map<String, GatewayProperties.BackendRoute> routes = new LinkedHashMap<>();
         routes.put("candlestick", new GatewayProperties.BackendRoute(
                 "http://candles:9081", "/api/v1/candlestick", false));
-        routes.put("trading-market", new GatewayProperties.BackendRoute(
+        routes.put("remote-market", new GatewayProperties.BackendRoute(
                 "http://matching:9085", "/api/v1/trading/market", false));
+        routes.put("trading-market", new GatewayProperties.BackendRoute(
+                "local:", "/api/v1/trading/market", false));
         routes.put("trading-trigger", new GatewayProperties.BackendRoute(
                 "http://trading-provider:9084", "/api/v1/trading/trigger-orders", true));
         routes.put("trading", new GatewayProperties.BackendRoute(

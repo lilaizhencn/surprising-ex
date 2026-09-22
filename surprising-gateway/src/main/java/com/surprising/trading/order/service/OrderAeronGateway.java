@@ -68,6 +68,15 @@ public class OrderAeronGateway implements AutoCloseable {
         return clients.command(type, commandId, userId, payload).commandStatus() == ResponseStatus.APPLIED;
     }
 
+    public com.surprising.aeron.protocol.CoreOrderBookView orderBook(com.surprising.aeron.protocol.CoreOrderBookQuery query) {
+        CoreResponse response = clients.query(CoreMessageType.BOOK_STATE_QUERY, UUID.randomUUID(), 0,
+                CoreStateQueryCodec.encodeOrderBookQuery(query));
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron order-book query failed");
+        }
+        return CoreStateQueryCodec.decodeOrderBookView(response.data());
+    }
+
     public CoreUserStateView userState(long userId) {
         CoreResponse response = clients.query(CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), userId, new byte[0]);
         if (response.status() == ResponseStatus.REJECTED && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) {

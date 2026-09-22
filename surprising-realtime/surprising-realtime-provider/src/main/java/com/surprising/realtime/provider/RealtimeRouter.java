@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /** All Valkey and per-node publication work is isolated from the trading process. */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "surprising.realtime.router.enabled", havingValue = "true", matchIfMissing = true)
 public final class RealtimeRouter implements AutoCloseable {
     private final ArrayBlockingQueue<RealtimeFrame> inbound = new ArrayBlockingQueue<>(8192);
     private final RealtimeRouterProperties config;
@@ -67,15 +68,19 @@ public final class RealtimeRouter implements AutoCloseable {
                         config.directory(),
                         config.channel(),
                         config.stream(),
-                        f -> {
-                            long bytes = f.payloadLength() + 448;
-                            if (queuedBytes.addAndGet(bytes) > 16 * 1024 * 1024
-                                    || !inbound.offer(f)) {
-                                queuedBytes.addAndGet(-bytes);
-                                dropped.increment();
-                            }
-                        });
+                        this::offer);
         worker = Thread.ofPlatform().name("realtime-router").start(this::run);
+    }
+
+    /** Thread handoff shared by Core frames and in-process candle updates; never blocks the producer. */
+    public boolean offer(RealtimeFrame frame) {
+        long bytes = frame.payloadLength() + 448;
+        if (queuedBytes.addAndGet(bytes) > 16 * 1024 * 1024 || !inbound.offer(frame)) {
+            queuedBytes.addAndGet(-bytes);
+            dropped.increment();
+            return false;
+        }
+        return true;
     }
 
     private void run() {

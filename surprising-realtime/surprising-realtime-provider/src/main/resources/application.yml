@@ -1,3 +1,6 @@
+server:
+  port: ${REALTIME_ROUTER_PORT:9095}
+
 spring:
   cloud:
     openfeign:
@@ -7,7 +10,25 @@ spring:
             defaultRequestHeaders:
               X-Business-Internal-Token: ${BUSINESS_INTERNAL_TOKEN:}
   application:
-    name: surprising-realtime-router
+    name: surprising-realtime-market-data
+  task:
+    scheduling:
+      pool:
+        size: 2
+      thread-name-prefix: market-data-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange?reWriteBatchedInserts=true
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+      validation-timeout: 1000
+
   data:
     redis:
       host: ${VALKEY_HOST:127.0.0.1}
@@ -16,9 +37,49 @@ spring:
       password: ${VALKEY_PASSWORD:}
       connect-timeout: 500ms
       timeout: 500ms
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
 surprising:
+  candlestick:
+    periods: [ "1m", "5m", "15m", "30m", "1h", "4h", "1d" ]
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      application-id-override: ${SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID_OVERRIDE:}
+    stream:
+      threads: 2
+      state-dir: ${CANDLESTICK_STATE_DIR:data/kafka-streams}
+      commit-interval: 1s
+      dedupe-retention: 3d
+      dedupe-cleanup-max-entries: 10000
+    rocksdb:
+      block-cache-size: 256MB
+      write-buffer-size: 64MB
+      write-buffer-manager-size: 256MB
+      max-write-buffer-number: 3
+      block-size: 16KB
+      max-background-jobs: 2
+      target-file-size-base: 64MB
+      bytes-per-sync: 1MB
+      compression-type: LZ4_COMPRESSION
+      bloom-filter-enabled: true
+      bloom-filter-bits-per-key: 10.0
+    flush:
+      interval: 1s
+      max-batch-size: 1000
+    query:
+      max-limit: 1500
   realtime:
     router:
+      enabled: ${REALTIME_ENABLED:true}
       directory: ${AERON_DIR:/dev/shm/aeron-router}
       channel: ${REALTIME_ROUTER_CHANNEL:aeron:udp?endpoint=0.0.0.0:21010}
       stream: 2101

@@ -54,7 +54,7 @@ surprising:
     instrument:
       base-url: http://localhost:9094
     matching:
-      base-url: http://localhost:9081
+      base-url: http://localhost:9094
     trading:
       base-url: http://localhost:9094
   market-maker:

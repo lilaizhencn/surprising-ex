@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-market-data-provider",
+        name = "surprising-realtime-market-data",
         contextId = "candlestickRpcApi",
         path = CandlestickApiPaths.BASE_PATH,
-        url = "${surprising.clients.candlestick.base-url:http://localhost:9081}")
+        url = "${surprising.clients.candlestick.base-url:http://localhost:9095}")
 public interface CandlestickRpcApi {
 
     @GetMapping("/candles")

@@ -1,4 +1,35 @@
-# 实时行情、私有状态和 Valkey 查询
+# 统一行情应用：K 线与实时路由
+
+`surprising-realtime-provider` 现在同时运行 K 线与实时路由，默认 HTTP 端口 **9095**。
+盘口查询已迁入 gateway；不再部署 market-data provider。原有实时协议、Valkey 查询视图和 Core 权威状态保持不变。
+
+## K 线链路
+
+`CommittedTradeExportMain` → 产品成交 Kafka topic → `CandlestickStreamConfiguration` →
+RocksDB 聚合/去重/水位线 → PostgreSQL 历史与 K 线 Kafka 事件。
+K 线更新同时以本地方法进入 `RealtimeRouter.offer` 的有界队列，由路由线程按订阅推送。
+不再创建本进程的 `RealtimeJsonPublisher` 或通过 Aeron 将 K 线回送给自己。
+
+Kafka Streams 线程只做聚合、持久化与非阻塞入队；路由线程负责 Valkey 和下游 Aeron 发送，
+不在路由线程查询 K 线数据库或执行聚合。队列满时沿用实时丢帧计数；历史 K 线仍由数据库和 Kafka 路径保存。
+共享 JVM 的 CPU、GC 和内存故障域仍会相互影响，并不等于资源完全隔离。
+
+保留原 1m 关闭不可改写、迟到数据处理、高周期汇总、去重及状态恢复规则；没有改动 K 线算法。
+每个行情实例只聚合一个 `PRODUCT_LINE`，使用独立数据库 schema、Kafka Streams application-id 和状态目录。
+旧 `candlestick_candles` 表没有 product_line 列，禁止多产品共用 schema。
+
+## 启动与迁移
+
+- `REALTIME_ROUTER_PORT` 默认 9095；K 线 Feign 和 gateway 路由默认已改为此端口。自定义地址需同步修改。
+- `REALTIME_ENABLED=false` 只关闭 Router，K 线聚合和 HTTP 查询仍启用；开启 Router 时先启动 MediaDriver。
+- 先启动 gateway 并等待 liveness，再启动 price 和本行情应用，以便 `SymbolRegistryService` 拉取合约快照。
+- 保留旧 market-data 数据库、Kafka Streams application-id、topic/changelog；迁移前停止旧实例。
+  `CANDLESTICK_STATE_DIR` 指向原状态目录，或在空目录从原 changelog 恢复，不能误改 application-id 后当成无损迁移。
+  本地脚本默认使用本轮运行目录下 `candlestick-state`。
+- 继续运行成交导出器才能获得新的真实成交 K 线；Core 仍独立，资金账本不在行情应用中。
+- 部署数据源、Kafka、Valkey、`BUSINESS_INTERNAL_TOKEN` 和当前产品配置。RocksDB 原有 native 内存预算仍需保留，合并不表示这些缓存消失。
+
+## 实时行情、私有状态和 Valkey 查询
 
 实时数据在交易提交完成后进入有界 outbox，由独立 Aeron 线程发送到 Router。
 Router 在 Valkey 查询订阅节点，为每个目标 WS 节点维护一个 Publication；不向所有 WS 节点广播。
@@ -141,3 +172,46 @@ Kafka长时间故障会使 exporter 落后，不能推进 checkpoint；Archive �
 六产品 `RealtimeWorkloadTest` 验证开启采集的成交往返资金/冻结/持仓/快照恢复；JMH/JFR范围及未测项单独记录。
 
 最终构建记录（2026-09-06）：`mvn package -Drealtime.test.server=/tmp/valkey-realtime-build/valkey-8.0.1/src/valkey-server` 全 reactor 成功，1410项测试中1388通过、22项提现数据库集成测试因未配置 `SURPRISING_WITHDRAWAL_IT_DATABASE_URL` 跳过，无失败。原始日志 `/tmp/realtime-final-package2.log`。Router可执行JAR也已使用独立MediaDriver和Valkey实际启动通过，记录 `/tmp/realtime-router-startup-result.log`。短JMH覆盖六产品线，SPOT/OPTION各180秒持续状态检查通过资金/终态和短期堆稳定检查；生产API尾延迟、真实集群切主和完整长期容量验收仍未完成，不能据此承诺零性能成本。
+
+
+## 2026-09-22 盘口与行情进程合并验证
+
+基线 `6fd38b36`，HotSpot Corretto JDK 27、Maven 3.9.16。
+
+| 模块 | 通过 | 跳过 |
+| --- | ---: | ---: |
+| gateway（含新盘口路径） | 518 | 34 |
+| realtime API | 7 | 0 |
+| realtime provider（含迁入 K 线） | 35 | 0 |
+| maker | 45 | 0 |
+| trading API | 20 | 0 |
+| 合计 | 625 | 34 |
+
+market-data API 编译通过，当前无独立测试类。12 组“六产品 × Router 开关”验证生产配置与组件扫描；
+关闭 Router 时 K 线 HTTP 查询仍返回 200。装配测试替换数据库、合约快照加载与 Router I/O，停止 Kafka 消费，不等于真实外部环境验收。
+
+真实 Redis + Aeron UDP/IPC 测试覆盖：订阅定向、断档快照恢复、本地 CANDLE 入队、超出 16 MiB 队列预算的帧被拒绝及后续正常路由。
+Kafka Streams TopologyTestDriver 覆盖原聚合、去重、水位线、迟到分钟及数据库写入重试边界，并验证本地发布 1m 和 5m 更新。
+初次新增发布断言漏计一个 5m 汇总帧，修正为验证两条 1m 与一条 5m 后全部通过，未修改聚合算法。
+盘口测试验证共用 Core 客户端、symbol/depth、买卖档位映射、错误不得伪装为空盘口，以及本地路由协议与权限。
+
+12 组启动 dry-run、脚本语法和 production-chain-preflight 合约测试通过：行情应用只启动一次，位于 gateway 之后；不再启动 market-data provider。
+原始 Core 生产代码和协议没有改动，因此本轮未重跑资金主链路 JMH；没有宣称提高撮合吞吐或给出内存节省实测数。
+网关 34 项外部环境集成测试跳过；未重跑完整真实 Core 盘口 HTTP 链路、外部 Kafka → PostgreSQL 重启恢复、长稳或容量验收。
+完整测试摘要和跳过原因见 [market-realtime-merge-20260922.json](../docs/validation/market-realtime-merge-20260922.json)。
+
+复现命令：
+
+```bash
+mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests install
+mvn -pl surprising-trading/surprising-trading-api,surprising-market-data/surprising-market-data-api install
+mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-maker test
+mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-provider,surprising-maker -DskipTests package
+PRODUCT_LINE=LINEAR_PERPETUAL REALTIME_ENABLED=true RUN_ID=market-merge-review ACTION=dry-run AERON_CLUSTER_HOSTNAMES=127.0.0.1 bash scripts/start-product-line-providers.sh
+TASK1_TEST_ROOT="$PWD/.local-logs/market-merge-preflight-20260922" bash scripts/test-production-chain-preflight.sh
+```
+
+运行规模：U 永续单成员 Core + gateway + price + realtime 行情 + derivatives-lifecycle + maker 共 6 个基础 JVM；
+同时启用应用 MediaDriver 与成交导出后共 8 个。与此前完整链路的 9 个 JVM 相比减少一个；不计 PostgreSQL/Kafka/Valkey。
+
+最终 JAR 检查通过：gateway 包含盘口入口且无 K 线聚合，realtime 包含 K 线与 Router 且无旧 market-data 启动入口；两者均不包含 Core service 运行依赖。测试进程已结束，真实 Redis/Aeron 测试资源已关闭，临时日志、preflight 数据及已汇总测试报告已清理。构建包 SHA-256 保存在上述验证摘要。

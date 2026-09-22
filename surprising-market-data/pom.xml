@@ -18,7 +18,6 @@
 
     <modules>
         <module>surprising-market-data-api</module>
-        <module>surprising-market-data-provider</module>
     </modules>
 
     <dependencyManagement>

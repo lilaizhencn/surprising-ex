@@ -25,6 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
     private final OrderController orders = mock(OrderController.class);
+    private final com.surprising.trading.matching.controller.MarketDataController market = mock(com.surprising.trading.matching.controller.MarketDataController.class);
     private final AccountController accounts = mock(AccountController.class);
     private final InstrumentController instruments = mock(InstrumentController.class);
     private final AdminMaintenanceController maintenance = mock(AdminMaintenanceController.class);
@@ -41,7 +42,7 @@ class LocalBusinessApiTest {
         return new LocalBusinessApi(new TradingLocalRoutes(maintenance,
                 mock(TriggerOrderController.class), mock(AdminTriggerOrderController.class),
                 mock(LeverageController.class), mock(TradingFeeController.class), orders,
-                mock(AdminOrderController.class), mock(InstrumentCoreSyncController.class)),
+                mock(AdminOrderController.class), mock(InstrumentCoreSyncController.class), market),
                 new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments), mapper,
                 Validation.buildDefaultValidatorFactory().getValidator(), accountProperties, tradingProperties);
     }
@@ -56,6 +57,23 @@ class LocalBusinessApiTest {
         headers.set("X-User-Id", "42");
         headers.set("X-Product-Line", "LINEAR_PERPETUAL");
         return headers;
+    }
+
+    @Test
+    void publicBookUsesLocalControllerAndDefaultDepthWithoutUserIdentity() {
+        assertThat(LocalBusinessApi.isLocalService("trading-market")).isTrue();
+        var response = invoke("trading-market", "/api/v1/trading/market/orderbook?symbol=BTC-USDT",
+                HttpMethod.GET, new HttpHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(market).orderBook("BTC-USDT", 30);
+    }
+
+    @Test
+    void missingBookSymbolDoesNotReachController() {
+        var response = invoke("trading-market", "/api/v1/trading/market/orderbook",
+                HttpMethod.GET, new HttpHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        org.mockito.Mockito.verifyNoInteractions(market);
     }
 
     @Test
@@ -153,7 +171,8 @@ class LocalBusinessApiTest {
         var controllers = java.util.List.of(OrderController.class, AdminOrderController.class,
                 TradingFeeController.class, LeverageController.class, TriggerOrderController.class,
                 AdminTriggerOrderController.class, AdminMaintenanceController.class,
-                InstrumentCoreSyncController.class, AccountController.class, InstrumentController.class);
+                InstrumentCoreSyncController.class, AccountController.class, InstrumentController.class,
+                com.surprising.trading.matching.controller.MarketDataController.class);
         var expected = new java.util.HashSet<String>();
         for (Class<?> controller : controllers) {
             var base = org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(controller,

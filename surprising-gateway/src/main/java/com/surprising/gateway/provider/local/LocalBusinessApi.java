@@ -116,7 +116,7 @@ public final class LocalBusinessApi {
 
     public static boolean isLocalService(String service) {
         return switch (service.toLowerCase(java.util.Locale.ROOT)) {
-            case "trading", "trading-orders", "trading-fees", "trading-leverage", "trading-trigger",
+            case "trading-market", "trading", "trading-orders", "trading-fees", "trading-leverage", "trading-trigger",
                  "account", "account-public", "instrument", "instrument-admin" -> true;
             default -> false;
         };

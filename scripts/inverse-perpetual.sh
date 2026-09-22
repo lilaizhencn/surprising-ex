@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly PRODUCT_LINE=INVERSE_PERPETUAL
 readonly RUN_ID=inverse-perpetual-fixed
 readonly TEST_RUN_ID=inverse-perpetual-fixed-test
-readonly START_ORDER='core-node0,core-node1,core-node2,gateway,price,market-data,derivatives-lifecycle,maker'
+readonly START_ORDER='core-node0,core-node1,core-node2,gateway,price,realtime,derivatives-lifecycle,maker'
 export JAVA_HOME="${JAVA_HOME:-$HOME/.sdkman/candidates/java/27.0.0-amzn}"
 
 runtime() {

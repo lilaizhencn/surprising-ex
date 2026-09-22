@@ -58,9 +58,9 @@ JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
 JVM_TELEMETRY_MODE=""
 
-readonly SERVICES=(gateway price market-data derivatives-lifecycle maker)
-readonly HTTP_SERVICES=(gateway price market-data derivatives-lifecycle maker)
-readonly HTTP_PORTS=(9094 9082 9081 9087 9096)
+readonly SERVICES=(gateway price realtime derivatives-lifecycle maker)
+readonly HTTP_SERVICES=(gateway price realtime derivatives-lifecycle maker)
+readonly HTTP_PORTS=(9094 9082 "$REALTIME_ROUTER_PORT" 9087 9096)
 
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
@@ -169,7 +169,6 @@ jar_path() {
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
     benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$ROOT_DIR" ;;
     realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
@@ -204,7 +203,6 @@ build_artifacts() {
   fi
   local service missing=()
   local required_artifacts=(core tools "${SERVICES[@]}")
-  [[ "$REALTIME_ENABLED" == true ]] && required_artifacts+=(realtime)
   for service in "${required_artifacts[@]}"; do
     service_enabled "$service" || continue
     [[ -f "$(jar_path "$service")" ]] || missing+=("$service")
@@ -481,7 +479,7 @@ start_app_media_driver() {
     -cp "$(jar_path tools)" io.aeron.driver.MediaDriver
 }
 
-start_realtime_router() {
+start_realtime_service() {
   local router_json
   if [[ -n "${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-}" ]]; then
     router_json="$REALTIME_ROUTER_SPRING_APPLICATION_JSON"
@@ -489,8 +487,9 @@ start_realtime_router() {
     router_json="$(printf '{\"surprising\":{\"realtime\":{\"router\":{\"control-channels\":{\"%s\":\"aeron:udp?control-mode=manual\"},\"control-destinations\":{\"%s\":[\"aeron:udp?endpoint=%s\"]}}}}}' \
       "$PRODUCT_LINE" "$PRODUCT_LINE" "$REALTIME_CORE_CONTROL_DESTINATION")"
   fi
-  java_args_for realtime-router
-  start_owned_process "realtime-router" '' "${COMMON_ENV[@]}" \
+  java_args_for realtime
+  start_owned_process "realtime" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
+    REALTIME_ENABLED="$REALTIME_ENABLED" CANDLESTICK_STATE_DIR="$RUN_DIR/candlestick-state" \
     AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
     SERVER_PORT="$REALTIME_ROUTER_PORT" SPRING_APPLICATION_JSON="$router_json" \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path realtime)"
@@ -521,12 +520,11 @@ start_stack() {
   start_core "$core_action"
   if [[ "$REALTIME_ENABLED" == true ]]; then
     start_app_media_driver
-    start_realtime_router
   fi
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && start_trade_export
   start_http_service gateway
   start_http_service price
-  start_http_service market-data
+  start_realtime_service
   service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
   start_http_service maker
   trap - EXIT ERR INT TERM
@@ -603,7 +601,7 @@ print_status() {
   for ((index = 0; index < member_count; index++)); do
     required_services+=("core-node$index")
   done
-  [[ "$REALTIME_ENABLED" == true ]] && required_services+=(app-media-driver realtime-router)
+  [[ "$REALTIME_ENABLED" == true ]] && required_services+=(app-media-driver)
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && required_services+=(trade-export)
   for service in "${SERVICES[@]}"; do
     service_enabled "$service" && required_services+=("$service")
@@ -661,9 +659,9 @@ print_dry_run() {
   printf 'START_ORDER='
   local index
   for ((index = 0; index < member_count; index++)); do (( index > 0 )) && printf ','; printf 'host-core-node%s' "$index"; done
-  [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver,realtime-router'
+  [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver'
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && printf ',trade-export'
-  printf ',gateway,price,market-data'
+  printf ',gateway,price,realtime'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
     "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$KAFKA_BOOTSTRAP_SERVERS" "$VALKEY_HOST" "$VALKEY_PORT"

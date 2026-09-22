@@ -9,18 +9,19 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.stereotype.Service;
+import com.surprising.trading.order.service.OrderAeronGateway;
 
 @Service
 public class MatchingMarketDataService {
 
-    private final MatchingAeronGateway aeronGateway;
+    private final OrderAeronGateway aeronGateway;
 
-    public MatchingMarketDataService(MatchingAeronGateway aeronGateway) {
+    public MatchingMarketDataService(OrderAeronGateway aeronGateway) {
         this.aeronGateway = aeronGateway;
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int depth) {
-        CoreOrderBookView book = aeronGateway.orderBookProjection(new CoreOrderBookQuery(symbol, depth));
+        CoreOrderBookView book = aeronGateway.orderBook(new CoreOrderBookQuery(symbol, depth));
         String normalized = symbol.trim().toUpperCase(Locale.ROOT);
         List<OrderBookLevel> bids = book.levels().stream()
                 .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)

@@ -43,7 +43,9 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
  */
 public class CandlestickStreamConfiguration {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
-    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
+    private com.surprising.realtime.provider.RealtimeRouter realtime;
+    @org.springframework.beans.factory.annotation.Autowired
+    private tools.jackson.databind.ObjectMapper objectMapper;
 
     /**
      * Shared Streams configuration for all nodes in the same deployment group.
@@ -147,9 +149,7 @@ public class CandlestickStreamConfiguration {
 
         updates.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
         updates.foreach((key,event) -> {
-            if(realtime!=null) realtime.publish(properties.getKafka().getProductLine(),
-                    com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,event.symbol(),event.period(),
-                    event.emittedAt().toEpochMilli(),event.eventTime(),event);
+            publishCandle(properties, event);
         });
 
         KStream<String, CandleUpdatedEvent> rollups = streamsBuilder
@@ -165,11 +165,17 @@ public class CandlestickStreamConfiguration {
                         CandleStores.ROLLUP_WATERMARK_STORE);
         rollups.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
         rollups.foreach((key,event) -> {
-            if(realtime!=null) realtime.publish(properties.getKafka().getProductLine(),
-                    com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,event.symbol(),event.period(),
-                    event.emittedAt().toEpochMilli(),event.eventTime(),event);
+            publishCandle(properties, event);
         });
         return updates;
+    }
+
+    private void publishCandle(CandlestickProperties properties, CandleUpdatedEvent event) {
+        if (realtime == null) return;
+        realtime.offer(new com.surprising.aeron.protocol.RealtimeFrame(
+                properties.getKafka().getProductLine(), com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,
+                0, Math.max(0, event.emittedAt().toEpochMilli()), 0, event.eventTime().toEpochMilli(),
+                0, event.symbol(), event.period(), objectMapper.writeValueAsBytes(event)));
     }
 
     private <T> JacksonJsonSerde<T> jsonSerde(Class<T> type) {

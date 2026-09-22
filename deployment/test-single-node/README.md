@@ -6,9 +6,9 @@
 
 1. 连接现有数据库、Kafka 和 Redis，确认依赖可用并初始化缺失 schema。
 2. 启动一个 Aeron Core 节点；节点成为单节点 Leader 后，ClusterProbe 才算就绪。
-3. 启动应用级 Aeron MediaDriver 和 realtime Router，把 Core 的已提交状态出口连接到 WebSocket Gateway。
+3. 启动应用级 Aeron MediaDriver；行情 Router 在 gateway 就绪后随行情应用启动。
 4. 启动成交导出器，从 Aeron Archive 的已提交位置恢复可靠 `match.trades` 事件。
-5. 按 `gateway（身份/订单/账户/合约）→ price → market-data → derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
+5. 按 `gateway（身份/订单/账户/合约）→ price → realtime（K 线/路由）→ derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
 
 Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍生品后台。资金权威状态仍由独立 Core 持有，各业务的 Kafka consumer group 和资金费/强平调度边界保留。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
 
@@ -29,7 +29,6 @@ mvn -pl \
   surprising-aeron-core/surprising-aeron-service,\
   surprising-aeron-core/surprising-aeron-tools,\
   surprising-price/surprising-price-provider,\
-  surprising-market-data/surprising-market-data-provider,\
   surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,\
   surprising-realtime/surprising-realtime-provider,\
   surprising-gateway,\
@@ -86,7 +85,7 @@ curl -fsS http://127.0.0.1:9094/actuator/health/readiness
 curl -fsS https://ex-api.tokdou.com/healthz
 ```
 
-Gateway 对外仍只走 9094；realtime-router 是无 HTTP 监听的后台 JVM，Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
+Gateway 对外仍只走 9094；realtime 行情应用在内网 9095 提供 K 线 HTTP 查询，Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
 
 停止服务：
 

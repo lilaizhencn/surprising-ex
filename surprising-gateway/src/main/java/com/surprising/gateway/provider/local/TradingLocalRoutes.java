@@ -95,6 +95,8 @@ public final class TradingLocalRoutes {
     private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELBYSYMBOL = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/cancel-by-symbol");
     private static final PathPattern INSTRUMENT_CORE_SYNC_CONTROLLER_STATE = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/instrument-sync/{symbol}");
 
+    private final com.surprising.trading.matching.controller.MarketDataController marketDataController;
+    private static final PathPattern ORDER_BOOK = PathPatternParser.defaultInstance.parse("/api/v1/trading/market/orderbook");
     private final AdminMaintenanceController adminMaintenanceController;
     private final TriggerOrderController triggerOrderController;
     private final AdminTriggerOrderController adminTriggerOrderController;
@@ -111,7 +113,9 @@ public final class TradingLocalRoutes {
             TradingFeeController tradingFeeController,
             OrderController orderController,
             AdminOrderController adminOrderController,
-            InstrumentCoreSyncController instrumentCoreSyncController) {
+            InstrumentCoreSyncController instrumentCoreSyncController,
+            com.surprising.trading.matching.controller.MarketDataController marketDataController) {
+        this.marketDataController = marketDataController;
         this.adminMaintenanceController = adminMaintenanceController;
         this.triggerOrderController = triggerOrderController;
         this.adminTriggerOrderController = adminTriggerOrderController;
@@ -123,6 +127,10 @@ public final class TradingLocalRoutes {
     }
 
     public Object invoke(LocalApiRequest r) {
+        if (r.matches(HttpMethod.GET, ORDER_BOOK)) {
+            return marketDataController.orderBook(r.query("symbol", String.class, null, true),
+                    r.query("depth", int.class, "30", false));
+        }
         if (r.matches(HttpMethod.GET, EFFECTIVE_FEE)) {
             return tradingFeeController.effective(r.query("userId", long.class, null, true),
                     r.query("symbol", String.class, null, true),

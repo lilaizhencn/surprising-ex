@@ -137,6 +137,18 @@ class RealtimeRouterIntegrationTest {
                 }
                 receivedA.clear();
                 receivedB.clear();
+                long droppedBefore = router.dropped();
+                assertThat(router.offer(frame(RealtimeFrame.Kind.CANDLE, 0, 9, 0, 0,
+                        "BTCUSDT", "1m", new byte[17 * 1024 * 1024]))).isFalse();
+                assertThat(router.dropped()).isEqualTo(droppedBefore + 1);
+                // Candle aggregation is in this process: feed the same bounded queue directly.
+                routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "CANDLE", "BTCUSDT"),
+                        nodeA, System.currentTimeMillis() + 30000);
+                assertThat(router.offer(frame(RealtimeFrame.Kind.CANDLE, 0, 10, 0, 0,
+                        "BTCUSDT", "1m", new byte[] {'{', '}'}))).isTrue();
+                await(() -> receivedA.stream().anyMatch(f -> f.kind() == RealtimeFrame.Kind.CANDLE));
+                assertThat(receivedB).noneMatch(f -> f.kind() == RealtimeFrame.Kind.CANDLE);
+                receivedA.clear(); receivedB.clear();
                 commit(publication, 100, 0, 1, 7);
                 await(() -> receivedA.stream().anyMatch(f -> f.userId() == 42));
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);

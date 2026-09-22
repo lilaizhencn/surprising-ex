@@ -118,7 +118,7 @@ surprising:
         target-prefix: /api/v1/instruments
         private-route: false
       candlestick:
-        base-url: http://localhost:9081
+        base-url: http://localhost:9095
         target-prefix: /api/v1/candlestick
         private-route: false
         product-routes:
@@ -181,22 +181,9 @@ surprising:
         target-prefix: /api/v1/trading/leverage
         private-route: true
       trading-market:
-        base-url: http://localhost:9081
+        base-url: "local:"
         target-prefix: /api/v1/trading/market
         private-route: false
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
         base-url: "local:"
         target-prefix: /api/v1/trading/trigger-orders
@@ -351,7 +338,7 @@ surprising:
         target-prefix: /api/v1/instruments/admin
         private-route: true
       candlestick:
-        base-url: http://localhost:9081
+        base-url: http://localhost:9095
         target-prefix: /api/v1/candlestick
         private-route: true
         product-routes:
@@ -418,22 +405,9 @@ surprising:
         target-prefix: /api/v1/admin/trading/fees
         private-route: true
       trading-market:
-        base-url: http://localhost:9081
+        base-url: "local:"
         target-prefix: /api/v1/trading/market
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
         base-url: "local:"
         target-prefix: /api/v1/admin/trading/trigger-orders

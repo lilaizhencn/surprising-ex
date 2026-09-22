@@ -48,15 +48,15 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 
 | Gateway service | 内部目标 | 私有 |
 | --- | --- | --- |
-| `instrument` | `http://localhost:9080/api/v1/instruments` | 否 |
-| `candlestick` | `http://localhost:9081/api/v1/candlestick` | 否 |
+| `instrument` | `local:/api/v1/instruments` | 否 |
+| `candlestick` | `http://localhost:9095/api/v1/candlestick` | 否 |
 | `price-index` | `http://localhost:9082/api/v1/price/index` | 否 |
 | `price-fx` | `http://localhost:9082/api/v1/price/fx` | 否 |
 | `price-mark` | `http://localhost:9082/api/v1/price/mark` | 否 |
-| `trading` | `http://localhost:9084/api/v1/trading/orders` | 是 |
-| `trading-market` | `http://localhost:9081/api/v1/trading/market` | 否 |
-| `trading-trigger` | `http://localhost:9084/api/v1/trading/trigger-orders` | 是 |
-| `account` | `http://localhost:9086/api/v1/accounts` | 是 |
+| `trading` | `local:/api/v1/trading/orders` | 是 |
+| `trading-market` | 进程内盘口查询 | 否 |
+| `trading-trigger` | `local:/api/v1/trading/trigger-orders` | 是 |
+| `account` | `local:/api/v1/accounts` | 是 |
 | `risk` | `http://localhost:9087/api/v1/risk` | 是 |
 | `liquidation` | `http://localhost:9087/api/v1/liquidations` | 是 |
 | `funding` | `http://localhost:9087/api/v1/funding` | 否 |
@@ -146,11 +146,11 @@ surprising:
       read-timeout: 30s
     routes:
       candlestick:
-        base-url: http://surprising-market-data:9081
+        base-url: http://surprising-realtime:9095
         target-prefix: /api/v1/candlestick
         private-route: false
       account:
-        base-url: http://surprising-account:9086
+        base-url: "local:"
         target-prefix: /api/v1/accounts
         private-route: true
       trading-trigger:

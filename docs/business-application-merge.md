@@ -18,7 +18,7 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
 `surprising-aeron-service` 在业务应用 POM 中仅为测试依赖，不打入运行包。
 余额、冻结、订单与持仓的权威状态、撮合、资金结算、Snapshot/Log Replay 均留在 Core。
 本轮四模块合并保留外围进程；后续 funding 已合入 derivatives-lifecycle，详见
-[衍生品后台说明](../surprising-derivatives-lifecycle/README.md)。价格、行情、realtime、maker 仍独立。
+[衍生品后台说明](../surprising-derivatives-lifecycle/README.md)。后续盘口查询已入 gateway，K 线与 realtime 合为行情进程；价格与 maker 仍独立。
 
 业务应用共用一个数据源和调度器。默认 Hikari 最大连接数为 30、最小空闲为 4，
 可用 `BUSINESS_DB_MAX_POOL_SIZE` / `BUSINESS_DB_MIN_IDLE` 调整。
@@ -80,7 +80,7 @@ java --enable-native-access=ALL-UNNAMED \
 ```
 
 完整本地启动脚本仍是 `scripts/start-product-line-providers.sh`。
-启动顺序为 Core → 业务应用 liveness → price → market-data → 生命周期（含资金费）→ maker；
+启动顺序为 Core → 业务应用 liveness → price → realtime（K 线/路由）→ 生命周期（含资金费）→ maker；
 启用 realtime/export 时按原配置先启动对应进程。
 业务应用先提供合约内部查询，价格启动后再满足标记价 readiness，避免双方启动互相等待。
 原来三个 provider 的进程、端口和单独启动命令不再使用。

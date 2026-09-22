@@ -49,8 +49,12 @@ class CandlestickRollupTopologyTest {
                 "BTC-USDT", "t1", 1, tradeTime, BigDecimal.TWO, BigDecimal.ONE,
                 TradeSide.BUY, null, null));
         StreamsBuilder builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration().candlestickTopology(builder, properties, sink,
-                symbols, mapper, new CandleHotCache());
+        var router = mock(com.surprising.realtime.provider.RealtimeRouter.class);
+        var configuration = new CandlestickStreamConfiguration();
+        var json = new tools.jackson.databind.ObjectMapper();
+        org.springframework.test.util.ReflectionTestUtils.setField(configuration, "realtime", router);
+        org.springframework.test.util.ReflectionTestUtils.setField(configuration, "objectMapper", json);
+        configuration.candlestickTopology(builder, properties, sink, symbols, mapper, new CandleHotCache());
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "flush-boundary-test");
@@ -75,6 +79,14 @@ class CandlestickRollupTopologyTest {
             CandleUpdatedEvent closed = output.readValue();
             assertThat(closed.period()).isEqualTo("1m");
             assertThat(closed.status()).isEqualTo(CandleStatus.CLOSED);
+            var frames = org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.protocol.RealtimeFrame.class);
+            verify(router, times(3)).offer(frames.capture());
+            assertThat(frames.getAllValues()).allSatisfy(frame -> {
+                assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE);
+                assertThat(frame.productLine()).isEqualTo(properties.getKafka().getProductLine());
+            });
+            assertThat(frames.getAllValues()).extracting(com.surprising.aeron.protocol.RealtimeFrame::entityId)
+                    .containsExactlyInAnyOrder("1m", "1m", "5m");
         }
     }
 
