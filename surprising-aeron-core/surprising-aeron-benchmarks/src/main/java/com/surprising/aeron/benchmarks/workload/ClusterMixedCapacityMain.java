@@ -484,15 +484,46 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         long start=System.nanoTime();boolean count=measured;
         if(count){offered+=weight;coreOffered++;}
         // Fail on a not-accepted offer rather than retry it behind dependent later commands.
-        var future=client.commandAsync(type,nextRequest(),user,payload).thenApply(r->{
+        UUID commandId = nextRequest();
+        var timing = count ? ClientRequestLatency.sample(type, commandId, start) : null;
+        var future=client.commandAsync(type,commandId,user,payload).thenApply(r->{
             if(r.commandStatus()!=ResponseStatus.APPLIED)throw new IllegalStateException(type+" rejected "+r.resultCode());
-            return new Completed(r,System.nanoTime());
+            long terminalNanos = System.nanoTime();
+            if (timing != null) timing.finish(terminalNanos);
+            return new Completed(r,terminalNanos);
         });
         // Completion processing belongs to this producer, never an egress callback thread.
         pending.addLast(new Pending(future,new Task(type,weight,start,count,validation)));
         peak=Math.max(peak,pending.size());
         reap();report();return future;
     }
+    /** Sparse benchmark-only request trace; joins Core boundaries by UUID, not JVM clocks. */
+    @jdk.jfr.Name("surprising.ClientRequestLatency")
+    @jdk.jfr.StackTrace(false)
+    static final class ClientRequestLatency extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(ClientRequestLatency.class);
+        public String commandType;
+        public long commandIdHigh, commandIdLow, startedNanos, finishedNanos, elapsedNanos;
+
+        static ClientRequestLatency sample(CoreMessageType type, UUID id, long start) {
+            if ((id.hashCode() & 63) != 0 || !TYPE.isEnabled()) return null;
+            var event = new ClientRequestLatency();
+            event.commandType = type.name();
+            event.commandIdHigh = id.getMostSignificantBits();
+            event.commandIdLow = id.getLeastSignificantBits();
+            event.startedNanos = start;
+            event.begin();
+            return event;
+        }
+
+        void finish(long terminalNanos) {
+            finishedNanos = terminalNanos;
+            elapsedNanos = terminalNanos - startedNanos;
+            end();
+            commit();
+        }
+    }
+
     private record Pending(CompletableFuture<Completed> future, Task task) {}
     private record Completed(CoreResponse response,long terminalNanos) {}
     private record Task(CoreMessageType type,int weight,long start,boolean counted,Consumer<CoreResponse> validation) {}

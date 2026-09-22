@@ -134,6 +134,8 @@ class ClusterCommandPipelineTest {
                     "ownerCommitAttemptTerminal", "ownerFactPublication", "ownerTerminalBookkeeping",
                     "ownerRealtimePublication", "ownerResponseAndRetirement");
             for (var event : boundaries) {
+                assertThat(event.getLong("finishedNanos") - event.getLong("startedNanos"))
+                        .isEqualTo(event.getLong("elapsedNanos"));
                 assertThat(event.getLong("elapsedNanos")).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
                 assertThat(event.getString("commandType")).isNotBlank();
             }

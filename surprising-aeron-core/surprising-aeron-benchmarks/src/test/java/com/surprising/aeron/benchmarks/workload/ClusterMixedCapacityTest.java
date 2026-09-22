@@ -7,6 +7,32 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class ClusterMixedCapacityTest {
+    @Test void requestTracePreservesCorrelationAndCallbackTime() throws Exception {
+        var path = java.nio.file.Files.createTempFile("client-request-latency-", ".jfr");
+        try (var recording = new jdk.jfr.Recording()) {
+            recording.enable(ClusterMixedCapacityMain.ClientRequestLatency.class);
+            recording.start();
+            var id = new java.util.UUID(0, 64);
+            long start = System.nanoTime();
+            var event = ClusterMixedCapacityMain.ClientRequestLatency.sample(CoreMessageType.CANCEL_ORDER_BATCH, id, start);
+            assertThat(event).isNotNull();
+            assertThat(ClusterMixedCapacityMain.ClientRequestLatency.sample(
+                    CoreMessageType.CANCEL_ORDER_BATCH, new java.util.UUID(0, 65), start)).isNull();
+            long finished = System.nanoTime();
+            event.finish(finished);
+            recording.stop(); recording.dump(path);
+            var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.ClientRequestLatency")).toList();
+            assertThat(events).hasSize(1);
+            var stored = events.getFirst();
+            assertThat(stored.getLong("commandIdHigh")).isZero();
+            assertThat(stored.getLong("commandIdLow")).isEqualTo(64);
+            assertThat(stored.getString("commandType")).isEqualTo("CANCEL_ORDER_BATCH");
+            assertThat(stored.getLong("elapsedNanos")).isEqualTo(finished - start);
+            assertThat(stored.getLong("finishedNanos")).isEqualTo(finished);
+        } finally { java.nio.file.Files.deleteIfExists(path); }
+    }
+
     @Test void laneResultCannotCarryAnotherAccountsExecution() {
         var item = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,null,
                 List.of(new CoreExecutionView(10,11,7,8,101,1)));

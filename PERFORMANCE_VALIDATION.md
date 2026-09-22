@@ -4212,3 +4212,150 @@ mapTiming独立1/2048样本：
 归档目录`/Users/atomex/.Trash/surprising-owner-merge-detail-20260922`，运行/tmp地址仅作历史定位；清理状态另追加。
 
 - 清理完成：本轮节点/客户端/驱动PID已退出；删除本轮runtime/Archive/Aeron/tmp、3份rawJFR及分析class，保留完整日志/命令/脚本/测试与聚合证据、JFR配置、原始大小SHA和artifact-sha256.json。归档`/Users/atomex/.Trash/surprising-owner-merge-detail-20260922`共5,262,782bytes；未影响其他进程或项目文件。
+
+
+## 2026-09-22 P99逐请求关联：采集前计划
+
+- 当前master9c666d12，CodeGraph工具未暴露；只检查已有源码。对照commit不适用（当前master诊断），不改业务、接纳/提交调度、Matcher/Lane或客户端负载。既往rawJFR已清理，汇总P99不能按请求关联，故补1次同场景真实JMH+JFR。
+- 问题：批量撤单高P99主要来自Owner接纳前、成为队首前、队首处理、egress，还是客户端/传输剩余区间；GC重叠解释多少。仅诊断，无新吞吐SLO/性能提升目标。资金差额/unfinished必须0；计数不一致为失败，DataLoss/负分段/关联缺失需报告并使相应结论无效；热控/swap使性能验收无效。采样量不足则保留未定位，不用不同请求的分位数相加。
+- 现有CommandBoundaryLatency补同JVM单调时钟起止字段；OwnerHead除原sequence抽样外覆盖相同UUID hash 1/64请求；benchmark新增ClientRequestLatency，只记录测量期1/64请求，保持原callback终态时间与直方图口径。无新业务状态/容器/线程；事件仅持有到future完成。JFR内UUID关联后，用客户端总duration减节点包围duration得联合外部残差，不跨JVM相减timestamp，不声称拆开入站/出站网络。节点单调时间到节点JFR时间映射需检验；GC重叠是相关证据，不直接等同全程因果。
+- 固定单真实Aeron成员/网络/Archive，LINEAR_PERPETUAL MIXED连续交易，seed25620/1385users/128symbols/batch20、4Lane/1Matcher，global/session inflight256，Owner/Matcher pipeline/settlement BUSY_SPIN、input64；maker与taker按原cycle交错，128批maker挂单后128批撤单、普通挂单/IOC成交和普通撤单，不改混合比例；启动资金1384000000125。单command session、独立行情源。JMH原脚本1fork/1thread，warmup30s/measurement60s/冷却60s/排空另记；不是open-loop，不做CO修正。
+- G1 node512m–1536m/client128m–512m、HotSpot Corretto27+33-FR/Maven3.9.16、i9-9880H/16GiB/macOS26.7；磁盘505GiB/低于10GiB停止。保留原owner-poll=true诊断以保持条件，已知有同步诊断日志，不能给主链路I/O验收通过。每进程JFR上限256m；5s ps/vm_stat/swap/pmset/磁盘，原JFC加客户端事件。记录采样未量化开销，不另跑无profiler/GC主成绩。
+- 预定回归ClusterCommandPipelineTest、ClusterMixedCapacityTest、CoreOrderedOrderBatchTest、RuntimeCommitRecoveryTest、ContinuousOwnerBenchmarkTest，diagnostics=true；事件端点/UUID字段与现有顺序、资金、恢复回归。真实Archive重启、长稳、三节点、外围API-WebSocket未覆盖。
+- 复现`python3 /tmp/surprising-p99-trace-20260922/run.py`；完整env/JVM/运行命令/PID/脚本和源码diff入档，diff SHA256 2f94965c95a4abc4e54cd151312faa1d8f4b10433414cf0978d59b1df363d245。证据根/tmp/surprising-p99-trace-20260922，最终归档/Users/atomex/.Trash/surprising-p99-trace-20260922；分析后只清理本轮runtime/rawJFR。
+
+
+### P99第一轮结果锁定与第二轮追加计划
+
+第一轮327测试通过；JMH+JFR clientPass/fundsDiff0/unfinished0，363583.233business/s仅诊断记录，CPU限制66–70性能无效。保护窗口03:59:02.278–03:59:58.295 UTC，30276客户端样本全部有节点事件；30181 matching请求分区有效，95价格控制请求无matching/head阶段单列。批量撤单n3770，采样P99=26.103955ms，全量26.279ms；最慢1%共38条，均外部残差最大，平均总29.428987ms/节点7.833395ms/外部21.595592ms，占73.382%；Owner成为队首后平均66.981μs。先排除“25ms主要花在单次Owner提交”的解释，残差尚未拆分，不称作网络耗时。
+
+节点退出后只读cnc.dat/loss-report.dat：NAK sent166/received87、retransmits44/retransmittedBytes108352，入站stream101 loss34次/79328bytes，first11:58:30.506/last11:59:54.411；含setup+warmup，不能充当稳定窗口增量或逐请求因果。client driver退出删除，第一轮无client计数。节点/客户端JFR与nanoTime的全录制固定offset不稳定（p01–p99漂移约150/102ms），因此不使用全局固定offset，更不能跨进程减timestamp。GC仅用同JVM逐请求局部映射（节点区间offset跨度p99=15.958μs/max66.509μs）估算重叠，绝非精确阻塞归因。最慢撤单38条中节点/客户端GC重叠各1条。
+
+第二轮只增加诊断：ClientTransportBoundary三个瞬时时点queued/offered/delivered，与已有UUID1/64采样一致，无新增请求持久状态/业务分支；真实fake-session回归校验顺序与槽复用，补AeronClientAgentTest/AeronClientPoolTest，重跑第一轮相关测试。独立只读Aeron计数采样（约100ms，读取本轮cnc/loss），测量窗口前后比对NAK/重传，不改UDP/缓冲/idle配置、不调整并发256。单次同环境/30s预热/60s稳定/60s冷却/同JFR上限的真实JMH+JFR，其他条件与第一轮完全相同；性能门槛、无效判据和未测范围沿用。
+
+验证客户端总duration内queued→offered占比；offer→delivered duration减同请求节点包围duration，仅得到传输/复制/响应联合残差，不能区分单向传输或证明链路丢包是全部残差原因。若残差仍主导且稳定窗口NAK/loss增长则保留传输恢复假设；若客户端队列主导则转向dispatcher。不得把累计driver max cycle当作某请求等待。第二轮`python3 /tmp/surprising-p99-transport-20260922/run.py`；根/tmp/surprising-p99-transport-20260922，源码diff SHA256 cac1e92fd917270a09d673698f8bb8452d7d0769d934a1dfbd858151c8c83e9c；最终归档同名.Trash目录，记录两轮而不跨profiler成绩宣称优化。
+
+
+## 2026-09-22 P99逐请求关联：最终诊断结果
+
+**结论：定位到主要等待区间，尚未完成每一笔传输恢复的因果闭环；正确性检查通过，性能验收无效。** 高批量撤单P99主要不是Owner队首提交执行，也不是客户端发送排队。第二轮同一尾部请求的耗时分解表明，成功offer→收到终态期间、节点已埋点包围区间之外的联合残差占约66%，Owner接纳前约25%；节点与客户端均有真实Aeron可靠流缺口/NAK/重传证据。优先检查传输恢复/driver调度及接收能力，不再把这25ms直接归因于Owner串行执行。
+
+### 方法与口径修正
+
+- `ClusterMixedCapacityMain.send`在`space()`之后才取start；直方图截止于终态future callback，reap只汇总。因此窗口阻塞比例不是单请求延迟，也不能把窗口等待再加进本次P99。它仍是闭环/背压负载，不代表open-loop等待已被校正。
+- ClientRequestLatency按UUID hash1/64、仅测量期采样；Core边界同hash，OwnerHead取原sequence样本与UUID样本的并集。只用于诊断，OwnerHead数量不再视作纯1/64 sequence无偏样本。
+- 每条matching请求的exclusive分段：client start→queued；queued→成功offer；成功offer→delivered（其中减去下述节点包围duration得到联合残差）；delivered→callback。节点内部依次：cluster service已复制消息交给Owner队列→Owner取出；取出→admission开始；admission执行；admission结束→成为提交队首；队首→Owner响应入队；响应入队→cluster service取响应。
+- 最后一段`ownerToEgress`只到**取出响应、开始编码之前**，不包含编码、deferred offer、网络发送和客户端接收。因此联合残差还包含Aeron offer后入站、Cluster log/Archive/复制和调度、响应编码/发送、客户端poll/decode/dispatch，不把它直接命名为纯网络延迟。
+- 空窗口的第一条命令在bindSequence时已经成为head，早于admission计时结束；互斥分区取max(headObserved,admissionEnd)，避免重叠计数。head段包含可能的异步等待，不等同纯CPU；beforeHead包含有序等待和并行Matcher/Lane推进，不能都算浪费。
+- JVM间按UUID关联后只相减**duration**，不相减timestamp。JFR时间和System.nanoTime在本机全录制存在漂移，固定offset会造成数十ms错误；GC使用同JVM、逐请求局部offset中位数，第二轮局部跨度p50=7.033μs/p99=18.052μs/max70.461μs。client用该事件end锚点回推本请求区间，GC重叠属近似相关性，边界附近不作严格因果判断。第一版分析器全局offset映射及10ms错误窗口末端已修正，留存输出均为最终窗口/局部映射；没有重跑或删除业务异常样本。
+
+### 同一尾部请求的分段结果
+
+第二轮保护窗口04:08:33.909–04:09:29.912 UTC（两端各裁2s），29554个客户端样本全部有关联节点事件；29411条matching请求完整分区，无负数/重复stage/分区不守恒，143个价格控制请求不适用matching/head分区，单列。客户端queued/offered/delivered均完整。
+
+|业务|完整请求样本|全量P99 ms|采样P99 ms|采样最慢1%数|联合传输残差占该尾部总耗时|
+|---|---:|---:|---:|---:|---:|
+|CANCEL_ORDER|7360|12.279000|12.367266|74|37.112%|
+|CANCEL_ORDER_BATCH|3680|26.263000|26.443335|37|65.806%|
+|PLACE_ORDER|7345|13.131000|12.367617|74|24.607%|
+|PLACE_ORDER_BATCH|11026|16.908000|17.742309|111|65.748%|
+
+周期性1/64样本有代表性限制，尤其普通下单和batchplace采样/全量P99并非完全相同，不能用样本值替换全量直方图。按全量batchcancel P99=26.263ms筛选，同批样本39条，联合残差占64.865%，与采样top1%的结论一致。
+
+批量撤单采样最慢1%共37条，下面是**这37条相同请求的平均分段**，不是把不同阶段P99相加；平均总耗时31.124765ms，完整逐请求CSV与最慢8条JSON入档：
+
+|互斥区间|平均ms|占总耗时|
+|---|---:|---:|
+|客户端调用开始→queued|0.000817|0.0026%|
+|queued→成功offer|0.008078|0.0260%|
+|成功offer后的联合外部残差|20.481872|65.8057%|
+|delivered→callback|0.001692|0.0054%|
+|已复制消息→Owner取出|2.020068|6.4902%|
+|Owner取出→admission开始|7.919513|25.4444%|
+|admission执行|0.013728|0.0441%|
+|admission结束→成为提交队首|0.590565|1.8974%|
+|提交队首→响应入队|0.071536|0.2298%|
+|响应入队→cluster service取出|0.016897|0.0543%|
+
+37条中34条最大项为联合外部残差、3条最大项为Owner接纳前；排除了客户端发送mailbox排队为主因（平均8.078μs）。成为head后平均71.536μs，占0.230%；因此微调0.1μs级结果准备无法解释这类26ms P99。普通下单尾部则接纳前占41.15%、beforeHead23.19%，普通撤单beforeHead30.24%，**不能把不同业务的长尾原因统一成一种**。
+
+第二轮batchcancel尾部节点GC重叠1/37、客户端GC重叠4/37，平均重叠0.149696/0.083811ms；第一轮对应1/38和1/38。GC可能通过队列和driver停顿间接传播影响，但“每个请求内直接GC暂停”解释不了大多数这些尾部。不能用少量无重叠样本推断GC完全无关。
+
+### Aeron数据缺口与重传
+
+- 第二轮只读CNC监控约100ms，共565个稳定窗口内样本，覆盖epoch1790050111989–1790050171863（59.874s，窗口两端约129ms未覆盖）；NAK sent122→195（+73），NAK received50→53（+3），节点retransmits27→28（+1）/bytes80864→82272（+1408），sender backpressure422→938（+516）。分别是接收端要求重传、对端要求本节点重传和本节点实际发送重传，**不能把节点retransmits+1解释为所有入站恢复只有1次**。计数为driver聚合；退出后的channel标签确认主入站stream101和响应stream102参与。
+- 第二轮节点loss report：stream101、session−1714764132，31次gap observation/70304bytes，12:08:02.221–12:09:30.543；客户端loss report：响应stream102、session−317774149，25次gap observation/71488bytes，12:08:02.469–12:09:12.335。这些是全生命周期累计，不能代替上面的稳定增量，也不等于业务请求数或最终业务丢失。客户端副本在稳定窗口结束后、driver退出删除前只读复制，原路径与capture.json留存。
+- 客户端退出前累计NAK sent53/received195、retransmits37；节点累计NAK sent195/received53、retransmits28，与两端方向对应。资金和最终完成量均通过，可靠流恢复没有被当成业务成功数缺失。
+- 第一轮也观察到双向NAK和重传，已在追加计划记录；两轮都未改socket大小/线程策略。本机UDP缺口是**实测事实**；“接收socket溢出/driver调度停顿导致gap→重传→批量队头等待”是合理待验证假设，尚无逐包跟踪、OS丢包增量或单因素消除实验，不能宣布物理丢包位置或全部20ms残差已归因。
+- Aeron官方[投递保证](https://github.com/aeron-io/aeron/wiki/Message-Delivery-Assurances)说明可靠流按序交付，检测gap后用NAK请求重传；它支持上述候选机制，不替代本项目逐请求证据。[最佳实践](https://github.com/aeron-io/aeron/wiki/Best-Practices-Guide)也把socket缓冲和线程/资源安排列为应检查因素。未修改可靠性、关闭Archive、扩大inflight或将本机网络测试换成IPC。
+- 下一项最小实验：保持当前master/1Matcher/inflight256，读取实际SO_RCVBUF/SO_SNDBUF及OS UDP丢包计数，单独改变接收缓冲或driver安排之一；同时要求窗口NAK/loss下降及相同请求的联合残差下降，才能认定相应根因。当前没有这个对照，不给“修复P99”的结论。
+
+### 两轮运行与正确性
+
+构建1：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dcore.settlementLatencyDiagnostics=true -Dtest=ClusterCommandPipelineTest,ClusterMixedCapacityTest,CoreOrderedOrderBatchTest,RuntimeCommitRecoveryTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`，327通过。构建2同命令增加AeronClientAgentTest/AeronClientPoolTest，共358通过（23+8+250+10+28+8+31），0失败/跳过。真实cluster沿用相同JMH workload，新增埋点实际走到，事件字段/请求相关性、顺序、资金和恢复回归通过；无业务调度、协议或持久状态修改。没有新增业务容器/线程；两个新增嵌套JFR事件分别承担benchmark回调和客户端传输边界，已有Core事件无法访问这些跨模块端点。
+
+#### 第1轮
+
+- 命令、JVM参数、PID、profile见归档surprising-p99-trace-20260922的run.py/owner.command.json/node.command/client.command/environment.txt；同场景1成员/4Lane/1Matcher/256窗口/batch20/128symbols/seed25620，setup强平/风险/保险/ADL通过，测量中不将setup动作算业务吞吐。
+- 稳定60.016112s：21,820,852 business/2,085,172messages/5,194,240fills，对应363,583.233business/s、34,743.537messages/s、86,547.426fills/s；仅诊断记录，不作无profiler主成绩或跨轮性能比较。排空6.986935ms/2660business/228messages。offered=terminal=21,823,512business/2,085,400messages，unfinished=0、clientPass，mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2956 businessHash=a4b9822c2e6585b4。
+- 窗口阻塞49.783759s（82.951%），575179次，peak256，闭环负载无CO校正。队列峰{"matcher": 212, "completion": 212, "context": 255, "lanes": [55, 37, 41, 43]}；包含BUSY_SPIN的CPU不能代表有用工作全部饱和，未证明客户端可无限供给或Core容量上限。
+- CPU限频66–70，swap使用0/无swapin-out，Pageouts+15，磁盘最低501.38GiB；性能验收无效。第二轮watch平均0.15%进程CPU/RSS58.95MiB，监控开销未做对照消除。
+
+全量客户端入口→终态直方图（μs；含排空样本），Core admission不是外围API accepted，未提供缺失的外围API三段直方图：
+
+|业务|requests/items|p50|p90|p95|p99|p99.9|max|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|PLACE_ORDER|519424/519424|5378|9584|10428|13623|25264|36995|
+|CANCEL_ORDER|519424/519424|5492|8232|8921|13058|23887|37289|
+|APPLY_MARK_PRICE|7704/7704|5201|9814|11845|15179|29556|30031|
+|PLACE_ORDER_BATCH|779136/15582720|6971|11968|13041|16736|30343|49676|
+|CANCEL_ORDER_BATCH|259712/5194240|12173|13705|14540|26279|33751|49938|
+
+批量均20items/batch；各业务request/s可由该表requests除以含排空elapsed=60.023s复算；稳定终态吞吐用上面稳定增量，不把排空混入。
+
+JFR每JVM max256m，summary/view/窗口计数与分配、CPU、阻塞、编译、native完整文本入档，三份DataLoss均0：
+
+|原始文件|bytes|SHA256|
+|---|---:|---|
+|/tmp/surprising-p99-trace-20260922/owner/window-256/end_to_end/client-65245.jfr|10042820|123ba3df5858531901ff65d57019dc93fa6a2296ad749bc970d45c860eb9dba1|
+|/tmp/surprising-p99-trace-20260922/owner/window-256/end_to_end/client-65248.jfr|122629262|d9771c7e4bdfaa916053576df133394733d93ea3c5e1c62c9f03a281809efcd0|
+|/tmp/surprising-p99-trace-20260922/owner/window-256/end_to_end/node.jfr|149182686|2c7a74d7fa7493d18e860bafd83bd02759e3a469f0d8675896a1eb60fdfe62e7|
+
+#### 第2轮
+
+- 命令、JVM参数、PID、profile见归档surprising-p99-transport-20260922的run.py/owner.command.json/node.command/client.command/environment.txt；同场景1成员/4Lane/1Matcher/256窗口/batch20/128symbols/seed25620，setup强平/风险/保险/ADL通过，测量中不将setup动作算业务吞吐。
+- 稳定60.001646s：21,283,224 business/2,033,944messages/5,066,240fills，对应354,710.672business/s、33,898.137messages/s、84,435.018fills/s；仅诊断记录，不作无profiler主成绩或跨轮性能比较。排空4.711831ms/2664business/232messages。offered=terminal=21,285,888business/2,034,176messages，unfinished=0、clientPass，mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2883 businessHash=48b7756dee5264ef。
+- 窗口阻塞49.504221s（82.505%），550140次，peak256，闭环负载无CO校正。队列峰{"matcher": 213, "completion": 205, "context": 255, "lanes": [50, 47, 60, 43]}；包含BUSY_SPIN的CPU不能代表有用工作全部饱和，未证明客户端可无限供给或Core容量上限。
+- CPU限频68–72，swap使用0/无swapin-out，Pageouts+74，磁盘最低498.41GiB；性能验收无效。第二轮watch平均0.15%进程CPU/RSS58.95MiB，监控开销未做对照消除。
+
+全量客户端入口→终态直方图（μs；含排空样本），Core admission不是外围API accepted，未提供缺失的外围API三段直方图：
+
+|业务|requests/items|p50|p90|p95|p99|p99.9|max|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|PLACE_ORDER|506624/506624|5595|9707|10436|13131|23117|40337|
+|CANCEL_ORDER|506624/506624|5603|8642|9388|12279|24051|29605|
+|APPLY_MARK_PRICE|7680/7680|5644|9773|11837|20135|32931|34766|
+|PLACE_ORDER_BATCH|759936/15198720|7467|11952|13017|16908|28835|46497|
+|CANCEL_ORDER_BATCH|253312/5066240|12083|13680|14721|26263|37388|46202|
+
+批量均20items/batch；各业务request/s可由该表requests除以含排空elapsed=60.006s复算；稳定终态吞吐用上面稳定增量，不把排空混入。
+
+JFR每JVM max256m，summary/view/窗口计数与分配、CPU、阻塞、编译、native完整文本入档，三份DataLoss均0：
+
+|原始文件|bytes|SHA256|
+|---|---:|---|
+|/tmp/surprising-p99-transport-20260922/owner/window-256/end_to_end/client-68270.jfr|10238931|3f00368cb042788971b13334456ff83e1dd004823b245a3c4927915c6247b81b|
+|/tmp/surprising-p99-transport-20260922/owner/window-256/end_to_end/client-68273.jfr|117103917|cfb3cf1b724d7dd76985832d7e0325ee15c8b1d638c6f38d6861de83c80967a2|
+|/tmp/surprising-p99-transport-20260922/owner/window-256/end_to_end/node.jfr|139238429|1d866ccd720da8d8de8db7cbde5072c81604583be4c5ff775f8c1bf74a2fc2cd|
+
+### 资源与证据边界
+
+- 保护窗口节点G1 young pause：第一轮79次/431.649513ms，p50/p95/p99/max5.335641/6.316442/6.560640/9.544743ms；第二轮77次/420.188906ms，5.364134/6.510324/6.940589/7.133678ms。客户端fork第一轮405次/347.948291ms/max1.475687ms，第二轮399次/334.475568ms/max1.553415ms。不能把节点平均GC占比低当成不影响尾延迟。
+- 第二轮Owner分配88.872MB/s、Matcher81.490MB/s、Lane每个53.528–53.673MB/s、clustered-service34.677MB/s、client dispatcher293.659MB/s（ThreadAllocationStatistics相邻采样窗口54.755/55.746s）；保留TLAB/OutsideTLAB/ObjectAllocationSample计数与top class/site。dispatcher热点有pending响应扫描/Long装箱，但clientQueue只有μs级，不能单凭分配热点把20ms归因于它。没跑-prof gc，不提供伪精确对象/op或分配byte/business op；未量化新增诊断整体开销。
+- 节点heap committed512MiB，第一轮afterGC172.595–175.525MB，第二轮167.770–171.391MB；客户端约13–14MB。节点Direct9,575,136bytes、client8,522,400bytes窗口不变。节点NMT committed第一轮740892KB/启动diff−1511KB，第二轮734953KB/diff−6974KB，各分类reserved/committed完整文本入档；Code committed增长约28MB含启动/JIT，不作泄漏结论。
+- 节点Compilation第一轮63次/1177.200ms/max827.790ms，第二轮58次/324.162ms/max123.274ms；safepoint begin85次/7.949ms与82次/6.455ms。预热后仍有编译，不能宣称完全越过JIT。第二轮窗口记录3个MethodHandle解析相关NoSuchMethodError事件（bootstrap Holder.resolve栈），无对应未捕获业务失败/节点ERROR，保留java-errors.txt与完整栈，不把它填0。
+- 第二轮Archive写入约1.785GB、经过时间11.832s，独立archive线程；Owner33次诊断Console write/12403bytes/1.025784ms，来自owner-poll=true，正式主链路同步I/O验收不通过。Aeron NIO/UDP不一定映射为JFR SocketRead/Write事件，采用cnc/loss补证，不用JFR socket缺失推出无网络问题。
+- 两轮CPU限频、owner-poll同步日志、新增采样未量化，使性能验收无效；仍可保留本次退化环境下的同请求分段和实际counter/gap观察。未做三节点、真实Archive重启、外围API/WebSocket、长稳；快照恢复仅测试覆盖，未验证本机以外容量或长期资源斜率。
+- 两轮均已成功结束；源码diff、日志、测试计数、逐请求CSV、尾部JSON、分析器、配置、counter时序、loss文本与原始文件SHA归档；删rawJFR后可复核统计和脚本但不能重放录制。下一次不把本轮profiler吞吐与37/39万主成绩直接比较。
+
+- 两轮清理完成：确认节点/客户端/驱动/只读watch进程均退出；移除本轮runtime/Archive/Aeron/tmp、6份rawJFR、CNC/loss二进制副本和分析class。保留逐请求CSV/JSON、cnc计数时序/loss文本、完整日志/命令/源脚本/测试/JFR配置与raw/artifact SHA清单。归档/Users/atomex/.Trash/surprising-p99-trace-20260922（12,035,524bytes）；/Users/atomex/.Trash/surprising-p99-transport-20260922（23,031,444bytes）。原/tmp路径仅作历史定位，未停止或删除其他项目进程与文件。

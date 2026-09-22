@@ -697,6 +697,7 @@ public final class AeronClientPool implements AutoCloseable {
                 return true;
             }
             request.startQueueTimeout(responseTimeout.toNanos());
+            ClientTransportBoundary.record("queued", request.operationId);
             if (!mailbox.offer(request)) {
                 request.releaseCorrelation();
                 return false;
@@ -745,6 +746,26 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void releaseCorrelation(long correlationId) {
             claimedCorrelations.remove(correlationId);
+        }
+    }
+
+    /** Optional sparse transport trace; no request state or cross-JVM clock assumptions. */
+    @jdk.jfr.Name("surprising.ClientTransportBoundary")
+    @jdk.jfr.StackTrace(false)
+    static final class ClientTransportBoundary extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(ClientTransportBoundary.class);
+        public String stage;
+        public long commandIdHigh, commandIdLow, observedNanos;
+
+        static void record(String stage, UUID id) {
+            if ((id.hashCode() & 63) != 0 || !TYPE.isEnabled()) return;
+            long observed = System.nanoTime();
+            var event = new ClientTransportBoundary();
+            event.stage = stage;
+            event.commandIdHigh = id.getMostSignificantBits();
+            event.commandIdLow = id.getLeastSignificantBits();
+            event.observedNanos = observed;
+            event.commit();
         }
     }
 
@@ -939,6 +960,7 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             if (offerResult > 0) {
+                ClientTransportBoundary.record("offered", request.operationId);
                 lane.connected();
                 if (!request.oneWay()) {
                     request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
@@ -1255,6 +1277,7 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
+            ClientTransportBoundary.record("delivered", operationId);
             CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
             CompletableFuture<CoreResponse> result = responseFuture;
             if (outcome != null) {

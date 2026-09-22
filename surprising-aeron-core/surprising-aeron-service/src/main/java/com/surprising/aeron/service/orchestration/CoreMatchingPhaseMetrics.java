@@ -75,7 +75,8 @@ final class CoreMatchingPhaseMetrics {
     static void recordOwnerHead(ClusterCommandWindow.Entry head, boolean afterPredecessor) {
         if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS
                 || head.sequence == 0
-                || (Long.hashCode(head.sequence * 0x9e3779b97f4a7c15L) & 63) != 0
+                || ((Long.hashCode(head.sequence * 0x9e3779b97f4a7c15L) & 63) != 0
+                    && (head.request.header().commandId().hashCode() & 63) != 0)
                 || !OwnerHead.TYPE.isEnabled()) return;
         var event = new OwnerHead();
         var header = head.request.header();
@@ -225,7 +226,8 @@ final class CoreMatchingPhaseMetrics {
         public String stage;
         public String commandType;
         public long commandIdHigh, commandIdLow;
-        public long elapsedNanos;
+        /** Same-JVM endpoints; never subtract these from a client JVM timestamp. */
+        public long startedNanos, finishedNanos, elapsedNanos;
     }
 
     static long sampleStart(com.surprising.aeron.protocol.CoreMessageHeader header) {
@@ -236,13 +238,15 @@ final class CoreMatchingPhaseMetrics {
 
     static void recordBoundary(String stage, com.surprising.aeron.protocol.CoreMessageHeader header, long start) {
         if (start == 0) return;
-        long elapsed = System.nanoTime() - start;
+        long finished = System.nanoTime();
         var event = new CommandBoundaryLatency();
         event.stage = stage;
         event.commandType = header.messageType().name();
         event.commandIdHigh = header.commandId().getMostSignificantBits();
         event.commandIdLow = header.commandId().getLeastSignificantBits();
-        event.elapsedNanos = elapsed;
+        event.startedNanos = start;
+        event.finishedNanos = finished;
+        event.elapsedNanos = finished - start;
         event.commit();
     }
 

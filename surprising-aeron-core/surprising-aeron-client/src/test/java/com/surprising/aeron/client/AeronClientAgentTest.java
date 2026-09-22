@@ -21,6 +21,36 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class AeronClientAgentTest {
+    @Test void transportTraceOrdersQueuedOfferAndTerminalForSameRequest() throws Exception {
+        var path = java.nio.file.Files.createTempFile("client-transport-", ".jfr");
+        var responses = ConcurrentHashMap.<Long>newKeySet();
+        try (var recording = new jdk.jfr.Recording()) {
+            recording.enable(AeronClientPool.ClientTransportBoundary.class); recording.start();
+            try (var pool = pool(Duration.ofSeconds(5), () -> new AeronClientPool.Session() {
+                public long offer(CoreMessage m) { responses.add(m.header().correlationId()); return 1; }
+                public int pollEgress(int limit) { return 0; }
+                public CoreResponse takeResponse(long id) {
+                    return responses.remove(id) ? new CoreResponse(ResponseStatus.APPLIED, 1) : null;
+                }
+                public RuntimeException sessionFailure() { return null; }
+                public boolean keepAlive() { return true; }
+                public void close() {}
+            })) {
+                pool.commandAsync(CoreMessageType.CANCEL_ORDER_BATCH, new UUID(0,64), 1, new byte[0])
+                        .get(2, TimeUnit.SECONDS);
+            }
+            recording.stop(); recording.dump(path);
+            var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.ClientTransportBoundary"))
+                    .sorted(java.util.Comparator.comparingLong(e -> e.getLong("observedNanos"))).toList();
+            assertThat(events).extracting(e -> e.getString("stage")).containsExactly("queued", "offered", "delivered");
+            for (var e : events) {
+                assertThat(e.getLong("commandIdHigh")).isZero();
+                assertThat(e.getLong("commandIdLow")).isEqualTo(64);
+            }
+        } finally { java.nio.file.Files.deleteIfExists(path); }
+    }
+
 
     @Test
     void configuredSessionWindowOffersMoreThan64BeforeAnyTerminalResponse() throws Exception {
