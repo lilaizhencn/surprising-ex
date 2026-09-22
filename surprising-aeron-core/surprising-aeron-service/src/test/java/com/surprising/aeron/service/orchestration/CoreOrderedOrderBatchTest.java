@@ -684,6 +684,21 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().user(1001).balances().get("USDT").lockedUnits()).isEqualTo(90_000);
             assertThat(state.tradingState().user(1001).reservations()).containsOnlyKeys(10_503L);
             assertThat(state.tradingState().user(1002).reservations()).isEmpty();
+            long businessHash = state.tradingState().businessStateHash();
+            CoreResponse duplicate = drainBatch(state, takerBatch);
+            assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(duplicate.data()).containsExactly(response.data());
+            assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHash);
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(businessHash);
+                assertThat(restored.tradingState().orders().keySet()).containsExactly(10_503L);
+                assertThat(restored.terminalRetention().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
+                assertThat(restored.terminalRetention().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
+                CoreResponse replay = drainBatch(restored, takerBatch);
+                assertThat(replay.status()).isEqualTo(ResponseStatus.DUPLICATE);
+                assertThat(replay.data()).containsExactly(response.data());
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(businessHash);
+            }
         }
     }
 

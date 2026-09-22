@@ -2315,9 +2315,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (changes != null) {
                 for (int index = 0; index < event.planCount(); index++) {
                     OrderRuntime admitted = event.admittedOrder(index);
-                    if (admitted != null
-                            && changes.laneDeltas[topology.accountLaneId(admitted.userId())]
-                                    .orders.containsKey(admitted.orderId())
+                    if (admitted == null) continue;
+                    LaneCommitDelta laneDelta = changes.laneDeltas[topology.accountLaneId(admitted.userId())];
+                    // Lane already decided which orders disappear at this commit. Avoid inserting
+                    // those only to remove them below; rejected/retained orders still need publication.
+                    if (!laneDelta.removedOrderRoutes.contains(admitted.orderId())
+                            && laneDelta.orders.containsKey(admitted.orderId())
                             && publishedOrders.get(admitted.orderId()) == null) {
                         publishedOrders.put(admitted.orderId(), admitted);
                     }

@@ -571,6 +571,11 @@ public final class SettlementLaneWorker implements AutoCloseable {
             consumerPosition = position + 1;
         }
 
-        long depth() { return producerPosition - consumerPosition; }
+        long depth() {
+            // Owner samples this Matcher->Lane ring as a third observer. The consumer can
+            // pass the sampled producer cursor before the second volatile read; a negative
+            // estimate must not become the admission probe's "full" sentinel.
+            return Math.max(0L, producerPosition - consumerPosition);
+        }
     }
 }

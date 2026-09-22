@@ -17,12 +17,12 @@ public class ClusterOperationalBenchmark {
     @Param({"0"})
     public int controlPageSize;
     /** 客户端实际在途档位；节点 owner-command-window 必须使用同一基线值。 */
-    @Param({"64"})
+    @Param({"256"})
     public int inFlightWindow;
-    /** 昨日吞吐基线使用连续混合交易；双向成交负载另行诊断，不混入基线。 */
+    /** 固定混合交易基线；双向成交负载另行诊断，不混入基线。 */
     @Param({"MIXED"})
     public String tradingProfile;
-    /** 昨日吞吐基线固定20项批量；单项批量另行诊断，不混入基线。 */
+    /** 固定20项批量；单项批量另行诊断，不混入基线。 */
     @Param({"20"})
     public int batchSize;
     private ClusterMixedCapacityMain workload;
@@ -43,7 +43,8 @@ public class ClusterOperationalBenchmark {
         catch (RuntimeException | Error failure) { workload.close(); throw failure; }
     }
 
-    /** 256币对、20项批量持续部分成交，覆盖Matcher直接发布批量结果、Lane持仓身份在途保护和事件池跨环复用；
+    /** 20项批量包含新单完全成交、部分成交及挂单，覆盖 Owner 按 Lane 删除标记跳过临时订单发布；
+     * 同时覆盖 Owner 观察 Matcher/Lane 游标的准入容量检查、Lane 持仓身份保护和事件池复用；币对数量由外部负载配置指定。
      * 测量后按完整生命周期核对资金、持仓、冻结及终态计数；外部驱动执行真实Archive快照重启校验。 */
     @Benchmark
     public long continuousOperations() { return workload.measureRun(); }

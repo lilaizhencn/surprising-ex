@@ -9,6 +9,47 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
     @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.Timeout(15)
+    void ownerObservesNonNegativeDepthWhileMatcherAndLaneAdvance() throws Exception {
+        // Exercise the real ring cursors without invoking settlement on a synthetic payload.
+        Class<?> type = Class.forName(SettlementLaneWorker.class.getName() + "$MatcherSettlementRing");
+        var constructor = type.getDeclaredConstructor(int.class);
+        constructor.setAccessible(true);
+        Object ring = constructor.newInstance(8);
+        var publish = type.getDeclaredMethod("publish", MatcherSettlementEvent.class);
+        var poll = type.getDeclaredMethod("poll");
+        var depth = type.getDeclaredMethod("depth");
+        publish.setAccessible(true);
+        poll.setAccessible(true);
+        depth.setAccessible(true);
+        var started = new CountDownLatch(1);
+        var stop = new java.util.concurrent.atomic.AtomicBoolean();
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var event = new MatcherSettlementEvent();
+        Thread advancing = Thread.ofPlatform().start(() -> {
+            started.countDown();
+            try {
+                while (!stop.get()) {
+                    publish.invoke(ring, event);
+                    poll.invoke(ring);
+                }
+            } catch (Throwable thrown) { failure.set(thrown); }
+        });
+        try {
+            assertThat(started.await(2, TimeUnit.SECONDS)).isTrue();
+            for (int sample = 0; sample < 2_000_000; sample++) {
+                long observed = (long) depth.invoke(ring);
+                if (observed < 0) fail("Owner sampled negative Matcher ring depth: " + observed);
+            }
+        } finally {
+            stop.set(true);
+            advancing.join(2_000);
+        }
+        assertThat(advancing.isAlive()).isFalse();
+        assertThat(failure.get()).isNull();
+    }
+
+    @org.junit.jupiter.api.Test
     void realLaneFailurePublishesTheOriginalExceptionBeforeOwnerChecks() throws Exception {
         var signal = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var announced = new CountDownLatch(1);
@@ -76,8 +117,11 @@ class SettlementLaneWorkerTest {
             // Repeat actual park -> publication and publication -> active consumer races.
             for (int round = 0; round < 32; round++) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (LockSupport.getBlocker(thread) != worker && System.nanoTime() < deadline) Thread.yield();
-                assertThat(LockSupport.getBlocker(thread)).isSameAs(worker);
+                Object observedBlocker;
+                while ((observedBlocker = LockSupport.getBlocker(thread)) != worker
+                        && System.nanoTime() < deadline) Thread.yield();
+                // Assert the observed park; a permitted/spurious wake-up may follow immediately.
+                assertThat(observedBlocker).isSameAs(worker);
                 var entered = new CountDownLatch(1);
                 var release = new CountDownLatch(1);
                 var complete = new CountDownLatch(8);
