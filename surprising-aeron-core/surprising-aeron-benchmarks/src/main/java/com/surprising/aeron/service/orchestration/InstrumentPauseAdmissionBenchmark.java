@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-/** Actual paused-instrument admission after snapshot recovery; no database or scheduler in the measured path. */
+/** Paused-instrument rejection using a recycled admission after snapshot recovery; no database or scheduler in the measured path. */
 @BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @Warmup(iterations=3) @Measurement(iterations=5) @Fork(1) @Threads(1)
 public class InstrumentPauseAdmissionBenchmark {
@@ -42,7 +42,7 @@ public class InstrumentPauseAdmissionBenchmark {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",20_000)))));
                 snapshot=state.snapshot(777);
             }
-            order=message(productLine,5,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
+            order=message(productLine,9,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
                     new PlaceOrderCommand(100,"BTC-USDT",CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"pause-benchmark")));
         }
@@ -52,6 +52,19 @@ public class InstrumentPauseAdmissionBenchmark {
                     !=CoreInstrumentMaintenance.Mode.HALTED)
                 throw new IllegalStateException("pause lost on recovery");
             funds=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState());
+            // Exercise reuse after a completed admission, not just a freshly allocated event.
+            requireApplied(applyAndDrain(core,message(productLine,5,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",1,
+                            CoreInstrumentMaintenance.TRADING)))));
+            requireApplied(applyAndDrain(core,message(productLine,6,CoreMessageType.PLACE_ORDER,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(99,"BTC-USDT",CoreOrderSide.BUY,
+                            100,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC,false,"recycle-benchmark")))));
+            requireApplied(applyAndDrain(core,message(productLine,7,CoreMessageType.CANCEL_ORDER,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(99)))));
+            requireApplied(applyAndDrain(core,message(productLine,8,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",0,
+                            new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0))))));
         }
         @TearDown(Level.Invocation) public void verify() {
             try {
@@ -66,7 +79,20 @@ public class InstrumentPauseAdmissionBenchmark {
             throw new IllegalStateException("pause did not reject admission: "+response.resultCode());
         return response;
     }
-    private static void requireApplied(CoreResponse response) { if(response.commandStatus()!=ResponseStatus.APPLIED) throw new IllegalStateException("fixture rejected"); }
+    private static CoreResponse applyAndDrain(TradingCoreRuntime core, CoreMessage message) {
+        CoreResponse[] result = {core.apply(message)};
+        long requested = core.matchingSequence(message.header().commandId());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (core.firstPendingMatchingSequence() != 0) {
+            core.commits.commitReadyMatching(256, message.header().submittedAtEpochMillis(),
+                    message.header().sourceSequence(), false,
+                    (sequence, response) -> { if (sequence == requested) result[0] = response; });
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("fixture drain timed out");
+            Thread.onSpinWait();
+        }
+        return result[0];
+    }
+    private static void requireApplied(CoreResponse response) { if(response.commandStatus()!=ResponseStatus.APPLIED) throw new IllegalStateException("fixture rejected: " + response.resultCode()); }
     private static CoreMessage message(ProductLine line,long sequence,CoreMessageType type,byte[] payload) {
         return new CoreMessage(CoreMessageHeader.command(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,994,sequence,22,
                 1_700_000_000_000L+sequence,sequence),payload);

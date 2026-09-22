@@ -4788,3 +4788,54 @@ NMT baseline/diff完整分类与进程CPU/RSS入档；分配采样不能当精�
 结论：代码清理及受影响功能回归通过；性能部分验证/正式成绩因限频无效，不声明吞吐提升或Owner瓶颈解决。下一步继续按实际热点评估索引/终态收集，不为已删除兼容层增加替代生产抽象。归档目录 /Users/atomex/.Trash/surprising-owner-cleanup-20260922；清理状态另追加。
 
 - 清理完成：本轮node/client/局部JMH/监控/分析Java进程均退出；删除本轮runtime/Archive/Aeron/tmp、10份rawJFR和分析class。保留命令/源码/日志/系统时序/指标、JFR摘要和聚合、SHA清单及分析脚本。归档 `/Users/atomex/.Trash/surprising-owner-cleanup-20260922` 共13,693,084bytes；原始/tmp路径只作历史定位。未清理其他项目或非本轮数据。
+
+
+## 2026-09-22 admission 回收修复：采集前计划
+
+- 当前 master 基线 `2443c15d`；对照 commit 不适用（仅验证当前 master）。修改为完成回收时重置 completed，保留完成/Matcher 消费保护。
+- 假设：已回收事件在下一次 prepare 前被维护校验拒绝时，应返回 INSTRUMENT_NOT_TRADING，不抛生命周期异常；六产品资金、订单及 snapshot 恢复不变。
+- 正确性门槛：CoreMaintenanceTest 六产品及 service 全量测试零失败；维护微基准每次恢复后先下单/撤单、重新暂停再测拒单，资金 hash 不变且无订单。
+- 局部 JMH 诊断：InstrumentPauseAdmissionBenchmark.pausedOrder，六产品，单线程/单 fork、1 matcher，3 × 1s warmup、3 × 1s measurement，ns/op；分别无 profiler、gc、JFR 轮次。每次 invocation 的恢复/准备在计时外，但分配和 JFR 包含这些开销，不可解释为纯拒单分配。
+- JFR 每产品独立文件，profile、maxsize=32m、dumponexit；收集 summary、分配/线程/异常/GC 聚合。日志限制为此有限轮次，不启动外部 wallet 或新容器。
+- 本轮为本地代码路径诊断，不设置或宣称集群吞吐/尾延迟容量门槛，不以同步微基准替代 in-flight=256 的真实 Aeron 验收；真实网络/Archive/全链路压测尚属缺口。
+- 环境：本机 macOS 26.7 x86_64、HotSpot Corretto JDK 27、Maven 3.9.16；可用磁盘 489 GiB。原始临时路径 `/tmp/core-funding-*`，结果摘要入档后清理。
+
+
+### admission 回收修复结果
+
+Core service 全量 918 项：917 通过、0 失败、0 错误；1 项 settlementLatencyDiagnostics 条件测试未开启。
+原 CoreMaintenanceTest 的六产品异常均消除，整类维护、资金守恒和 snapshot 恢复通过。
+InstrumentPauseAdmissionBenchmarkTest 六产品通过；准备阶段成功下单/撤单显式排空匹配终态，确保测量使用已回收事件。
+首次基准夹具尚未排空 MATCHING_PENDING 导致 6 项夹具失败，补齐后再采集；首次计时与 Maven 编译重叠，废弃并独立重跑。
+
+| 产品 | 无 profiler 平均 ns/op |
+| --- | ---: |
+| SPOT | 34419.7 |
+| LINEAR_PERPETUAL | 31957.5 |
+| INVERSE_PERPETUAL | 33023.4 |
+| LINEAR_DELIVERY | 35010.6 |
+| INVERSE_DELIVERY | 34063.1 |
+| OPTION | 33719.8 |
+
+每次 invocation 在计时外恢复 Core、解除维护、成功下单/撤单再暂停；因此 GC/JFR 包括 Core 重建，不能归因成纯拒单分配。
+U 永续 JFR 7 秒，分配样本主要为 CommandSlot（20.95%）、RuntimeFundsAccumulator（18.96%）、MatcherSettlementChanges（11.07%）；CPU 样本也以构建/启动与 Lane 等待为主。
+六份 JFR DataLoss 都为 0。完整分数、误差/原始轮次、gc secondary metrics、JFR summary/热点/分配、文件大小及 SHA-256、逐类测试结果见
+[`docs/validation/core-admission-recycle-20260922.json`](docs/validation/core-admission-recycle-20260922.json)。
+
+复现命令（HotSpot JDK 27，工作目录仓库根）：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service test install
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -Dtest=InstrumentPauseAdmissionBenchmarkTest package
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
+  InstrumentPauseAdmissionBenchmark -wi 3 -i 3 -w 1s -r 1s -f 1 -t 1 \
+  -jvmArgs '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED -Xms256m -Xmx512m' \
+  -rf json -rff /tmp/core-funding-jmh-main.json
+# 相同配置单独运行 -prof gc。
+# JFR 单独逐产品运行 -p productLine=<PRODUCT_LINE>，并在 -jvmArgs 追加：
+# -XX:StartFlightRecording=filename=/tmp/core-funding-<PRODUCT_LINE>.jfr,settings=profile,maxsize=32m,dumponexit=true
+```
+
+结论：正确性修复通过；性能为部分验证，不能据此声称稳定容量、p99 或速度提升。
+未运行真实网络/Archive 集群压测、API 延迟、NMT 或长稳；短基准不证明无泄漏，不能替代 256 in-flight 标准验收。
+本轮 fork 已退出；JFR、临时采集日志及已汇总 Core 测试报告在归档后清理，JSON 中路径仅供历史定位。

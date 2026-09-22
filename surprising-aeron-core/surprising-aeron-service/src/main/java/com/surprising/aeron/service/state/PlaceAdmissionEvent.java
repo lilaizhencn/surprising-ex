@@ -95,6 +95,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         reservedAmount = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
+        // The next owner-side resolution can reject before prepare() runs.
+        // A pooled event must already be discardable at that point.
+        completed = false;
     }
 
     @Override
