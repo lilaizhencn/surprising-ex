@@ -39,6 +39,16 @@ OWNER_WAIT_STRATEGY="${ASYNC_OWNER_WAIT_STRATEGY:-${AERON_BASELINE_OWNER_WAIT_ST
 OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
 COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
 ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
+# Optional single-factor UDP receive-buffer diagnostic, applied to both drivers.
+# Empty preserves Aeron's own default; no global OS socket setting is changed.
+SOCKET_RCVBUF_BYTES="${ASYNC_SOCKET_RCVBUF_BYTES:-}"
+if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then
+  if [[ ! "${SOCKET_RCVBUF_BYTES}" =~ ^[1-9][0-9]*$ ]] \
+      || (( ${#SOCKET_RCVBUF_BYTES} > 10 )) \
+      || (( SOCKET_RCVBUF_BYTES > 2147483647 )); then
+    echo "ASYNC_SOCKET_RCVBUF_BYTES must be a positive integer <= 2147483647" >&2; exit 2
+  fi
+fi
 # Keep profiler scores separate from the unprofiled terminal-throughput round.
 JMH_PROFILER="${ASYNC_JMH_PROFILER:-}"
 JMH_PROFILE_ARGS=()
@@ -115,6 +125,7 @@ start_node() {
     "-Dsurprising.aeron.owner-input-batch-size=${OWNER_INPUT_BATCH_SIZE}"
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
+  if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then args+=("-Daeron.socket.so_rcvbuf=${SOCKET_RCVBUF_BYTES}"); fi
   if [[ "${ENABLE_JFR}" == true ]]; then
     args+=(-Dcore.settlementLatencyDiagnostics=true "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
   fi
@@ -136,6 +147,7 @@ run_stage() {
   if [[ "${ISOLATE_STAGE}" == true && ( "${stage}" == lane || "${stage}" == matcher ) ]]; then NODE_LANES="${LANE_STAGE_LANES}"; fi
   if [[ "${ISOLATE_STAGE}" == true && "${stage}" == matcher ]]; then NODE_LANES="${MATCHER_STAGE_LANES}"; fi
   printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\ntradingProfile=%s\nbatchSize=%s\nenableJfr=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" "${profile}" "${batch}" "${ENABLE_JFR}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${dir}/stage-config.txt"
+  printf 'socketRcvbufBytes=%s\n' "${SOCKET_RCVBUF_BYTES:-aeron-default}" >> "${dir}/stage-config.txt"
   start_node "${dir}"
   "${JCMD}" "${NODE_PID}" VM.native_memory baseline > "${dir}/nmt-baseline.txt" 2>&1 || true
   local -a client_args=(
@@ -148,6 +160,7 @@ run_stage() {
     "-Dsurprising.aeron.capacity-symbols=${SYMBOLS}"
     -Dsurprising.aeron.mixed-operational=false "-Dsurprising.aeron.capacity-async-in-flight=${window}"
     "-Dsurprising.aeron.capacity-session-in-flight=${window}")
+  if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then client_args+=("-Daeron.socket.so_rcvbuf=${SOCKET_RCVBUF_BYTES}"); fi
   if [[ "${ENABLE_JFR}" == true ]]; then
     # JMH launches a runner and a forked benchmark JVM.  A single filename
     # lets both JVMs write the same recording and produces an invalid JFR.

@@ -4359,3 +4359,186 @@ JFR每JVM max256m，summary/view/窗口计数与分配、CPU、阻塞、编译�
 - 两轮均已成功结束；源码diff、日志、测试计数、逐请求CSV、尾部JSON、分析器、配置、counter时序、loss文本与原始文件SHA归档；删rawJFR后可复核统计和脚本但不能重放录制。下一次不把本轮profiler吞吐与37/39万主成绩直接比较。
 
 - 两轮清理完成：确认节点/客户端/驱动/只读watch进程均退出；移除本轮runtime/Archive/Aeron/tmp、6份rawJFR、CNC/loss二进制副本和分析class。保留逐请求CSV/JSON、cnc计数时序/loss文本、完整日志/命令/源脚本/测试/JFR配置与raw/artifact SHA清单。归档/Users/atomex/.Trash/surprising-p99-trace-20260922（12,035,524bytes）；/Users/atomex/.Trash/surprising-p99-transport-20260922（23,031,444bytes）。原/tmp路径仅作历史定位，未停止或删除其他项目进程与文件。
+
+
+## 2026-09-22 UDP接收缓冲最终确认：采集前计划
+
+- master8ca5381f，对照commit不适用（仅当前master）。CodeGraph工具未暴露，直接核对已有源码、Aeron1.53.1 jar常量与官方配置文档。Aeron默认SO_RCVBUF请求131072bytes，SO_SNDBUF请求0（OS默认）；本机netstat支持按socket报告rhiwat/shiwat与PID。net.inet.udp.recvspace786896/kern.ipc.maxsockbuf8388608，全机累计full socket buffer drops3596，尚不能归因于本次负载。
+- 因果假设：128KiB接收缓冲在本机负载/调度停顿时溢出，导致可靠流gap/NAK/恢复和额外尾延迟。A1默认→B4m节点/客户端同时请求4194304bytes→A2恢复默认；每轮仅此一个配置因素变化，不更改发送缓冲、driver线程、MTU、重传/NAK延时、可靠性或业务逻辑。读取运行socket实际rhiwat验证配置生效，不只看JVM属性。
+- 支持门槛：B实际缓冲生效，稳定窗口full-buffer drops及Aeron缺口/NAK显著消退（目标相对两轮A至少90%），batchcancel全量P99与同请求联合残差至少下降25%；A2应复现较高丢包/恢复与尾部。未同时满足则假设部分验证或否定，不事后改判据；若缺口消退而P99不降，不能称其为P99主因。OS UDP计数为宿主聚合，记录其他进程干扰，以Aeron流证据补充，不宣称逐包闭环。
+- 当前master同一构建/同一JFC，3次独立真实JMH+JFR：单Aeron成员/网络/Archive、LINEAR_PERPETUAL MIXED/seed25620、batch20/128symbols/1385users、初始资金1384000000125、4Lane/1Matcher、global/session inflight256、Owner/Matcher pipeline/settlement BUSY_SPIN/input64、1command session/独立行情源。G1 node512m–1536m/client128m–512m，HotSpot Corretto27+33-FR/Maven3.9.16、i9-9880H/16GiB/macOS26.7。冷却每轮60s、warmup30s、稳定60s、排空单列；JMH1fork/1thread/1single-shot iteration。窗口背压闭环，无CO修正，不改变负载到达方式。
+- 不改生产默认，仅给现有脚本加可选ASYNC_SOCKET_RCVBUF_BYTES；参数写入node/client完整命令及stage-config，空值保持Aeron默认。已通过bash-n及7个非法值拒绝检查；Java代码未变，沿用上一轮358项回归，新的行为由上述实际JMH覆盖。若机制确认再记录可用启动方式，不给未验证的全产品生产容量承诺。
+- JFR每进程256m、同UUID1/64端到端关联，GC仍用同JVM局部映射；100ms只读CNC计数、5s系统/热控/UDP全机统计/Java socket实际缓冲，测量后退出前复制本轮客户端cnc/loss。全机当前磁盘499GiB/低于10GiB停止；CPU限频/swap使正式性能无效，DataLoss/分区错误使对应诊断无效，资金差额或unfinished非0为业务失败。不能用profiler score替代主吞吐或跨旧版本比较。
+- owner-poll=true保持原条件，已知同步诊断日志使正式I/O验收不通过；不另跑无profiler/GC主成绩，本轮为根因确认。真实Archive重启/三节点/长稳/外围API-WebSocket未覆盖，快照恢复沿用上一轮回归。原始JFR/运行文件分析后清理，文本/逐请求/脚本/命令/系统时序/校验归档。
+- 入口`python3 /tmp/surprising-udp-confirm-20260922/run-all.py`，顺序a1,b4m,a2；完整每轮env、PID、JVM参数在子目录run.py、owner.command.json及node/client.command。证据根/tmp/surprising-udp-confirm-20260922，最终同名.Trash；本轮代码diff SHA256 57753993060b0cf5077637b24c3ad5a8d6a0357021df3628cf13184283984b14。
+
+## 2026-09-22 UDP接收缓冲最终确认：A/B/A结果
+
+结论：支持“放大缓冲能消除本次观测到的UDP溢出/可靠流缺口”，不支持“缺口恢复是当前主要P99来源”。B实际4MiB，OS稳定窗口full-buffer drops和节点NAK均0，节点/客户端全程loss报告均无条目；但批量撤单全量P99仅比A1下降3.44%，比A2反而高0.40%，联合残差也未达到下降25%的预设门槛。原假设仅部分成立，不能把4MiB称为主要长尾修复。
+
+### 可复核测量
+
+|轮次|实际接收缓冲bytes|稳定秒|business ops/s（诊断）|core messages/s|fills/s|batchcancel全量P99ms|UDP满缓冲丢包增量|节点NAK sent增量|CPU speed limit|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+|a1|131072|60.026120|341848.832|32673.559|81372.576|25.247|9|56|66–70%|
+|b4m|4194304|60.015326|360183.729|34419.475|85738.099|24.379|0|0|70–75%|
+|a2|131072|60.052870|377863.921|36104.269|89947.408|24.281|2|33|72–75%|
+
+三轮CPU限频且owner-poll同步日志开启，正式性能/I/O验收无效；上述吞吐是诊断观测，不是39万复现或配置收益。BUSY_SPIN的98%左右单核CPU和脚本saturationGate不能证明有用工作饱和。固定inflight256闭环背压、未做CO修正；windowBlocked约49.7–50.0s/60s，不是无限open-loop容量。
+
+|轮次|各业务全量P99 μs：单下/单撤/标记价/批下/批撤|排空ms/business/core|完成性|
+|---|---|---|---|
+|a1|14188 / 13344 / 17022 / 17776 / 25247|17.552128 / 2684 / 252|PASS/unfinished0/fundsDiff0|
+|b4m|15400 / 14311 / 14434 / 18137 / 24379|5.830084 / 2686 / 254|PASS/unfinished0/fundsDiff0|
+|a2|13295 / 12386 / 17465 / 15892 / 24281|21.841626 / 2688 / 256|PASS/unfinished0/fundsDiff0|
+
+期初资金1384000000125，各轮offered与terminal业务/Core计数相等；population/hftPositions/reservations/loss校验均PASS。详细accepted/提交/终态、p50/p90/p95/p99/p999/max及队列高水位见client.log、metrics.json、analysis.json。未修改资金或业务Java，快照回归沿用上一轮358测试，本次未做真实Archive重启、三节点、外围API/WebSocket或长稳。
+
+UDP全机采样覆盖A1/B/A2分别56.898/56.849/56.789s，节点CNC覆盖59.943/59.959/60.038s；不是全窗口逐包捕获。OS no-socket增量64/18/42另计，不能与满缓冲混淆。宿主仍有其他UDP进程，不能逐个丢包归因；实际Java socket rhiwat 131072/4194304/131072及Aeron loss反转提供应用流补证。节点send-backpressure增量585/670/729，节点NAK received/retransmits/retransmittedBytes三轮均0；NAK sent表示入口缺口，不能写成节点重传次数。
+
+节点全程loss observation/bytes A1=38/98432、B=0/0、A2=23/56992（stream101）；客户端截止测量后复制时A1=50/138464、B=0/0、A2=34/88096（stream102）。A1/A2客户端记录发生于预热，不能当稳定期egress丢包。loss observation不是唯一丢包数，报告含预热；完整首末时间及通道在aeron-*-final.txt。
+
+### 同请求分段与排除项
+
+按各轮全量batchcancel P99筛选稀疏关联样本，下面是这些请求的平均耗时，不是独立阶段P99相加。边界外残差=client offer成功→响应投递减去服务端已有覆盖区间；包括入口到Cluster日志/Archive交付，以及服务端出队后的编码/deferred offer/egress/client poll，**不是纯网络耗时**。
+
+|轮次|样本数|总ms|边界外残差ms|已复制命令→Owner出队ms|Owner出队→admission开始ms|admission本身ms|admission结束→观察为head ms|head处理ms|egress等待ms|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+|a1|14|27.996557|15.294503|2.523070|9.723407|0.018668|0.357251|0.063921|0.004446|
+|b4m|37|28.460045|18.656754|1.819228|7.088803|0.012381|0.510425|0.072548|0.284787|
+|a2|18|26.298653|15.163633|2.370885|8.353093|0.014782|0.280429|0.093277|0.013957|
+
+UUID1/64样本，保护窗各去2s；完整匹配交易请求28694/29888/31783，缺少matching head的行情控制41/85/38另列。九份JFR DataLoss=0，各轮invalidPartitions=0；跨JVM不直接相减nanoTime，局部时钟映射仅用于GC近似重叠。样本batchcancel P99为19.553/24.305/17.895ms，与全量25.247/24.379/24.281ms存在明显差异；样本分段只能描述捕获请求，不能把占比直接推广到全量，更不能对样本均值收益作精确因果推断。
+
+样本各自最慢1%：36/38/40请求，总均值24.462/28.351/23.220ms，边界外残差12.283/18.699/12.990ms；B占65.95%，Owner接纳前等待6.977ms占24.61%，head处理0.073ms占0.258%。节点GC重叠3/2/3请求、客户端3/6/5请求；GC影响不能完全排除，也不足以解释所有尾部。队列等待不等于Owner有用CPU时间。当前不支持把主要长尾归因于head终态收集/索引/发布串行成本，亦不声称这些成本为0。
+
+节点driver最大duty cycle为约22–30ms（累积最大值，包含启动/预热，不是稳定窗口P99）；稳定期CPU speed limit66–75%。这些支持调度/停顿方向，但没有同请求逐跳时间线，**尚未最终定位剩余18ms属于Consensus/Archive交付、driver调度还是egress消费**，不得把相关性写成根因。
+
+### 解决办法与下一项最小验证
+
+- 已落地可选`ASYNC_SOCKET_RCVBUF_BYTES=4194304`，复用Aeron原生`-Daeron.socket.so_rcvbuf=4194304`同时作用节点/客户端；不新增业务类、状态、线程或顺序阶段，默认仍跟随Aeron。本机实证支持其缓解溢出，未证明其改善主要P99。运行方式见benchmarks/README.md。
+- 主要长尾目前没有验证通过的修复。先在既有稀疏事件中补齐Cluster收到命令、响应实际offer成功、客户端poll收到响应的边界，把入口/Archive与egress分开；保留同UUID/有界采样，不新增逐命令快照或同步日志。时钟不能跨JVM直接相减。
+- 得到慢段后只做对应一个配置因素的对照：若driver duty-cycle主导且有专用物理核，验证DEDICATED/核隔离；核不足则比较共享策略和BUSY_SPIN竞争，不能盲目增加线程。若Archive交付主导则验证Archive调度/磁盘；若client poll主导则验证dispatcher空闲策略。上述均为待验证方向，不是本轮已生效方案，也不放松持久化/可靠性/FIFO/结算边界。
+- Aeron官方建议按socket丢包调整接收缓冲、按可用核心选择driver线程：[Best Practices Guide](https://github.com/aeron-io/aeron/wiki/Best-Practices-Guide)。本地1.53.1常量显示unicast NAK delay默认1000ns；没有“默认固定20ms重传等待”的证据。
+
+### JVM与资源证据
+
+
+a1：
+
+client-73183-window.txt：
+```text
+DURATION jdk.Compilation count=45 totalMs=193.814475 p50=0.209272 p95=32.974825 p99=38.558028 max=57.457038
+DURATION jdk.GCPhasePause count=397 totalMs=357.852890 p50=0.866113 p95=1.180359 p99=1.483573 max=2.248242
+DURATION jdk.SafepointBegin count=402 totalMs=17.433799 p50=0.033261 p95=0.057967 p99=0.102328 max=2.233615
+RANGE direct.memoryUsed first,last,min,max,n=[8522400.0, 8522400.0, 8522400.0, 8522400.0, 55.0]
+RANGE heapCommitted first,last,min,max,n=[1.34217728E8, 1.34217728E8, 1.34217728E8, 1.34217728E8, 794.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.3440232E7, 1.3252736E7, 1.2889736E7, 1.3665896E7, 397.0]
+THREAD_ALLOC mixed-egress-dispatcher bytes=15820002640 seconds=54.587 bytesPerSec=289812641.105
+EXCEPTIONS total=0
+```
+
+node-window.txt：
+```text
+DURATION jdk.Compilation count=67 totalMs=488.284813 p50=0.456971 p95=14.714953 p99=114.936279 max=186.411970
+DURATION jdk.GCPhasePause count=75 totalMs=437.414681 p50=5.717383 p95=7.144621 p99=7.211222 max=7.501524
+DURATION jdk.SafepointBegin count=81 totalMs=6.635552 p50=0.079423 p95=0.116168 p99=0.130450 max=0.153095
+RANGE direct.memoryUsed first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 55.0]
+RANGE heapCommitted first,last,min,max,n=[5.36870912E8, 5.36870912E8, 5.36870912E8, 5.36870912E8, 150.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.72908136E8, 1.74302952E8, 1.71973256E8, 1.74302952E8, 75.0]
+THREAD_ALLOC core-account-lane-0 bytes=2840908584 seconds=54.634 bytesPerSec=51998912.472
+THREAD_ALLOC core-account-lane-1 bytes=2841952536 seconds=54.634 bytesPerSec=52018020.573
+THREAD_ALLOC core-account-lane-2 bytes=2834141464 seconds=54.634 bytesPerSec=51875049.676
+THREAD_ALLOC core-account-lane-3 bytes=2839366512 seconds=54.634 bytesPerSec=51970686.971
+THREAD_ALLOC core-matcher-0 bytes=4327792304 seconds=54.634 bytesPerSec=79214267.745
+THREAD_ALLOC trading-owner--1 bytes=4670564032 seconds=54.634 bytesPerSec=85488231.358
+EXCEPTIONS total=0
+```
+
+磁盘最低495.97GiB，swapout增量0；NMT总量/分类reserved、committed及baseline diff保留analysis.json与nmt文件。
+
+b4m：
+
+client-74571-window.txt：
+```text
+DURATION jdk.Compilation count=40 totalMs=218.102753 p50=0.228514 p95=31.243537 p99=57.845701 max=68.458191
+DURATION jdk.GCPhasePause count=408 totalMs=345.905354 p50=0.816362 p95=1.065638 p99=1.566209 max=2.111172
+DURATION jdk.SafepointBegin count=413 totalMs=21.795968 p50=0.046420 p95=0.073607 p99=0.199545 max=2.276872
+RANGE direct.memoryUsed first,last,min,max,n=[8522400.0, 8522400.0, 8522400.0, 8522400.0, 55.0]
+RANGE heapCommitted first,last,min,max,n=[1.34217728E8, 1.34217728E8, 1.34217728E8, 1.34217728E8, 816.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.2913696E7, 1.3224608E7, 1.2913696E7, 1.3684872E7, 408.0]
+THREAD_ALLOC mixed-egress-dispatcher bytes=16432464856 seconds=54.572 bytesPerSec=301115312.908
+EXCEPTIONS total=0
+```
+
+node-window.txt：
+```text
+DURATION jdk.Compilation count=59 totalMs=203.554491 p50=0.376440 p95=5.411182 p99=47.432020 max=97.990537
+DURATION jdk.GCPhasePause count=79 totalMs=442.226240 p50=5.221694 p95=7.923074 p99=9.141637 max=13.919448
+DURATION jdk.SafepointBegin count=85 totalMs=9.074502 p50=0.076705 p95=0.116970 p99=0.377136 max=2.209577
+RANGE direct.memoryUsed first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 56.0]
+RANGE heapCommitted first,last,min,max,n=[5.36870912E8, 5.36870912E8, 5.36870912E8, 5.36870912E8, 158.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.72014032E8, 1.74991568E8, 1.72014032E8, 1.7663592E8, 79.0]
+THREAD_ALLOC core-account-lane-0 bytes=3024845464 seconds=55.640 bytesPerSec=54364584.184
+THREAD_ALLOC core-account-lane-1 bytes=3027958152 seconds=55.640 bytesPerSec=54420527.534
+THREAD_ALLOC core-account-lane-2 bytes=3018764520 seconds=55.640 bytesPerSec=54255293.314
+THREAD_ALLOC core-account-lane-3 bytes=3023521280 seconds=55.640 bytesPerSec=54340785.047
+THREAD_ALLOC core-matcher-0 bytes=4601164752 seconds=55.640 bytesPerSec=82695268.728
+THREAD_ALLOC trading-owner--1 bytes=5025265672 seconds=55.640 bytesPerSec=90317499.497
+EXCEPTIONS total=0
+```
+
+磁盘最低492.89GiB，swapout增量0；NMT总量/分类reserved、committed及baseline diff保留analysis.json与nmt文件。
+
+a2：
+
+client-76069-window.txt：
+```text
+DURATION jdk.Compilation count=42 totalMs=162.946630 p50=0.198633 p95=3.350889 p99=52.204707 max=59.127188
+DURATION jdk.GCPhasePause count=431 totalMs=352.970625 p50=0.807956 p95=0.957215 p99=1.045342 max=1.280938
+DURATION jdk.SafepointBegin count=437 totalMs=24.523632 p50=0.047274 p95=0.062931 p99=0.082985 max=5.623594
+RANGE direct.memoryUsed first,last,min,max,n=[8522400.0, 8522400.0, 8522400.0, 8522400.0, 56.0]
+RANGE heapCommitted first,last,min,max,n=[1.34217728E8, 1.34217728E8, 1.34217728E8, 1.34217728E8, 862.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.33606E7, 1.357032E7, 1.32876E7, 1.3901792E7, 431.0]
+THREAD_ALLOC mixed-egress-dispatcher bytes=17602383704 seconds=55.547 bytesPerSec=316891707.995
+EXCEPTIONS total=0
+```
+
+node-window.txt：
+```text
+DURATION jdk.Compilation count=60 totalMs=267.445692 p50=0.277184 p95=9.123828 p99=51.737024 max=149.531160
+DURATION jdk.GCPhasePause count=83 totalMs=442.867873 p50=5.189547 p95=6.120073 p99=6.814115 max=9.379723
+DURATION jdk.SafepointBegin count=89 totalMs=8.826193 p50=0.078619 p95=0.233477 p99=0.486012 max=0.497703
+RANGE direct.memoryUsed first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 55.0]
+RANGE heapCommitted first,last,min,max,n=[5.36870912E8, 5.36870912E8, 5.36870912E8, 5.36870912E8, 166.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.7559808E8, 1.75522392E8, 1.74993776E8, 1.77401072E8, 83.0]
+THREAD_ALLOC core-account-lane-0 bytes=3153343248 seconds=54.597 bytesPerSec=57756712.786
+THREAD_ALLOC core-account-lane-1 bytes=3155388296 seconds=54.597 bytesPerSec=57794169.936
+THREAD_ALLOC core-account-lane-2 bytes=3144613456 seconds=54.597 bytesPerSec=57596817.701
+THREAD_ALLOC core-account-lane-3 bytes=3150913408 seconds=54.597 bytesPerSec=57712207.777
+THREAD_ALLOC core-matcher-0 bytes=4795334776 seconds=54.597 bytesPerSec=87831470.154
+THREAD_ALLOC trading-owner--1 bytes=5164313344 seconds=54.597 bytesPerSec=94589690.716
+EXCEPTIONS total=0
+```
+
+磁盘最低489.71GiB，swapout增量0；NMT总量/分类reserved、committed及baseline diff保留analysis.json与nmt文件。
+
+JFR分配来自ThreadAllocationStatistics与ObjectAllocationSample/事件，不报告精确对象/op、byte/business op；本轮未跑-prof gc。TLAB/OutsideTLAB、热点、阻塞、文件/Socket、Archive写入、owner同步日志及异常完整文本保留各窗口文件和views。短窗heap/native不证明长期无泄漏；录制有上限且本次DataLoss均0。
+
+### 原始录制校验
+
+|轮次/文件|bytes|SHA256|
+|---|---:|---|
+|a1/client-73176.jfr|10111053|1f2447b755b3d945ae5fd551200b8c1800d92204cd1c5f63df15b8d4412a3773|
+|a1/client-73183.jfr|127698823|048588d026b578d25643a0bb96dd7ac8d04e694933739af6c4b0ec88b2433439|
+|a1/node.jfr|147022492|e47e194a291f8b2795e1fc231a7c4f6cc34dfc1d89c2c0dff972e0d88be77180|
+|b4m/client-74565.jfr|9903151|28cdd5b8465346fdcb21147b2c6aa7cd02e916dba9a3c0515954454909e56f5b|
+|b4m/client-74571.jfr|129706655|6862df69f0082e81822c0461d16cea96ba51fd678bf5efbb718017bf1c901740|
+|b4m/node.jfr|149436728|66ef42de839b027ccf6e3d394ee327433efce5d56f51ff6083c0a30fcbfc88f2|
+|a2/client-76066.jfr|10006758|9166f5731498c334bc6ac62b6679f2a46b4df6d4b57753a7387265d89f356245|
+|a2/client-76069.jfr|133689392|b7e5704b344b1b51bea0915cb4eb0a9f680a85882d0430ef4f167c1f94d36983|
+|a2/node.jfr|155304207|ff8f5e6685f40bee8791b8ca2cb8571637cafca83c91344c00c5100f54893363|
+
+采集与分析入口run-all.py/postprocess.py/compare.py/report.py，逐轮run.py记录完整环境；command/JFR设置/源diff/CPU与UDP时序/逐UUID CSV/GC映射检查/尾部JSON/原始hash保留在归档。bash -n、7个非法参数拒绝、三轮真实JMH新参数路径及git diff --check通过；Java实现未变，不重复无关Maven全量。
+
+- 本轮清理完成：节点/客户端/watch全部退出，清理3轮runtime/Archive/Aeron/tmp、9份rawJFR、CNC/loss二进制及分析class；保留命令/配置/日志/CSV/JSON/分析源码/检查与hash清单。归档`/Users/atomex/.Trash/surprising-udp-confirm-20260922`（69,388,879bytes），原/tmp路径仅为历史定位。未停止或删除其他项目进程/文件；raw录制删除后只能复核保留的导出数据，不能重新扫描原JFR。
