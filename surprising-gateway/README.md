@@ -191,3 +191,26 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 未测完整部署、共享 JVM 内存预算、持续吞吐及 p99，不能据此声称零性能影响。
 命令、逐类结果/跳过原因和 JAR SHA-256 见
 [验证摘要](../docs/validation/gateway-media-driver-20260922.json)。本轮测试进程已结束，临时日志及已汇总报告已清理。
+
+
+## 合并后冗余配置清理（2026-09-22）
+
+账户包没有业务读者的合约快照已整体删除：`InstrumentSnapshotConfiguration`、
+`InstrumentSnapshotInitializer`、`InstrumentSnapshotConsumer`；同时删除无读写方的 `PositionSnapshotConfiguration`。
+账户查询和命令仍使用原 Core/本地服务路径，不新增另一份缓存。
+订单包的 `orderInstrumentSnapshotCache`、启动加载和增量消费者仍用于下单规则、手续费与 `InstrumentCoreSyncService`，必须保留。
+
+删除无 KafkaListener 引用的账户批量 listener factory 及其 concurrency 配置；
+交割/行权使用的逐条确认 listener factory 和无限重试设置不变。
+删除 YAML 中无对应字段的 account.cache / account.position-margin，
+以及 account group-id/各业务 topic、trading fee-schedule-events-topic 的无效字段/setter（topic 实际始终按 ProductLine 生成）。
+业务内部凭证和实际使用的 account.aeron 参数保留，不改变认证及 Core 连接。
+
+`initialize_database` 的数据库建表/种子初始化和 Core 合约注册仍是必要步骤，不能因为 instrument 合入 gateway 就删除。
+其他独立进程的合约快照初始化也保留。
+
+本轮验证：gateway 537 通过、34 外部环境条件跳过；derivatives-lifecycle 34 通过；合计 571 通过、34 跳过。
+六产品验证仅加载一次订单快照/保留资产精度/空快照拒绝启动，五衍生品验证唯一消费者能更新共享合约状态。
+构建包检查确认已删除类不再进入 JAR，必要的订单初始化和 Core 同步仍保留。
+未测完整外部数据库/Kafka/Core 重启链路，未重新压测；Core 主链路和快照算法未改。
+[逐类结果、命令和产物校验](../docs/validation/merged-config-cleanup-20260922.json)。测试进程已退出，本轮临时日志及已汇总报告已清理。

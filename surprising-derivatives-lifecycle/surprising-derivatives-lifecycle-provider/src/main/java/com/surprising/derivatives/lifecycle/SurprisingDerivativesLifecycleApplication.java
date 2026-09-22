@@ -1,9 +1,5 @@
 package com.surprising.derivatives.lifecycle;
 
-import com.surprising.adl.provider.SurprisingAdlApplication;
-import com.surprising.insurance.provider.SurprisingInsuranceApplication;
-import com.surprising.liquidation.provider.SurprisingLiquidationApplication;
-import com.surprising.risk.provider.SurprisingRiskApplication;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -26,12 +22,8 @@ import org.springframework.kafka.annotation.EnableKafka;
 @ComponentScan(
         basePackages = "com.surprising",
         nameGenerator = FullyQualifiedAnnotationBeanNameGenerator.class,
-        excludeFilters = { @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {
-                SurprisingRiskApplication.class,
-                SurprisingLiquidationApplication.class,
-                SurprisingInsuranceApplication.class,
-                SurprisingAdlApplication.class
-        }), @ComponentScan.Filter(type = FilterType.REGEX, pattern = "com\\.surprising\\.funding\\.provider\\..*") })
+        excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX,
+                pattern = "com\\.surprising\\.funding\\.provider\\..*"))
 @Import(FundingConfiguration.class)
 @EnableKafka
 @EnableScheduling

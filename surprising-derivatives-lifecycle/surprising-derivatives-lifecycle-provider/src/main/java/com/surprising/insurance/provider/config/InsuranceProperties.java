@@ -66,8 +66,6 @@ public class InsuranceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private String groupId = "surprising-insurance-v1";
-        private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -91,17 +89,11 @@ public class InsuranceProperties {
             return productTopics().consumerGroup("insurance");
         }
 
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
 
         public String getLiquidationFeeEventsTopic() {
             return productTopics().accountLiquidationFeeEventsTopic();
         }
 
-        public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
-            this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
-        }
 
         public String getInstrumentSnapshotGroupId() {
             return "surprising-" + productLine.topicSegment() + "-insurance-instrument-snapshot-v1";

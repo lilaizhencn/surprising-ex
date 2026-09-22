@@ -101,7 +101,6 @@ public class TradingOrderProperties {
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
-        private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -132,9 +131,6 @@ public class TradingOrderProperties {
         }
         public String getFeeScheduleEventsTopic() {
             return productTopics().feeScheduleEventsTopic();
-        }
-        public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
-            this.feeScheduleEventsTopic = feeScheduleEventsTopic;
         }
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");

@@ -57,7 +57,6 @@ public class FundingProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
         private int concurrency = 1;
         private int maxPollRecords = 500;
@@ -86,9 +85,6 @@ public class FundingProperties {
             return productLine.isFundingProduct();
         }
 
-        public void setFundingRateTopic(String fundingRateTopic) {
-            this.fundingRateTopic = fundingRateTopic;
-        }
 
         public String getCacheGroupId() {
             return cacheGroupId;

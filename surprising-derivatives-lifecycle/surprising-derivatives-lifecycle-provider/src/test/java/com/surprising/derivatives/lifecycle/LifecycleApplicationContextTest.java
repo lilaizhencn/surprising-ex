@@ -49,7 +49,29 @@ class LifecycleApplicationContextTest {
                 })
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
-                            .hasSingleBean(DerivativesAeronClient.class);
+                            .hasSingleBean(DerivativesAeronClient.class)
+                            .hasSingleBean(com.surprising.insurance.provider.service.InstrumentSnapshotConsumer.class)
+                            .doesNotHaveBean("adlInstrumentSnapshotConsumer")
+                            .doesNotHaveBean("adlInstrumentSnapshotConsumerFactory");
+                    var shared = ctx.getBean(InstrumentSnapshotCache.class);
+                    var row = mock(com.surprising.instrument.api.model.InstrumentResponse.class);
+                    org.mockito.Mockito.when(row.symbol()).thenReturn("BTC-USDT");
+                    org.mockito.Mockito.when(row.contractType()).thenReturn(java.util.Arrays.stream(
+                            com.surprising.instrument.api.model.ContractType.values())
+                            .filter(type -> type.productLine() == line).findFirst().orElseThrow());
+                    org.mockito.Mockito.when(row.changeId()).thenReturn(1L);
+                    org.mockito.Mockito.when(row.lastChangeId()).thenReturn(2L);
+                    org.mockito.Mockito.when(row.status()).thenReturn(com.surprising.instrument.api.model.InstrumentStatus.HALT);
+                    var event = new com.surprising.instrument.api.model.InstrumentEvent("BTC-USDT", 2,
+                            com.surprising.instrument.api.model.InstrumentStatus.HALT,
+                            com.surprising.instrument.api.model.InstrumentEventType.STATUS_CHANGED,
+                            java.time.Instant.now(), com.surprising.instrument.api.model.InstrumentResponse.immutableCopy(row), line, 2);
+                    var consumer = ctx.getBean(com.surprising.insurance.provider.service.InstrumentSnapshotConsumer.class);
+                    consumer.onInstrumentEvent(new org.apache.kafka.clients.consumer.ConsumerRecord<>(consumer.topic(), 0, 0,
+                            com.surprising.instrument.api.InstrumentEventKeys.key(line, "BTC-USDT"),
+                            ctx.getBean(ObjectMapper.class).writeValueAsString(event)));
+                    assertThat(shared.current(line, "BTC-USDT").orElseThrow().status())
+                            .isEqualTo(com.surprising.instrument.api.model.InstrumentStatus.HALT);
                     if (line.isFundingProduct()) assertThat(ctx).hasSingleBean(FundingService.class);
                     else assertThat(ctx).doesNotHaveBean(FundingService.class);
                     var mvc = MockMvcBuilders.webAppContextSetup(ctx).build();

@@ -18,18 +18,17 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AccountKafkaConfigurationTest {
 
     @Test
-    void consumerUsesReplaySafeBatchAckSettings() {
+    void settlementConsumerUsesReplaySafeRecordAckSettings() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setBootstrapServers("kafka-d:9092");
         properties.getKafka().setClientId("account-node-a");
-        properties.getKafka().setConcurrency(3);
         properties.getKafka().setMaxPollRecords(750);
 
         AccountKafkaConfiguration configuration = new AccountKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
                 configuration.accountConsumerFactory(properties);
-        var listenerFactory = configuration.accountKafkaListenerContainerFactory(consumerFactory, properties);
+        var listenerFactory = configuration.accountInstrumentLifecycleKafkaListenerContainerFactory(consumerFactory);
 
         Map<String, Object> config = consumerFactory.getConfigurationProperties();
         assertThat(config).containsEntry(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-d:9092");
@@ -43,10 +42,9 @@ class AccountKafkaConfigurationTest {
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());
-        assertThat(ReflectionTestUtils.getField(listenerFactory, "concurrency")).isEqualTo(3);
-        assertThat(ReflectionTestUtils.getField(listenerFactory, "batchListener")).isEqualTo(true);
+        assertThat(ReflectionTestUtils.getField(listenerFactory, "batchListener")).isEqualTo(false);
         assertThat(listenerFactory.getContainerProperties().getAckMode())
-                .isEqualTo(ContainerProperties.AckMode.BATCH);
+                .isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 
     @Test

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 保险基金服务消费 Instrument 增量事件并更新本地快照。
+ * 统一衍生品进程的 Instrument 增量消费者；更新 risk/funding/insurance/ADL 共用快照。
  */
 @Service("insuranceInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
@@ -34,7 +34,7 @@ public class InstrumentSnapshotConsumer {
             containerFactory = "insuranceInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
-                properties.getKafka().getProductLine(), "保险基金服务");
+                properties.getKafka().getProductLine(), "衍生品服务");
     }
 
     public String topic() {

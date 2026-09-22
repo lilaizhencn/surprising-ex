@@ -38,7 +38,6 @@ surprising:
     kafka:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      funding-rate-topic: surprising.perp.funding.rate.v1
       cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
       concurrency: 1
       max-poll-records: 500
@@ -66,9 +65,6 @@ surprising:
   liquidation:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:
-      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
-      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     coordinator:
       delay-ms: 25
@@ -87,8 +83,6 @@ surprising:
     kafka:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      group-id: surprising-insurance-v1
-      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
       concurrency: 2
       max-poll-records: 500
     coverage:
@@ -96,13 +90,7 @@ surprising:
       batch-size: 100
   adl:
     kafka:
-      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      position-risk-events-topic: surprising.risk.position.events.v1
-      group-id: surprising-adl-risk-index-${HOSTNAME:${random.uuid}}
-    redis-index:
-      key-prefix: surprising:adl:v1
-      ready-ttl-ms: 30000
     scanner:
       scan-delay-ms: 1000
       min-deficit-age-ms: 10000
@@ -110,22 +98,12 @@ surprising:
       batch-size: 50
       max-deleverages-per-deficit: 20
       candidate-multiplier: 5
-    aeron:
-      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
-      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
-      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
   price:
     consumer:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      topic: surprising.perp.price.events.v1
       group-id: surprising-adl-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
-
-  clients:
-    derivatives-lifecycle:
-      base-url: http://localhost:${DERIVATIVES_LIFECYCLE_PORT:9087}

@@ -17,7 +17,7 @@
 
 - 一套数据库连接池，仍使用各业务原有表；原 funding 表须部署到此实例的数据源，不能遗漏原有迁移。
 - 一份 `derivativesInstrumentSnapshotCache`，资金费不再自行初始化或创建一份缓存。
-- 一个 `DerivativesAeronClient` 连接池，统一使用 `surprising.risk.aeron` / `AERON_*` 配置，删除重复的 `surprising.funding.aeron`。
+- risk、强平、ADL、funding 使用 `DerivativesAeronClient`，连接参数取 `surprising.risk.aeron` / `AERON_*`。保险业务的 `InsuranceAeronGateway` 仍有实际使用的独立客户端池，保留 `surprising.insurance.aeron`。
 - 一份标记价消费缓存，保留衍生品后台 5 秒的新鲜度要求。
 - `taskScheduler` 负责强平、保险、ADL，默认 6 线程；`fundingScheduler` 独立 2 线程负责费率发布和结算，避免资金费等待占用生命周期调度线程。共享客户端、数据库和 JVM 仍可能产生资源竞争。
 - `FundingConfiguration` 只对 U/币本位永续加载资金费组件；交割、期权不创建资金费任务、消费者或接口。资金费产品配置与生命周期产品不一致时启动失败。
@@ -71,3 +71,24 @@ TASK1_TEST_ROOT="$PWD/.local-logs/funding-merge-preflight-20260922" bash scripts
 ```
 
 最终可执行包检查通过：包含资金费入口和条件装配，只有 lifecycle 启动类，不包含旧 funding 启动类、重复合约初始化或 Core service 运行依赖。测试/JMH 进程已退出，本轮 preflight 数据、原始 JFR、日志及已汇总报告已清理，保留构建产物与验证摘要。
+
+
+## 合并后的初始化与配置清理（2026-09-22）
+
+只保留 `SurprisingDerivativesLifecycleApplication` 启动入口，删除原 risk/liquidation/insurance/ADL 四个 Application
+及专门排除它们的扫描配置；funding 的产品条件扫描仍保留。
+
+`DerivativesInstrumentSnapshotInitializer` 仍从 gateway 加载当前产品快照，不能删除。
+ADL 与保险原先消费同一 Instrument topic 并更新同一个 `derivativesInstrumentSnapshotCache`；
+现在保留保险包的消费者/工厂作为共享更新入口，沿用原 consumer group，删除 ADL 的重复消费者/工厂。
+risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事件 key 校验和快照版本规则不变。
+
+已删除的无效配置：`surprising.adl.aeron`、ADL 旧风险索引 Kafka 参数/`redis-index`、
+`surprising.liquidation.aeron` 的 hostnames/egress-hostname/response-timeout、
+固定按 ProductLine 生成却仍暴露 setter 的 funding-rate-topic / insurance group-id / liquidation-fee-events-topic，
+以及本进程没有 Feign 调用者的 `surprising.clients.derivatives-lifecycle.base-url`。
+强平的 `aeron.client-connections` 仍作为本地异步提交宽度使用，保留；真实共享连接参数取 risk.aeron。
+保险消费并发、资金费调度/协调租约、数据库迁移及标记价新鲜度配置均保留。
+
+本轮 lifecycle 34 项测试全部通过，含五产品完整组件配置与共享快照实际更新；gateway 537 通过、34 外部环境测试跳过。
+完整外部数据库/Kafka/Core 重启和吞吐未测。详见 [清理验证摘要](../docs/validation/merged-config-cleanup-20260922.json)。

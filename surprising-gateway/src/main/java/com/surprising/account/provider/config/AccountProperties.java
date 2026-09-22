@@ -42,20 +42,9 @@ public class AccountProperties {
         private String bootstrapServers = "localhost:9092";
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
-        private String groupId = "surprising-account-v1";
-        /** 每个账户 JVM 的实例标识；快照广播消费组必须按实例隔离。 */
+        /** 账户 Kafka 客户端及事务 producer 前缀使用的实例标识。 */
         private String clientId = "account-provider-" + UUID.randomUUID();
-        private String orderCommandsTopic = "surprising.perp.order.commands.v1";
-        private String orderEventsTopic = "surprising.perp.order.events.v1";
-        private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
-        private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
-        private String accountStateEventsTopic = "surprising.account.state.events.v1";
-        private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
-        private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
-        private String optionExercisesTopic = "surprising.option.option.exercises.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
-        private int concurrency = 2;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -78,9 +67,6 @@ public class AccountProperties {
             return productTopics().consumerGroup("account");
         }
 
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
 
         public String getClientId() {
             return clientId;
@@ -97,66 +83,42 @@ public class AccountProperties {
             return productTopics().orderCommandsTopic();
         }
 
-        public void setOrderCommandsTopic(String orderCommandsTopic) {
-            this.orderCommandsTopic = orderCommandsTopic;
-        }
 
         public String getOrderEventsTopic() {
             return productTopics().orderEventsTopic();
         }
 
-        public void setOrderEventsTopic(String orderEventsTopic) {
-            this.orderEventsTopic = orderEventsTopic;
-        }
 
         public String getPositionEventsTopic() {
             return productTopics().accountPositionEventsTopic();
         }
 
-        public void setPositionEventsTopic(String positionEventsTopic) {
-            this.positionEventsTopic = positionEventsTopic;
-        }
 
         public String getOpenInterestEventsTopic() {
             return productTopics().accountOpenInterestEventsTopic();
         }
 
-        public void setOpenInterestEventsTopic(String openInterestEventsTopic) {
-            this.openInterestEventsTopic = openInterestEventsTopic;
-        }
 
         public String getLiquidationFeeEventsTopic() {
             return productTopics().accountLiquidationFeeEventsTopic();
         }
 
-        public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
-            this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
-        }
 
         public String getAccountStateEventsTopic() {
             return productTopics().accountStateEventsTopic();
         }
 
-        public void setAccountStateEventsTopic(String accountStateEventsTopic) {
-            this.accountStateEventsTopic = accountStateEventsTopic;
-        }
 
 
         public String getTriggerOrderEventsTopic() {
             return productTopics().triggerOrderEventsTopic();
         }
 
-        public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
-            this.triggerOrderEventsTopic = triggerOrderEventsTopic;
-        }
 
         public String getDeliverySettlementsTopic() {
             return productTopics().deliverySettlementsTopic();
         }
 
-        public void setDeliverySettlementsTopic(String deliverySettlementsTopic) {
-            this.deliverySettlementsTopic = deliverySettlementsTopic;
-        }
 
         public boolean isDeliverySettlementsTopicEnabled() {
             return productLine == ProductLine.LINEAR_DELIVERY
@@ -167,9 +129,6 @@ public class AccountProperties {
             return productTopics().optionExercisesTopic();
         }
 
-        public void setOptionExercisesTopic(String optionExercisesTopic) {
-            this.optionExercisesTopic = optionExercisesTopic;
-        }
 
         public boolean isOptionExercisesTopicEnabled() {
             return productLine.isOptionProduct();
@@ -186,17 +145,7 @@ public class AccountProperties {
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("account-instrument-lifecycle");
         }
-        public String getInstrumentSnapshotGroupId() {
-            return productTopics().consumerGroup("account-instrument-snapshot");
-        }
 
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
 
         public int getMaxPollRecords() {
             return maxPollRecords;

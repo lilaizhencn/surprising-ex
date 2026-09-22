@@ -67,18 +67,6 @@ public class AccountKafkaConfiguration {
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> accountKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> accountConsumerFactory,
-            AccountProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(accountConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getConcurrency());
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        return factory;
-    }
-
     /**
      * 到期冻结资金核对必须失败关闭，直到全部订单预占已经消费或释放。
      */
