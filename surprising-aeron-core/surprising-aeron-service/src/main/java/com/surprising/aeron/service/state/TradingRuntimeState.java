@@ -1497,9 +1497,12 @@ public final class TradingRuntimeState implements AutoCloseable {
                     continue;
                 }
                 PositionRuntime published = state.publishedPositions.get(id);
-                if (published == null) published = value.publicationValue();
-                else published.copyStateFrom(value);
-                state.publishedPositions.applyPublished(id, published);
+                if (published == null) {
+                    published = value.publicationValue();
+                    state.publishedPositions.put(id, published);
+                } else {
+                    published.copyStateFrom(value);
+                }
                 positions.setValueAt(index, published);
             }
             if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }

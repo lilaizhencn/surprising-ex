@@ -29,10 +29,16 @@ public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
     }
 
     public boolean add(long value) {
-        if (indexOf(value) >= 0) return false;
+        int mask = indexKeys.length - 1;
+        int position = longHash(value) & mask;
+        while (indexGenerations[position] == generation) {
+            if (indexKeys[position] == value) return false;
+            position = (position + 1) & mask;
+        }
         ensureCapacity(size + 1);
+        // The first probe already found the insertion slot unless growth rebuilt the index.
+        if (mask != indexKeys.length - 1) position = emptyIndexPosition(value);
         values[size++] = value;
-        int position = emptyIndexPosition(value);
         indexKeys[position] = value;
         indexGenerations[position] = generation;
         return true;

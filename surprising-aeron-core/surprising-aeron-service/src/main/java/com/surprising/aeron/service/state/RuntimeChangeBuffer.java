@@ -54,18 +54,24 @@ class RuntimeChangeBuffer<V> {
     }
 
     int put(long key, V value) {
-        int slot = indexOf(key);
-        if (slot >= 0) {
-            values[slot] = value;
-            return slot;
+        int mask = indexSlots.length - 1;
+        int indexPosition = LaneLongCaptures.longHash(key) & mask;
+        while (indexGenerations[indexPosition] == indexGeneration) {
+            if (indexKeys[indexPosition] == key) {
+                int slot = indexSlots[indexPosition];
+                values[slot] = value;
+                return slot;
+            }
+            indexPosition = (indexPosition + 1) & mask;
         }
         ensureIndexCapacity(size + 1);
+        // Reuse the empty slot from the lookup; only index growth invalidates it.
+        if (mask != indexSlots.length - 1) indexPosition = emptyIndexPosition(key);
         if (size == keys.length) {
             int capacity = Math.multiplyExact(size, 2);
             keys = java.util.Arrays.copyOf(keys, capacity);
             values = java.util.Arrays.copyOf(values, capacity);
         }
-        int indexPosition = emptyIndexPosition(key);
         keys[size] = key;
         values[size] = value;
         indexKeys[indexPosition] = key;

@@ -67,4 +67,45 @@ class SettlementChangesReuseTest {
             }
         }
     }
+    @Test void positionPublicationCreatesUpdatesDeletesAndRecreatesOwnerValue() {
+        try (var runtime = new TradingRuntimeState()) {
+            var delta = new TradingRuntimeState.LaneCommitDelta();
+            var instrument = CoreStateTestFixtures.runtimeInstrument();
+            var source = new PositionRuntime(7, 0, 0,
+                    com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                    com.surprising.aeron.protocol.CorePositionSide.NET,
+                    instrument, 2, 100, 200, 0, 20);
+            delta.putPosition(1, source);
+            delta.preparePublication();
+            delta.commitTerminalToOwner(runtime, 0, null, 1, null, null);
+            var published = runtime.publishedPositions.get(1);
+            assertThat(published).isEqualTo(source).isNotSameAs(source);
+            runtime.clearChangedKeys();
+            delta.clear();
+
+            source.applyInPlace(instrument, 3, 100, 300, 5, 30);
+            assertThat(published.signedQuantitySteps()).isEqualTo(2);
+            delta.putPosition(1, source);
+            delta.preparePublication();
+            delta.commitTerminalToOwner(runtime, 0, null, 2, null, null);
+            assertThat(runtime.publishedPositions.get(1)).isSameAs(published).isEqualTo(source);
+            assertThat(runtime.changedPositions.get(1)).isSameAs(published);
+            runtime.clearChangedKeys();
+            delta.clear();
+
+            delta.putPosition(1, null);
+            delta.preparePublication();
+            delta.commitTerminalToOwner(runtime, 0, null, 3, null, null);
+            assertThat(runtime.publishedPositions.get(1)).isNull();
+            assertThat(runtime.changedPositions.toArray()).containsExactly(1);
+            runtime.clearChangedKeys();
+            delta.clear();
+
+            delta.putPosition(1, source);
+            delta.preparePublication();
+            delta.commitTerminalToOwner(runtime, 0, null, 4, null, null);
+            assertThat(runtime.publishedPositions.get(1)).isEqualTo(source).isNotSameAs(published);
+        }
+    }
+
 }

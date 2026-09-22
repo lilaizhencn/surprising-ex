@@ -36,4 +36,26 @@ class PrimitiveLongChangeSetTest {
         assertThat(values.toPrimitiveArray()).containsExactly(1_024, 2_048);
         assertThat(formerSnapshot).hasSize(1_024).startsWith(1L).endsWith(1_024L);
     }
+    @Test
+    void matchesInsertionOrderedSetAcrossGrowthDuplicatesAndReuse() {
+        var actual = new PrimitiveLongChangeSet(0);
+        var expected = new java.util.LinkedHashSet<Long>();
+        var random = new java.util.Random(25620);
+        for (int round = 0; round < 4; round++) {
+            for (long key : new long[]{0, Long.MIN_VALUE, Long.MAX_VALUE, -1}) {
+                assertThat(actual.add(key)).isEqualTo(expected.add(key));
+            }
+            for (int i = 0; i < 4096; i++) {
+                long key = random.nextInt(2048) - 1024;
+                assertThat(actual.add(key)).isEqualTo(expected.add(key));
+                assertThat(actual.contains(key)).isTrue();
+            }
+            assertThat(actual.toPrimitiveArray()).containsExactly(
+                    expected.stream().mapToLong(Long::longValue).toArray());
+            actual.clear();
+            expected.clear();
+            assertThat(actual).isEmpty();
+        }
+    }
+
 }

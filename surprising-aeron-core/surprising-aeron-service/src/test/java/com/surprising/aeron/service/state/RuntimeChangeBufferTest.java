@@ -50,4 +50,35 @@ class RuntimeChangeBufferTest {
         buffer.clear();
         assertThat(buffer.containsKey(0)).isFalse();
     }
+    @Test
+    void matchesInsertionOrderedMapAcrossGrowthOverwriteNullAndReuse() {
+        var actual = new RuntimeChangeBuffer<String>();
+        var expected = new java.util.LinkedHashMap<Long, String>();
+        var random = new java.util.Random(25620);
+        for (int round = 0; round < 4; round++) {
+            for (long key : new long[]{0, Long.MIN_VALUE, Long.MAX_VALUE, -1}) {
+                actual.put(key, null);
+                expected.put(key, null);
+            }
+            for (int i = 0; i < 4096; i++) {
+                long key = random.nextInt(2048) - 1024;
+                String value = i % 3 == 0 ? null : "value" + i;
+                int slot = actual.put(key, value);
+                expected.put(key, value);
+                assertThat(actual.keyAt(slot)).isEqualTo(key);
+                assertThat(actual.valueAt(slot)).isEqualTo(value);
+            }
+            assertThat(actual.size()).isEqualTo(expected.size());
+            int slot = 0;
+            for (var entry : expected.entrySet()) {
+                assertThat(actual.indexOf(entry.getKey())).isEqualTo(slot);
+                assertThat(actual.keyAt(slot)).isEqualTo(entry.getKey());
+                assertThat(actual.valueAt(slot++)).isEqualTo(entry.getValue());
+            }
+            actual.clear();
+            for (long key : expected.keySet()) assertThat(actual.containsKey(key)).isFalse();
+            expected.clear();
+        }
+    }
+
 }
