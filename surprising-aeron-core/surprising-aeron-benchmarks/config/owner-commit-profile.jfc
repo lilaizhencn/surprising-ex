@@ -69,6 +69,7 @@
   <event name="surprising.SettlementLatency"><setting name="enabled">true</setting></event>
   <event name="surprising.LaneCommitLatency"><setting name="enabled">true</setting></event>
   <event name="surprising.CommandBoundaryLatency"><setting name="enabled">true</setting></event>
+  <event name="surprising.OwnerHead"><setting name="enabled">true</setting></event>
   <event name="surprising.OwnerTurn"><setting name="enabled">true</setting></event>
   <event name="surprising.OwnerSettlementMerge"><setting name="enabled">true</setting></event>
 </configuration>

@@ -80,6 +80,7 @@ class ClusterCommandPipelineTest {
         var path = java.nio.file.Files.createTempFile("settlement-latency-test-", ".jfr");
         try (var recording = new jdk.jfr.Recording()) {
             recording.enable(CoreMatchingPhaseMetrics.SettlementLatency.class);
+            recording.enable(CoreMatchingPhaseMetrics.OwnerHead.class);
             recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
             recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
             recording.enable("surprising.OwnerSettlementMerge");
@@ -135,12 +136,24 @@ class ClusterCommandPipelineTest {
                 assertThat(turn.getInt("retired") + turn.getInt("admitted")).isBetween(0, 64);
                 assertThat(turn.getInt("windowAtStart")).isPositive();
             }
+            var heads = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerHead")).toList();
+            assertThat(heads).isNotEmpty();
             var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.SettlementLatency")).toList();
             assertThat(events).extracting(e -> e.getString("commandType"))
                     .contains("PLACE_ORDER", "PLACE_ORDER_BATCH");
             for (var event : events) {
                 assertThat(event.getInt("lanes")).isPositive();
+                assertThat(event.getLong("ownerObservedNanos") - event.getLong("lanesCompletedNanos"))
+                        .isEqualTo(event.getLong("lanesCompleteToOwnerNanos"));
+                var matchingHeads = heads.stream().filter(h -> h.getLong("sequence") == event.getLong("sequence")
+                        && h.getLong("commandIdHigh") == event.getLong("commandIdHigh")
+                        && h.getLong("commandIdLow") == event.getLong("commandIdLow")
+                        && h.getString("commandType").equals(event.getString("commandType"))).toList();
+                assertThat(matchingHeads).hasSize(1);
+                assertThat(matchingHeads.getFirst().getLong("observedNanos"))
+                        .isLessThanOrEqualTo(event.getLong("ownerObservedNanos"));
                 for (String field : List.of("matcherToLastLaneStartNanos", "maxLaneExecutionNanos",
                         "matcherToLanesCompleteNanos", "lanesCompleteToOwnerNanos"))
                     assertThat(event.getLong(field)).as(field).isBetween(0L, TimeUnit.SECONDS.toNanos(5));

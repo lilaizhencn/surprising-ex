@@ -31,6 +31,34 @@ final class CoreMatchingPhaseMetrics {
         return event;
     }
 
+    /** One sparse transition when a bound command becomes the physical FIFO head. */
+    @jdk.jfr.Name("surprising.OwnerHead")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class OwnerHead extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(OwnerHead.class);
+        public String commandType;
+        public long sequence, commandIdHigh, commandIdLow;
+        public long observedNanos;
+        public boolean afterPredecessor;
+    }
+
+    static void recordOwnerHead(ClusterCommandWindow.Entry head, boolean afterPredecessor) {
+        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS
+                || head.sequence == 0
+                || (Long.hashCode(head.sequence * 0x9e3779b97f4a7c15L) & 63) != 0
+                || !OwnerHead.TYPE.isEnabled()) return;
+        var event = new OwnerHead();
+        var header = head.request.header();
+        event.sequence = head.sequence;
+        event.commandType = header.messageType().name();
+        event.commandIdHigh = header.commandId().getMostSignificantBits();
+        event.commandIdLow = header.commandId().getLeastSignificantBits();
+        event.afterPredecessor = afterPredecessor;
+        event.observedNanos = System.nanoTime();
+        event.commit();
+    }
+
     @jdk.jfr.Name("surprising.SettlementLatency")
     @jdk.jfr.Label("Matcher publication through ordered commit")
     @jdk.jfr.Category("Surprising Core")
@@ -44,6 +72,8 @@ final class CoreMatchingPhaseMetrics {
         public long maxLaneExecutionNanos;
         public long matcherToLanesCompleteNanos;
         public long lanesCompleteToOwnerNanos;
+        /** Same-process monotonic timestamps for joining to OwnerHead; never business state. */
+        public long commandIdHigh, commandIdLow, lanesCompletedNanos, ownerObservedNanos;
     }
 
     static SettlementLatency beginSettlement(CommandSlot pending, long sequence) {
@@ -55,6 +85,9 @@ final class CoreMatchingPhaseMetrics {
         var event = new SettlementLatency();
         event.commandType = pending.command().header().messageType().name();
         event.sequence = sequence;
+        event.commandIdHigh = pending.command().header().commandId().getMostSignificantBits();
+        event.commandIdLow = pending.command().header().commandId().getLeastSignificantBits();
+        event.ownerObservedNanos = observed;
         long mask = settlement.completedLaneMask();
         if (mask == 0) return null;
         event.lanes = Long.bitCount(mask);
@@ -69,6 +102,7 @@ final class CoreMatchingPhaseMetrics {
         }
         event.matcherToLastLaneStartNanos = lastStart - settlement.matcherPublishedNanos();
         event.matcherToLanesCompleteNanos = lastFinish - settlement.matcherPublishedNanos();
+        event.lanesCompletedNanos = lastFinish;
         event.lanesCompleteToOwnerNanos = observed - lastFinish;
         event.begin();
         return event;

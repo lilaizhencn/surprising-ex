@@ -222,6 +222,7 @@ public final class ClusterCommandWindow {
         if (sequence == 0) return;
         lastMatchingSequence = sequence;
         lastMatchingPhysical = entry.physicalSlot;
+        if (entry == get(0)) CoreMatchingPhaseMetrics.recordOwnerHead(entry, false);
     }
 
     /** Compatibility callback for control/replay paths; normal ordered heads bypass this scan. */
@@ -274,6 +275,7 @@ public final class ClusterCommandWindow {
         head = (head + count) & indexMask;
         size -= count;
         if (removedLastMatching) recomputeLastMatching();
+        if (count != 0 && size != 0) CoreMatchingPhaseMetrics.recordOwnerHead(get(0), true);
     }
 
     private void recomputeLastMatching() {

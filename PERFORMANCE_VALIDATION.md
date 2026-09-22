@@ -3640,3 +3640,228 @@ jfr
 - 清理归档：`/Users/atomex/.Trash/surprising-owner-skip-20260922`，3,736,589 bytes。本轮data/Archive、tmp、aeron及派生目录、原始JFR已删除；完整命令、日志、SHA、系统时间序列和离线结果保留。原/tmp路径仅为历史定位；未修改其他运行数据或终止同机IDE/Node。
 
 - 清理归档：`/Users/atomex/.Trash/surprising-owner-skip-fixed-20260922`，11,988,292 bytes。本轮data/Archive、tmp、aeron及派生目录、原始JFR已删除；完整命令、日志、SHA、系统时间序列和离线结果保留。原/tmp路径仅为历史定位；未修改其他运行数据或终止同机IDE/Node。
+
+
+## 2026-09-22 Owner 队首等待分解：采集前计划
+
+- 问题：区分结算完成后等前序命令、队首自身等待Matcher/Lane、队首完成后Owner未及时收取，以及提交/出口成本。当前master cc29bf7a；只增加采样事件及同进程单调时钟字段，不改业务状态、顺序、等待策略或容量。对照commit：不适用（只验证当前master）。CodeGraph工具未暴露，已直接核对相关源码。
+- 新增OwnerHead事件在既有FIFO绑定首项/移除前缀时记录；不新增槽位业务字段、队列或调度阶段。按sequence与既有Matcher采样相同的1/64规则选择，关闭diagnostics时短路。SettlementLatency增加关联ID和绝对单调时间。对刚进入空窗口的命令，首项绑定发生在准入之后，以afterPredecessor=false单列，不能把此前时间算作前序阻塞。
+- 关联键为sequence+command UUID+commandType；只在单个节点/同一运行生命周期关联。首轮测试暴露两个独立Fixture复用UUID/sequence而commandType不同，补齐类型关联后重测；不是业务失败。样本必须满足head<=observe、matcher<=lastStart<=lastFinish<=observe，事件复用不得串代，关联缺失率必须报告。
+- 诊断分解：完成后至队首=max(0,head-finish)；队首至全部Lane完成=max(0,finish-head)；队首且Lane完成后至收取=observe-max(head,finish)。后者包含通知收集、调度/抢占、前置Owner操作，并非纯CPU执行。队首等待再按Matcher发布/最后Lane启动拆分；发布前包含准入及Matcher执行，不能直接命名Matcher计算。
+- 使用更新的owner-commit-profile.jfc执行现有真实ClusterOperationalBenchmark.continuousOperations；只跑独立JFR诊断1轮，另启用现有Owner-poll日志。单真实成员/网络/Archive保留，LINEAR_PERPETUAL MIXED、batch20/128symbols/1385用户/seed25620、4Lane/1Matcher、全局/session inflight256、Owner/Matcher pipeline/settlement BUSY_SPIN、input64；冷却60s、预热30s、测量60s、排空另报。命令：python3 /tmp/surprising-owner-head-20260922/run.py；完整env/JVM/JMH命令、PID、5s系统采样保存到该目录。
+- HotSpot Corretto27+33-FR、Maven3.9.16、i9-9880H/16GiB/macOS26.7；G1节点512m–1536m、客户端128m–512m、NMT、每进程独立JFR max256m。磁盘当前510GiB，低于10GiB停止。禁止停止用户其他进程，记录同机干扰。
+- 判定：完成性/资金/冻结/持仓核对必须PASS且未完成0；录制DataLoss/损坏/时间不一致使对应诊断无效，限频/swap使性能证据无效并保留。不设吞吐提升验收线；本轮不跑无采样主成绩或-prof gc，不用历史样本作性能对照，也不以事件次数估计墙钟占比。保留已有JFR提交/Fact/终态/实时/响应/ownerToEgress分段和CPU、分配、GC、native/IO证据。
+- 恢复与资金回归覆盖ClusterCommandPipeline、CoreOrderedOrderBatch、RuntimeCommitRecovery、六产品线ContinuousOwnerBenchmark及窗口测试，开启diagnostics验证新事件关联。未进行真实Archive重启/长稳/三节点/外围HTTP认证，仅局部归因。源码diff SHA256 `84e4d370f5c5d08afe56a0270bff69ca396c74cdeda40ce584d7ac10595f8664`。
+
+### Owner 队首定位结果
+
+- 318个受影响用例全部通过、无跳过，包含显式JFR事件复用/关联测试、窗口路由、批量资金/终态/幂等、恢复及六产品线连续交易。验证命令：
+```sh
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dcore.settlementLatencyDiagnostics=true -Dtest=ClusterCommandWindowRoutingTest,ClusterCommandPipelineTest,CoreOrderedOrderBatchTest,RuntimeCommitRecoveryTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package
+```
+- 主体业务代码未改，新增OwnerHead是仅用于JFR关联的事件类；生命周期为一次采样、仅Owner写入、离线分析读取，无新增交易状态/容器/线程。关闭diagnostics时短路。
+- 实际参数与预先计划一致。60.018592s持续315377.523 business ops/s、30151.773 Core messages/s、75070.071 fills/s；这是JFR+Owner-poll诊断值，不是主成绩。测量窗CPU_Speed_Limit66–70%，性能证据无效；没有给吞吐提升结论。资金/持仓/冻结/完成性全部PASS，未完成0。
+```json
+{"epoch": [1790043561.903, 1790043621.922], "steady": {"elapsedSeconds": 60.018592, "terminalBusinessOperations": 18928515, "terminalCoreMessages": 1809667, "fills": 4505600, "businessOpsPerSec": 315377.523, "coreMessagesPerSec": 30151.773, "fillsPerSec": 75070.071, "peakInFlight": 256, "windowBlockedCount": 499399, "windowBlockedNanos": 50655501904}, "drain": {"elapsedNanos": 6468956, "terminalBusinessOperations": 2685, "terminalCoreMessages": 253, "fills": 0}, "completion": {"mixedCapacity": "PASS", "elapsedSeconds": 60.025, "terminalBusinessOperations": 18931200, "offeredBusinessOperations": 18931200, "terminalCoreMessages": 1809920, "offeredCoreMessages": 1809920, "businessOpsPerSec": 315388.266, "coreMessagesPerSec": 30152.739, "fills": 4505600, "fillsPerSec": 75061.981, "queries": 0, "unfinished": 0, "peakInFlight": 256, "measuredCycles": 1760, "totalCycles": 2533, "triggerExecutions": 0}}
+```
+```text
+mixedLiquidationCancellation=PASS pages=1
+mixedLossLifecycle=PASS liquidation=true insurance=true adl=true
+mixedSetup=PASS users=1385 retail=1000 symbols=128 initialFunds=1384000000125
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2533 businessHash=ea08810adc496cc3
+```
+- 保护窗为02:19:23.903Z–02:20:19.922Z，共56.019s。22956条SettlementLatency全部关联到唯一队首事件（普通下单6553、普通撤单6560、批量下单9843），缺失/重复头/重复结算/时间顺序异常均0；三份录制DataLoss均0。分析以单调时钟逐条分解，不相减两个群体的p99，也不外推整个Owner墙钟占比。
+
+**已经证实的局部现象**
+- 批量下单9610/9843=97.63%在成为队首前已完成Lane；其Lane完成→Owner收取的累计样本时间中98.5666%花在成为队首之前。对这9610条已完成队首，队首→收取p99仅14.631μs、均值2.622μs。
+- 普通撤单6414/6560=97.77%在成为队首前已完成Lane；其完成后延迟99.4255%在队首之前，已完成队首→收取p99 6.648μs。上述结论定位到前序命令阻塞，不能继续把整个毫秒级Lane→Owner延迟叫作Owner收取慢。
+- 普通下单6463/6553在队首期间才完成Lane：队首等待Lane平均13.050μs、p99 52.615μs；Lane结束且已为队首→收取平均10.136μs、p99 245.169μs。
+- 批量下单中233条是在队首期间完成Lane。这一子群完成后→收取平均334.136μs、p99 1620.926μs；它是比重较小但明确的尾延迟线索。该子群不能与9610条早已完成的队首混算。
+- 批量下单队首等待Lane的样本总时长中85.9084%位于Matcher最终发布之前，包括准入、批内执行/续接、Matcher计算/调度等，不能单独解释成Matcher计算饱和。
+
+**下一处最小验证及未证实项**
+- TradingCoreOwner.progressCommandsInScope在本轮第一次提交未就绪后设置awaitingCompletion=true，后续继续准入直到预算/依赖边界，不在本轮重试队首；这一行为可能解释“在队首期间完成”的命令收取较迟。尚未逐条关联期间执行了哪些准入操作，因此这仍是可验证假设，不是唯一根因。下一步可在当前1matcher/inflight256下独立验证适度交错准入与就绪队首检查，不增加队列、不打乱FIFO、不逐次重复全窗口收集。
+- Owner串行提交本身仍有成本：现有UUID采样批量下单/批量撤单ownerCommitAttemptTerminal均值分别30.325/30.335μs，p99 117.646/99.503μs；结合前序排队，应继续审计串行发布/终态索引，不据此宣布Owner有效CPU100%。该计时包括调用内部推进和可能的抢占，不是纯计算耗时。
+- 响应Owner→Egress队列段均值22.875μs、p99 289.616μs，样本26344；只能降低对这一段为主要毫秒级排队源的怀疑，不覆盖编码后deferred.offer实际网络完成，不能宣称完整出口已排除。
+- Owner无进展poll本体在55.013s日志窗累计193.014ms，占0.3509%；门禁之外的忙等未包含，调用次数不代表墙钟占比。
+```json
+{"calls": 1435830, "noProgress": 590552, "noProgressNanos": 193014434, "gateSkippedPending": 11788467, "seconds": 55.01300001144409, "noProgressWallFraction": 0.003508524057220078}
+```
+- Lane finishedNanos在release完成位之前采集，故“已完成且队首→收取”仍含发布完成标志/通知的尾部和调度、Owner前置操作；不能全部算Owner可运行但被拖延。CANCEL_ORDER_BATCH使用另一结算路径，没有本轮逐条Head/Lane分解，只保留现有提交时间指标；未覆盖完整风险/强平/资金费等稳态命令。
+
+**全部关联分段分布（μs；totalMs单独为毫秒）**
+```csv
+window=2026-09-22T02:19:23.903Z..2026-09-22T02:20:19.922Z loss=0 headsWholeRecording=40646
+COUNTS={CANCEL_ORDER.afterPredecessor=6446, CANCEL_ORDER.initialHead=114, CANCEL_ORDER.joined=6560, CANCEL_ORDER.lanesFinishedAfterHead=146, CANCEL_ORDER.lanesFinishedBeforeHead=6414, CANCEL_ORDER.settlements=6560, PLACE_ORDER.afterPredecessor=6458, PLACE_ORDER.initialHead=95, PLACE_ORDER.joined=6553, PLACE_ORDER.lanesFinishedAfterHead=6463, PLACE_ORDER.lanesFinishedBeforeHead=90, PLACE_ORDER.settlements=6553, PLACE_ORDER_BATCH.afterPredecessor=9710, PLACE_ORDER_BATCH.initialHead=133, PLACE_ORDER_BATCH.joined=9843, PLACE_ORDER_BATCH.lanesFinishedAfterHead=233, PLACE_ORDER_BATCH.lanesFinishedBeforeHead=9610, PLACE_ORDER_BATCH.settlements=9843}
+metric,n,totalMs,meanUs,p50Us,p90Us,p95Us,p99Us,p999Us,maxUs
+CANCEL_ORDER.commitMethod,6560,75.141816,11.454545,10.148000,15.490000,19.600000,34.513000,92.013000,137.693000
+CANCEL_ORDER.completedBeforeHead,6560,5857.665137,892.936759,360.643000,2466.075000,3236.278000,5615.673000,7303.857000,9214.290000
+CANCEL_ORDER.completedBeforeHead.afterPredecessor,6446,5857.665137,908.728690,365.145000,2491.087000,3252.057000,5618.734000,7303.857000,9214.290000
+CANCEL_ORDER.completedBeforeHead.initial,114,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+CANCEL_ORDER.headAwaitLanes,6560,2.647592,0.403596,0.000000,0.000000,0.000000,14.177000,49.274000,96.434000
+CANCEL_ORDER.headBeforeMatcherPublication,6560,0.793440,0.120951,0.000000,0.000000,0.000000,3.900000,14.080000,55.234000
+CANCEL_ORDER.headLastLaneStartToAllFinished,6560,1.689977,0.257618,0.000000,0.000000,0.000000,9.121000,33.757000,47.826000
+CANCEL_ORDER.headMatcherPublicationToLastLaneStart,6560,0.164175,0.025027,0.000000,0.000000,0.000000,0.581000,3.159000,26.895000
+CANCEL_ORDER.headReadyToCollect,6560,33.847156,5.159627,1.199000,2.527000,3.790000,152.832000,410.822000,2345.919000
+CANCEL_ORDER.headReadyToCollect.alreadyFinished,6414,9.960219,1.552887,1.191000,2.383000,3.133000,6.648000,25.352000,30.364000
+CANCEL_ORDER.headReadyToCollect.finishedWhileHead,146,23.886937,163.609158,101.369000,314.554000,405.656000,1112.686000,2345.919000,2345.919000
+CANCEL_ORDER.headToCollect,6560,36.494748,5.563224,1.202000,2.595000,4.180000,175.397000,466.008000,2364.138000
+CANCEL_ORDER.lanesFinishToCollect,6560,5891.512293,898.096386,362.932000,2469.112000,3237.350000,5617.212000,7306.855000,9217.578000
+PLACE_ORDER.commitMethod,6553,91.318188,13.935325,11.790000,17.301000,20.683000,37.645000,87.549000,5890.633000
+PLACE_ORDER.completedBeforeHead,6553,20.801552,3.174356,0.000000,0.000000,0.000000,11.577000,801.268000,2434.192000
+PLACE_ORDER.completedBeforeHead.afterPredecessor,6458,20.801552,3.221052,0.000000,0.000000,0.000000,13.040000,801.268000,2434.192000
+PLACE_ORDER.completedBeforeHead.initial,95,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+PLACE_ORDER.headAwaitLanes,6553,85.516432,13.049967,10.362000,19.599000,29.353000,52.615000,121.088000,559.844000
+PLACE_ORDER.headBeforeMatcherPublication,6553,36.297746,5.539104,4.690000,7.359000,9.648000,20.572000,63.932000,311.507000
+PLACE_ORDER.headLastLaneStartToAllFinished,6553,35.421970,5.405459,4.960000,7.449000,8.790000,18.798000,34.477000,75.570000
+PLACE_ORDER.headMatcherPublicationToLastLaneStart,6553,13.796716,2.105405,0.482000,1.933000,10.896000,34.109000,76.947000,546.685000
+PLACE_ORDER.headReadyToCollect,6553,66.419519,10.135742,0.860000,13.522000,26.439000,245.169000,767.795000,1399.705000
+PLACE_ORDER.headReadyToCollect.alreadyFinished,90,0.190875,2.120833,1.425000,3.111000,5.314000,23.188000,23.188000,23.188000
+PLACE_ORDER.headReadyToCollect.finishedWhileHead,6463,66.228644,10.247353,0.856000,13.624000,26.639000,246.125000,767.795000,1399.705000
+PLACE_ORDER.headToCollect,6553,151.935951,23.185709,11.658000,35.033000,51.811000,260.542000,777.298000,1740.940000
+PLACE_ORDER.lanesFinishToCollect,6553,87.221071,13.310098,0.860000,14.288000,32.886000,271.156000,1081.029000,2439.506000
+PLACE_ORDER_BATCH.commitMethod,9843,327.525798,33.274997,28.443000,46.813000,58.671000,100.657000,177.850000,5835.042000
+PLACE_ORDER_BATCH.completedBeforeHead,9843,7085.827409,719.884934,509.377000,1467.965000,2013.087000,3991.715000,6273.083000,7292.435000
+PLACE_ORDER_BATCH.completedBeforeHead.afterPredecessor,9710,7085.827409,729.745356,515.384000,1484.439000,2022.963000,3997.462000,6273.083000,7292.435000
+PLACE_ORDER_BATCH.completedBeforeHead.initial,133,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+PLACE_ORDER_BATCH.headAwaitLanes,9843,94.468411,9.597522,0.000000,0.000000,0.000000,278.662000,1020.947000,6537.491000
+PLACE_ORDER_BATCH.headBeforeMatcherPublication,9843,81.156264,8.245074,0.000000,0.000000,0.000000,120.212000,977.838000,6460.989000
+PLACE_ORDER_BATCH.headLastLaneStartToAllFinished,9843,10.820043,1.099263,0.000000,0.000000,0.000000,46.447000,94.424000,258.913000
+PLACE_ORDER_BATCH.headMatcherPublicationToLastLaneStart,9843,2.492104,0.253185,0.000000,0.000000,0.000000,2.826000,47.496000,137.907000
+PLACE_ORDER_BATCH.headReadyToCollect,9843,103.046927,10.469057,2.069000,4.278000,6.606000,242.231000,1221.561000,4642.194000
+PLACE_ORDER_BATCH.headReadyToCollect.alreadyFinished,9610,25.193128,2.621553,2.049000,3.977000,5.402000,14.631000,31.140000,87.879000
+PLACE_ORDER_BATCH.headReadyToCollect.finishedWhileHead,233,77.853799,334.136476,196.411000,1026.003000,1202.513000,1620.926000,4642.194000,4642.194000
+PLACE_ORDER_BATCH.headToCollect,9843,197.515338,20.066579,2.089000,4.434000,7.593000,885.028000,1564.281000,6815.600000
+PLACE_ORDER_BATCH.lanesFinishToCollect,9843,7188.874336,730.353991,516.060000,1476.208000,2018.105000,4003.002000,6278.512000,7295.551000
+boundary.APPLY_MARK_PRICE.ingressToControl,127,634.422792,4995.455055,4314.803000,9455.467000,11015.288000,16785.625000,17059.625000,17059.625000
+boundary.APPLY_MARK_PRICE.transportToOwner,127,69.893846,550.345244,368.518000,1406.959000,1479.711000,1727.815000,1831.967000,1831.967000
+boundary.CANCEL_ORDER.admissionExecution,6558,18.403238,2.806227,2.816000,4.038000,4.681000,8.695000,24.279000,54.672000
+boundary.CANCEL_ORDER.ingressToAdmission,6558,14007.352971,2135.918416,2294.818000,3990.257000,5000.195000,9303.490000,13617.837000,34875.441000
+boundary.CANCEL_ORDER.ownerCommitAttemptTerminal,6558,44.629170,6.805302,5.756000,9.068000,11.785000,25.721000,85.162000,404.417000
+boundary.CANCEL_ORDER.ownerCommitAttemptWaiting,38,0.033096,0.870947,0.747000,1.322000,1.455000,1.600000,1.600000,1.600000
+boundary.CANCEL_ORDER.ownerRealtimePublication,6558,0.651808,0.099391,0.107000,0.135000,0.146000,0.200000,0.890000,3.674000
+boundary.CANCEL_ORDER.ownerResponseAndRetirement,6558,3.148799,0.480146,0.414000,0.613000,0.783000,1.441000,12.789000,20.461000
+boundary.CANCEL_ORDER.transportToOwner,6560,3662.248697,558.269618,114.056000,2228.435000,3132.621000,4735.048000,9114.828000,10774.227000
+boundary.CANCEL_ORDER_BATCH.admissionExecution,3278,25.834867,7.881290,6.876000,10.500000,13.915000,26.772000,84.956000,96.867000
+boundary.CANCEL_ORDER_BATCH.ingressToAdmission,3278,18809.187319,5738.007114,5115.783000,9395.051000,11602.731000,15222.232000,23511.073000,39612.075000
+boundary.CANCEL_ORDER_BATCH.ownerCommitAttemptTerminal,3279,99.469947,30.335452,26.029000,43.080000,55.797000,99.503000,171.065000,254.372000
+boundary.CANCEL_ORDER_BATCH.ownerCommitAttemptWaiting,41,0.089663,2.186902,1.554000,4.056000,5.121000,11.921000,11.921000,11.921000
+boundary.CANCEL_ORDER_BATCH.ownerFactPublication,3279,23.111074,7.048208,6.340000,8.961000,11.234000,22.331000,45.056000,66.308000
+boundary.CANCEL_ORDER_BATCH.ownerRealtimePublication,3279,0.304253,0.092788,0.091000,0.123000,0.137000,0.240000,1.093000,1.949000
+boundary.CANCEL_ORDER_BATCH.ownerResponseAndRetirement,3279,4.031318,1.229435,1.010000,1.783000,2.385000,4.459000,17.741000,20.525000
+boundary.CANCEL_ORDER_BATCH.ownerTerminalBookkeeping,3279,8.195067,2.499258,2.188000,3.302000,4.153000,8.022000,22.587000,38.239000
+boundary.CANCEL_ORDER_BATCH.transportToOwner,3278,4408.180723,1344.777524,1234.850000,2342.164000,2935.211000,5168.889000,8976.946000,10986.414000
+boundary.COMMAND_RESULT.ownerToEgress,26344,602.618451,22.874979,6.272000,31.483000,65.365000,289.616000,1667.931000,10012.564000
+boundary.PLACE_ORDER.admissionExecution,6553,24.970463,3.810539,3.359000,4.784000,6.049000,12.961000,36.394000,106.450000
+boundary.PLACE_ORDER.ingressToAdmission,6553,19406.332132,2961.442413,1868.069000,6183.322000,7833.313000,12233.360000,17724.736000,37286.275000
+boundary.PLACE_ORDER.ownerCommitAttemptTerminal,6552,55.801526,8.516716,7.329000,12.179000,14.369000,26.886000,63.181000,148.633000
+boundary.PLACE_ORDER.ownerCommitAttemptWaiting,12936,24.797896,1.916968,1.693000,4.128000,4.864000,6.502000,17.208000,33.734000
+boundary.PLACE_ORDER.ownerRealtimePublication,6552,0.640295,0.097725,0.089000,0.136000,0.146000,0.183000,0.536000,3.625000
+boundary.PLACE_ORDER.ownerResponseAndRetirement,6552,3.575867,0.545767,0.483000,0.691000,0.851000,1.526000,4.511000,53.713000
+boundary.PLACE_ORDER.transportToOwner,6552,6209.753377,947.764557,735.988000,1994.568000,2562.698000,3883.096000,6893.501000,10265.150000
+boundary.PLACE_ORDER_BATCH.admissionExecution,9828,70.272825,7.150267,6.496000,8.992000,11.511000,22.052000,42.770000,98.123000
+boundary.PLACE_ORDER_BATCH.ingressToAdmission,9828,23764.839058,2418.074792,2286.532000,4733.584000,6348.919000,9826.815000,16466.859000,30568.828000
+boundary.PLACE_ORDER_BATCH.ownerCommitAttemptTerminal,9828,298.035814,30.325174,23.919000,42.403000,55.478000,117.646000,678.452000,1356.754000
+boundary.PLACE_ORDER_BATCH.ownerCommitAttemptWaiting,3059,2.489551,0.813845,0.169000,0.290000,0.769000,9.958000,94.796000,259.310000
+boundary.PLACE_ORDER_BATCH.ownerFactPublication,9828,47.803099,4.863970,4.525000,6.959000,8.805000,17.835000,51.356000,102.653000
+boundary.PLACE_ORDER_BATCH.ownerRealtimePublication,9828,1.007454,0.102509,0.096000,0.130000,0.144000,0.268000,1.352000,33.681000
+boundary.PLACE_ORDER_BATCH.ownerResponseAndRetirement,9828,14.444111,1.469690,1.216000,2.152000,2.777000,5.112000,16.850000,73.664000
+boundary.PLACE_ORDER_BATCH.ownerTerminalBookkeeping,9828,32.302547,3.286787,2.663000,4.842000,6.009000,12.023000,24.883000,170.559000
+boundary.PLACE_ORDER_BATCH.transportToOwner,9828,4543.011761,462.251909,212.340000,1309.139000,1735.231000,2867.120000,5882.121000,7953.956000
+```
+
+**系统、JVM及采样边界**
+```json
+{"sampleCount": 13, "freeGiBMin": 507.0880355834961, "swapFirst": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "swapLast": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)", "Swapins": {"first": 0, "last": 0, "delta": 0}, "Swapouts": {"first": 0, "last": 0, "delta": 0}, "Pageouts": {"first": 58630, "last": 58631, "delta": 1}, "Pages throttled": {"first": 0, "last": 0, "delta": 0}, "java": {"36401": {"ppid": "36390", "n": 11, "cpuMean": 915.6181818181818, "rssMaxMiB": 1790.4765625}, "36416": {"ppid": "36390", "n": 11, "cpuMean": 0.6454545454545455, "rssMaxMiB": 96.34375}, "36419": {"ppid": "36416", "n": 11, "cpuMean": 325.0272727272727, "rssMaxMiB": 429.90234375}}}
+```
+```json
+{"thermal": {"sampleCount": 11, "speedLimits": [68, 68, 68, 68, 68, 70, 66, 70, 68, 70, 70], "schedulerLimits": [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]}, "pipelineHighWater": {"matcher": 217, "completion": 210, "context": 256, "lanes": [39, 47, 37, 60]}, "cpu": {"ownerSingleCorePercent": 98.12259088773334, "matcherSingleCorePercent": 98.10789873653336, "laneSingleCorePercentMax": 98.10645535920001, "laneSingleCorePercentByThread": [98.06356409600001, 98.10645535920001, 98.05787663866671, 98.08030170239998]}}
+```
+- 同机干扰摘要如下；均值只对观察到的该进程样本求平均，短命进程不代表全测量窗持续占用。未终止用户进程。
+```json
+[{"pid": "36401", "name": "/Users/atomex/.sdkman/candidates/java/current/bin/java", "meanCpu": 915.6181818181818, "maxCpu": 969.8}, {"pid": "36419", "name": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java", "meanCpu": 325.0272727272727, "maxCpu": 362.3}, {"pid": "36802", "name": "/Users/atomex/.cache/uv/builds-v0/.tmptM8GjF/bin/python", "meanCpu": 74.1, "maxCpu": 74.1}, {"pid": "815", "name": "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", "meanCpu": 42.13636363636364, "maxCpu": 52.0}, {"pid": "205", "name": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer", "meanCpu": 26.21818181818182, "maxCpu": 44.5}, {"pid": "10109", "name": "/Applications/WeChat.app/Contents/MacOS/WeChat", "meanCpu": 22.454545454545453, "maxCpu": 88.9}, {"pid": "10127", "name": "/Applications/WeChat.app/Contents/MacOS/WeChatHelper.app/Contents/MacOS/WeChatHelper", "meanCpu": 16.236363636363638, "maxCpu": 77.5}, {"pid": "36801", "name": "uv", "meanCpu": 9.9, "maxCpu": 9.9}, {"pid": "10772", "name": "/Applications/AOne/AOne.app/Contents/Frameworks/AOne Helper (Renderer).app/Contents/MacOS/AOne Helper (Renderer)", "meanCpu": 9.518181818181818, "maxCpu": 12.3}, {"pid": "233", "name": "/usr/libexec/airportd", "meanCpu": 7.6454545454545455, "maxCpu": 31.7}, {"pid": "37024", "name": "/usr/sbin/system_profiler", "meanCpu": 6.3, "maxCpu": 6.3}, {"pid": "535", "name": "/System/Library/CoreServices/WindowManager.app/Contents/MacOS/WindowManager", "meanCpu": 5.681818181818182, "maxCpu": 6.4}]
+```
+```text
+DURATION jdk.Compilation count=60 totalMs=353.331856 p50=0.479747 p95=50.844735 p99=55.719533 max=113.750067
+DURATION jdk.ExecuteVMOperation count=75 totalMs=429.744760 p50=5.674604 p95=8.504409 p99=10.618972 max=12.202773
+DURATION jdk.GCPhasePause count=69 totalMs=427.683872 p50=5.680096 p95=8.485308 p99=10.593766 max=12.178827
+DURATION jdk.GarbageCollection count=69 totalMs=427.683872 p50=5.680096 p95=8.485308 p99=10.593766 max=12.178827
+DURATION jdk.SafepointBegin count=73 totalMs=7.852781 p50=0.077733 p95=0.109233 p99=0.206447 max=2.148617
+RANGE direct.count first,last,min,max,n=[8.0, 8.0, 8.0, 8.0, 56.0]
+RANGE direct.memoryUsed first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 56.0]
+RANGE direct.totalCapacity first,last,min,max,n=[9575136.0, 9575136.0, 9575136.0, 9575136.0, 56.0]
+RANGE heapCommitted first,last,min,max,n=[5.36870912E8, 5.36870912E8, 5.36870912E8, 5.36870912E8, 138.0]
+RANGE heapUsed first,last,min,max,n=[4.82613312E8, 1.76480608E8, 1.74748496E8, 4.82828704E8, 138.0]
+RANGE heapUsed.After GC first,last,min,max,n=[1.75992352E8, 1.76480608E8, 1.74748496E8, 1.77495736E8, 69.0]
+RANGE heapUsed.Before GC first,last,min,max,n=[4.82613312E8, 4.82828704E8, 4.8077536E8, 4.82828704E8, 69.0]
+THREAD_ALLOC core-account-lane-0 bytes=2688957696 seconds=55.610 bytesPerSec=48353851.753
+THREAD_ALLOC core-account-lane-1 bytes=2688756128 seconds=55.610 bytesPerSec=48350227.081
+THREAD_ALLOC core-account-lane-2 bytes=2684805704 seconds=55.610 bytesPerSec=48279189.067
+THREAD_ALLOC core-account-lane-3 bytes=2689823664 seconds=55.610 bytesPerSec=48369423.917
+THREAD_ALLOC core-matcher-0 bytes=4035881552 seconds=55.610 bytesPerSec=72574744.686
+THREAD_ALLOC trading-owner--1 bytes=4372919856 seconds=55.610 bytesPerSec=78635494.623
+```
+- 节点GC69次/427.684ms（保护窗0.763%）、p99 10.594ms/max12.179ms；JFR含完整分配Sample/TLAB/OutsideTLAB/ThreadAllocationStatistics，Owner线程约78.636MB/s（十进制，55.610s统计窗）。采样权重不是精确对象数，不给精确objects/op或B/business。GC后heap174.7–177.5MB、direct9,575,136B仅短窗。预热后仍有60次编译，最大113.750ms；不能把编译时长当STW，也不能宣称已经无JIT干扰。
+```text
+Total: reserved=3162274KB, committed=740314KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                     Class (reserved=1049216KB, committed=6144KB)
+                            (malloc=640KB tag=Class #16174) (peak=641KB #16175)
+                            (  Class space:)
+-                    Thread (reserved=51344KB, committed=2580KB)
+                            (malloc=88KB tag=Thread #302) (peak=117KB #346)
+-                      Code (reserved=262741KB, committed=43565KB)
+                            (malloc=15020KB tag=Code #47174) (at peak)
+-                        GC (reserved=95097KB, committed=72569KB)
+                            (malloc=28317KB tag=GC #14672) (peak=29006KB #24316)
+-                     Other (reserved=9413KB, committed=9413KB)
+                            (malloc=9413KB tag=Other #37) (at peak)
+Total: reserved=3162270KB -18172KB, committed=740306KB +6776KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                     Class (reserved=1049216KB +210KB, committed=6144KB +1106KB)
+                            (  Class space)
+-                    Thread (reserved=51344KB -2046KB, committed=2576KB +438KB)
+-                      Code (reserved=262740KB +11277KB, committed=43564KB +27853KB)
+-                        GC (reserved=95097KB +757KB, committed=72569KB +757KB)
+-                     Other (reserved=9413KB +4KB, committed=9413KB +4KB)
+```
+- 热点/等待/IO全量同窗聚合、各线程CPU及分配、Native范围保留在node-window.txt等独立产物；owner同步IO观测见OWNER_IO_ALL。CPU样本不是墙钟，busy-spin单列。没有FD长稳斜率/外围服务全链路/精确网络完成或同步IO因果实验，未声称无泄漏。
+
+**复现与录制校验**
+```json
+{"cwd": "/Users/atomex/Desktop/surprising/surprising-ex", "command": ["bash", "surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh"], "env": {"ASYNC_RUN_ID": "owner-head-20260922-owner", "ASYNC_ARTIFACT_DIR": "/tmp/surprising-owner-head-20260922/owner", "ASYNC_ONLY_STAGE": "end_to_end", "ASYNC_OWNER_POLL_DIAGNOSTICS": "true", "ASYNC_WINDOWS": "256", "ASYNC_OWNER_WAIT_STRATEGY": "BUSY_SPIN", "ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY": "BUSY_SPIN", "ASYNC_MATCHING_ENGINES": "1", "ASYNC_WARMUP_SECONDS": "30", "ASYNC_MEASURE_SECONDS": "60", "ASYNC_ENABLE_JFR": "true", "ASYNC_SKIP_BUILD": "true"}}
+```
+```json
+{"metrics.json": "414b0c66668e97a1fdce1b7e0798c64cb1bc3817ddb01ed1da1c702404907a84", "client.log": "e567630ca1e08ada2540ff7ca15cce5bfa1b7f377bfa2d7c6460e4bef7a6c137", "node.log": "f700d6e0ae74005c27a37ee2ff244ff4a761a2b47e98c8065301274314d4cd6a", "node.command": "01c002f922836bb8e53a2bd3d7c0258e0a5996953b60ded4eb401fd7ebcb9635", "client.command": "cfe14f372ef84627af1e630e6aed559ed8bc85acd330fa9f27f05702b0a8033d"}
+```
+```json
+[{"file": "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-36416.jfr", "size": 9210834, "sha256": "a9a66770666bec6964ecdb5722856b7004d54b216d8b347a0d08088f7e8b4610", "command": ["java", "-Xmx256m", "-cp", "/tmp/surprising-owner-head-20260922", "JfrWindow", "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-36416.jfr", "1790043561903", "1790043621922"], "dataLoss": ["DataLossWholeRecording=0"]}, {"file": "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-36419.jfr", "size": 109838521, "sha256": "6e07e845c98fe54d7129df075bc58ebf8c42b3b1c870dd7881bb1974cdc5e199", "command": ["java", "-Xmx256m", "-cp", "/tmp/surprising-owner-head-20260922", "JfrWindow", "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-36419.jfr", "1790043561903", "1790043621922"], "dataLoss": ["DataLossWholeRecording=0"]}, {"file": "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/node.jfr", "size": 114889423, "sha256": "de1c9b98759e07911314f6775baeb0279dcd1dc1ac60834bfde2efb5b9993c9d", "command": ["java", "-Xmx256m", "-cp", "/tmp/surprising-owner-head-20260922", "JfrWindow", "/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/node.jfr", "1790043561903", "1790043621922"], "dataLoss": ["DataLossWholeRecording=0"]}]
+```
+- JFR配置SHA256 `87d0685a6f58d29eaf44ee07ff3f9de233dca78815c1efefa5feb5dff5dbf708`；每进程原始JFR大小/校验如上，jfr summary及thread-cpu-load/hot-methods/allocation-by-site/gc/safepoints视图保留。
+- 结论：功能及事件关联验证通过；在本轮受限环境中，已把批量下单/普通撤单的主要完成后延迟定位为前序命令排队，并发现少量“队首期间完成”命令的通知/调度尾延迟。尚未证明单一Owner计算饱和或Aeron网络上限，整体属于部分定位；吞吐验收因限频无效。没有业务架构改动、旧版本重跑、真实Archive重启或长稳认证。
+
+### 业务延迟与诊断开销补充
+
+|业务|items|requests|p50 μs|p90|p95|p99|p99.9|max|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+|PLACE_ORDER|450560|450560|6103|11124|13787|19054|31637|62554|
+|CANCEL_ORDER|450560|450560|6008|9609|11558|15548|27836|37519|
+|APPLY_MARK_PRICE|7680|7680|6041|11812|13926|22593|39813|41549|
+|PLACE_ORDER_BATCH|13516800|675840|8245|14032|16007|21463|36044|74907|
+|CANCEL_ORDER_BATCH|4505600|225280|12722|16580|18759|27049|53575|70057|
+
+- 上表为实际请求入口至响应，batch请求与item分列，未校正coordinated omission；没有全量入口→accepted/accepted→terminal直方图，不能把有背压的结果说成无限到达负载。
+- Owner存在33次FileWrite，共12657B/1.032148ms，与保护窗11次Owner-poll三行日志一致；抽查栈为System.Out→PrintStream→Logback Console，owner-io.txt保留。显式诊断日志确有同步IO开销，本轮不是主链路性能验收，不声称Owner无IO。采样/日志开销未单独量化，不能比较本轮与历史绝对吞吐。
+
+实际节点与客户端命令：
+```sh
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.owner.poll-diagnostics=true -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN -Dsurprising.aeron.owner-input-batch-size=64 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/data -Daeron.dir=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/tmp -Dcore.settlementLatencyDiagnostics=true -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/node.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+/Users/atomex/.sdkman/candidates/java/current/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=60 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/client-%p.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 180s -rf json -rff /tmp/surprising-owner-head-20260922/owner/window-256/end_to_end/jmh.json
+```
+
+构建产物：
+```json
+{"surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {"bytes": 62557493, "sha256": "e13bdfbfa25fe01dd67a06b9b0983c742038a6a2f4932c36e878bd346b1d29d9"}, "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {"bytes": 81824067, "sha256": "43d37bca70bf9eb09f242c9733b578c66ab261f0cd7ef560c4295390809bd836"}}
+```
+
+- 清理完成：本轮节点、客户端及分析JVM已退出；删除本轮runtime/Archive/tmp/Aeron及3份原始JFR。原始/tmp路径仅作历史定位。完整脚本、关联器源码、命令、日志、时间序列、JFR摘要/视图/校验及测试证据归档到 `/Users/atomex/.Trash/surprising-owner-head-20260922`，共5,086,491 bytes。其他项目和用户进程未触碰。
