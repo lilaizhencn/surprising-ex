@@ -98,7 +98,6 @@ final class CommitPublication {
                 owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
                 if (timing != null) { timing.indexesNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 owner.runtimeProjectionJournal.publish(sequence);
-                owner.publicationSequence = sequence;
                 runtimePatchRevision = owner.runtimeState.committedRevision();
                 if (timing != null) { timing.journalNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 owner.runtimeState.clearCommittedChanges(owner.identities);

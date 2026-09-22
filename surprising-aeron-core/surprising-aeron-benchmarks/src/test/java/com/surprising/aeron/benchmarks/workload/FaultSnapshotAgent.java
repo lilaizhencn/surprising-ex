@@ -1,5 +1,4 @@
 package com.surprising.aeron.benchmarks.workload;
-import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.instruction.InvokeInstruction;
@@ -24,7 +23,7 @@ public final class FaultSnapshotAgent {
             @Override
             public byte[] transform(ClassLoader loader, String name, Class<?> cls,
                                     ProtectionDomain domain, byte[] bytes) {
-                if (!name.equals("com/surprising/aeron/service/execution/SurprisingClusteredService")) return null;
+                if (!name.equals("com/surprising/aeron/service/cluster/AeronTradingClusterService")) return null;
                 return ClassFile.of().transformClass(ClassFile.of().parse(bytes),
                         ClassTransform.transformingMethodBodies(method -> method.methodName().equalsString("onTakeSnapshot"),
                                 (builder, element) -> {

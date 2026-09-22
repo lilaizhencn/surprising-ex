@@ -256,8 +256,8 @@ class RuntimeCommitRecoveryTest {
             pairedSnapshot = seed.snapshot(705);
         }
 
-        SurprisingClusteredService uninterrupted = restoredService(pairedSnapshot);
-        SurprisingClusteredService recovered = restoredService(pairedSnapshot);
+        TradingOwnerTestSupport uninterrupted = restoredService(pairedSnapshot);
+        TradingOwnerTestSupport recovered = restoredService(pairedSnapshot);
         try {
             BatchReplay reference = completeBatch(uninterrupted, batch);
             BatchReplay replayed = completeBatch(recovered, batch);
@@ -317,7 +317,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private void insuranceAndAdlSnapshotCuts(boolean batch) throws Exception {
-        SurprisingClusteredService uninterrupted = new SurprisingClusteredService(ProductLine.LINEAR_PERPETUAL);
+        TradingOwnerTestSupport uninterrupted = new TradingOwnerTestSupport(ProductLine.LINEAR_PERPETUAL);
         uninterrupted.onStart(cluster(), null);
         try {
             ReplayResult setup = replayClustered(uninterrupted, List.of(
@@ -399,7 +399,7 @@ class RuntimeCommitRecoveryTest {
                     .insuranceBalances().getOrDefault("USDT", 0L);
 
             byte[] beforeInsurance = uninterrupted.state().snapshot(710);
-            SurprisingClusteredService restoredBeforeInsurance = restoredService(beforeInsurance);
+            TradingOwnerTestSupport restoredBeforeInsurance = restoredService(beforeInsurance);
             try {
                 assertBatchRecoveryParity(restoredBeforeInsurance.state(), uninterrupted.state());
                 List<CoreMessage> partialInsurance = List.of(
@@ -436,7 +436,7 @@ class RuntimeCommitRecoveryTest {
                         uninterrupted, restoredBeforeInsurance, partialInsurance.getLast());
 
                 byte[] afterInsurance = uninterrupted.state().snapshot(711);
-                SurprisingClusteredService restoredAfterInsurance = restoredService(afterInsurance);
+                TradingOwnerTestSupport restoredAfterInsurance = restoredService(afterInsurance);
                 try {
                     assertBatchRecoveryParity(restoredAfterInsurance.state(), uninterrupted.state());
                     CoreMessage adl = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
@@ -486,7 +486,7 @@ class RuntimeCommitRecoveryTest {
                     assertThat(economicEquityUsdt(uninterrupted.state())).isEqualTo(beforeAdlEconomic);
 
                     byte[] afterAdl = uninterrupted.state().snapshot(712);
-                    SurprisingClusteredService restoredAfterAdl = restoredService(afterAdl);
+                    TradingOwnerTestSupport restoredAfterAdl = restoredService(afterAdl);
                     try {
                         assertBatchRecoveryParity(restoredAfterAdl.state(), uninterrupted.state());
                         assertDuplicateClusterReplay(uninterrupted, restoredAfterAdl, adl);
@@ -500,8 +500,8 @@ class RuntimeCommitRecoveryTest {
                 restoredBeforeInsurance.state().close();
             }
 
-            SurprisingClusteredService fullReference = restoredService(beforeInsurance);
-            SurprisingClusteredService fullRecovered = restoredService(beforeInsurance);
+            TradingOwnerTestSupport fullReference = restoredService(beforeInsurance);
+            TradingOwnerTestSupport fullRecovered = restoredService(beforeInsurance);
             try {
                 List<CoreMessage> fullInsurance = List.of(
                         operationsCommand(insuranceAdjustSequence, CoreMessageType.ADJUST_INSURANCE_FUND,
@@ -522,7 +522,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(economicEquityUsdt(fullReference.state()))
                         .isEqualTo(Math.addExact(economicBeforeInsurance, deficit - initialInsurance));
                 byte[] afterFullInsurance = fullReference.state().snapshot(713);
-                SurprisingClusteredService restoredAfterFull = restoredService(afterFullInsurance);
+                TradingOwnerTestSupport restoredAfterFull = restoredService(afterFullInsurance);
                 try {
                     assertBatchRecoveryParity(restoredAfterFull.state(), fullReference.state());
                     assertDuplicateClusterReplay(fullReference, restoredAfterFull, fullInsurance.getLast());
@@ -730,7 +730,7 @@ class RuntimeCommitRecoveryTest {
         assertThat(actualState.pendingTransfers()).isEqualTo(expectedState.pendingTransfers());
     }
 
-    private static BatchReplay completeBatch(SurprisingClusteredService service, CoreMessage batch) {
+    private static BatchReplay completeBatch(TradingOwnerTestSupport service, CoreMessage batch) {
         TradingCoreRuntime state = service.state();
         ClusterReplay replay = replayClusterCommand(service, batch);
         assertThat(replay.responses()).hasSize(1);
@@ -752,8 +752,8 @@ class RuntimeCommitRecoveryTest {
         return matching;
     }
 
-    private static SurprisingClusteredService restoredService(byte[] snapshot) {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.LINEAR_PERPETUAL);
+    private static TradingOwnerTestSupport restoredService(byte[] snapshot) {
+        TradingOwnerTestSupport service = new TradingOwnerTestSupport(ProductLine.LINEAR_PERPETUAL);
         service.onStart(cluster(), null);
         service.restoreSnapshot(snapshot);
         return service;
@@ -785,7 +785,7 @@ class RuntimeCommitRecoveryTest {
         return null;
     }
 
-    private static ClusterReplay replayClusterCommand(SurprisingClusteredService service, CoreMessage command) {
+    private static ClusterReplay replayClusterCommand(TradingOwnerTestSupport service, CoreMessage command) {
         ClusterReplay replay = replayClusterCommandRaw(service, command);
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         do {
@@ -800,7 +800,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static ClusterReplay replayClusterCommandRaw(
-            SurprisingClusteredService service, CoreMessage command) {
+            TradingOwnerTestSupport service, CoreMessage command) {
         List<byte[]> responses = new ArrayList<>();
         byte[] encoded = CoreMessageCodec.encode(command);
         service.onSessionMessage(clusterClient(responses), command.header().submittedAtEpochMillis(),
@@ -809,7 +809,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static ReplayResult replayClustered(
-            SurprisingClusteredService service, List<CoreMessage> commands) {
+            TradingOwnerTestSupport service, List<CoreMessage> commands) {
         ArrayList<ResponseView> responses = new ArrayList<>();
         for (CoreMessage command : commands) {
             ClusterReplay replay = replayClusterCommand(service, command);
@@ -850,7 +850,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static void assertDuplicateClusterReplay(
-            SurprisingClusteredService reference, SurprisingClusteredService restored,
+            TradingOwnerTestSupport reference, TradingOwnerTestSupport restored,
             CoreMessage command) throws Exception {
         long projectionBefore = reference.state().snapshotProjectionSequence();
         ReplayResult referenceDuplicate = replayClustered(reference, List.of(command));

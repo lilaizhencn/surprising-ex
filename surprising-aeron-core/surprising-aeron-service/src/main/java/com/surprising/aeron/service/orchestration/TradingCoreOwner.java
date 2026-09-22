@@ -43,7 +43,7 @@ public final class TradingCoreOwner {
     /** 实时盘口和快照的独立传输边界，不阻塞撮合主流程。 */
     private final TradingRealtimeBoundary realtimeBoundary;
 
-    /** 兼容旧的 ClusteredService 测试和独立回放工具的响应交接函数。 */
+    /** 已提交响应的显式出口交接函数。 */
     @FunctionalInterface
     interface ResponseSink {
         /** 接收已经提交的不可变响应，由外部出口负责网络线程交接。 */
@@ -68,9 +68,6 @@ public final class TradingCoreOwner {
     /** 快照屏障超时的诊断次数，不参与业务判断。 */
     private long snapshotFenceTimeoutCount;
 
-    /** 创建指定产品线的 Owner。 */
-    public TradingCoreOwner(ProductLine productLine) { this(productLine, null); }
-
     TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
@@ -90,7 +87,6 @@ public final class TradingCoreOwner {
         if (state == null) state = new TradingCoreRuntime(productLine);
         processingLogCallback = false;
         commandPipeline.reset();
-        responsePublisher.clear();
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -115,12 +111,11 @@ public final class TradingCoreOwner {
         acceptCommittedCommand(session, request, timestamp, position, fingerprint, false);
     }
 
-    /** 统一处理两种入口，确保响应轮询、入队、推进和异常转换使用同一顺序。 */
+    /** 统一处理两种入口，确保入队、推进和异常转换使用同一顺序。 */
     private void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                         CommandFingerprint fingerprint, boolean advance) {
         try {
             processingLogCallback = true;
-            responsePublisher.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
             processIngress(session, request, timestamp, position, fingerprint, advance);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
@@ -568,7 +563,6 @@ public final class TradingCoreOwner {
     /** 处理集群角色切换，清理不能跨 Leader 任期继续发送的出口状态。 */
     void roleChange(Cluster.Role newRole) {
         realtimeBoundary.roleChange(newRole);
-        responsePublisher.clear();
         log.info("Aeron core role-change productLine={} role={}", productLine, newRole);
     }
 
@@ -590,7 +584,6 @@ public final class TradingCoreOwner {
         log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
         commandPipeline.clearCommandContainers();
-        responsePublisher.clear();
         this.cluster = null;
         realtimeBoundary.close();
         if (state != null) {
@@ -603,16 +596,14 @@ public final class TradingCoreOwner {
     void sessionOpened() {
         processingLogCallback = true;
         try {
-            responsePublisher.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
             progressCommands();
         } catch (RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally { processingLogCallback = false; }
     }
 
-    /** 会话关闭时丢弃对应的未发送响应，并继续推进交易状态。 */
+    /** 会话关闭后继续推进交易状态；未发送响应由集群出口清理。 */
     void sessionClosed(long sessionId) {
-        responsePublisher.removeSession(sessionId);
         drainFromLogEvent();
     }
 
@@ -638,13 +629,11 @@ public final class TradingCoreOwner {
         long matchingBefore = state.matchingProgressSequence();
         processingLogCallback = true;
         try {
-            int responseWork = responsePublisher.poll(System.nanoTime(),
-                    OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
             progressCommands();
             int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
             return (before != commandPipeline.commandProgress()
                     || matchingBefore != state.matchingProgressSequence() ? 1 : 0)
-                    + responseWork + realtimeWork;
+                    + realtimeWork;
         } catch (org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;
         } catch (RuntimeException failure) {

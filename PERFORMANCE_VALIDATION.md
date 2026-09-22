@@ -4703,3 +4703,88 @@ NMT baseline/diff完整分类与进程CPU/RSS入档；分配采样不能当精�
 - 同一运行内启动前CPU speed100%，预热及稳定负载再次66–72%，说明重启未消除此现象；pmset数值不是实际GHz或温度，尚未区分热/功耗等具体限频原因。
 
 - 清理完成：本轮node/client/watch均退出，runtime/Archive/Aeron/tmp、CNC/loss二进制和分析class已清理，无JFR原始文件；完整命令/env/构建校验/日志/分析JSON/NMT/系统与counter时序/源脚本/hash保留在/Users/atomex/.Trash/surprising-reboot2-20260922（2,684,877bytes）。未操作其他项目进程/文件；git diff --check通过。本轮仅追加验证记录，不改业务实现。
+
+
+## 2026-09-22 Owner 兼容路径清理：采集前计划
+
+- 当前 master fe0ed4b9；本轮删除无读取 publicationSequence、生产旧回调适配器和 Owner 内兼容响应编码/重试，局部基准显式接收终态响应；删除只计深度的 downstream publication batch。保留逐命令 CommitPublication、全局序号、Lane 完成、资金及快照边界。对照 commit 不适用（仅验证当前 master）；不声称吞吐提升。
+- 问题：清理后有序提交、背压响应与恢复是否保持正确，实际 Owner 热路径是否可完成真实集群负载。业务要求资金差额0、accepted=terminal、unfinished=0；无新吞吐/尾延迟业务SLO，性能只作探索记录；限频/swap/DataLoss使相应性能证据无效。所有记录保存在 /tmp/surprising-owner-cleanup-20260922，原始文件分析后清理并归档文本。
+- HotSpot Corretto27+33-FR、Maven3.9.16、Intel i9/macOS26.7/16GiB；启动前磁盘497GiB。构建命令与日志入档；业务源 diff 与 SHA256 在采集前保存。先回归实际受影响的 Owner/命令窗口/批量/终态响应/六产品线生命周期与恢复、局部基准工作负载测试。
+- 真实集群：1成员+网络+Archive、LINEAR_PERPETUAL MIXED、4 Lane/1 Matcher、global/session in-flight256、batch20/128symbols/seed25620、1385users、初始资金1384000000125；持续异步提交、买卖交错，沿用 qualify-aeron-async-stages.sh。Owner/Matcher/Lane BUSY_SPIN，input64，默认UDP缓冲，owner-poll=false。G1 node512m–1536m/client128m–512m；1fork/1thread，冷却60s/预热30s/稳定60s，排空另报。无profiler主轮、独立gc、独立JFR各1次；JFR每进程256MiB。闭环背压，无CO修正，不由峰值inflight或忙转CPU认定饱和。
+- 全产品线局部 ownerBatchCompletion JMH 覆盖改动入口，256窗口/1matcher/4Lane，独立fork、预热3×3s/测量3×5s，JFR诊断；不将本地无网络分数当完整Core吞吐。测量包含批量下单/撤单与资金、订单、快照恢复校验。
+- 系统每5s采样CPU、pmset、swap、磁盘/UDP，磁盘低于10GiB停止；JFR记录summary、GC/分配/热点/阻塞与DataLoss，NMT按脚本采集。无新持久容器/业务状态，因此不追加泄漏长稳；三节点、外围网关/API和真实Archive重启不在本次改动验收范围。
+
+### 清理结果及功能回归
+
+- 生产删除 SurprisingClusteredService；测试迁入 TradingOwnerTestSupport，测试类改为 TradingCoreOwnerTest。局部 ClusteredBatchTradingBenchmark 直接使用 TradingCoreOwner，显式消费编码响应，保留复用缓冲和原 flyweight 解码路径；移除仅透传的 RealtimeBenchmarkFixture。OwnerResponsePublisher 必须有 sink，去掉 sink-null 编码/重试分支和 Owner 的空队列轮询；生产 ClusterServiceEgress/DeferredSessionResponses 背压逻辑保留。
+- 删除无读取 publicationSequence 及两处赋值；删除 RuntimeCommitJournal publicationBatchDepth 和两组 downstream try/finally 包装。CommitPublication 延迟/dirty/失败状态、权威 publishedSequence 及快照 ProjectionVersion 保留。快照故障注入器的目标类路径同步指向实际 AeronTradingClusterService；本次不额外执行杀进程式快照故障注入。
+- 只新增一个测试目录辅助类，负责 mock Cluster 回调与响应消费，不进入生产 JAR；没有新增业务接口/线程/状态/容器。生产 OwnerResponsePublisher 仍承担协议响应类型选择，RuntimeCommitJournal 仍承担递增顺序与生命周期校验；不是为删类将职责重新堆入 Owner。
+- JDK/Maven 已检查。第一次编译发现 CoreTestCompletion 仍调用被删的计数包装，迁移后修复。第一次回归345项中1个测试读取全状态早于实时读取 mailbox 完成；把同一资金断言移到 realtimeSnapshotPending=false 之后，未放松生产 snapshot fence。第二次527项全部通过（service345、benchmarks182，0失败/错误/跳过）。15个测试类及逐类结果见 tests.json；包含六产品线 ProductRecoveryLifecycleTest、125个批量基准路径、12个实时工作负载、250个命令流水线及有界背压测试。
+- 完整命令：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dcore.settlementLatencyDiagnostics=true -Dtest=TradingCoreOwnerTest,ClusterCommandPipelineTest,RuntimeCommitRecoveryTest,CoreOrderedOrderBatchTest,RuntimeCommitJournalTest,DeferredSessionResponsesTest,TradingRuntimeOwnershipTest,ProductRecoveryLifecycleTest,CommandSlotRingTest,ClusteredBatchTradingBenchmarkTest,RealtimeWorkloadTest,ContinuousOwnerBenchmarkTest,ClusterMixedCapacityTest,SpotMixedWorkloadTest,DerivativeMixedWorkloadTest -Dsurefire.failIfNoSpecifiedTests=false clean package`；首次测试失败后同命令去掉clean重跑package成功。编译、失败和成功日志分别build.log/tests.log/tests2.log。最终代码仅多删一行无字段对应注释；运行字节码无后续变化。
+- `jar tf` 检查service/benchmark产物均不含旧适配器、测试fixture和被删除的实时fixture；git diff --check通过。源码逐文件SHA、patch与产物SHA在source-files.json/source.diff/build-hashes.json。
+
+### 真实单成员结果
+
+|轮次|稳定窗口s|terminal business/s|terminal Core messages/s|fills/s|CPU speed limit|完成性|
+|---|---:|---:|---:|---:|---|---|
+|main|60.027936|288819.074|27622.289|68746.658|56–62%|PASS，fundsDiff0/unfinished0|
+|gc|60.009560|253252.398|24235.022|60278.396|52–56%|PASS，fundsDiff0/unfinished0|
+|jfr|60.027682|246548.467|23596.397|58682.259|52–56%|PASS，fundsDiff0/unfinished0|
+
+三轮均明显限频，正式性能无效；GC/JFR分数仅归因记录，不作为主吞吐、不跨轮次推导清理收益。主轮饱和UNCONFIRMED，windowBlocked49.571249358s/60.027936s=82.58%，Lane执行墙钟平均43.30%非有效CPU，只有队列高水位，缺持续占用和负载阶梯。主轮排空5.622972ms、补2688business/256Core；最终17339901business、1658365Core accepted=terminal。拒绝/资金/持仓/冻结/损失处理按mixedVerify通过；稳定期不包含初始化的强平/保险/ADL。
+
+主轮分业务客户端入口到终态延迟（μs，样本包含最终排空；无本轮accepted三段完整直方图，不混作Owner执行时长）：
+
+|业务|requests|items|p50/p90/p95/p99/p99.9/max μs|
+|---|---:|---:|---|
+|PLACE_ORDER|412672|412672|6406/12460/14508/26181/47579/59572|
+|CANCEL_ORDER|412672|412672|6529/10231/13049/22577/41975/62259|
+|APPLY_MARK_PRICE|7677|7677|6492/14327/19759/31899/58556/59768|
+|PLACE_ORDER_BATCH|619008|12380160|7892/15261/17874/31064/53149/77594|
+|CANCEL_ORDER_BATCH|206336|4126720|14704/18546/23953/40566/59867/77398|
+
+### JFR、GC、分配与系统
+
+- JFR node/client wrapper/client fork以及六产品线局部录制DataLoss均0。真实JFR保护窗口2026-09-22T06:31:11.892Z–06:32:07.919Z（56.027s，稳定期两端裁2s）；InspectRecording.java逐事件流式汇总，避免跨JVM相减时钟。分析器首次遇到无Java线程名的VM线程报空指针，修复空名后重读全部成功，非业务异常。
+- 保护窗口node GC54次，pause总377.659059ms、最大11.181856ms；client fork GC284次，pause总312.292147ms、最大2.440313ms。没有逐请求GC重叠因果分析，不能称这些暂停解释全部P99。node仍有C2编译（24+5次、最大411.282206ms编译经过时间），30s预热不足以证明JIT完全稳定。
+- ThreadAllocationStatistics相邻采样跨度54.692s：Owner3372780384bytes（约61.668MB/s），Matcher3101991600bytes（约56.717MB/s），四Lane各约37.34–37.41MB/s；client JMH线程10049273312bytes/54.631s≈183.948MB/s。为线程采样增量，不是精确稳定期bytes/business op。node全录制抽样分配权重主要OrderRuntime20.59%、byte[]10.94%、long[]8.73%、MatcherResult7.30%；不把抽样权重当对象精确数量。
+- 独立-prof gc只覆盖客户端JMH fork：290.900MiB/s、40116069648B/JMH整次调用、GC513次/552ms；一次JMH调用包含完整交易工作负载，不能把40GB解释成单笔订单分配，也不把客户端GC当整个集群GC。
+- Owner保护窗口execution samples1948；完整前8帧栈保存在node.window.txt。业务栈包括TerminalStateRetention.acceptBatch56样本、批单解码48、matchingCommitReady32、captureBatchAdmissionBefore32；TradingOwnerLoop.run142样本含轮询/忙转。多阶段仍有成本，本次未证明Owner饱和或其串行索引成本已解决。
+- 保护窗口未录到Owner FileRead/FileWrite/SocketRead/SocketWrite/JavaMonitorEnter事件；全录制Owner锁争用在窗口外，不能混为稳定期阻塞。Aeron原生网络I/O不保证均被JFR捕获；Archive文件写属于独立线程。未做本轮逐UUID传输恢复关联，不归因本轮尾延迟。
+- JFR节点NMT baseline→结束：reserved3163979KiB（-26632）、committed742255KiB（+544），heap committed524288KiB；分类与各轮线程转储/NMT均归档。系统5s记录见system.jsonl，无swap；磁盘保持远高于10GiB。没有新增长期业务状态；短轮不能证明无泄漏，未追加长稳。
+
+### 六产品线局部JMH
+
+- 使用ownerBatchCompletion，1fork/1thread、warmup3×3s/measurement3×5s、256window/4Lane/1matcher/batch20/realtime=false/interleavedMetrics=false，G1 256m–1024m，JFR256MiB；每个产品独立artifact和录制，完整命令见local-*/command.json。方法每次调用15400 business items/770 Core messages，其中5080是预期ORDER_NOT_FOUND拒绝项，不是全成功订单吞吐。
+- 初次local-SPOT启动时CLI jvmArgsAppend覆盖了注解中的模块开放参数，Agrona UnsafeApi IllegalAccessError，未进入业务；失败日志及JFR保留摘要/hash。run-local.py显式补齐--add-opens/--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED后六轮成功。
+|产品|JMH整组调用/s|误差（JMH）|业务/资金/恢复|
+|---|---:|---:|---|
+|INVERSE_DELIVERY|22.414691|±18.892642|PASS|
+|INVERSE_PERPETUAL|23.472017|±4.009743|PASS|
+|LINEAR_DELIVERY|22.843149|±9.196044|PASS|
+|LINEAR_PERPETUAL|22.064832|±6.110372|PASS|
+|OPTION|22.503564|±17.400267|PASS|
+|SPOT|22.456779|±4.131677|PASS|
+
+局部结果含JFR开销、宿主限频和短预热，只证明改动路径可执行及每轮tearDown资金/冻结/订单/快照检查通过；不是完整Core容量，不能与真实集群主分数比较。没有新协议或资金模型；外围API/WebSocket、三节点、真实Archive重启和故障注入Agent执行未覆盖。
+
+### 原始录制清单与结论
+
+原始路径仅作历史定位；各进程独立filename，profile与jfr summary/view、窗口聚合、源码/产物hash、完整命令均归档。
+
+|JFR原始路径|bytes|SHA256|
+|---|---:|---|
+|/tmp/surprising-owner-cleanup-20260922/jfr/cluster/window-256/end_to_end/client-12109.jfr|8972214|f4e88ff7723a9b59b5f0b02088488b72d47949938a8c288c570259160bbb2dc3|
+|/tmp/surprising-owner-cleanup-20260922/jfr/cluster/window-256/end_to_end/client-12112.jfr|90044923|40293887eda631b0dbe039b6825e27238019ebb92d9630464041c4b157dfc2af|
+|/tmp/surprising-owner-cleanup-20260922/jfr/cluster/window-256/end_to_end/node.jfr|101131403|67b34fc5b84c94fe97d6578e5af36b177d2fd793cbfa545e832593fbd4480815|
+|/tmp/surprising-owner-cleanup-20260922/local-INVERSE_DELIVERY/local.jfr|92634714|f78a002f48d4b33b06cd7358e2a04eed140b6e22d8a4a566648aa2653a7876dc|
+|/tmp/surprising-owner-cleanup-20260922/local-INVERSE_PERPETUAL/local.jfr|96619090|49b5e301792844d818d75907a5a34c2ed245eeafe8b8061833c3f87ef47e6077|
+|/tmp/surprising-owner-cleanup-20260922/local-LINEAR_DELIVERY/local.jfr|97804229|105e0784531162152ff90521a8110cc6dfe8aed97f8449fe76b25a8ef4e241fe|
+|/tmp/surprising-owner-cleanup-20260922/local-LINEAR_PERPETUAL/local.jfr|93220947|d4d782773b26d2e6ef0e287899c7cf3423111471e42a68b4b9e714605c9097ae|
+|/tmp/surprising-owner-cleanup-20260922/local-OPTION/local.jfr|92686285|571fbb3065c39b89b4dccaf33c00cd5a87c86b22bad39d4ced0457430fff7a9d|
+|/tmp/surprising-owner-cleanup-20260922/local-SPOT/local.jfr|95694148|736108279913dccfe7be414375aa54569b2242270b922b77de0aba330592c445|
+|/tmp/surprising-owner-cleanup-20260922/local-SPOT-launch-failed/local.jfr|590752|25a4eb3c46dcf247f2ae726f5f0d18decaf46765f851e8ecee36f91dc11cbf10|
+
+结论：代码清理及受影响功能回归通过；性能部分验证/正式成绩因限频无效，不声明吞吐提升或Owner瓶颈解决。下一步继续按实际热点评估索引/终态收集，不为已删除兼容层增加替代生产抽象。归档目录 /Users/atomex/.Trash/surprising-owner-cleanup-20260922；清理状态另追加。
+
+- 清理完成：本轮node/client/局部JMH/监控/分析Java进程均退出；删除本轮runtime/Archive/Aeron/tmp、10份rawJFR和分析class。保留命令/源码/日志/系统时序/指标、JFR摘要和聚合、SHA清单及分析脚本。归档 `/Users/atomex/.Trash/surprising-owner-cleanup-20260922` 共13,693,084bytes；原始/tmp路径只作历史定位。未清理其他项目或非本轮数据。

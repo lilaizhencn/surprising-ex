@@ -1,6 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -403,8 +401,10 @@ public class ClusteredBatchTradingBenchmark {
         private int responseBatchSize;
         private String settleAsset;
         private String pipelineSymbolB;
-        private SurprisingClusteredService service;
+        private TradingCoreOwner service;
         private ClientSession session;
+        private byte[] responseScratch = new byte[4096];
+        private final UnsafeBuffer responseBuffer = new UnsafeBuffer(responseScratch);
         private final Header header = new Header(0, 0).buffer(new UnsafeBuffer(new byte[64]))
                 .offset(0).initialTermId(0).positionBitsToShift(16);
         private long sequence;
@@ -420,6 +420,24 @@ public class ClusteredBatchTradingBenchmark {
         private long makerBaseBalance;
         private final long[] firstOrders = new long[256];
         private static final long BALANCE = 1_000_000_000L;
+
+        /** Local benchmark consumes encoded responses immediately; real-cluster runs use ClusterServiceEgress. */
+        private void publishResponse(ClientSession target, CoreMessageHeader responseHeader,
+                                     CoreResponse response, long committedSequence) {
+            try {
+                if (target == null || target.isClosing()) return;
+                int length = CoreMessageCodec.encodedResponseLength(response);
+                if (responseScratch.length < length) {
+                    responseScratch = new byte[length];
+                    responseBuffer.wrap(responseScratch);
+                }
+                CoreMessageCodec.encodeResponse(responseHeader, response, committedSequence, responseScratch);
+                if (target.offer(responseBuffer, 0, length) < 0)
+                    throw new IllegalStateException("local benchmark response was not consumed");
+            } finally {
+                service.releaseResponse(response);
+            }
+        }
 
         @Setup(Level.Iteration)
         public void setup() {
@@ -438,12 +456,12 @@ public class ClusteredBatchTradingBenchmark {
             expectBatchTrades = false;
             batchTrades = 0;
             makerBaseBalance = 1L + 256L * batchSize;
-            service = new SurprisingClusteredService(productLine);
+            service = new TradingCoreOwner(productLine, this::publishResponse);
             snapshotRequests = service.snapshotRequests();
             // Aeron invokes background callbacks while its service idle strategy is running.
             // Define that path here too; performance execution remains on the real cluster.
             var serviceIdle = new org.agrona.concurrent.IdleStrategy() {
-                public void idle(int work) { if (realtime) service.doBackgroundWork(System.nanoTime()); }
+                public void idle(int work) { if (realtime) service.pollBackgroundWork(System.nanoTime()); }
                 public void idle() { idle(0); }
                 public void reset() { }
                 public String alias() { return "realtime-reentrant"; }
@@ -457,10 +475,10 @@ public class ClusteredBatchTradingBenchmark {
                         case "time", "logPosition" -> 1_700_000_000_000L;
                         default -> defaultValue(method.getReturnType());
                     });
-            service.onStart(cluster, null);
+            service.start(cluster);
             if(realtime) {
                 realtimeOutbox=new com.surprising.aeron.client.RealtimeOutbox(8192,8*1024*1024);
-                RealtimeBenchmarkFixture.attach(service, realtimeOutbox);consuming=true;
+                service.attachRealtime(realtimeOutbox, null);consuming=true;
                 realtimeConsumer=Thread.ofPlatform().name("realtime-benchmark-drain").start(()->{
                     while(consuming){if(realtimeOutbox.poll()==null)java.util.concurrent.locks.LockSupport.parkNanos(100_000);}
                     while(realtimeOutbox.poll()!=null){}
@@ -509,7 +527,7 @@ public class ClusteredBatchTradingBenchmark {
                         }
                         default -> defaultValue(method.getReturnType());
                     });
-            service.onSessionOpen(session, 1_700_000_000_000L);
+            service.sessionOpened();
             ContractType type=ContractType.valueOf(productLine.contractTypeCode());
             settleAsset=type.isInverse()?"BTC":"USDT";
             pipelineSymbolB = "JMH-PIPE-B-USDT";
@@ -542,8 +560,9 @@ public class ClusteredBatchTradingBenchmark {
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
                     TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 120)));
             byte[] makerBytes = CoreMessageCodec.encode(maker);
-            service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
-                    0, makerBytes.length, header);
+            service.acceptCommittedCommand(null, com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode(
+                            new UnsafeBuffer(makerBytes), 0, makerBytes.length),
+                    1_700_000_000_000L, header.position());
             drain();
             service.state().assertClusterCallbackComplete();
         }
@@ -890,7 +909,7 @@ public class ClusteredBatchTradingBenchmark {
                 if (fullWindowBoundary) {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (service.pendingCommandCount() != 0) {
-                        service.onSessionOpen(session, 1_700_000_000_000L);
+                        service.sessionOpened();
                         if (System.nanoTime() > deadline)
                             throw new IllegalStateException("full window waited for another timer");
                         Thread.onSpinWait();
@@ -1033,7 +1052,9 @@ public class ClusteredBatchTradingBenchmark {
                     || message.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH)
                 batchRequestSizes.put(message.header().correlationId(), responseBatchSize);
             byte[] bytes = CoreMessageCodec.encode(message);
-            service.onSessionMessage(session, 1_700_000_000_000L, new UnsafeBuffer(bytes), 0, bytes.length, header);
+            service.acceptCommittedCommand(session, com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode(
+                            new UnsafeBuffer(bytes), 0, bytes.length),
+                    1_700_000_000_000L, header.position());
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());
         }
 
@@ -1130,7 +1151,7 @@ public class ClusteredBatchTradingBenchmark {
                 System.out.printf("clusterBatch acceptedCore=%d terminalCore=%d unfinished=0 endBacklog=0 maxBacklog=%d queries=%d%n",
                         terminal, terminal, maxBacklog, queryResults);
             } finally {
-                service.onTerminate(null);
+                service.terminate();
                 consuming=false;
                 if(realtimeConsumer!=null){try{realtimeConsumer.join(5000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
                 if(realtimeOutbox!=null)System.out.println("realtimeDroppedBatches="+realtimeOutbox.droppedBatches());

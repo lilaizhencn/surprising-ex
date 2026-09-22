@@ -2121,7 +2121,7 @@ class ClusterCommandPipelineTest {
     }
 
     private static final class Fixture implements AutoCloseable {
-        final SurprisingClusteredService service;
+        final TradingOwnerTestSupport service;
         final ProductLine product;
         final List<CoreResponse> responses = new ArrayList<>();
         final ClientSession session;
@@ -2132,7 +2132,7 @@ class ClusterCommandPipelineTest {
         Fixture(ProductLine product) { this(product, Cluster.Role.LEADER); }
         Fixture(ProductLine product, Cluster.Role role) {
             this.product = product; this.role = role;
-            service = new SurprisingClusteredService(product);
+            service = new TradingOwnerTestSupport(product);
             session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
                     new Class<?>[]{ClientSession.class}, (p, method, args) -> {
                         if (method.getName().equals("offer")) {

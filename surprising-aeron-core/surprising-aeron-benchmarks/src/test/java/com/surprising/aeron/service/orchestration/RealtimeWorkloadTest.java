@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
+import com.surprising.aeron.service.orchestration.TradingCoreOwner;
 import com.surprising.product.api.ProductLine;
 
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,9 +20,9 @@ class RealtimeWorkloadTest {
         try {
             var field = workload.getClass().getDeclaredField("service");
             field.setAccessible(true);
-            var service = (SurprisingClusteredService) field.get(workload);
+            var service = (TradingCoreOwner) field.get(workload);
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(65536, 32 * 1024 * 1024);
-            RealtimeBenchmarkFixture.attach(service, outbox);
+            service.attachRealtime(outbox, null);
             workload.runRoundTripTrades();
             int trades = 0, executions = 0, begins = 0, ends = 0;
             var ids = new java.util.HashSet<String>();

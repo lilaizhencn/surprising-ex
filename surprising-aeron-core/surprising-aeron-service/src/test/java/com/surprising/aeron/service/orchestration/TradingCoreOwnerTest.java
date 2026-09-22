@@ -47,7 +47,7 @@ import org.agrona.concurrent.NoOpIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
-class SurprisingClusteredServiceTest {
+class TradingCoreOwnerTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection(boolean capacityFailure) throws Exception {
@@ -315,8 +315,6 @@ class SurprisingClusteredServiceTest {
             assertThat(blocked.join()).isEqualTo(1);
             assertThat(responses).hasSize(1);
             service.state().assertClusterCallbackComplete();
-            assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
-                    .isEqualTo(2_000);
             drainRealtime(outbox);
             // Read dispatch is now allowed at the completed window boundary, but never
             // during the reentrant idle callbacks above while settlement is pending.
@@ -327,6 +325,10 @@ class SurprisingClusteredServiceTest {
                 Thread.yield();
             }
             assertThat(service.state().realtimeSnapshotPending()).isFalse();
+            // The dispatched realtime read also owns Lane mailbox work. Inspect the full
+            // fenced state only after that read has completed, not merely the trade response.
+            assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
+                    .isEqualTo(2_000);
             assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
                 assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.USER);
                 var user = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(frame.payload());
@@ -414,7 +416,7 @@ class SurprisingClusteredServiceTest {
     void followerReplayAndLeaderCompleteEveryCallbackWithoutBackgroundPumps() {
         long expectedHash = 0;
         for (Cluster.Role role : new Cluster.Role[]{Cluster.Role.LEADER, Cluster.Role.FOLLOWER}) {
-            SurprisingClusteredService service = service();
+            TradingOwnerTestSupport service = service();
             service.onStart(cluster(role), null);
             try {
                 replayWithoutSession(service, timerInstrument());
@@ -449,7 +451,7 @@ class SurprisingClusteredServiceTest {
         }
     }
 
-    private static void replayWithoutSession(SurprisingClusteredService service, CoreMessage message) {
+    private static void replayWithoutSession(TradingOwnerTestSupport service, CoreMessage message) {
         byte[] encoded = CoreMessageCodec.encode(message);
         service.onSessionMessage(null, 1234, new UnsafeBuffer(encoded), 0, encoded.length, aeronHeader());
         finishCommands(service);
@@ -458,7 +460,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void asynchronousBookQueryIsCollectedBeforeCallbackReturnsEvenWithoutSession() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             replayWithoutSession(service, timerInstrument());
@@ -476,7 +478,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void egressRetriesOnlyInsideLogCallbackAndBackgroundNeverOffersOrCloses() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         AtomicInteger offers = new AtomicInteger();
         AtomicInteger closes = new AtomicInteger();
         ClientSession session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
@@ -509,7 +511,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void unfinishedCallbackIsAnAgentTerminationNotARecoverableBusinessRejection() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             preparePendingPlace(service.state(), 30_001);
@@ -525,7 +527,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void queriesAndFollowingCommandsObserveCompletedLogCallbacks() throws Exception {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
@@ -560,7 +562,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void handsRuntimeOwnershipFromConstructionThreadToClusterServiceThread() throws Exception {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<CoreResponse> response = new AtomicReference<>();
         Thread serviceThread = new Thread(() -> {
@@ -585,7 +587,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void loggedTimerCompletesMatchingExactlyOnceWithoutBackgroundWork() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
@@ -614,7 +616,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void logCallbackCommitsMatchingBeforeTheFollowingCommand() throws Exception {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
@@ -647,8 +649,8 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void loadsOneByteSnapshotFragmentsThroughBoundedSectionRecovery() {
-        SurprisingClusteredService source = service();
-        SurprisingClusteredService target = service();
+        TradingOwnerTestSupport source = service();
+        TradingOwnerTestSupport target = service();
         try {
             source.onStart(cluster(), null);
             assertThat(source.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
@@ -656,7 +658,7 @@ class SurprisingClusteredServiceTest {
             byte[] snapshot = source.state().snapshot(45);
             AtomicInteger offset = new AtomicInteger();
             UnsafeBuffer buffer = new UnsafeBuffer(snapshot);
-            SurprisingClusteredService.SnapshotFragmentSource fragments = (handler, fragmentLimit) -> {
+            TradingOwnerTestSupport.SnapshotFragmentSource fragments = (handler, fragmentLimit) -> {
                 if (offset.get() == snapshot.length) return 0;
                 handler.onFragment(buffer, offset.getAndIncrement(), 1, null);
                 return 1;
@@ -676,7 +678,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void emptyAndIncompleteFragmentSourcesFailBeforeStateReplacement() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
@@ -701,9 +703,9 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
-        SurprisingClusteredService.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
+        TradingOwnerTestSupport.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
 
-        assertThatThrownBy(() -> SurprisingClusteredService.ensureSnapshotCapacity(
+        assertThatThrownBy(() -> TradingOwnerTestSupport.ensureSnapshotCapacity(
                 SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 2))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Aeron core snapshot exceeds maximum size");
@@ -711,7 +713,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void doesNotReplaceStateAfterCorruptSnapshot() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
@@ -729,7 +731,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void pairedManifestMismatchFailsBeforeLiveStateReplacement() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
@@ -759,7 +761,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void propagatesFatalMatcherDivergenceFromSnapshotCallback() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             TradingCoreRuntime state = service.state();
@@ -778,7 +780,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void loggedSessionOpenAndBackgroundNeverScheduleProgressTimers() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         AtomicInteger attempts = new AtomicInteger();
         AtomicLong correlationId = new AtomicLong();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
@@ -798,7 +800,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void followerDoesNotSynthesizeHistoricalMatcherTimeoutDuringReplay() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(Cluster.Role.FOLLOWER), null);
         try {
             long sequence = preparePendingPlace(service.state(), 905);
@@ -814,7 +816,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void snapshotWaitsForAsynchronousMatcherCaptureAndReleasesCommandAdmission() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             assertThat(service.captureSnapshot(7)).isNotEmpty();
@@ -829,7 +831,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void snapshotCaptureTimeoutIsFailClosedAndObservable() {
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(9, System.nanoTime()))
@@ -848,7 +850,7 @@ class SurprisingClusteredServiceTest {
     @Test
     void backgroundAndSnapshotCannotCommitWorkOutsideALogCallback() {
         // Given
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             long pendingSequence = preparePendingPlace(service.state(), 903);
@@ -873,7 +875,7 @@ class SurprisingClusteredServiceTest {
     @Test
     void restoresSuccessfulSnapshotRoundTripWithoutTimingPoll() {
         // Given
-        SurprisingClusteredService service = service();
+        TradingOwnerTestSupport service = service();
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
@@ -927,7 +929,7 @@ class SurprisingClusteredServiceTest {
     }
 
     private static void onSessionMessage(
-            SurprisingClusteredService service, List<byte[]> responses, CoreMessage request) {
+            TradingOwnerTestSupport service, List<byte[]> responses, CoreMessage request) {
         byte[] encoded = CoreMessageCodec.encode(request);
         service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
                 encoded.length, aeronHeader());
@@ -935,7 +937,7 @@ class SurprisingClusteredServiceTest {
     }
 
 
-    private static void finishCommands(SurprisingClusteredService service) {
+    private static void finishCommands(TradingOwnerTestSupport service) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         do {
             service.pollCommands();
@@ -988,8 +990,8 @@ class SurprisingClusteredServiceTest {
         return cluster(Cluster.Role.LEADER);
     }
 
-    private static SurprisingClusteredService service() {
-        return new SurprisingClusteredService(ProductLine.SPOT);
+    private static TradingOwnerTestSupport service() {
+        return new TradingOwnerTestSupport(ProductLine.SPOT);
     }
 
     private static Cluster cluster(Cluster.Role role) {

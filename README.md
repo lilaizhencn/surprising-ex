@@ -1,5 +1,16 @@
 # Surprising 交易系统
 
+## Owner 提交与响应边界
+
+生产入口统一为 `AeronTradingClusterService → TradingOwnerLoop → TradingCoreOwner`。
+Owner 通过必填的响应出口交接已提交结果，`ClusterServiceEgress` 在集群线程编码和处理有界背压；
+Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。回调模拟仅位于测试目录的
+`TradingOwnerTestSupport`，局部批量基准直接调用实际 Owner，并提供显式的结果消费出口。
+
+`CommitPublication` 保留逐命令索引更新、延迟发布及失败处理边界；`RuntimeCommitJournal`
+只维护权威发布序号和生命周期校验，不再提供只有深度计数的 downstream publication batch。
+撮合和账户 Lane 的完成条件、资金结算、终态去重及快照恢复顺序不变。
+
 ## 项目介绍
 
 Surprising 是一个正在开发和验证中的多产品线交易系统。本仓库承载交易后端，围绕交易撮合、账户结算、风险处理、行情分发和运营管理组织服务，并通过 Aeron Cluster 构建交易核心的高可用运行环境。

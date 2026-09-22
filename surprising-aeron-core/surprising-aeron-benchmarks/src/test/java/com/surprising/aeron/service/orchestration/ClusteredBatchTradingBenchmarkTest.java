@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
+import com.surprising.aeron.service.orchestration.TradingCoreOwner;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,7 +40,7 @@ class ClusteredBatchTradingBenchmarkTest {
         try (workload) {
             var serviceField = workload.getClass().getDeclaredField("service");
             serviceField.setAccessible(true);
-            var service = (SurprisingClusteredService) serviceField.get(workload);
+            var service = (TradingCoreOwner) serviceField.get(workload);
             var runtime = service.state().runtimeState;
             var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
             epoch.setAccessible(true);

@@ -19,28 +19,32 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/**
- * 兼容用的 Aeron Cluster 回调适配器。
- *
- * <p>生产节点使用 {@link com.surprising.aeron.service.cluster.AeronTradingClusterService} 直接连接
- * {@link TradingCoreOwner}。这个类只保留旧的 ClusteredService 入口，供现有测试和
- * 独立回放工具使用，不拥有交易状态或命令推进逻辑。</p>
- */
-public final class SurprisingClusteredService implements ClusteredService {
+/** Test-only callback and response fixture for the real trading Owner. */
+final class TradingOwnerTestSupport implements ClusteredService {
     private final TradingCoreOwner owner;
     private Cluster cluster;
+    private final DeferredSessionResponses responses = new DeferredSessionResponses();
 
-    public SurprisingClusteredService(ProductLine productLine) {
-        this(productLine, null);
+    TradingOwnerTestSupport(ProductLine productLine) {
+        owner = new TradingCoreOwner(productLine, this::respond);
     }
 
-    SurprisingClusteredService(ProductLine productLine, TradingCoreOwner.ResponseSink responseSink) {
-        owner = new TradingCoreOwner(productLine, responseSink);
+    private void respond(ClientSession session, com.surprising.aeron.protocol.CoreMessageHeader header,
+                         CoreResponse response, long sequence) {
+        try {
+            if (session == null || session.isClosing()) return;
+            byte[] bytes = new byte[com.surprising.aeron.protocol.CoreMessageCodec.encodedResponseLength(response)];
+            com.surprising.aeron.protocol.CoreMessageCodec.encodeResponse(header, response, sequence, bytes);
+            responses.offer(session, new UnsafeBuffer(bytes), bytes.length, System.nanoTime());
+        } finally {
+            owner.releaseResponse(response);
+        }
     }
 
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
+        responses.clear();
         owner.start(cluster);
         if (snapshotImage != null) {
             owner.loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);
@@ -115,6 +119,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onRoleChange(Cluster.Role newRole) {
+        responses.clear();
         owner.roleChange(newRole);
     }
 
@@ -125,6 +130,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster ignored) {
+        responses.clear();
         owner.terminate();
         cluster = null;
     }
@@ -136,7 +142,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason reason) {
-        if (session != null) owner.sessionClosed(session.id());
+        if (session != null) { responses.remove(session.id()); owner.sessionClosed(session.id()); }
     }
 
     @Override
@@ -148,7 +154,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     boolean ownerWorkAvailable() { return owner.ownerWorkAvailable(); }
     boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
     void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }
-    int pollCommands() { return owner.pollCommands(); }
+    int pollCommands() {
+        int sent = responses.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
+        return owner.pollCommands() + sent;
+    }
     void finishCommands() { owner.finishCommands(); }
     int commandWindowSize() { return owner.commandWindowSize(); }
     int commandWindowHighWaterMark() { return owner.commandWindowHighWaterMark(); }

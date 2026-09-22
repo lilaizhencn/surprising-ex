@@ -58,51 +58,46 @@ final class CoreTestCompletion {
             throw new IllegalArgumentException("invalid synchronous matching fence");
         }
         CoreResponse requestedResponse = null;
-        owner.beginDownstreamPublicationBatch();
-        try {
-            while (true) {
-                owner.drainMatchingCompletions();
-                long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
-                        ? requestedSequence : owner.firstPendingMatchingSequence();
-                if (sequence == 0) break;
-                owner.progressPlaceBatchAdmissions();
-                CoreResponse response;
-                if (owner.hasPendingMatchingRejection(sequence)) {
+        while (true) {
+            owner.drainMatchingCompletions();
+            long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
+                    ? requestedSequence : owner.firstPendingMatchingSequence();
+            if (sequence == 0) break;
+            owner.progressPlaceBatchAdmissions();
+            CoreResponse response;
+            if (owner.hasPendingMatchingRejection(sequence)) {
+                response = owner.commits.completeRejectedMatching(sequence);
+            } else {
+                CommandSlot pending = owner.pendingMatching.get(sequence);
+                com.surprising.aeron.service.matching.MatchingResult matching =
+                        pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
+                                || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
+                                ? pending.orderBatch.lastMatchingResult
+                                : pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
+                                || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
+                                ? owner.laneCommandContexts.required(sequence).matchingResult()
+                                : awaitMatchingResult(owner, sequence);
+                if (matching == null) matching = awaitMatchingResult(owner, sequence);
+                if (matching == null && owner.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
+                } else if (matching == null) {
+                    throw new IllegalStateException(
+                            "matcher did not complete sequence " + sequence);
                 } else {
-                    CommandSlot pending = owner.pendingMatching.get(sequence);
-                    com.surprising.aeron.service.matching.MatchingResult matching =
-                            pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
-                                    || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
-                                    ? pending.orderBatch.lastMatchingResult
-                                    : pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
-                                    || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
-                                    ? owner.laneCommandContexts.required(sequence).matchingResult()
-                                    : awaitMatchingResult(owner, sequence);
-                    if (matching == null) matching = awaitMatchingResult(owner, sequence);
-                    if (matching == null && owner.hasPendingMatchingRejection(sequence)) {
-                        response = owner.commits.completeRejectedMatching(sequence);
-                    } else if (matching == null) {
-                        throw new IllegalStateException(
-                                "matcher did not complete sequence " + sequence);
-                    } else {
-                        response = owner.commits.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
-                    }
-                }
-                if (response != null && sequence == requestedSequence) {
-                    requestedResponse = response;
-                    break;
+                    response = owner.commits.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
                 }
             }
-            if (requestedSequence != 0 && requestedResponse == null) {
-                throw new IllegalStateException(
-                        "synchronous matcher did not produce a terminal response for sequence "
-                                + requestedSequence);
+            if (response != null && sequence == requestedSequence) {
+                requestedResponse = response;
+                break;
             }
-            return requestedResponse;
-        } finally {
-            owner.endDownstreamPublicationBatch();
         }
+        if (requestedSequence != 0 && requestedResponse == null) {
+            throw new IllegalStateException(
+                    "synchronous matcher did not produce a terminal response for sequence "
+                            + requestedSequence);
+        }
+        return requestedResponse;
     }
 
     static com.surprising.aeron.service.matching.MatchingResult awaitMatchingResult(

@@ -43,7 +43,7 @@ public final class CoreFaults {
         set(batch, "actualLaneMask", (long) get(batch, "actualLaneMask") ^ 1L);
     }
 
-    static void attachRealtime(SurprisingClusteredService service, RealtimeOutbox outbox) {
+    static void attachRealtime(TradingOwnerTestSupport service, RealtimeOutbox outbox) {
         service.attachRealtime(outbox);
     }
 

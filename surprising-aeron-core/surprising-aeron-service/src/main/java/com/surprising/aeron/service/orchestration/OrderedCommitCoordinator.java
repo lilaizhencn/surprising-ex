@@ -1158,34 +1158,29 @@ final class OrderedCommitCoordinator {
         if (maxCompletions <= 0 || handler == null) {
             throw new IllegalArgumentException("matching commit batch requires a positive limit and handler");
         }
-        owner.beginDownstreamPublicationBatch();
-        try {
-            if (advanceProgress) advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
-            int completed = 0;
-            int attempts = 0;
-            while (attempts < maxCompletions) {
-                if (owner.pendingMatching.firstSequence() > throughSequence) break;
-                CommandSlot pending = pollReadyPending();
-                if (pending == null && attempts == 0 && awaitFirst) {
-                    pending = pollReadyHead(clusterTimestamp, clusterPosition, throughSequence);
-                }
-                if (pending == null) break;
-                long sequence = pending.sequence();
-                CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
-                attempts++;
-                owner.pendingMatching.progressChanged();
-                // A Matcher or Lane notification may arrive later.  Leave the pending head in
-                // place and let the next cluster-agent poll retry it; never block the Owner.
-                if (response == null) {
-                    break;
-                }
-                handler.onCommitted(sequence, response);
-                completed++;
+        if (advanceProgress) advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+        int completed = 0;
+        int attempts = 0;
+        while (attempts < maxCompletions) {
+            if (owner.pendingMatching.firstSequence() > throughSequence) break;
+            CommandSlot pending = pollReadyPending();
+            if (pending == null && attempts == 0 && awaitFirst) {
+                pending = pollReadyHead(clusterTimestamp, clusterPosition, throughSequence);
             }
-            return completed;
-        } finally {
-            owner.endDownstreamPublicationBatch();
+            if (pending == null) break;
+            long sequence = pending.sequence();
+            CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
+            attempts++;
+            owner.pendingMatching.progressChanged();
+            // A Matcher or Lane notification may arrive later.  Leave the pending head in
+            // place and let the next cluster-agent poll retry it; never block the Owner.
+            if (response == null) {
+                break;
+            }
+            handler.onCommitted(sequence, response);
+            completed++;
         }
+        return completed;
     }
 
     /**
@@ -1199,20 +1194,15 @@ final class OrderedCommitCoordinator {
         owner.assertOwner();
         owner.assertHealthy();
         if (throughSequence <= 0) throw new IllegalArgumentException("matching head sequence must be positive");
-        owner.beginDownstreamPublicationBatch();
-        try {
-            if (advanceProgress) {
-                advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
-            }
-            if (owner.pendingMatching.firstSequence() > throughSequence) return null;
-            CommandSlot pending = pollReadyPending();
-            if (pending == null || pending.sequence() > throughSequence) return null;
-            CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
-            owner.pendingMatching.progressChanged();
-            return response;
-        } finally {
-            owner.endDownstreamPublicationBatch();
+        if (advanceProgress) {
+            advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
         }
+        if (owner.pendingMatching.firstSequence() > throughSequence) return null;
+        CommandSlot pending = pollReadyPending();
+        if (pending == null || pending.sequence() > throughSequence) return null;
+        CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
+        owner.pendingMatching.progressChanged();
+        return response;
     }
 
     /** Applies one ready slot while preserving the existing response-routing boundary. */

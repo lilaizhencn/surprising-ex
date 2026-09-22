@@ -314,8 +314,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final TerminalStateRetention terminalRetention;
     /** 提交日志与快照版本边界；与交易日志共同约束恢复。 */
     final com.surprising.aeron.service.state.RuntimeCommitJournal runtimeProjectionJournal;
-    /** 当前已发布状态序号；Owner 单线程递增，不为每次发布创建 fence 对象。 */
-    long publicationSequence;
 
     /** Owner 当前是否持有命令的变更缓冲；挂起时交还序号槽。 */
     boolean factContextActive;
@@ -518,7 +516,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.factIndexes.rebuild(snapshotState, identities);
         this.runtimeProjectionJournal = com.surprising.aeron.service.state.RuntimeCommitJournal.passive(
                 productLine, snapshotState, projectionSequence);
-        this.publicationSequence = runtimeProjectionJournal.publishedSequence();
         runtimeState.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();
     }
@@ -935,14 +932,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     boolean hasMatchingNotifications() { return matchingProgress.hasNotifications(); }
 
     boolean hasMatchingNotifications(long now) { return matchingProgress.hasNotifications(now); }
-
-    void beginDownstreamPublicationBatch() {
-        runtimeProjectionJournal.beginPublicationBatch();
-    }
-
-    void endDownstreamPublicationBatch() {
-        runtimeProjectionJournal.endPublicationBatch();
-    }
 
     int matchingCompletionHighWaterMark() {
         return matcherPipeline.completionHighWaterMark();
