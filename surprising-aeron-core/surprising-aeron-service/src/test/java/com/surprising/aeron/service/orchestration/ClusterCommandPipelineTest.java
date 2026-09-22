@@ -139,6 +139,19 @@ class ClusterCommandPipelineTest {
             var heads = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.OwnerHead")).toList();
             assertThat(heads).isNotEmpty();
+            for (var head : heads) {
+                long residence = head.getLong("retiredNanos") - head.getLong("observedNanos");
+                assertThat(head.getBoolean("completed")).isTrue();
+                assertThat(head.getInt("attempts")).isPositive();
+                assertThat(head.getInt("unreadyAttempts")).isLessThan(head.getInt("attempts"));
+                assertThat(head.getLong("attemptNanos") + head.getLong("admissionWhileWaitingNanos"))
+                        .isBetween(0L, residence);
+                assertThat(head.getLong("admissionAfterLaneFinishNanos"))
+                        .isBetween(0L, head.getLong("admissionWhileWaitingNanos"));
+                assertThat(head.getInt("admittedAfterLaneFinish"))
+                        .isBetween(0, head.getInt("admittedWhileWaiting"));
+                if (head.getInt("unreadyAttempts") != 0) assertThat(head.getString("firstWaitReason")).isNotBlank();
+            }
             var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.SettlementLatency")).toList();
             assertThat(events).extracting(e -> e.getString("commandType"))

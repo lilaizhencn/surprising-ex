@@ -31,7 +31,7 @@ final class CoreMatchingPhaseMetrics {
         return event;
     }
 
-    /** One sparse transition when a bound command becomes the physical FIFO head. */
+    /** Sparse head residence, owned only by Owner and discarded on retirement. */
     @jdk.jfr.Name("surprising.OwnerHead")
     @jdk.jfr.Category("Surprising Core")
     @jdk.jfr.StackTrace(false)
@@ -41,6 +41,13 @@ final class CoreMatchingPhaseMetrics {
         public long sequence, commandIdHigh, commandIdLow;
         public long observedNanos;
         public boolean afterPredecessor;
+        public long retiredNanos, attemptNanos, admissionWhileWaitingNanos;
+        public long admissionAfterLaneFinishNanos;
+        public int admittedAfterLaneFinish;
+        public long lastAttemptNanos, maxAttemptGapNanos;
+        public int attempts, unreadyAttempts, admittedWhileWaiting;
+        public String firstWaitReason, lastWaitReason;
+        public boolean completed;
     }
 
     static void recordOwnerHead(ClusterCommandWindow.Entry head, boolean afterPredecessor) {
@@ -56,7 +63,85 @@ final class CoreMatchingPhaseMetrics {
         event.commandIdLow = header.commandId().getLeastSignificantBits();
         event.afterPredecessor = afterPredecessor;
         event.observedNanos = System.nanoTime();
-        event.commit();
+        event.begin();
+        head.headTiming = event;
+    }
+
+    static void finishOwnerHead(ClusterCommandWindow.Entry head) {
+        var timing = head.headTiming;
+        if (timing == null) return;
+        head.headTiming = null;
+        timing.retiredNanos = System.nanoTime();
+        timing.completed = head.response != null;
+        timing.end();
+        timing.commit();
+    }
+
+    static long beginHeadAttempt(OwnerHead timing) {
+        if (timing == null) return 0;
+        long now = System.nanoTime();
+        if (timing.lastAttemptNanos != 0)
+            timing.maxAttemptGapNanos = Math.max(timing.maxAttemptGapNanos, now - timing.lastAttemptNanos);
+        timing.lastAttemptNanos = now;
+        timing.attempts++;
+        return now;
+    }
+
+    static void finishHeadAttempt(OwnerHead timing, long started, String waitReason) {
+        if (timing == null) return;
+        timing.attemptNanos += System.nanoTime() - started;
+        if (waitReason != null) {
+            timing.unreadyAttempts++;
+            if (timing.firstWaitReason == null) timing.firstWaitReason = waitReason;
+            timing.lastWaitReason = waitReason;
+        }
+    }
+
+    static void recordAdmissionWhileWaiting(OwnerHead timing, long started, CommandSlot pending) {
+        long finished = System.nanoTime();
+        timing.admittedWhileWaiting++;
+        timing.admissionWhileWaitingNanos += finished - started;
+        if (pending == null) return;
+        var settlement = pending.orderBatch == null ? pending.settlementEvent() : pending.orderBatch.settlementEvent;
+        if (settlement == null || !settlement.complete() || settlement.matcherPublishedNanos() == 0) return;
+        long lanes = settlement.completedLaneMask();
+        if (lanes == 0) return;
+        long laneFinished = Long.MIN_VALUE;
+        while (lanes != 0) {
+            int lane = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
+            laneFinished = Math.max(laneFinished, settlement.laneFinishedNanos(lane));
+        }
+        long overlap = finished - Math.max(started, laneFinished);
+        if (overlap > 0) {
+            timing.admissionAfterLaneFinishNanos += overlap;
+            timing.admittedAfterLaneFinish++;
+        }
+    }
+
+    /** Read-only observation after an unsuccessful attempt, not a readiness predicate. */
+    static String headWaitReason(CommandSlot pending) {
+        if (pending == null) return "NO_PENDING";
+        var batch = pending.orderBatch;
+        if (batch != null) {
+            if (!batch.activated()) return "BATCH_ACTIVATION";
+            if (batch.placeBatchAdmissionEvent != null && !batch.placeBatchAdmissionEvent.complete())
+                return "BATCH_ADMISSION";
+            if (batch.itemAdmission != null) return "ITEM_ADMISSION_CONTINUATION";
+            if (batch.itemSettlementEvent != null && !batch.itemSettlementEvent.complete()) return "ITEM_SETTLEMENT";
+            if (batch.laneCommitEvent != null && !batch.laneCommitEvent.complete()) return "LANE_COMMIT";
+            if (batch.cancelEvent != null && !batch.cancelEvent.complete()) return "LANE_CANCEL";
+        }
+        if (pending.placeAdmission() != null && !pending.placeAdmission().complete()) return "PLACE_ADMISSION";
+        var settlement = batch == null ? pending.settlementEvent() : batch.settlementEvent;
+        if (settlement != null && settlement.direct()) {
+            if (!settlement.ready()) return "MATCHER_PUBLICATION";
+            if (!settlement.complete()) return "LANE_SETTLEMENT";
+            return pending.submittedMatcherShard() != -1 ? "MATCHER_TOKEN_RELEASE" : "READY_FINALIZATION";
+        }
+        if (pending.hasLaneContinuation() && !pending.laneContinuationComplete()) return "LANE_CONTINUATION";
+        if (pending.matchingResult() != null || pending.hasMatchingCompletion()) return "RESULT_FINALIZATION";
+        return pending.isMatchingSubmitted() ? "MATCHER_RESULT" : "MATCHER_SUBMISSION";
     }
 
     @jdk.jfr.Name("surprising.SettlementLatency")

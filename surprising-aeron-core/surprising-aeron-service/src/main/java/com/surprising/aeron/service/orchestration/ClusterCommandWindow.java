@@ -252,6 +252,7 @@ public final class ClusterCommandWindow {
         boolean removedLastMatching = false;
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
+            CoreMatchingPhaseMetrics.finishOwnerHead(entry);
             int physical = (head + i) & indexMask;
             for (int k = 0; k < entry.orderCount; k++) {
                 long id = entry.orders[k];
@@ -291,6 +292,8 @@ public final class ClusterCommandWindow {
     }
 
     public static final class Entry {
+        /** Optional JFR state for the current sampled head; never read by business logic. */
+        CoreMatchingPhaseMetrics.OwnerHead headTiming;
         /** Only exact identities needed for cancellation/retry fencing. */
         public final long[] orders = new long[MAX_TRACKED_ORDER_IDS];
         public int orderCount;

@@ -195,6 +195,8 @@ public final class TradingCoreOwner {
                 var next = commandPipeline.pendingIngress().first();
                 if (next == null) return;
                 if (commandPipeline.isIngressBlocked(next.command)) return;
+                var waitingHeadTiming = awaitingCompletion ? commandPipeline.committingHead().headTiming : null;
+                long waitingAdmissionStarted = waitingHeadTiming == null ? 0 : System.nanoTime();
                 commandPipeline.clearBlockedIngress();
                 boolean eligible = state.prepareClusterPipelineScope(next.command, window);
                 boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
@@ -239,6 +241,10 @@ public final class TradingCoreOwner {
                 entry.response = entry.sequence == 0 ? result : null;
                 commandPipeline.pendingIngress().remove();
                 commandPipeline.recordAdmission();
+                if (waitingHeadTiming != null) {
+                    CoreMatchingPhaseMetrics.recordAdmissionWhileWaiting(waitingHeadTiming, waitingAdmissionStarted,
+                            state.pendingMatching(waitingHeadTiming.sequence));
+                }
                 if (turn != null) turn.admitted++;
                 advanceMatching = true;
             }
@@ -269,12 +275,15 @@ public final class TradingCoreOwner {
     private boolean pollCommandCommit(boolean advanceMatching) {
         ClusterCommandWindow window = commandPipeline.commandWindow();
         var last = commandPipeline.committingHead();
+        var headTiming = last.headTiming;
+        long headAttemptStarted = CoreMatchingPhaseMetrics.beginHeadAttempt(headTiming);
         long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
         long progressBefore = state.matchingProgressSequence();
         if (commandPipeline.waitingForMatchingNotification()
                 && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
                 state.hasMatchingNotifications())) {
             checkProgressDeadline();
+            CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted, "NOTIFICATION_GATE");
             return false;
         }
         commandPipeline.beginMatchingPoll();
@@ -293,6 +302,8 @@ public final class TradingCoreOwner {
                         progressBefore, state.hasLocalMatchingWork());
                 CoreMatchingPhaseMetrics.recordBoundary("ownerCommitAttemptWaiting", timingHeader, commitStart);
                 checkProgressDeadline();
+                CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted,
+                        headTiming == null ? null : CoreMatchingPhaseMetrics.headWaitReason(state.pendingMatching(last.sequence)));
                 return false;
             }
             if (last.response != null) throw new IllegalStateException("duplicate pipeline terminal response");
@@ -306,6 +317,7 @@ public final class TradingCoreOwner {
         long retirementStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
         if (last.session != null) offerResponse(last.session, last.request, last.response);
+        CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted, null);
         commandPipeline.finishHeadCommit();
         state.runtimeState.releaseCompletedSequentialLaneStage();
         if (window.size() == 0) progressRealtimeReads(System.nanoTime());
