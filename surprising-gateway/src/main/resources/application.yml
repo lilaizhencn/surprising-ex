@@ -567,7 +567,7 @@ surprising:
         basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
         basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
       websocket-admin:
-        base-url: ${GATEWAY_SELF_BASE_URL:http://localhost:9094}
+        base-url: "local:"
         target-prefix: /api/v1/admin/websocket
         private-route: true
   websocket:

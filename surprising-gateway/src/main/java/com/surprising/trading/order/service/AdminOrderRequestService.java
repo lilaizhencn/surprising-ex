@@ -1,4 +1,4 @@
-package com.surprising.trading.order.controller;
+package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
@@ -10,39 +10,23 @@ import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.OrderService;
-import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.stereotype.Service;
 
-@RestController
-@RequestMapping("/api/v1/admin/trading")
-public class AdminOrderController {
+/**
+ * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ */
+@Service()
+public class AdminOrderRequestService {
 
     private final OrderService orderService;
 
-    public AdminOrderController(OrderService orderService) {
+    public AdminOrderRequestService(OrderService orderService) {
         this.orderService = orderService;
     }
 
-    @GetMapping("/orders")
-    public OrderQueryResponse orders(@RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-                                     @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-                                     @RequestParam(value = "productLine", required = false) String productLineValue,
-                                     @RequestParam(value = "userId", required = false) Long userId,
-                                     @RequestParam(value = "symbol", required = false) String symbol,
-                                     @RequestParam(value = "status", required = false) String status,
-                                     @RequestParam(value = "orderId", required = false) Long orderId,
-                                     @RequestParam(value = "limit", defaultValue = "100") int limit,
-                                     @RequestParam(value = "cursor", required = false) String cursor,
-                                     @RequestParam(value = "sort", required = false) String sort) {
+    public OrderQueryResponse orders(String adminUserId, String productLineHeader, String productLineValue, Long userId, String symbol, String status, Long orderId, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
@@ -54,13 +38,7 @@ public class AdminOrderController {
         }
     }
 
-    @PostMapping("/orders/{orderId}/cancel")
-    public AdminCancelOrderResult cancelOrder(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @PathVariable("orderId") long orderId,
-            @Valid @RequestBody(required = false) AdminCancelOrderRequest request) {
+    public AdminCancelOrderResult cancelOrder(String adminUserId, String productLineHeader, String productLineValue, long orderId, AdminCancelOrderRequest request) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
@@ -74,14 +52,7 @@ public class AdminOrderController {
         }
     }
 
-    @GetMapping("/orders/cancel-preview")
-    public AdminCancelOrdersPreviewResponse cancelPreview(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @RequestParam(value = "userId", required = false) Long userId,
-            @RequestParam(value = "symbol", required = false) String symbol,
-            @RequestParam(value = "limit", defaultValue = "100") int limit) {
+    public AdminCancelOrdersPreviewResponse cancelPreview(String adminUserId, String productLineHeader, String productLineValue, Long userId, String symbol, int limit) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
@@ -93,12 +64,7 @@ public class AdminOrderController {
         }
     }
 
-    @PostMapping("/orders/cancel")
-    public AdminCancelOrdersResponse cancelOrders(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @Valid @RequestBody(required = false) AdminBatchCancelOrdersRequest request) {
+    public AdminCancelOrdersResponse cancelOrders(String adminUserId, String productLineHeader, String productLineValue, AdminBatchCancelOrdersRequest request) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
@@ -110,12 +76,7 @@ public class AdminOrderController {
         }
     }
 
-    @PostMapping("/orders/cancel-by-symbol")
-    public AdminCancelOrdersResponse cancelBySymbol(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @Valid @RequestBody AdminCancelBySymbolRequest request) {
+    public AdminCancelOrdersResponse cancelBySymbol(String adminUserId, String productLineHeader, String productLineValue, AdminCancelBySymbolRequest request) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);

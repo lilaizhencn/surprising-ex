@@ -21,6 +21,9 @@ import tools.jackson.databind.ObjectMapper;
 /** 保留公共 API 的响应契约，将已鉴权的请求直接交给进程内业务入口。 */
 @Component
 public final class LocalBusinessApi {
+    private static final org.springframework.web.util.pattern.PathPattern WEBSOCKET_METRICS =
+            org.springframework.web.util.pattern.PathPatternParser.defaultInstance.parse("/api/v1/admin/websocket/metrics");
+    private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket;
     private final TradingLocalRoutes trading;
     private final AccountLocalRoutes account;
     private final InstrumentLocalRoutes instrument;
@@ -31,8 +34,10 @@ public final class LocalBusinessApi {
 
     public LocalBusinessApi(TradingLocalRoutes trading, AccountLocalRoutes account,
                             InstrumentLocalRoutes instrument, ObjectMapper mapper, Validator validator,
+                            com.surprising.websocket.provider.service.SubscriptionRegistry websocket,
                             com.surprising.account.provider.config.AccountProperties accountProperties,
                             com.surprising.trading.order.config.TradingOrderProperties tradingProperties) {
+        this.websocket = websocket;
         this.trading = trading;
         this.account = account;
         this.instrument = instrument;
@@ -117,7 +122,7 @@ public final class LocalBusinessApi {
     public static boolean isLocalService(String service) {
         return switch (service.toLowerCase(java.util.Locale.ROOT)) {
             case "trading-market", "trading", "trading-orders", "trading-fees", "trading-leverage", "trading-trigger",
-                 "account", "account-public", "instrument", "instrument-admin" -> true;
+                 "account", "account-public", "instrument", "instrument-admin", "websocket-admin" -> true;
             default -> false;
         };
     }
@@ -130,6 +135,13 @@ public final class LocalBusinessApi {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin identity is required");
             }
             Object result = switch (service.toLowerCase(java.util.Locale.ROOT)) {
+                case "websocket-admin" -> {
+                    if (!request.matches(HttpMethod.GET, WEBSOCKET_METRICS)) {
+                        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown websocket admin route");
+                    }
+                    yield websocket.metrics(request.header("X-Admin-User-Id", String.class, null, true),
+                            request.header("X-Admin-Username", String.class, null, false));
+                }
                 case "account", "account-public" -> account.invoke(request);
                 case "instrument", "instrument-admin" -> instrument.invoke(request);
                 default -> trading.invoke(request);

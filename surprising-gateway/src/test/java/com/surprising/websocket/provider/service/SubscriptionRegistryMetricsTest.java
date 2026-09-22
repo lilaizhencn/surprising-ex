@@ -12,17 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
-class AdminWebSocketMetricsControllerTest {
-
-    @Test
-    void metricsRequiresAdminHeader() {
-        AdminWebSocketMetricsController controller = new AdminWebSocketMetricsController(
-                new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties()));
-
-        assertThatThrownBy(() -> controller.metrics(null, null))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("admin identity header is required");
-    }
+class SubscriptionRegistryMetricsTest {
 
     @Test
     void metricsReturnsRegistrySnapshot() {
@@ -33,7 +23,7 @@ class AdminWebSocketMetricsControllerTest {
         registry.add(connection);
         registry.subscribe(connection, new SubscriptionTopic(WsChannel.POSITIONS, "BTC-USDT", null, 1001L));
 
-        var response = new AdminWebSocketMetricsController(registry).metrics("7", "admin");
+        var response = registry.metrics("7", "admin");
 
         assertThat(response.activeConnections()).isEqualTo(1);
         assertThat(response.authenticatedConnections()).isEqualTo(1);

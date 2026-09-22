@@ -13,13 +13,11 @@ import java.util.Map;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * 执行后台系统路由汇总和服务健康探测。
@@ -30,13 +28,16 @@ public class AdminSystemService {
     private final AuthService authService;
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
+    private final org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint;
 
     public AdminSystemService(AuthService authService,
                               GatewayProperties properties,
-                              RestTemplate restTemplate) {
+                              RestTemplate restTemplate,
+                              org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint) {
         this.authService = authService;
         this.properties = properties;
         this.restTemplate = restTemplate;
+        this.healthEndpoint = healthEndpoint;
     }
 
     public SystemRoutesResponse routes(String authorization) {
@@ -78,7 +79,8 @@ public class AdminSystemService {
         routes.forEach((service, route) -> responses.add(new RouteResponse(
                 routeType,
                 service,
-                route.getBaseUrl(),
+                com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)
+                        ? "local:" : route.getBaseUrl(),
                 route.getTargetPrefix(),
                 route.isPrivateRoute(),
                 route.hasBasicAuth())));
@@ -89,7 +91,8 @@ public class AdminSystemService {
                            String routeType,
                            String service,
                            BackendRoute route) {
-        String baseUrl = trimTrailingSlash(route.getBaseUrl());
+        String baseUrl = com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)
+                ? "local:" : trimTrailingSlash(route.getBaseUrl());
         String key = baseUrl + "|" + route.hasBasicAuth();
         targets.putIfAbsent(key, new HealthTarget(routeType, service, route, baseUrl));
     }
@@ -98,6 +101,12 @@ public class AdminSystemService {
         URI healthUri = URI.create(target.baseUrl() + "/actuator/health");
         Instant startedAt = Instant.now();
         try {
+            if ("local:".equals(target.baseUrl())) {
+                String status = healthEndpoint.health().getStatus().getCode();
+                return new SystemHealthItem(target.routeType(), target.service(), target.baseUrl(),
+                        healthUri.toString(), target.route().getTargetPrefix(), target.route().isPrivateRoute(),
+                        false, status, null, Duration.between(startedAt, Instant.now()).toMillis(), null, null);
+            }
             HttpHeaders headers = new HttpHeaders();
             if (target.route().hasBasicAuth()) {
                 headers.setBasicAuth(target.route().getBasicAuthUsername(), target.route().getBasicAuthPassword());

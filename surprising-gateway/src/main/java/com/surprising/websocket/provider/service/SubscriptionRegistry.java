@@ -292,4 +292,9 @@ public class SubscriptionRegistry {
 
     public record TimedPayload(Object payload, Instant eventTime) {
     }
+    public WebSocketAdminMetrics metrics(String adminUserId, String adminUsername) {
+        return new WebSocketAdminMetrics(java.time.Instant.now(), adminUserId, adminUsername,
+                activeConnectionCount(), authenticatedConnectionCount(), anonymousConnectionCount(),
+                totalSubscriptionCount(), uniqueTopicCount(), maxSubscriptionsPerSession(), channelMetrics());
+    }
 }

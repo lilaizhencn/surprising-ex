@@ -24,7 +24,7 @@ class AdminSystemServiceTest {
     void routesExposeAdminAndPublicRoutesWithoutSecrets() {
         GatewayProperties properties = properties();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, new RestTemplate());
+                adminAuthService(), properties, new RestTemplate(), mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class));
 
         var response = service.routes("Bearer admin");
 
@@ -39,7 +39,7 @@ class AdminSystemServiceTest {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, restTemplate);
+                adminAuthService(), properties, restTemplate, mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class));
 
         var response = service.health("Bearer admin", false);
 
@@ -50,6 +50,58 @@ class AdminSystemServiceTest {
         assertThat(restTemplate.url.toString()).isEqualTo("http://wallet:8002/actuator/health");
         assertThat(restTemplate.requestEntity.getHeaders().getFirst("Authorization"))
                 .isEqualTo("Basic YWRtaW46c2VjcmV0");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"UP", "DOWN", "OUT_OF_SERVICE", "UNKNOWN"})
+    void localRoutesShareActualApplicationHealthWithoutHttp(String status) {
+        var properties = new GatewayProperties();
+        properties.setAdminRoutes(Map.of(
+                "account", new GatewayProperties.BackendRoute("local:", "/api/v1/admin/accounts", true),
+                "websocket-admin", new GatewayProperties.BackendRoute("http://localhost:9094", "/api/v1/admin/websocket", true)));
+        properties.setRoutes(Map.of("instrument", new GatewayProperties.BackendRoute(
+                "http://old-instrument:9080", "/api/v1/instruments", false)));
+        var http = mock(RestTemplate.class);
+        var endpoint = mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class);
+        var health = mock(org.springframework.boot.health.actuate.endpoint.IndicatedHealthDescriptor.class);
+        when(health.getStatus()).thenReturn(new org.springframework.boot.health.contributor.Status(status));
+        when(endpoint.health()).thenReturn(health);
+        var service = new AdminSystemService(adminAuthService(), properties, http, endpoint);
+
+        var result = service.health("Bearer admin", true);
+
+        assertThat(result.count()).isEqualTo(1);
+        assertThat(result.services().getFirst().status()).isEqualTo(status);
+        assertThat(result.services().getFirst().healthUrl()).isEqualTo("local:/actuator/health");
+        assertThat(result.services().getFirst().httpStatus()).isNull();
+        assertThat(service.routes("Bearer admin").publicRoutes().getFirst().baseUrl()).isEqualTo("local:");
+        org.mockito.Mockito.verify(endpoint).health();
+        org.mockito.Mockito.verifyNoInteractions(http);
+    }
+
+    @Test
+    void localProbeUsesRealSpringHealthAggregation() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withConfiguration(org.springframework.boot.autoconfigure.AutoConfigurations.of(
+                        org.springframework.boot.health.autoconfigure.registry.HealthContributorRegistryAutoConfiguration.class,
+                        org.springframework.boot.health.autoconfigure.actuate.endpoint.HealthEndpointAutoConfiguration.class))
+                .withBean("testDependency", org.springframework.boot.health.contributor.HealthIndicator.class,
+                        () -> () -> org.springframework.boot.health.contributor.Health.down().build())
+                .withBean(AuthService.class, this::adminAuthService)
+                .withBean(RestTemplate.class, () -> mock(RestTemplate.class))
+                .withBean(GatewayProperties.class, () -> {
+                    var properties = new GatewayProperties();
+                    properties.setAdminRoutes(Map.of("account", new GatewayProperties.BackendRoute(
+                            "local:", "/api/v1/admin/accounts", true)));
+                    return properties;
+                })
+                .withUserConfiguration(AdminSystemService.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var result = context.getBean(AdminSystemService.class).health("Bearer admin", false);
+                    assertThat(result.down()).isEqualTo(1);
+                    org.mockito.Mockito.verifyNoInteractions(context.getBean(RestTemplate.class));
+                });
     }
 
     private GatewayProperties properties() {

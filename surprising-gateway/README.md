@@ -214,3 +214,13 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 构建包检查确认已删除类不再进入 JAR，必要的订单初始化和 Core 同步仍保留。
 未测完整外部数据库/Kafka/Core 重启链路，未重新压测；Core 主链路和快照算法未改。
 [逐类结果、命令和产物校验](../docs/validation/merged-config-cleanup-20260922.json)。测试进程已退出，本轮临时日志及已汇总报告已清理。
+
+### 合并后的本地调用边界（2026-09-22）
+
+公共请求统一从 `GatewayProxyController` / `BinanceApiController` 进入，完成鉴权后由本地路由绑定参数并调用 Service，不再调用其他 Controller。原订单、账户、合约等 Controller 的请求校验、业务编排和结果转换已迁到相应 `*RequestService`；重复的公共/管理 HTTP Controller 已删除。盘口、合约同步和 WebSocket 指标直接调用已有 Service/Registry；没有新增状态、接口或异步阶段。
+
+独立 maker 仍需要 HTTP 接入，故保留 `OrderInternalController`、`AccountInternalController`、`MarketDataInternalController`，原始地址仅允许携带业务内部凭证的进程访问。账户内部入口还服务跨产品线资金操作，已去掉不再使用的管理端别名。`InstrumentInternalController` 等原有内部查询/划转接口继续保留。管理 WebSocket 指标仅从 gateway 管理路由进入，原始 `/api/v1/admin/websocket/metrics` HTTP 映射已删除。
+
+合并业务和 `websocket-admin` 默认路由均为 `local:`。`AdminSystemService` 将同 JVM 路由聚合为一次本地 `HealthEndpoint` 检查，返回实际健康状态，本地结果 `httpStatus` 为 null；远程服务仍通过 HTTP 探测。跨产品线现货资金接入必须显式配置远端地址。
+
+测试以删除前的 81 个 API 路径作为本地分派契约基线，并检查 maker 的三个 Feign 契约均仍有内部 HTTP 映射。本轮不改变 Core 协议、事件可靠投递、产品线隔离或资金结算规则。
