@@ -16,19 +16,19 @@ import org.springframework.core.io.ClassPathResource;
 class GatewayProductRoutesConfigurationTest {
 
     @Test
-    void applicationYmlProvidesProductRoutesForTradingServices() throws IOException {
+    void applicationYmlSeparatesLocalDomainsFromExternalProductRoutes() throws IOException {
         GatewayProperties properties = bindApplicationProperties(Map.of());
 
-        assertProductRouteMatrix(properties.getRoutes().get("trading"));
-        assertProductRouteMatrix(properties.getRoutes().get("trading-leverage"));
+        assertLocalRoute(properties.getRoutes().get("trading"));
+        assertLocalRoute(properties.getRoutes().get("trading-leverage"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-market"));
-        assertProductRouteMatrix(properties.getRoutes().get("trading-trigger"));
+        assertLocalRoute(properties.getRoutes().get("trading-trigger"));
         assertProductRouteMatrix(properties.getRoutes().get("account"));
         assertProductRouteMatrix(properties.getRoutes().get("risk"));
         assertProductRouteMatrix(properties.getRoutes().get("price-mark"));
         assertProductRouteMatrix(properties.getRoutes().get("candlestick"));
-        assertProductRouteMatrix(properties.getAdminRoutes().get("trading-fees"));
-        assertProductRouteMatrix(properties.getAdminRoutes().get("account"));
+        assertLocalRoute(properties.getAdminRoutes().get("trading-fees"));
+        assertLocalRoute(properties.getAdminRoutes().get("account"));
         assertProductRouteMatrix(properties.getAdminRoutes().get("market-maker"));
 
         assertThat(properties.getRoutes().get("price-mark").getBaseUrl())
@@ -38,27 +38,27 @@ class GatewayProductRoutesConfigurationTest {
 
         GatewayProperties.BackendRoute trading = properties.getRoutes().get("trading");
         GatewayProperties.BackendRoute optionRoute = trading.resolve(ProductLine.OPTION);
-        assertThat(optionRoute.getBaseUrl()).isEqualTo("http://localhost:9084");
+        assertThat(optionRoute.getBaseUrl()).isEqualTo("local:");
         assertThat(optionRoute.getTargetPrefix()).isEqualTo("/api/v1/trading/orders");
         GatewayProperties.BackendRoute leverage = properties.getRoutes().get("trading-leverage");
         assertThat(leverage.getTargetPrefix()).isEqualTo("/api/v1/trading/leverage");
     }
 
     @Test
-    void productRouteBaseUrlCanBeOverriddenByEnvironment() throws IOException {
+    void onlyCrossProductAccountTransferTargetsUseRemoteOverrides() throws IOException {
         GatewayProperties properties = bindApplicationProperties(Map.of(
                 "GATEWAY_ROUTE_TRADING_OPTION_BASE_URL", "http://order-option:9284",
                 "GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL", "http://account-linear-delivery:9286"));
 
         GatewayProperties.BackendRoute optionTrading = properties.getRoutes().get("trading")
                 .resolve(ProductLine.OPTION);
-        assertThat(optionTrading.getBaseUrl()).isEqualTo("http://order-option:9284");
+        assertThat(optionTrading.getBaseUrl()).isEqualTo("local:");
         assertThat(optionTrading.getTargetPrefix()).isEqualTo("/api/v1/trading/orders");
 
-        GatewayProperties.BackendRoute deliveryAccount = properties.getAdminRoutes().get("account")
+        GatewayProperties.BackendRoute deliveryAccount = properties.getRoutes().get("account")
                 .resolve(ProductLine.LINEAR_DELIVERY);
         assertThat(deliveryAccount.getBaseUrl()).isEqualTo("http://account-linear-delivery:9286");
-        assertThat(deliveryAccount.getTargetPrefix()).isEqualTo("/api/v1/admin/accounts");
+        assertThat(deliveryAccount.getTargetPrefix()).isEqualTo("/api/v1/accounts");
     }
 
     @Test
@@ -90,6 +90,11 @@ class GatewayProductRoutesConfigurationTest {
         return Binder.get(environment)
                 .bind("surprising.gateway", Bindable.of(GatewayProperties.class))
                 .orElseThrow(() -> new IllegalStateException("surprising.gateway properties not bound"));
+    }
+
+    private static void assertLocalRoute(GatewayProperties.BackendRoute route) {
+        assertThat(route.getBaseUrl()).isEqualTo("local:");
+        assertThat(route.getProductRoutes()).isEmpty();
     }
 
     private static void assertProductRouteMatrix(GatewayProperties.BackendRoute route) {

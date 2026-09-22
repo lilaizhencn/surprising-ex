@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
         name = "surprising-account-provider",
         contextId = "accountAdminRpcApi",
         path = AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH,
-        url = "${surprising.clients.account.base-url:http://localhost:9086}")
+        url = "${surprising.clients.account.base-url:http://localhost:9094}")
 public interface AccountAdminRpcApi {
 
     @PostMapping("/balance-adjustments")

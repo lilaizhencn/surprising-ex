@@ -1,12 +1,14 @@
 # surprising-account
 
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+
 
 Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础余额、产品账户、余额流水、成交幂等处理、现货资产结算、永续/交割/期权持仓更新、成交后订单保证金到持仓保证金的迁移、期权买卖双方权利金、maker/taker 手续费结算、资金费结算、强平成交后的强平费收取和保险基金入账，以及带不可变结算价的交割结算和欧式现金行权。
 
 ## 模块
 
 - `surprising-account-api`：账户/持仓 RPC 合约和 DTO。
-- `surprising-account-provider`：账户 HTTP/Kafka 入口、Aeron Core 命令/查询网关，以及成交侧结算编排；不直接持有或更新实时余额。
+- `surprising-gateway` 中的 账户业务包：账户 HTTP/Kafka 入口、Aeron Core 命令/查询网关，以及成交侧结算编排；不直接持有或更新实时余额。
 
 ## 资金权威边界
 
@@ -264,7 +266,8 @@ brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 # Topic 初始化命令待验证脚本重新整理后补回
-mvn -pl :surprising-account-provider -am spring-boot:run
+mvn -pl surprising-gateway -am package -DskipTests
+java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 ```
 
 端口：
@@ -296,5 +299,5 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 ## 验证
 
 ```bash
-mvn -pl :surprising-account-provider -am test
+mvn -pl surprising-gateway -am test
 ```

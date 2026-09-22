@@ -1,5 +1,11 @@
 # surprising-gateway
 
+本模块现为统一业务应用：身份在 `com.surprising.gateway.provider`，订单在
+`com.surprising.trading`，账户在 `com.surprising.account.provider`，合约在
+`com.surprising.instrument.provider`。四者共享一个启动入口、HTTP 端口及数据源；
+Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，再调用本地业务入口。
+详见 [合并及部署说明](../docs/business-application-merge.md)。
+
 
 面向前端和 BFF 的无状态 REST API 网关。
 
@@ -148,7 +154,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       trading-trigger:
-        base-url: http://surprising-trading-provider:9084
+        base-url: "local:"
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```

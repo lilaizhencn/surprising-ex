@@ -1,12 +1,14 @@
 # surprising-trading
 
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-trading-provider` 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。行情查询投影已迁入 `surprising-market-data-provider`。
+
+Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-gateway` 中的 订单业务包 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。行情查询投影已迁入 `surprising-market-data-provider`。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
-- `surprising-trading-provider`：统一订单和止盈止损条件单入口 provider。
+- `surprising-gateway` 中的 订单业务包：统一订单和止盈止损条件单入口 provider。
 - `surprising-market-data-provider`（位于 `surprising-market-data`）：Aeron Core 行情与公共成交的可重建查询投影。
 
 ## long 定点数模型
@@ -71,7 +73,7 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 ```text
 client / internal gateway
   -> POST /api/v1/trading/orders
-  -> surprising-trading-provider
+  -> surprising-gateway / com.surprising.trading
   -> Aeron Product Core
   -> Runtime 原子裁决订单、预占、成交、手续费和持仓
   -> exchange-core 唯一订单簿
@@ -85,7 +87,7 @@ client / internal gateway
 ```text
 client / internal gateway
   -> POST /api/v1/trading/trigger-orders
-  -> surprising-trading-provider
+  -> surprising-gateway / com.surprising.trading
   -> Aeron Core CoreTriggerOrderState
   -> Core 接收 APPLY_MARK_PRICE 并按增量索引触发
   -> Core 原子创建 reduce-only 子订单并撮合
@@ -103,7 +105,7 @@ client / internal gateway
 默认值是 `CROSS`。`ISOLATED` 已经进入订单入口、撮合事件、账户保证金、持仓、风控快照、资金费和强平链路。
 全仓亏损、手续费和资金费可以使用全仓可用余额以及全仓持仓保证金兜底；逐仓只消耗同一 `userId + symbol + asset + marginMode`
 下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。用户手动追加/减少逐仓保证金由
-`surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。同一用户同一 symbol
+`surprising-gateway` 中的 账户业务包 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。同一用户同一 symbol
 要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；这项状态检查和裁决统一在 Aeron Core 的单写者状态机内完成。
 
 持仓模式按用户维度配置，默认是 `ONE_WAY`。用户只能在无非零持仓、无活动挂单、无待触发条件单、无未结算撮合/账户状态时通过
@@ -255,13 +257,13 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
-- `surprising-trading-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command 元数据。
+- `surprising-gateway` 中的 订单业务包 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command 元数据。
 - Core command、领域事件和私有 WebSocket 事件沿用同一个 traceId，查询不参与在线裁决。
 - 生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
 
 ## 保证金冻结
 
-普通开仓/挂单由 `surprising-trading-provider` 完成 API 形状、数量和 instrument version 校验，只把精简下单意图提交给 Aeron Core：
+普通开仓/挂单由 `surprising-gateway` 中的 订单业务包 完成 API 形状、数量和 instrument version 校验，只把精简下单意图提交给 Aeron Core：
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - Core 从 Runtime Instrument、mark、leverage、position、active-order、open-interest 和 fee policy 计算保护价、预占价格、结算资产、保证金及手续费上界；所有整数运算溢出都会拒绝。
@@ -527,23 +529,23 @@ brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 # Topic 初始化命令待验证脚本重新整理后补回
-mvn -pl :surprising-instrument-provider -am spring-boot:run
-mvn -pl :surprising-trading-provider -am spring-boot:run
+mvn -pl surprising-gateway -am package -DskipTests
+java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-market-data-provider -am spring-boot:run
 ```
 
 端口：
 
-- `9084`：trading provider，普通订单和止盈止损条件单统一入口。
+- `9094`：统一业务应用；用户订单经 `/api/v1/gateway/trading` 进入。
 - `9081`：统一 Market Data Provider，提供撮合行情投影和 K 线查询。
 
 ## 生产注意事项
 
-- `surprising-trading-provider` 单独部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态，不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
+- 订单业务包与身份、账户、合约同进程部署。Aeron Core 独立；业务应用的 PostgreSQL、价格 Kafka 和查询投影依赖保留，数据库不作为 Core 资金状态回退。
 - `surprising-market-data-provider` 独立于 trading provider，但只维护可重建的行情、成交和 K 线查询投影，不持有可执行订单簿。
-- Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
-  父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 25 可用的 2026.x BOM；service Maven `validate`
+- Aeron Core 使用 HotSpot JDK 27 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
+  父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 27 可用的 2026.x BOM；service Maven `validate`
   同时验证 whole dependency JAR 与内嵌 provenance。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
@@ -563,7 +565,7 @@ mvn -pl :surprising-market-data-provider -am spring-boot:run
 ## 验证
 
 ```bash
-mvn -pl :surprising-trading-provider -am test
+mvn -pl surprising-gateway -am test
 mvn -pl :surprising-market-data-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```

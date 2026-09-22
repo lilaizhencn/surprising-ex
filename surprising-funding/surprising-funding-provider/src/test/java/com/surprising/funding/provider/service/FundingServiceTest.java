@@ -64,7 +64,7 @@ class FundingServiceTest {
         when(fixture.settlementRepository.reserveCore(due))
                 .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), 7));
         when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(
                                 fundingTime.toEpochMilli(), true, 0, 0))));
 
@@ -89,11 +89,11 @@ class FundingServiceTest {
         when(fixture.settlementRepository.reserveCore(due))
                 .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
         when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(
                                 settlementId, false, 42, 0))));
         when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1,
                                 CoreFundingProgressCodec.encode(new CoreFundingProgressView(
                                         settlementId, true, 0, 3))));
 
@@ -118,7 +118,7 @@ class FundingServiceTest {
         when(fixture.settlementRepository.reserveCore(due))
                 .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
         when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
-                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(settlementId, false, 0, 0))));
         when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
                 .thenReturn(progress(settlementId, 10), progress(settlementId, 20), progress(settlementId, 30));
@@ -185,7 +185,7 @@ class FundingServiceTest {
     }
 
     private static CoreResponse maintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance gate) {
-        return new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+        return new CoreResponse(ResponseStatus.OK, 0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                 new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(gate,List.of(),false)));
     }
 
@@ -194,7 +194,7 @@ class FundingServiceTest {
     }
 
     private static CoreResponse progress(long settlementId, long cursor) {
-        return new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+        return new CoreResponse(ResponseStatus.APPLIED, 1,
                 CoreFundingProgressCodec.encode(new CoreFundingProgressView(settlementId, false, cursor, 1)));
     }
 

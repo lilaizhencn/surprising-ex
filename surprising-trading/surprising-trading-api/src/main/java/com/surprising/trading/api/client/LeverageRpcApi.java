@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
         name = "surprising-trading-provider",
         contextId = "leverageRpcApi",
         path = TradingApiPaths.LEVERAGE_BASE_PATH,
-        url = "${surprising.clients.trading.base-url:http://localhost:9084}")
+        url = "${surprising.clients.trading.base-url:http://localhost:9094}")
 public interface LeverageRpcApi {
 
     @PostMapping("/settings")

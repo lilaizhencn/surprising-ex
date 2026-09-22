@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
         name = "surprising-instrument-provider",
         contextId = "instrumentRpcApi",
         path = InstrumentApiPaths.INTERNAL_BASE_PATH,
-        url = "${surprising.clients.instrument.base-url:http://localhost:9080}")
+        url = "${surprising.clients.instrument.base-url:http://localhost:9094}")
 public interface InstrumentRpcApi {
 
     default InstrumentResponse latest(String symbol) {

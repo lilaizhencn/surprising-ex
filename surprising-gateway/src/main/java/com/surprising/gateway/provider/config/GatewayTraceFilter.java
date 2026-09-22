@@ -25,7 +25,12 @@ public class GatewayTraceFilter extends OncePerRequestFilter {
         String traceId = normalizeOrCreate(request.getHeader(TRACE_ID_HEADER));
         request.setAttribute(TRACE_ID_ATTRIBUTE, traceId);
         response.setHeader(TRACE_ID_HEADER, traceId);
-        filterChain.doFilter(request, response);
+        com.surprising.trading.api.TraceContext.set(traceId);
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            com.surprising.trading.api.TraceContext.clear();
+        }
     }
 
     private String normalizeOrCreate(String traceId) {

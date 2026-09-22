@@ -827,7 +827,7 @@ class MarketMakerServiceTest {
         private OrderCommandReceipt terminal(OrderCommandResult result) {
             UUID commandId = UUID.nameUUIDFromBytes(("fake:" + result).getBytes(StandardCharsets.UTF_8));
             OrderCommandReceipt receipt = new OrderCommandReceipt(commandId, "TERMINAL", "NONE", "completed",
-                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, result, null);
+                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), result, null);
             if (!jsonRoundTripReceipts) {
                 return receipt;
             }

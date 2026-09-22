@@ -2,6 +2,8 @@ server:
   port: 9094
 
 spring:
+  config:
+    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml
   application:
     name: surprising-gateway
   servlet:
@@ -16,8 +18,8 @@ spring:
   task:
     scheduling:
       pool:
-        size: 4
-      thread-name-prefix: gateway-scheduler-
+        size: 12
+      thread-name-prefix: business-scheduler-
       shutdown:
         await-termination: true
         await-termination-period: 10s
@@ -26,16 +28,25 @@ spring:
     username: surprising
     password: surprising
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
+      maximum-pool-size: ${BUSINESS_DB_MAX_POOL_SIZE:30}
+      minimum-idle: ${BUSINESS_DB_MIN_IDLE:4}
       connection-timeout: 3000
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,markPriceReadiness
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
 
 surprising:
+  business:
+    internal-token: ${BUSINESS_INTERNAL_TOKEN:}
   gateway:
     withdrawal:
       single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
@@ -44,7 +55,7 @@ surprising:
       valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
       failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
     product-transfer:
-      enabled: ${GATEWAY_PRODUCT_TRANSFER_ENABLED:true}
+      enabled: ${GATEWAY_PRODUCT_TRANSFER_ENABLED:false}
       verification-threshold-usdt: ${GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT:10000}
       reconciliation-delay: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_DELAY:5s}
       reconciliation-batch-size: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_BATCH_SIZE:100}
@@ -54,7 +65,7 @@ surprising:
       api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY:}
       api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET:}
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET:}
-      spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL:http://localhost:9086}
+      spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL:}
       spot-account-internal-secret: ${GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET:}
       asset-scales-json: ${GATEWAY_CUSTODY_WALLET_ASSET_SCALES:{}}
       withdrawal-address-ids-json: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS:{}}
@@ -103,22 +114,9 @@ surprising:
       read-timeout: 30s
     routes:
       instrument:
-        base-url: http://localhost:9080
+        base-url: "local:"
         target-prefix: /api/v1/instruments
         private-route: false
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_OPTION_BASE_URL:}
       candlestick:
         base-url: http://localhost:9081
         target-prefix: /api/v1/candlestick
@@ -175,39 +173,13 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_PRICE_MARK_OPTION_BASE_URL:}
       trading:
-        base-url: http://localhost:9084
+        base-url: "local:"
         target-prefix: /api/v1/trading/orders
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-leverage:
-        base-url: http://localhost:9084
+        base-url: "local:"
         target-prefix: /api/v1/trading/leverage
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_SPOT_BASE_URL:http://localhost:9084}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_LINEAR_PERPETUAL_BASE_URL:http://localhost:9084}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_INVERSE_PERPETUAL_BASE_URL:http://localhost:9084}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_LINEAR_DELIVERY_BASE_URL:http://localhost:9084}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_INVERSE_DELIVERY_BASE_URL:http://localhost:9084}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_OPTION_BASE_URL:http://localhost:9084}
       trading-market:
         base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
@@ -226,26 +198,10 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
+        base-url: "local:"
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_OPTION_BASE_URL:}
       account:
-        base-url: http://localhost:9086
-        target-prefix: /api/v1/accounts
-        private-route: true
         product-routes:
           SPOT:
             base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
@@ -259,6 +215,9 @@ surprising:
             base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
           OPTION:
             base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
+        base-url: "local:"
+        target-prefix: /api/v1/accounts
+        private-route: true
       risk:
         base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/risk
@@ -384,26 +343,13 @@ surprising:
         private-route: true
     admin-routes:
       instrument:
-        base-url: http://localhost:9080
+        base-url: "local:"
         target-prefix: /api/v1/instruments
         private-route: true
       instrument-admin:
-        base-url: http://localhost:9080
+        base-url: "local:"
         target-prefix: /api/v1/instruments/admin
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_INSTRUMENT_OPTION_BASE_URL:}
       candlestick:
         base-url: http://localhost:9081
         target-prefix: /api/v1/candlestick
@@ -460,56 +406,17 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_PRICE_MARK_OPTION_BASE_URL:}
       trading:
-        base-url: http://localhost:9084
+        base-url: "local:"
         target-prefix: /api/v1/admin/trading/orders
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-orders:
-        base-url: http://localhost:9084
+        base-url: "local:"
         target-prefix: /api/v1/admin/trading/orders
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-fees:
-        base-url: http://localhost:9084
+        base-url: "local:"
         target-prefix: /api/v1/admin/trading/fees
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-market:
         base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
@@ -528,56 +435,17 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
+        base-url: "local:"
         target-prefix: /api/v1/admin/trading/trigger-orders
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_OPTION_BASE_URL:}
       account:
-        base-url: http://localhost:9086
+        base-url: "local:"
         target-prefix: /api/v1/admin/accounts
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       account-public:
-        base-url: http://localhost:9086
+        base-url: "local:"
         target-prefix: /api/v1/accounts
         private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       risk:
         base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/risk
@@ -731,7 +599,7 @@ surprising:
   websocket:
     kafka:
       bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-      product-line: ${PRODUCT_LINE}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
       group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
       concurrency: 2

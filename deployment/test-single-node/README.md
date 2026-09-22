@@ -28,10 +28,7 @@ mvn -version
 mvn -pl \
   surprising-aeron-core/surprising-aeron-service,\
   surprising-aeron-core/surprising-aeron-tools,\
-  surprising-instrument/surprising-instrument-provider,\
   surprising-price/surprising-price-provider,\
-  surprising-account/surprising-account-provider,\
-  surprising-trading/surprising-trading-provider,\
   surprising-market-data/surprising-market-data-provider,\
   surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,\
   surprising-funding/surprising-funding-provider,\
@@ -40,6 +37,10 @@ mvn -pl \
   surprising-maker \
   -am package -DskipTests
 ```
+
+`gateway` 现在包含身份、订单、账户、合约四个业务包，不再部署三个 provider 进程。
+所有业务和后台实例的环境文件需配置相同的 `BUSINESS_INTERNAL_TOKEN`；不要将该凭证发送给客户端。
+Core 先启动，随后业务应用完成 liveness，再启动价格和其他后台服务。
 
 将同一 Git 提交的代码和 `target` 产物放到服务器 `/opt/surprising-ex`，并创建：
 

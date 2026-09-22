@@ -36,7 +36,7 @@ class GatewayProxyServiceTest {
     @Test
     void targetUriUsesAllowlistedBackendAndPreservesQueryString() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
         request.setQueryString("limit=100");
@@ -50,7 +50,7 @@ class GatewayProxyServiceTest {
     @Test
     void publicTradingMarketRouteProxiesOrderBookSnapshotToMatchingProvider() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-market/orderbook");
         request.setQueryString("symbol=BTC-USDT&depth=50");
@@ -70,7 +70,7 @@ class GatewayProxyServiceTest {
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         restTemplate.responseBody = "{\"version\":7,\"instrumentChangeId\":7,\"nested\":[{\"instrumentChangeId\":8}]}"
                 .getBytes(StandardCharsets.UTF_8);
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/instrument");
 
@@ -84,7 +84,7 @@ class GatewayProxyServiceTest {
     @Test
     void privateTradingTriggerRouteProxiesToTriggerProvider() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-trigger/open");
         request.setQueryString("userId=42&symbol=BTC-USDT");
@@ -100,7 +100,7 @@ class GatewayProxyServiceTest {
     @Test
     void privateMarketMakerRouteProxiesToInternalProvider() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/market-maker/strategies");
 
@@ -115,7 +115,7 @@ class GatewayProxyServiceTest {
     @Test
     void adminGatewayUsesSeparateAdminRoutesAndPrefix() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/admin/gateway/account/ledger");
         request.setQueryString("userId=42&asset=USDT");
@@ -129,7 +129,7 @@ class GatewayProxyServiceTest {
     @Test
     void adminTradingTriggerRouteUsesAdminTriggerOrderPrefix() {
         GatewayProperties properties = properties();
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate());
+        GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/admin/gateway/trading-trigger");
         request.setQueryString("userId=42&symbol=BTC-USDT");
@@ -143,7 +143,7 @@ class GatewayProxyServiceTest {
 
     @Test
     void adminGatewayNeverFallsBackToUserIdHeader() {
-        GatewayProxyService controller = new GatewayProxyService(properties(), new RestTemplate());
+        GatewayProxyService controller = gateway(properties(), new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/admin/gateway/account/ledger");
         request.addHeader("X-User-Id", "42");
@@ -157,7 +157,7 @@ class GatewayProxyServiceTest {
     @Test
     void highRiskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();
-        GatewayProxyService controller = new GatewayProxyService(
+        GatewayProxyService controller = gateway(
                 properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/account/balance-adjustments");
@@ -176,7 +176,7 @@ class GatewayProxyServiceTest {
             properties.getAdminRoutes().put("trading-orders",new GatewayProperties.BackendRoute(
                     "http://trading-provider:9084","/api/v1/admin/trading/orders",true));
             AuthService auth=adminAuthService();
-            var proxy=new GatewayProxyService(properties,new RestTemplate(),auth,null,new FakeApprovalRepository());
+            var proxy=gateway(properties,new RestTemplate(),auth,null,new FakeApprovalRepository());
             var request=new MockHttpServletRequest("POST","/api/v1/admin/gateway/trading-orders"+suffix);
             request.addHeader("Authorization","Bearer admin");
             request.addHeader("X-Product-Line","LINEAR_PERPETUAL");
@@ -190,7 +190,7 @@ class GatewayProxyServiceTest {
     @Test
     void riskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();
-        GatewayProxyService controller = new GatewayProxyService(
+        GatewayProxyService controller = gateway(
                 properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/risk-admin/rules/GLOBAL_MARGIN_POLICY");
@@ -207,7 +207,7 @@ class GatewayProxyServiceTest {
         AuthService authService = adminAuthService();
         doThrow(new IllegalStateException("admin permission required: admin.gateway.account.write"))
                 .when(authService).requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway.account.write");
-        GatewayProxyService controller = new GatewayProxyService(
+        GatewayProxyService controller = gateway(
                 properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/account/balance-adjustments");
@@ -226,7 +226,7 @@ class GatewayProxyServiceTest {
         AuthService authService = adminAuthService();
         FakeApprovalRepository approvalRepository = new FakeApprovalRepository();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(
+        GatewayProxyService controller = gateway(
                 properties, restTemplate, authService, null, approvalRepository);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/account/balance-adjustments");
@@ -246,7 +246,7 @@ class GatewayProxyServiceTest {
 
     @Test
     void privateRouteRequiresIdentityBeforeProxying() {
-        GatewayProxyService controller = new GatewayProxyService(properties(), new RestTemplate());
+        GatewayProxyService controller = gateway(properties(), new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/account/42/positions");
 
@@ -259,7 +259,7 @@ class GatewayProxyServiceTest {
     @Test
     void tradeDisabledUserCannotPlaceOrders() {
         AuthService authService = userAuthService("TRADE_DISABLED");
-        GatewayProxyService controller = new GatewayProxyService(properties(), new RestTemplate(), authService);
+        GatewayProxyService controller = gateway(properties(), new RestTemplate(), authService);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/trading");
         request.addHeader("Authorization", "Bearer user");
@@ -275,7 +275,7 @@ class GatewayProxyServiceTest {
     void tradeDisabledUserCanStillCancelOrders() {
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         AuthService authService = userAuthService("TRADE_DISABLED");
-        GatewayProxyService controller = new GatewayProxyService(properties(), restTemplate, authService);
+        GatewayProxyService controller = gateway(properties(), restTemplate, authService);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/trading/cancel");
         request.addHeader("Authorization", "Bearer user");
@@ -289,19 +289,19 @@ class GatewayProxyServiceTest {
     @Test
     void productLineQueryRoutesTradingRequestToProductBackend() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
                 new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+        GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading");
+                "POST", "/api/v1/gateway/trading-market");
         request.setQueryString("productLine=LINEAR_DELIVERY");
         request.addParameter("productLine", "LINEAR_DELIVERY");
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-linear-delivery:9184/api/v1/trading/orders?productLine=LINEAR_DELIVERY");
@@ -317,17 +317,17 @@ class GatewayProxyServiceTest {
                                                 String productLineName,
                                                 String backendUrl) {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.valueOf(productLineName),
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.valueOf(productLineName),
                 new GatewayProperties.ProductRoute(backendUrl,
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+        GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", requestPath);
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo(backendUrl + "/api/v1/trading/orders");
@@ -336,14 +336,14 @@ class GatewayProxyServiceTest {
     @Test
     void explicitProductLineOverridesBinancePathDefault() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
                 new GatewayProperties.ProductRoute("http://order-linear-perpetual:9084",
                         "/api/v1/trading/orders"));
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.OPTION,
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.OPTION,
                 new GatewayProperties.ProductRoute("http://order-option:9284",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+        GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/fapi/v1/order");
@@ -351,7 +351,7 @@ class GatewayProxyServiceTest {
         request.addParameter("productLine", "OPTION");
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+        controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes());
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-option:9284/api/v1/trading/orders?productLine=OPTION");
@@ -360,18 +360,18 @@ class GatewayProxyServiceTest {
     @Test
     void productLineBodyRoutesTradingRequestToProductBackend() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.OPTION,
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.OPTION,
                 new GatewayProperties.ProductRoute("http://order-option:9284",
                         "/api/v1/trading/orders"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+        GatewayProxyService controller = gateway(properties, restTemplate,
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading");
+                "POST", "/api/v1/gateway/trading-market");
         request.addHeader("Authorization", "Bearer user");
         byte[] body = "{\"productLine\":\"option\",\"symbol\":\"BTC-USDT-260925-70000-C\"}".getBytes();
 
-        controller.proxy("trading", HttpMethod.POST, request, body);
+        controller.proxy("trading-market", HttpMethod.POST, request, body);
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-option:9284/api/v1/trading/orders");
@@ -385,7 +385,7 @@ class GatewayProxyServiceTest {
                 new GatewayProperties.ProductRoute("http://matching-inverse-delivery:9185",
                         "/api/v1/trading/market"));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-market/orderbook");
         request.addHeader("X-Account-Type", "COIN_DELIVERY");
@@ -400,18 +400,18 @@ class GatewayProxyServiceTest {
     @Test
     void configuredProductRouteMissingForRequestedLineFailsClosed() {
         GatewayProperties properties = properties();
-        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
                 new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
                         "/api/v1/trading/orders"));
-        GatewayProxyService controller = new GatewayProxyService(properties, new RestTemplate(),
+        GatewayProxyService controller = gateway(properties, new RestTemplate(),
                 userAuthService("NORMAL"));
         MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/v1/gateway/trading");
+                "POST", "/api/v1/gateway/trading-market");
         request.setQueryString("productLine=OPTION");
         request.addParameter("productLine", "OPTION");
         request.addHeader("Authorization", "Bearer user");
 
-        assertThatThrownBy(() -> controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes()))
+        assertThatThrownBy(() -> controller.proxy("trading-market", HttpMethod.POST, request, "{}".getBytes()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.NOT_FOUND))
@@ -421,7 +421,7 @@ class GatewayProxyServiceTest {
     @Test
     void withdrawDisabledUserCannotCallWalletWithdraw() {
         AuthService authService = userAuthService("WITHDRAW_DISABLED");
-        GatewayProxyService controller = new GatewayProxyService(properties(), new RestTemplate(), authService);
+        GatewayProxyService controller = gateway(properties(), new RestTemplate(), authService);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/wallet/app/withdraw");
         request.addHeader("Authorization", "Bearer user");
@@ -437,7 +437,7 @@ class GatewayProxyServiceTest {
     void forwardsTraceIdFromGatewayFilterAttribute() {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
         request.setAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE, "trace-gateway-1");
@@ -452,7 +452,7 @@ class GatewayProxyServiceTest {
     void forwardsProductLineHeadersToTheSelectedBackend() {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-market/orderbook");
         request.addHeader("X-Product-Line", "SPOT");
@@ -470,7 +470,7 @@ class GatewayProxyServiceTest {
         route.setBasicAuthUsername("wallet");
         route.setBasicAuthPassword("secret");
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        GatewayProxyService controller = gateway(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
         request.addHeader("Authorization", "Bearer browser-token");
@@ -483,7 +483,7 @@ class GatewayProxyServiceTest {
 
     @Test
     void mapsBackendReadTimeoutToGatewayTimeout() {
-        GatewayProxyService controller = new GatewayProxyService(properties(), new TimeoutRestTemplate());
+        GatewayProxyService controller = gateway(properties(), new TimeoutRestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
 
@@ -491,6 +491,33 @@ class GatewayProxyServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.GATEWAY_TIMEOUT));
+    }
+
+    private GatewayProxyService gateway(GatewayProperties properties, RestTemplate rest, Object... dependencies) {
+        AuthService auth = dependencies.length > 0 ? (AuthService) dependencies[0] : null;
+        var audit = dependencies.length > 1
+                ? (com.surprising.gateway.provider.auth.AdminAuditRepository) dependencies[1] : null;
+        var approval = dependencies.length > 2 ? (AdminApprovalRepository) dependencies[2] : null;
+        var mapper = dependencies.length > 3 ? (tools.jackson.databind.ObjectMapper) dependencies[3]
+                : new tools.jackson.databind.ObjectMapper();
+        var transfers = dependencies.length > 4 ? (ProductTransferCoordinator) dependencies[4] : null;
+        var security = dependencies.length > 5 ? (ProductTransferSecurityService) dependencies[5] : null;
+        var gateway = new GatewayProxyService(properties, rest, auth, audit, approval, mapper, transfers, security);
+        var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        when(local.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (!(rest instanceof CapturingRestTemplate captured)) {
+                throw new AssertionError("local invocation must have an explicit test response");
+            }
+            captured.url = invocation.getArgument(1);
+            captured.requestEntity = new HttpEntity<>(invocation.getArgument(4),
+                    (org.springframework.http.HttpHeaders) invocation.getArgument(3));
+            return ResponseEntity.ok(captured.responseBody);
+        }).when(local).invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "localBusinessApi", local);
+        return gateway;
     }
 
     private GatewayProperties properties() {

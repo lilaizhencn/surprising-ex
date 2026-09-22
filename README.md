@@ -32,6 +32,12 @@ Surprising 是一个正在开发和验证中的多产品线交易系统。本仓
 
 ## 总体架构
 
+身份、订单、账户、合约已合并为 `surprising-gateway` 一个业务应用，默认产品线为
+`LINEAR_PERPETUAL`。三套 provider 的业务源码及测试迁入该模块，独立启动入口已删除；
+`surprising-trading-api`、`surprising-account-api`、`surprising-instrument-api` 保留为共享契约。
+四个业务包通过本地方法调用协作，Aeron Core 继续使用独立 JVM 和集群日志。
+启动、鉴权边界及验证记录见 [业务应用合并说明](docs/business-application-merge.md)。
+
 交易核心的 Owner 流水线位于 `surprising-aeron-core/surprising-aeron-service`：
 `TradingCoreOwner` 每轮按需收集 Matcher/Lane 完成结果，再按 FIFO 连续退休 ready 命令，
 不等待凑批；新准入或未 ready 的队首会重新推进异步工作。每条命令独立保留日志时间、位置、
@@ -126,15 +132,15 @@ flowchart TB
 | [surprising-parent](surprising-parent/) | 构建、依赖与公共插件配置 |
 | [surprising-product-api](surprising-product-api/) | 产品线定义与共享产品契约 |
 | [surprising-aeron-core](surprising-aeron-core/) | 核心协议、集群服务、客户端、运维工具及独立测试压测模块 |
-| [surprising-instrument](surprising-instrument/) | 币对与合约配置、交易状态管理 |
-| [surprising-trading](surprising-trading/) | 订单、触发单与交易业务接入 |
-| [surprising-account](surprising-account/) | 账户接口、资产与持仓查询及相关事件处理 |
+| [surprising-instrument](surprising-instrument/) | 合约共享 API；业务实现位于 gateway 的 instrument 包 |
+| [surprising-trading](surprising-trading/) | 订单和触发单共享 API；业务实现位于 gateway 的 trading 包 |
+| [surprising-account](surprising-account/) | 账户共享 API；业务实现位于 gateway 的 account 包 |
 | [surprising-market-data](surprising-market-data/) | 盘口、成交行情与市场数据服务 |
 | [surprising-price](surprising-price/) | 指数价格、标记价格及价格分发 |
 | [surprising-funding](surprising-funding/) | 永续资金费业务 |
 | [surprising-derivatives-lifecycle](surprising-derivatives-lifecycle/) | 衍生品风险、强平、保险及交割行权相关业务 |
 | [surprising-realtime](surprising-realtime/) | 实时路由、订阅目录、状态快照与 Valkey 查询视图 |
-| [surprising-gateway](surprising-gateway/) | 接入、认证、管理接口与 WebSocket 连接 |
+| [surprising-gateway](surprising-gateway/) | 统一身份、订单、账户、合约业务应用，以及 HTTP / WebSocket 接入 |
 | [surprising-maker](surprising-maker/) | 做市程序与相关业务支持 |
 
 测试服务器单节点永续部署见 [deployment/test-single-node/README.md](deployment/test-single-node/README.md)。该入口只启用 `LINEAR_PERPETUAL`，不启动 wallet；生产高可用仍需三节点切主和资金链路验收。

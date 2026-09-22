@@ -2,6 +2,13 @@ server:
   port: ${MARKET_DATA_PORT:9081}
 
 spring:
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            defaultRequestHeaders:
+              X-Business-Internal-Token: ${BUSINESS_INTERNAL_TOKEN:}
   application:
     name: surprising-market-data-provider
   task:

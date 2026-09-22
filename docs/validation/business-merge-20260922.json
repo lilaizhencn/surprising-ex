@@ -1,0 +1,1370 @@
+{
+  "baseline": "b675c6bd",
+  "jdk": "HotSpot Corretto 27.0.0.33.1",
+  "tests": [
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.config.AccountKafkaConfigurationTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.AccountControllerInternalAuthTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.PerpetualAccountStateInternalControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.controller.ProductTransferInternalControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.repository.SingleTableRepositoryBoundaryTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountAeronGatewayTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountCommandGatewayTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountMarginReleaseMathTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.AccountServiceLocalSnapshotTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.ExpiringContractSettlementConsumerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.ExpiringContractSettlementFanoutServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.MarginTransferMathTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.PnlSettlementMathTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.account.provider.service.TradeFeeMathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.aeron.service.orchestration.MaintenanceIntegrationTest",
+      "tests": 36,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AdminCursorPageTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ClientIpResolverTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.PasswordResetServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.TotpServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.AdminIpWhitelistFilterTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.AdminPermissionFilterTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayCorsConfigTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayHttpConfigurationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.config.GatewayTraceFilterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.AdminSupportControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.BinanceApiControllerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.local.MergedBusinessHttpIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.AdminSystemServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWalletClientTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.HttpProductAccountClientTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductAccountAccessTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferCoordinatorTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.gateway.provider.service.SpotAccountClientTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.OkxInstrumentSeedContractTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.config.InstrumentKafkaConfigurationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.repository.InstrumentRepositoryTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.repository.InstrumentSingleTableRepositoryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentOutboxPublisherTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentServiceTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentStorageServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.instrument.provider.service.InstrumentValidatorTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.maintenance.AdminMaintenanceControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TraceIdFilterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TradingOrderKafkaConfigurationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.config.TradingOrderPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.controller.AdminOrderControllerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.controller.OrderControllerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.repository.ProjectionWatermarkWaiterTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.CancelAllAfterServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentOrderDrainServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.LeverageServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderBatchServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderMarginMathTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderServiceTest",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.OrderValidatorTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.StableOrderIdentityTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.config.TriggerPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.controller.TriggerOrderControllerTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketPropertiesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.AdminWebSocketMetricsControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.ClientConnectionIsolationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.SubscriptionRegistryTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "class": "com.surprising.websocket.provider.service.SubscriptionTopicTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-instrument/surprising-instrument-api",
+      "class": "com.surprising.instrument.api.InstrumentEventKeysTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-instrument/surprising-instrument-api",
+      "class": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-instrument/surprising-instrument-api",
+      "class": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-instrument/surprising-instrument-api",
+      "class": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-account/surprising-account-api",
+      "class": "com.surprising.account.api.cache.PerpetualAccountStateSnapshotCacheTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-account/surprising-account-api",
+      "class": "com.surprising.account.api.cache.PositionSnapshotCacheTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-account/surprising-account-api",
+      "class": "com.surprising.account.api.model.AccountTypeProductLineTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-account/surprising-account-api",
+      "class": "com.surprising.account.api.model.AdminCursorPageTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-account/surprising-account-api",
+      "class": "com.surprising.account.api.model.PerpetualAccountStateUpdatedEventTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.KafkaSymbolKeyValidatorTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.TraceContextTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.cache.FeeScheduleSnapshotCacheTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.client.OrderRpcApiContractTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.model.AdminCursorPageTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.model.MarketPriceProtectionTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-trading/surprising-trading-api",
+      "class": "com.surprising.trading.api.model.OrderCommandReceiptJsonContractTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.SurprisingPriceApplicationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.client.ExternalSpotPriceClientTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.config.IndexKafkaProducerConfigurationTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.config.IndexPriceApplicationYamlTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.repository.IndexPriceRepositoryBoundaryTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.IndexInstrumentConfigLoaderTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.IndexInstrumentConfigServiceTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.IndexPriceAuditConsumerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.IndexPriceCalculatorTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.IndexPriceServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.index.service.LatestIndexPriceCacheTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.config.MarkKafkaConfigurationTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.config.MarkPriceApplicationYamlTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.repository.MarkPriceTickRepositoryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.MarkPriceAuditConsumerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.MarkPriceCalculatorTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.MarkPriceCorePublisherTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.MarkPriceEncodingServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.MarkPriceServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.mark.service.PublicTradeEventMapperTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.probe.MarketProbeControllerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-price/surprising-price-provider",
+      "class": "com.surprising.price.probe.MarketProbeServiceTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-funding/surprising-funding-provider",
+      "class": "com.surprising.funding.provider.config.FundingKafkaConfigurationTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-funding/surprising-funding-provider",
+      "class": "com.surprising.funding.provider.service.FundingMathTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-funding/surprising-funding-provider",
+      "class": "com.surprising.funding.provider.service.FundingServiceTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-funding/surprising-funding-provider",
+      "class": "com.surprising.funding.provider.service.FundingTimeTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "class": "com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleMathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickPropertiesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.repository.PostgresCandleSinkTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleHotCacheTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.service.PublicTradeEventMapperTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-market-data/surprising-market-data-provider",
+      "class": "com.surprising.candlestick.provider.service.SymbolRegistryServiceTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-realtime/surprising-realtime-provider",
+      "class": "com.surprising.realtime.provider.RealtimeRouterPropertiesTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.config.MarketMakerTraceConfigurationTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.service.MarketMakerServiceTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.service.QuotePlannerTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-maker",
+      "class": "com.surprising.marketmaker.provider.service.RestReferenceMarketProviderTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "httpTestBusinessJarSha256": "906742de55be072e07d997d8ba440022614585d3ba9c66fd4a2866ec403c01fe",
+  "finalBusinessJarSha256": "2b2329b777b1eaf78f7513a652430eeeb244ae72dc8b16361e74503c1dc7936a",
+  "finalConfigurationVerification": "Restored original trading readiness group readinessState,markPriceReadiness; bean name verified; JDK 27 package and WebSocketApplicationYamlTest passed after configuration change. Native HTTP test used httpTestBusinessJarSha256.",
+  "cleanup": "Stopped isolated business, Core, PostgreSQL, Kafka and Redis processes; removed this run runtime/Archive data, preflight directory, temporary logs and summarized JUnit reports; retained build artifacts and this summary."
+}

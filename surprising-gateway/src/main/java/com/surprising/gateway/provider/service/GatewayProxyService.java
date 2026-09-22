@@ -50,6 +50,9 @@ public class GatewayProxyService {
             "X-Forwarded-For",
             GatewayTraceFilter.TRACE_ID_HEADER);
 
+    @Autowired
+    private com.surprising.gateway.provider.local.LocalBusinessApi localBusinessApi;
+
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
     private final AuthService authService;
@@ -122,7 +125,7 @@ public class GatewayProxyService {
                                         byte[] body) {
         long startedNanos = System.nanoTime();
         boolean adminRequest = isAdminRequest(request);
-        GatewayProperties.BackendRoute route = resolveProductRoute(route(service, adminRequest), request, body);
+        GatewayProperties.BackendRoute route = resolveRoute(service, adminRequest, request, body);
         GatewayIdentity identity = adminRequest ? enforceAdminIdentity(request) : enforceIdentity(route, request);
         if (adminRequest) {
             enforceAdminPermission(service, method, identity);
@@ -136,7 +139,7 @@ public class GatewayProxyService {
         ResponseEntity<byte[]> response;
         try {
             enforceAdminApprovalIfRequired(service, method, request, bodyHash, identity);
-            response = exchange(target, method, body, request, identity, route);
+            response = exchange(service, target, method, body, request, identity, route);
             recordAdminOperation(service, method, request, body, identity, target,
                     bodyHash, response.getStatusCode().value(), elapsedMillis(startedNanos), true, null);
         } catch (ResponseStatusException ex) {
@@ -164,7 +167,7 @@ public class GatewayProxyService {
                                               HttpServletRequest request,
                                               byte[] body,
                                               Long authenticatedUserId) {
-        GatewayProperties.BackendRoute route = resolveProductRoute(route(service, false), request, body);
+        GatewayProperties.BackendRoute route = resolveRoute(service, false, request, body);
         GatewayIdentity identity = authenticatedUserId == null
                 ? enforceIdentity(route, request)
                 : userIdentity(Long.toString(authenticatedUserId));
@@ -174,7 +177,7 @@ public class GatewayProxyService {
             return transferResponse(identity, request, body);
         }
         URI target = compatibilityTarget(route, targetSuffix, targetQuery);
-        ResponseEntity<byte[]> response = exchange(target, method, body, request, identity, route);
+        ResponseEntity<byte[]> response = exchange(service, target, method, body, request, identity, route);
         HttpHeaders responseHeaders = new HttpHeaders();
         if (response.getHeaders().getContentType() != null) {
             responseHeaders.setContentType(response.getHeaders().getContentType());
@@ -214,12 +217,18 @@ public class GatewayProxyService {
         }
     }
 
-    private ResponseEntity<byte[]> exchange(URI target,
+    private ResponseEntity<byte[]> exchange(String service, URI target,
                                             HttpMethod method,
                                             byte[] body,
                                             HttpServletRequest request,
                                             GatewayIdentity identity,
                                             GatewayProperties.BackendRoute route) {
+        if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+            HttpHeaders trustedHeaders = headers(request, identity, route);
+            trustedHeaders.set("X-Product-Line", localBusinessApi.productLine().name());
+            return localBusinessApi.invoke(service, target, method, trustedHeaders, body,
+                    properties.getHttpClient().getReadTimeout());
+        }
         try {
             return restTemplate.exchange(target, method, new HttpEntity<>(body, headers(request, identity, route)),
                     byte[].class);
@@ -242,7 +251,8 @@ public class GatewayProxyService {
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
         boolean instrumentResponse = normalizedService.equals("instrument")
                 || normalizedService.equals("instrument-admin");
-        if (!instrumentResponse && !containsJsonField(body, "instrumentChangeId")) {
+        if (!instrumentResponse && !containsJsonField(body, "instrumentChangeId")
+                && !containsJsonField(body, "commandResultUrl")) {
             return body;
         }
         try {
@@ -260,6 +270,11 @@ public class GatewayProxyService {
         if (value instanceof Map<?, ?> map) {
             Map<Object, Object> mutable = (Map<Object, Object>) map;
             mutable.remove("instrumentChangeId");
+            if (mutable.get("commandResultUrl") instanceof String url
+                    && url.startsWith("/api/v1/trading/orders/commands/")) {
+                mutable.put("commandResultUrl", GATEWAY_PREFIX + "/trading/commands/"
+                        + url.substring("/api/v1/trading/orders/commands/".length()));
+            }
             if (instrumentResponse) {
                 mutable.remove("version");
                 stringifyUnitField(mutable, "priceTickUnits");
@@ -321,6 +336,20 @@ public class GatewayProxyService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown " + routeType + ": " + service);
         }
         return route;
+    }
+
+    private GatewayProperties.BackendRoute resolveRoute(String service, boolean admin,
+                                                         HttpServletRequest request, byte[] body) {
+        GatewayProperties.BackendRoute configured = route(service, admin);
+        if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+            ProductLine requested = productLine(request, body);
+            if (requested != null && requested != localBusinessApi.productLine()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product is not enabled in this application");
+            }
+            localBusinessApi.validateProductSelectors(request, body);
+            return configured;
+        }
+        return resolveProductRoute(configured, request, body);
     }
 
     private GatewayProperties.BackendRoute resolveProductRoute(GatewayProperties.BackendRoute route,

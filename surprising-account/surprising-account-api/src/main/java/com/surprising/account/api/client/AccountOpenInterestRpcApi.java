@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
         name = "surprising-account-provider",
         contextId = "accountOpenInterestRpcApi",
         path = AccountApiPaths.INTERNAL_BASE_PATH,
-        url = "${surprising.clients.account.base-url:http://localhost:9086}")
+        url = "${surprising.clients.account.base-url:http://localhost:9094}")
 public interface AccountOpenInterestRpcApi {
 
     @GetMapping("/open-interest/snapshot")

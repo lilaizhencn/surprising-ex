@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
         name = "surprising-trading-provider",
         contextId = "tradingFeeAdminRpcApi",
         path = TradingApiPaths.ADMIN_FEE_BASE_PATH,
-        url = "${surprising.clients.trading.base-url:http://localhost:9084}")
+        url = "${surprising.clients.trading.base-url:http://localhost:9094}")
 public interface TradingFeeAdminRpcApi {
 
     @PostMapping("/schedules")

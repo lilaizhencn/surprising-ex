@@ -18,7 +18,6 @@
 
     <modules>
         <module>surprising-instrument-api</module>
-        <module>surprising-instrument-provider</module>
     </modules>
 
     <dependencyManagement>

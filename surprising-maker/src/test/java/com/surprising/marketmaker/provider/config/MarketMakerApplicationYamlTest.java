@@ -40,10 +40,10 @@ class MarketMakerApplicationYamlTest {
                 .contains("500ms");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.enabled"))
-                .contains(false);
+                .contains("${MM_REFERENCE_MARKET_ENABLED:false}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.websocket-enabled"))
-                .contains(false);
+                .contains("${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:false}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.sources[0].parser"))
                 .contains("BINANCE_DEPTH");

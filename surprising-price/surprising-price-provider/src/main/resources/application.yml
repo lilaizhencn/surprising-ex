@@ -2,6 +2,13 @@ server:
   port: 9082
 
 spring:
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            defaultRequestHeaders:
+              X-Business-Internal-Token: ${BUSINESS_INTERNAL_TOKEN:}
   application:
     name: surprising-price-provider
   task:

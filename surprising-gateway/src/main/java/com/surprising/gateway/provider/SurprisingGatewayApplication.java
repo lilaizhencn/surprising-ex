@@ -10,9 +10,17 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {
         "com.surprising.gateway.provider",
-        "com.surprising.websocket.provider"
+        "com.surprising.websocket.provider",
+        "com.surprising.trading",
+        "com.surprising.account.provider",
+        "com.surprising.instrument.provider",
+        "com.surprising.price.consumer"
 })
-@EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class})
+@EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class,
+        com.surprising.trading.order.config.TradingOrderProperties.class,
+        com.surprising.trading.trigger.config.TriggerProperties.class,
+        com.surprising.account.provider.config.AccountProperties.class,
+        com.surprising.instrument.provider.config.InstrumentProperties.class})
 @EnableKafka
 @EnableScheduling
 public class SurprisingGatewayApplication {

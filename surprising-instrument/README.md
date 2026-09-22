@@ -1,12 +1,14 @@
 # surprising-instrument
 
+本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部凭证和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+
 
 Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
 
 ## 模块
 
 - `surprising-instrument-api`：RPC 合约、DTO 和事件模型。
-- `surprising-instrument-provider`：配置持久化、查询、管理接口和 Kafka 变更事件发布。
+- `surprising-gateway` 中的 合约业务包：配置持久化、查询、管理接口和 Kafka 变更事件发布。
 
 ## 核心职责
 
@@ -154,7 +156,8 @@ brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 # Topic 初始化命令待验证脚本重新整理后补回
-mvn -pl :surprising-instrument-provider -am spring-boot:run
+mvn -pl surprising-gateway -am package -DskipTests
+java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 ```
 
 ## 生产注意事项
@@ -174,7 +177,7 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 ## 验证
 
 ```bash
-mvn -pl :surprising-instrument-provider -am test
+mvn -pl surprising-gateway -am test
 ```
 
 ## Core 同步与审计引用

@@ -13,7 +13,7 @@
 
     <artifactId>surprising-gateway</artifactId>
     <name>surprising-gateway</name>
-    <description>Frontend REST gateway for Surprising Exchange</description>
+    <description>Unified identity, trading, account and instrument application</description>
 
     <dependencies>
         <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
@@ -115,6 +115,28 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId><artifactId>surprising-aeron-service</artifactId><version>${project.version}</version><scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-aeron-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-price-consumer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-instrument-api</artifactId>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 

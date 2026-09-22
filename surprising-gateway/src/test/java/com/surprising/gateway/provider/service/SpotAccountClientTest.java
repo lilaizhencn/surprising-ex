@@ -29,7 +29,7 @@ class SpotAccountClientTest {
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("{}"));
-        SpotAccountClient client = new SpotAccountClient(properties, restTemplate);
+        SpotAccountClient client = new SpotAccountClient(properties, restTemplate, org.mockito.Mockito.mock(com.surprising.account.provider.service.AccountCommandGateway.class), new com.surprising.account.provider.config.AccountProperties());
 
         client.adjustBalance(42L, "usdt", 1_250_000L, "deposit:event-1", "custody deposit");
 

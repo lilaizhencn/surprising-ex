@@ -34,6 +34,9 @@ class ProductTransferGatewaySurfaceTest {
                 .thenReturn(ProductAccountAdjustment.applied("ok"));
         GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),
                 null, null, new ObjectMapper(), new ProductTransferCoordinator(accountClient));
+        var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        when(local.productLine()).thenReturn(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(proxy, "localBusinessApi", local);
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/account/transfers");
         servletRequest.addHeader("Authorization", "Bearer user");

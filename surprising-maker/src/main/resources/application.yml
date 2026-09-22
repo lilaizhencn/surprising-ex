@@ -9,6 +9,8 @@ spring:
       client:
         config:
           default:
+            defaultRequestHeaders:
+              X-Business-Internal-Token: ${BUSINESS_INTERNAL_TOKEN:}
             # 做市报价是异步用户命令链路，读超时要覆盖 Kafka 重平衡和账户预占确认。
             connect-timeout: 1000
             read-timeout: 5000
@@ -48,13 +50,13 @@ surprising:
       required-symbols: ${PRICE_CONSUMER_REQUIRED_SYMBOLS:}
   clients:
     account:
-      base-url: http://localhost:9086
+      base-url: http://localhost:9094
     instrument:
-      base-url: http://localhost:9080
+      base-url: http://localhost:9094
     matching:
       base-url: http://localhost:9081
     trading:
-      base-url: http://localhost:9084
+      base-url: http://localhost:9094
   market-maker:
     engine:
       enabled: true

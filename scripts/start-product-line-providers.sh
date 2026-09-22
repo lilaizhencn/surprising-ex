@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRODUCT_LINE="${PRODUCT_LINE:?PRODUCT_LINE must be explicit}"
 RUN_ID="${RUN_ID:?RUN_ID must be explicit}"
 ACTION="${ACTION:-up}"
-JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home}"
+JAVA_HOME="${JAVA_HOME:-$HOME/.sdkman/candidates/java/27.0.0-amzn}"
 RUNTIME_ROOT="${RUNTIME_ROOT:-${TMPDIR:-/tmp}/surprising-product-line-runtime}"
 RUN_DIR="$RUNTIME_ROOT/$RUN_ID"
 PID_DIR="$RUN_DIR/pids"
@@ -58,9 +58,9 @@ JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
 JVM_TELEMETRY_MODE=""
 
-readonly SERVICES=(instrument price account trading market-data derivatives-lifecycle funding gateway maker)
-readonly HTTP_SERVICES=(instrument price account trading market-data derivatives-lifecycle funding gateway maker)
-readonly HTTP_PORTS=(9080 9082 9086 9084 9081 9087 9089 9094 9096)
+readonly SERVICES=(gateway price market-data derivatives-lifecycle funding maker)
+readonly HTTP_SERVICES=(gateway price market-data derivatives-lifecycle funding maker)
+readonly HTTP_PORTS=(9094 9082 9081 9087 9089 9096)
 
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
@@ -129,7 +129,7 @@ cluster_id() {
 
 detect_jvm_campaign_support() {
   local version_output
-  [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 25 unavailable JAVA_HOME=$JAVA_HOME"
+  [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 27 unavailable JAVA_HOME=$JAVA_HOME"
   version_output="$("$JAVA_HOME/bin/java" -version 2>&1)" || fail "unable to inspect JVM JAVA_HOME=$JAVA_HOME"
   if grep -Eqi 'OpenJ9|IBM Semeru' <<<"$version_output"; then
     fail "unsupported JVM implementation=OPENJ9; requested collector=$JVM_GC telemetry=GC_SAFEPOINT jfr=$JFR_ENABLED require HotSpot 25+"
@@ -170,11 +170,8 @@ jar_path() {
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
     benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$ROOT_DIR" ;;
     realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    trading) printf '%s/surprising-trading/surprising-trading-provider/target/surprising-trading-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    account) printf '%s/surprising-account/surprising-account-provider/target/surprising-account-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
@@ -188,7 +185,7 @@ preflight_port() {
 }
 
 preflight() {
-  [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 25 unavailable JAVA_HOME=$JAVA_HOME"
+  [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 27 unavailable JAVA_HOME=$JAVA_HOME"
   command -v curl >/dev/null || fail 'curl unavailable'
   command -v nc >/dev/null || fail 'nc unavailable'
   if [[ "$POSTGRES_MODE" == docker ]] || {
@@ -197,6 +194,7 @@ preflight() {
     command -v docker >/dev/null || fail 'docker unavailable'
     docker info >/dev/null 2>&1 || fail 'docker daemon unavailable'
   fi
+  [[ -n "${BUSINESS_INTERNAL_TOKEN:-}" ]] || fail "BUSINESS_INTERNAL_TOKEN must be explicit for background RPC"
   preflight_port "$POSTGRES_HOST" "$POSTGRES_PORT"
   preflight_port "${KAFKA_BOOTSTRAP_SERVERS%:*}" "${KAFKA_BOOTSTRAP_SERVERS##*:}"
   preflight_port "$VALKEY_HOST" "$VALKEY_PORT"
@@ -353,9 +351,11 @@ start_owned_process() {
   fi
   printf '%s\n' "$pid" > "$PID_DIR/$name.pid"
   if [[ -n "$port" ]]; then
+    local health_path=/actuator/health
+    [[ "$name" == gateway ]] && health_path=/actuator/health/liveness
     local deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT_SECONDS))
     until port_owned_by_process_tree "$port" "$pid" && curl --fail --silent --max-time 2 \
-      "http://127.0.0.1:$port/actuator/health" >/dev/null; do
+      "http://127.0.0.1:$port$health_path" >/dev/null; do
       kill -0 "$pid" 2>/dev/null || fail "service exited name=$name log=$LOG_DIR/$name.log"
       (( SECONDS < deadline )) || fail "health timeout name=$name port=$port log=$LOG_DIR/$name.log"
       sleep 1
@@ -372,6 +372,10 @@ COMMON_ENV=(
     PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false \
     AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
     AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" AERON_CLIENT_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
+    BUSINESS_INTERNAL_TOKEN="${BUSINESS_INTERNAL_TOKEN:-}" \
+    SURPRISING_CLIENTS_INSTRUMENT_BASE_URL="http://127.0.0.1:9094" \
+    SURPRISING_CLIENTS_ORDER_BASE_URL="http://127.0.0.1:9094" \
+    SURPRISING_CLIENTS_ACCOUNT_BASE_URL="http://127.0.0.1:9094" \
     KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" SPRING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
@@ -516,20 +520,17 @@ start_stack() {
   claim_runtime
   trap 'cleanup_failed_start' EXIT ERR INT TERM
   initialize_database
-  start_http_service instrument
   start_core "$core_action"
   if [[ "$REALTIME_ENABLED" == true ]]; then
     start_app_media_driver
     start_realtime_router
   fi
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && start_trade_export
+  start_http_service gateway
   start_http_service price
-  start_http_service account
-  start_http_service trading
   start_http_service market-data
   service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
   service_enabled funding && start_http_service funding
-  start_http_service gateway
   start_http_service maker
   trap - EXIT ERR INT TERM
   printf 'PRODUCT_LINE_RUNTIME=PASS productLine=%s runId=%s wallet=ABSENT\n' "$PRODUCT_LINE" "$RUN_ID"
@@ -660,15 +661,15 @@ print_dry_run() {
   printf 'JVM_COMPATIBILITY=PASS implementation=%s featureVersion=%s collector=%s telemetry=%s jfr=%s\n' \
     "$JVM_IMPLEMENTATION" "$JVM_FEATURE_VERSION" "$JVM_GC" "$JVM_TELEMETRY_MODE" "$JFR_ENABLED"
   local service
-  printf 'START_ORDER=instrument'
+  printf 'START_ORDER='
   local index
-  for ((index = 0; index < member_count; index++)); do printf ',host-core-node%s' "$index"; done
+  for ((index = 0; index < member_count; index++)); do (( index > 0 )) && printf ','; printf 'host-core-node%s' "$index"; done
   [[ "$REALTIME_ENABLED" == true ]] && printf ',app-media-driver,realtime-router'
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && printf ',trade-export'
-  printf ',price,account,trading,market-data'
+  printf ',gateway,price,market-data'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   service_enabled funding && printf ',funding'
-  printf ',gateway,maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
+  printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
     "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$KAFKA_BOOTSTRAP_SERVERS" "$VALKEY_HOST" "$VALKEY_PORT"
 }
 
