@@ -12,9 +12,14 @@
 
     <artifactId>surprising-derivatives-lifecycle-provider</artifactId>
     <name>surprising-derivatives-lifecycle</name>
-    <description>Unified risk, liquidation, insurance and ADL lifecycle provider</description>
+    <description>Unified funding, risk, liquidation, insurance and ADL lifecycle provider</description>
 
     <dependencies>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-funding-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-derivatives-lifecycle-api</artifactId>

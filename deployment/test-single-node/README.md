@@ -8,9 +8,9 @@
 2. 启动一个 Aeron Core 节点；节点成为单节点 Leader 后，ClusterProbe 才算就绪。
 3. 启动应用级 Aeron MediaDriver 和 realtime Router，把 Core 的已提交状态出口连接到 WebSocket Gateway。
 4. 启动成交导出器，从 Aeron Archive 的已提交位置恢复可靠 `match.trades` 事件。
-5. 按 `instrument → price → account → trading → market-data → derivatives-lifecycle → funding → gateway → maker` 启动永续服务。
+5. 按 `gateway（身份/订单/账户/合约）→ price → market-data → derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
 
-Core、账户、撮合、行情、资金费和 Gateway 仍是独立 JVM。它们分别拥有自己的状态、Kafka consumer group 和故障恢复边界；这里合并的是启动编排，不是业务状态。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
+Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍生品后台。资金权威状态仍由独立 Core 持有，各业务的 Kafka consumer group 和资金费/强平调度边界保留。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
 
 ## 服务器条件
 
@@ -31,7 +31,6 @@ mvn -pl \
   surprising-price/surprising-price-provider,\
   surprising-market-data/surprising-market-data-provider,\
   surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,\
-  surprising-funding/surprising-funding-provider,\
   surprising-realtime/surprising-realtime-provider,\
   surprising-gateway,\
   surprising-maker \

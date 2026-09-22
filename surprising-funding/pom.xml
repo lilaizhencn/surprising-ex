@@ -15,7 +15,6 @@
     <description>Funding API and provider modules</description>
     <modules>
         <module>surprising-funding-api</module>
-        <module>surprising-funding-provider</module>
     </modules>
     <dependencyManagement>
         <dependencies>

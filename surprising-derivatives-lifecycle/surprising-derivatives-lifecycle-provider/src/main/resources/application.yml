@@ -34,6 +34,26 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  funding:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      funding-rate-topic: surprising.perp.funding.rate.v1
+      cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
+      concurrency: 1
+      max-poll-records: 500
+    calculation:
+      publish-delay-ms: 1000
+      max-mark-age: 10s
+      max-rate-age: 5s
+    settlement:
+      settle-delay-ms: 1000
+      batch-size: 20
+      max-pages-per-run: ${FUNDING_MAX_PAGES_PER_RUN:8}
+    coordination:
+      enabled: true
+      node-id:
+      lease-duration: 15s
   risk:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:

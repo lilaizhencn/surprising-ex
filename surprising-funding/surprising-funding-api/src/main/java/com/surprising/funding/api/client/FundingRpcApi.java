@@ -10,9 +10,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-funding-provider",
+        name = "surprising-derivatives-lifecycle",
         path = FundingApiPaths.API_V1,
-        url = "${surprising.clients.funding.base-url:http://localhost:9089}")
+        url = "${surprising.clients.funding.base-url:http://localhost:9087}")
 public interface FundingRpcApi {
 
     @GetMapping("/rates/latest")

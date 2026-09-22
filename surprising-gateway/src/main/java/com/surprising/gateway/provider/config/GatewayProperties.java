@@ -325,7 +325,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("account", new BackendRoute("http://localhost:9086", "/api/v1/accounts", true));
         routes.put("risk", new BackendRoute("http://localhost:9087", "/api/v1/risk", true));
         routes.put("liquidation", new BackendRoute("http://localhost:9087", "/api/v1/liquidations", true));
-        routes.put("funding", new BackendRoute("http://localhost:9089", "/api/v1/funding", false));
+        routes.put("funding", new BackendRoute("http://localhost:9087", "/api/v1/funding", false));
         routes.put("insurance", new BackendRoute("http://localhost:9087", "/api/v1/insurance", true));
         routes.put("adl", new BackendRoute("http://localhost:9087", "/api/v1/adl", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/market-maker", true));
@@ -352,7 +352,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("risk-admin", new BackendRoute("http://localhost:9087", "/api/v1/admin/risk", true));
         routes.put("liquidation", new BackendRoute("http://localhost:9087", "/api/v1/liquidations", true));
         routes.put("liquidation-admin", new BackendRoute("http://localhost:9087", "/api/v1/admin/liquidations", true));
-        routes.put("funding", new BackendRoute("http://localhost:9089", "/api/v1/funding", true));
+        routes.put("funding", new BackendRoute("http://localhost:9087", "/api/v1/funding", true));
         routes.put("insurance", new BackendRoute("http://localhost:9087", "/api/v1/insurance", true));
         routes.put("insurance-admin", new BackendRoute("http://localhost:9087", "/api/v1/insurance/admin", true));
         routes.put("adl", new BackendRoute("http://localhost:9087", "/api/v1/adl", true));

@@ -15,12 +15,12 @@ public class FundingMaintenanceTask {
         this.fundingService = fundingService;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.funding.calculation.publish-delay-ms:1000}")
+    @Scheduled(scheduler = "fundingScheduler", fixedDelayString = "${surprising.funding.calculation.publish-delay-ms:1000}")
     public void publishRates() {
         fundingService.publishRates();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.funding.settlement.settle-delay-ms:1000}")
+    @Scheduled(scheduler = "fundingScheduler", fixedDelayString = "${surprising.funding.settlement.settle-delay-ms:1000}")
     public void settleDueRates() {
         fundingService.settleDueRates();
     }

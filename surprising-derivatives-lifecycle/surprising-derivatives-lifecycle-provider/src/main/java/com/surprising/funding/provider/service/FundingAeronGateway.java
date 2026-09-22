@@ -1,25 +1,20 @@
 package com.surprising.funding.provider.service;
 
-import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.funding.provider.config.FundingProperties;
-import jakarta.annotation.PreDestroy;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
-public class FundingAeronGateway implements AutoCloseable {
+public class FundingAeronGateway {
 
-    private final AeronClientPool clients;
+    private final DerivativesAeronClient clients;
 
-    public FundingAeronGateway(FundingProperties properties) {
-        FundingProperties.Aeron aeron = properties.getAeron();
-        this.clients = new AeronClientPool("funding", properties.getKafka().getProductLine(),
-                aeron.getHostnames(), aeron.getEgressHostname(), aeron.getResponseTimeout(),
-                aeron.getClientConnections());
+    public FundingAeronGateway(DerivativesAeronClient clients) {
+        this.clients = clients;
     }
 
     public void command(CoreMessageType type, UUID commandId, byte[] payload) {
@@ -39,9 +34,4 @@ public class FundingAeronGateway implements AutoCloseable {
         return clients.query(type, queryId, 0, payload);
     }
 
-    @Override
-    @PreDestroy
-    public void close() {
-        clients.close();
-    }
 }

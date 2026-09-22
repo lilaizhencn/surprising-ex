@@ -58,9 +58,9 @@ JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
 JVM_TELEMETRY_MODE=""
 
-readonly SERVICES=(gateway price market-data derivatives-lifecycle funding maker)
-readonly HTTP_SERVICES=(gateway price market-data derivatives-lifecycle funding maker)
-readonly HTTP_PORTS=(9094 9082 9081 9087 9089 9096)
+readonly SERVICES=(gateway price market-data derivatives-lifecycle maker)
+readonly HTTP_SERVICES=(gateway price market-data derivatives-lifecycle maker)
+readonly HTTP_PORTS=(9094 9082 9081 9087 9096)
 
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
@@ -151,7 +151,6 @@ detect_jvm_campaign_support() {
 
 service_enabled() {
   case "$1" in
-    funding) [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL || "$PRODUCT_LINE" == INVERSE_PERPETUAL ]] ;;
     derivatives-lifecycle) [[ "$PRODUCT_LINE" != SPOT ]] ;;
     *) return 0 ;;
   esac
@@ -173,7 +172,6 @@ jar_path() {
     market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     *) fail "unknown service=$1" ;;
@@ -530,7 +528,6 @@ start_stack() {
   start_http_service price
   start_http_service market-data
   service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
-  service_enabled funding && start_http_service funding
   start_http_service maker
   trap - EXIT ERR INT TERM
   printf 'PRODUCT_LINE_RUNTIME=PASS productLine=%s runId=%s wallet=ABSENT\n' "$PRODUCT_LINE" "$RUN_ID"
@@ -668,7 +665,6 @@ print_dry_run() {
   [[ "$TRADE_EXPORT_ENABLED" == true ]] && printf ',trade-export'
   printf ',gateway,price,market-data'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
-  service_enabled funding && printf ',funding'
   printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
     "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$KAFKA_BOOTSTRAP_SERVERS" "$VALKEY_HOST" "$VALKEY_PORT"
 }

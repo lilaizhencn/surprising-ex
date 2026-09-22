@@ -17,6 +17,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.FullyQualifiedAnnotationBeanNameGenerator;
+import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.kafka.annotation.EnableKafka;
 
@@ -25,12 +26,13 @@ import org.springframework.kafka.annotation.EnableKafka;
 @ComponentScan(
         basePackages = "com.surprising",
         nameGenerator = FullyQualifiedAnnotationBeanNameGenerator.class,
-        excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {
+        excludeFilters = { @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {
                 SurprisingRiskApplication.class,
                 SurprisingLiquidationApplication.class,
                 SurprisingInsuranceApplication.class,
                 SurprisingAdlApplication.class
-        }))
+        }), @ComponentScan.Filter(type = FilterType.REGEX, pattern = "com\\.surprising\\.funding\\.provider\\..*") })
+@Import(FundingConfiguration.class)
 @EnableKafka
 @EnableScheduling
 @EnableFeignClients(clients = InstrumentRpcApi.class)

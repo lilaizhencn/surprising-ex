@@ -182,14 +182,14 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private Map<String, String> providerUrls() {
         Map<String, String> urls = new LinkedHashMap<>();
         Map<String, Integer> ports = Map.of(
-                "instrument", 9080, "price", 9082, "trading", 9084, "risk", 9087,
-                "funding", 9089, "liquidation", 9087, "insurance", 9087,
-                "adl", 9087, "account", 9086, "maker", 9096);
+                "instrument", 9094, "price", 9082, "trading", 9094, "risk", 9087,
+                "funding", 9087, "liquidation", 9087, "insurance", 9087,
+                "adl", 9087, "account", 9094, "maker", 9096);
         for (var entry : ports.entrySet()) {
             String envName = "W4_" + entry.getKey().toUpperCase() + "_URL";
             String configured = System.getenv(envName);
             if ((configured == null || configured.isBlank())
-                    && List.of("risk", "liquidation", "insurance", "adl").contains(entry.getKey())) {
+                    && List.of("funding", "risk", "liquidation", "insurance", "adl").contains(entry.getKey())) {
                 configured = System.getenv("W4_DERIVATIVES_LIFECYCLE_URL");
             }
             urls.put(entry.getKey(), (configured == null || configured.isBlank())
@@ -218,6 +218,13 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(base + path))
                 .timeout(Duration.ofSeconds(20));
+        if (List.of("instrument", "account", "trading", "command").contains(service)) {
+            String internalToken = System.getenv("BUSINESS_INTERNAL_TOKEN");
+            if (internalToken == null || internalToken.isBlank()) {
+                throw new IllegalStateException("BUSINESS_INTERNAL_TOKEN is required for merged business RPC");
+            }
+            builder.header("X-Business-Internal-Token", internalToken);
+        }
         headers.forEach(builder::header);
         if (body == null) {
             builder.method(method, HttpRequest.BodyPublishers.noBody());

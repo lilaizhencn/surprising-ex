@@ -1,0 +1,1400 @@
+{
+  "baseline": "9ebdc0c1",
+  "jdk": "HotSpot Corretto 27",
+  "modules": [
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-gateway",
+      "tests": 547,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 34
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-funding/surprising-funding-api",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "tests": [
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.funding.provider.service.FundingAeronGatewayTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.funding.provider.service.FundingMathTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.funding.provider.service.FundingTimeTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.funding.provider.service.FundingServiceTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.derivatives.lifecycle.FundingCompositionTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+      "name": "com.surprising.funding.provider.config.FundingKafkaConfigurationTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.ClientConnectionIsolationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.ProductAccountAccessTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.TradingFeeServiceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderServiceTest",
+      "tests": "42",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.config.WebSocketPropertiesTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.controller.OrderControllerTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.ClientIpResolverTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentOutboxPublisherTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.AccountServiceLocalSnapshotTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentStorageServiceTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.trigger.controller.TriggerOrderControllerTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.maintenance.AdminMaintenanceControllerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.config.TradingOrderKafkaConfigurationTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.CustodyWalletClientTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.controller.AccountControllerInternalAuthTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.AccountAeronGatewayTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderValidatorTest",
+      "tests": "24",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.GatewayHttpConfigurationTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.TradeFeeMathTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.controller.PerpetualAccountStateInternalControllerTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+      "tests": "29",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.trigger.config.TriggerPropertiesTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.ExpiringContractSettlementFanoutServiceTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.AccountMarginReleaseMathTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderMarginMathTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.config.InstrumentKafkaConfigurationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderBatchServiceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "22",
+      "skipReasons": [
+        {
+          "test": "custodyResultWithMismatchedAmountDoesNotCompleteOrRefundWithdrawal",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "repeatedTargetTransitionsAreIdempotentButAdminTransitionsRemainStrict",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "refundDecisionHoldsOutcomeLockUntilSpotCreditAndStateCommit",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "duplicateCustodyResultOnLaterPageDoesNotCompleteOrRefundWithdrawal",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "lateBroadcastUnknownObservationKeepsProviderEventId",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "custodyResultWithoutWalletIdDoesNotCompleteOrRefundUnboundWithdrawal",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "invalidWebhookDoesNotPersistWalletIdBinding",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "retryCannotBypassPendingApproval",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "duplicateCompletionForSameTargetIsIdempotent",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "stateTransitionRejectsWalletIdOwnedByAnotherWithdrawal",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "conditionalTransitionsRejectExistingWithdrawalInInvalidState",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "confirmationThatWinsTheOutcomeLockDoesNotCreditSpot",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "adminActionAuditIsImmutable",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "automaticStateChangesAppendImmutableWithdrawalEvents",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "submittedWithdrawalCannotBeDowngradedToBroadcastUnknown",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "databaseRejectsDirectStatusChangeWithoutLegalTransitionAudit",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "ambiguousCustodyResultDoesNotCompleteOrRefundWithdrawal",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "webhookBindsWalletIdByExternalReferenceAndRejectsConflictingBinding",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "invalidCompletionSourceDoesNotChangeWithdrawalState",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "idempotentTerminalWebhookAppendsAuditEvent",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "eventInsertFailureRollsBackWithdrawalState",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        },
+        {
+          "test": "adminStateAndActionAuditRollbackTogetherWhenAuditInsertFails",
+          "reason": {
+            "message": "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist"
+          }
+        }
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.GatewayTraceFilterTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.AccountCommandGatewayTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.controller.AdminOrderControllerTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.AdminSystemServiceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.LeverageServiceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.AdminPermissionFilterTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.StableOrderIdentityTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.SubscriptionRegistryTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.GatewayCorsConfigTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.CancelAllAfterServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.controller.AdminSupportControllerTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.controller.ProductTransferInternalControllerTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.MarginTransferMathTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.AuthServiceTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.aeron.service.orchestration.MaintenanceIntegrationTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "10",
+      "skipReasons": [
+        {
+          "test": "providerReplicasSkipLockedTasksAndCannotMixProductLines",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "cancelsOrdersAndTriggersRestartsFromPersistedActionsAndReleases(ProductLine)",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "matchingCloseReportsPartialFillThenRetriesOnlyTheRemainingPosition(ProductLine, Mode)",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "unknownGateAndReleaseOutcomesResumeTheirOwnPhaseAndIdentity",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "knownGateRejectionCanBeRetriedAfterFundingFinishes",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "clearsAtApprovedPriceDespiteLostReplyAndProviderAndCoreRestart(ProductLine)",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "fixedPriceClearanceClosesBothHedgedLegs(ProductLine)",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "rejectsUnsafeScopesAndPrices",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "existingLiquidationRejectsClearanceWithoutFreezingRiskAndTaskCanBeAbandoned",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        },
+        {
+          "test": "noLiquidityNeverMarksClosingCompleteAndPreservesThePosition(ProductLine)",
+          "reason": {
+            "message": "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist"
+          }
+        }
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.AdminIpWhitelistFilterTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.config.TradingOrderPropertiesTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.repository.InstrumentSingleTableRepositoryTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentValidatorTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.repository.ProjectionWatermarkWaiterTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.config.TraceIdFilterTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.InstrumentOrderDrainServiceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.controller.BinanceApiControllerTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.SpotAccountClientTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "skipReasons": [
+        {
+          "test": "allSixLinesKeepOneCurrentRowAndAtomicBeforeAfterAudit",
+          "reason": {
+            "message": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist"
+          }
+        }
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.ProductTransferCoordinatorTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.repository.InstrumentRepositoryTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.AdminWebSocketMetricsControllerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.service.SubscriptionTopicTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.ExpiringContractSettlementConsumerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.repository.SingleTableRepositoryBoundaryTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.service.PnlSettlementMathTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.local.MergedBusinessHttpIntegrationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "skipReasons": [
+        {
+          "test": "identityOrdersAccountsAndInstrumentsRunInOneAppWhileCoreRemainsIndependent",
+          "reason": {
+            "message": "Environment variable [MERGED_BUSINESS_IT_BASE_URL] does not exist"
+          }
+        }
+      ]
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.account.provider.config.AccountKafkaConfigurationTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.AdminCursorPageTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.PasswordResetServiceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.service.InstrumentServiceTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.TotpServiceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.instrument.provider.OkxInstrumentSeedContractTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-gateway",
+      "name": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.AeronClientPoolTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.CoreQueryClassTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.AeronClientAgentTest",
+      "tests": "23",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.RealtimeOutboxTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "name": "com.surprising.aeron.client.AeronClientCapacityTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "skipReasons": []
+    }
+  ],
+  "w4Tests": {
+    "name": "com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest",
+    "tests": "7",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  "notes": [
+    "Funding composition covers all six product selectors; production YAML, component scan and MockMvc endpoints cover five derivative products.",
+    "Full application tests replace external Aeron, JDBC and instrument snapshot bootstrap, disable Kafka consumption and disable business scheduled execution; separate test blocks funding scheduler threads and verifies lifecycle progress.",
+    "Existing funding service tests preserve paged settlement, maintenance rejection, idempotency and failure boundaries. Core funds/snapshot tests passed in preceding fix commit.",
+    "Gateway integration tests requiring PostgreSQL or native merged business server were not enabled this round; skip details retained. No new full HTTP/Aeron/PostgreSQL financial E2E, 3-member failure, saturation or long-run capacity claim."
+  ],
+  "finalLifecycleJar": {
+    "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+    "sha256": "838eb7d18db5f86f576bf2625a58dbf912db9a4438e772b1231c6d9657af1584",
+    "checks": [
+      "FundingController and FundingConfiguration present",
+      "single lifecycle entrypoint",
+      "no former funding application or duplicate snapshot initializer",
+      "Core service absent from runtime libraries"
+    ]
+  },
+  "cleanup": "All Maven/JMH/test JVMs exited; this task preflight data, raw JFR/logs and summarized test reports removed. Build artifacts and validation summaries retained."
+}
