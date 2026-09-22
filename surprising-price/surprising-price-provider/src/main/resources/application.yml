@@ -38,7 +38,6 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      topic: surprising.perp.price.events.v1
       group-id: surprising-mark-price-query-${HOSTNAME:${random.uuid}}
       max-age: 3s
       allowed-future-skew: 1s
@@ -49,7 +48,6 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
-        price-events-topic: surprising.perp.price.events.v1
         group-id: surprising-index-price-v1
         cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
         concurrency: 2
@@ -81,11 +79,6 @@ surprising:
         enabled: true
         node-id:
         lease-duration: 15s
-      aeron:
-        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
-        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-        response-timeout: 5s
-        client-connections: 1
       audit:
         retention: 3d
         cleanup-delay-ms: 60000
@@ -134,10 +127,6 @@ surprising:
         product-line: ${PRODUCT_LINE}
         concurrency: 2
         max-poll-records: 500
-      topics:
-        book-ticker-topic: surprising.perp.book.ticker.v1
-        funding-rate-topic: surprising.perp.funding.rate.v1
-        price-events-topic: surprising.perp.price.events.v1
       calculation:
         publish-interval-ms: ${MARK_PUBLISH_INTERVAL_MS:1000}
         basis-window: 60s

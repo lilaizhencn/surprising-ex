@@ -7,7 +7,7 @@ Surprising Exchange 合约指数价格和标记价格模块。
 
 - `surprising-price-api`：RPC 合约和 Kafka 事件模型。
 - `surprising-price-provider`：在同一进程内完成外部现货源采集、指数价格、标记价格和法币汇率服务。
-- `surprising-price-consumer`：供 account/command/funding/maker/ADL 等下游消费标记价格的共享缓存适配层。
+- `surprising-price-consumer`：供 gateway、derivatives-lifecycle、maker 和 price 查询端消费标记价格的共享缓存适配层。
 
 ## 架构
 
@@ -301,3 +301,9 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&t
 - Coinbase product ticker：https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductticker
 - Kraken ticker：https://docs.kraken.com/api/docs/rest-api/get-ticker-information
 - ExchangeRate-API free endpoint：https://www.exchangerate-api.com/docs/free
+
+### 行情配置清理（2026-09-22）
+
+行情 topic 由 `ProductLine` 和 `ProductTopicNames` 唯一推导。已删除从未参与收发的 `surprising.price.consumer.topic`、`surprising.price.index.kafka.price-events-topic` 和 `surprising.price.mark.topics.*`，并清理 price、maker 默认 YAML 中的旧值。实际 topic、消费组、重试、价格时效检查及合约快照初始化保持原有行为；部署配置只需指定正确的产品线，不应再设置这些无效覆盖项。
+
+删除未绑定任何属性或调用方的 `surprising.price.index.aeron` 默认配置块。实际向 Core 发布标记价的是 `MarkPriceCorePublisher`，读取 `surprising.price.mark.aeron`；其连接属性和默认值仍保留在 `MarkPriceProperties.Aeron`。

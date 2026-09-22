@@ -98,7 +98,6 @@ public class IndexPriceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private String priceEventsTopic = "surprising.perp.price.events.v1";
         private String groupId = "surprising-index-price-v1";
         private String cacheGroupId = "surprising-index-price-cache-local";
         private int concurrency = 2;
@@ -122,10 +121,6 @@ public class IndexPriceProperties {
 
         public String getPriceEventsTopic() {
             return productTopics().priceEventsTopic();
-        }
-
-        public void setPriceEventsTopic(String priceEventsTopic) {
-            this.priceEventsTopic = priceEventsTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {

@@ -15,7 +15,6 @@ import org.springframework.validation.annotation.Validated;
 public class MarkPriceProperties {
 
     private Kafka kafka = new Kafka();
-    private Topics topics = new Topics();
     private Calculation calculation = new Calculation();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
@@ -27,14 +26,6 @@ public class MarkPriceProperties {
 
     public void setKafka(Kafka kafka) {
         this.kafka = kafka;
-    }
-
-    public Topics getTopics() {
-        return topics;
-    }
-
-    public void setTopics(Topics topics) {
-        this.topics = topics;
     }
 
     public Calculation getCalculation() {
@@ -173,37 +164,6 @@ public class MarkPriceProperties {
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
         }
-    }
-
-    public static class Topics {
-        private String bookTickerTopic = "surprising.perp.book.ticker.v1";
-        private String fundingRateTopic = "surprising.perp.funding.rate.v1";
-        private String priceEventsTopic = "surprising.perp.price.events.v1";
-
-        public String getBookTickerTopic() {
-            return bookTickerTopic;
-        }
-
-        public void setBookTickerTopic(String bookTickerTopic) {
-            this.bookTickerTopic = bookTickerTopic;
-        }
-
-        public String getFundingRateTopic() {
-            return fundingRateTopic;
-        }
-
-        public void setFundingRateTopic(String fundingRateTopic) {
-            this.fundingRateTopic = fundingRateTopic;
-        }
-
-        public String getPriceEventsTopic() {
-            return priceEventsTopic;
-        }
-
-        public void setPriceEventsTopic(String priceEventsTopic) {
-            this.priceEventsTopic = priceEventsTopic;
-        }
-
     }
 
     public static class Calculation {
