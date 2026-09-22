@@ -4663,3 +4663,43 @@ NMT baseline/diff完整分类与进程CPU/RSS入档；分配采样不能当精�
 - JFR保护窗口节点GC83次、总425.360ms、p99 6.379ms、max7.185ms；未观察到Owner FileWrite事件，Archive写入1,910,331,904bytes/12.315s为独立archive线程。不能从事件缺失推导整个运行绝无IO；Socket由CNC/loss补证。三个JFR DataLoss均0、同请求分区错误0，节点窗口异常事件0。
 
 - 本轮清理完成：三轮节点/客户端/watch均退出；清理本轮runtime/Archive/Aeron/tmp、3份rawJFR、CNC/loss二进制及分析class，未操作其他项目。命令/源脚本/构建hash/完整日志/分析导出/逐UUID CSV/JSON/系统与counter时序/原始hash清单归档至`/Users/atomex/.Trash/surprising-retest-20260922`（31,163,525bytes）。原/tmp路径仅历史定位，原JFR删除后不能重新扫描。git diff --check通过；本轮仅新增验证记录，未改业务实现。
+
+## 2026-09-22 重启后同条件复测：采集前计划
+
+- 用户已重启，当前master 5bcd05ed、工作树清洁；uptime约3分钟，启动前CPU speed/scheduler limit100%，磁盘498GiB。HotSpot Corretto27+33-FR/Maven3.9.16。业务Java/POM与已验证构建一致（空diff及jar哈希归档），仅测试当前master，不检出旧版本。
+- 完全复用上轮条件：main无profiler→gc独立-prof gc→jfr独立录制，各冷却60s/预热30s/稳定60s/单fork单thread、排空单列；LINEAR_PERPETUAL/MIXED/tradingStream，单真实Aeron成员+网络+Archive、1session、4Lane/1Matcher、全局/session inflight256、batch20/128symbols/1385users/seed25620、初始资金1384000000125，G1 node512m–1536m/client128m–512m。Owner/Matcher pipeline/settlement BUSY_SPIN/input64、SHARED_NETWORK、service YIELDING、默认UDP缓冲、owner-poll=false。唯一外部变化为用户重启环境，不改压测/业务代码。
+- 目标是记录重启后同条件吞吐、各业务尾延迟、窗口背压和负载期是否再限频；不预设39万通过线，不从跨热状态/跨profiler差异推导代码收益。正确性要求fundsDiff0、unfinished0、offered/terminal相等及业务校验PASS；限频/swap/磁盘不足使正式性能无效，JFR DataLoss使诊断无效。现有证据缺持续队列及有效CPU分段，饱和仍不能仅凭高CPU/窗口峰值判PASS；闭环背压无CO修正。
+- 5s系统/thermal/swap/UDP/socket与100ms只读CNC采样；JFR每JVM256m，保留summary/views/分段/GC/分配/NMT证据，低于10GiB停止。入口python3 /tmp/surprising-reboot-20260922/run-all.py；完整env与命令位于子目录run.py和command文件，最终归档同名.Trash，分析后清理自有runtime/Archive/rawJFR。三节点、真实Archive重启、外围API/WebSocket、长稳和新快照恢复不在本轮覆盖，先前业务回归未重新执行。
+
+## 2026-09-22 再次重启：上轮中断与新的采集计划
+
+- 用户在上一轮对话采集中断后再次重启。本次检查uptime约2分钟、无Java/Python压测进程；原/tmp/surprising-reboot-20260922已不存在，无法复核该轮完整结果，不填造完成量或宣布通过。此前在线采样仅观察到预热后speed limit68–70%，不构成完整压测结果；原采集计划留存，标为中断/证据丢失。
+- 当前master仍5bcd05ed，仅性能记录未提交；HotSpot Corretto27+33-FR/Maven3.9.16，启动前speed/scheduler100%，磁盘498GiB。先跑一次无profiler主轮：冷却60s/预热30s/稳定60s，LINEAR_PERPETUAL/MIXED/tradingStream、单真实Aeron成员+网络+Archive、4Lane/1Matcher、1session/global与session inflight256、batch20/128symbols/1385users/seed25620、初始资金1384000000125；G1 node512m–1536m/client128m–512m、Owner/Matcher pipeline/settlement BUSY_SPIN/input64、SHARED_NETWORK、service YIELDING、默认UDP缓冲、owner-poll=false。业务Java/POM与构建一致，jar哈希和空diff存档。
+- 重启后若稳定期再次限频，本次仅完成主轮功能校验和结果归档，不重复GC/JFR；若不再限频再按相同条件补独立诊断轮。正式有效性仍要求无明显限频/swap/磁盘问题，完成性要求unfinished0/fundsDiff0/offered与terminal相等；不设置39万通过线，不能由背压/CPU峰值判饱和。闭环无CO修正，不跨旧版本做代码收益推断。
+- 本次证据直接写持久目录/Users/atomex/.Trash/surprising-reboot2-20260922，避免再次重启丢失/tmp证据；运行入口其main/run.py。系统/thermal/swap/UDP/socket每5s、CNC每100ms，低于10GiB停止。分析后清理本轮runtime/Archive/CNC二进制，保留文本/脚本/hash。若仅主轮，无JFR线程/GC/尾部分段新证据；不重复业务回归、快照恢复、三节点、真实Archive重启、外围API或长稳。
+
+## 2026-09-22 再次重启后主轮结果
+
+当前master5bcd05ed，无profiler主轮完成，业务/资金通过；稳定期CPU speed limit66–72%，正式性能无效。按预锁计划不重复GC/JFR，未生成新的分段、GC或线程CPU证据。相同负载下观测超过39万，但不能用跨热状态单次差异声称代码收益、重启治好限频或已达到Core容量上限。
+
+- 稳定窗口60.020576s：23756198 terminal business operations、2269478 terminal Core messages、5655040 fills；分别395800.903 business ops/s、37811.667 Core messages/s、94218.357 fills/s。
+- 排空另计：5.645271ms，补business/core终态=2688/256；最终{'mixedCapacity': 'PASS', 'elapsedSeconds': 60.026, 'terminalBusinessOperations': 23758886, 'offeredBusinessOperations': 23758886, 'terminalCoreMessages': 2269734, 'offeredCoreMessages': 2269734, 'businessOpsPerSec': 395808.46, 'coreMessagesPerSec': 37812.375, 'fills': 5655040, 'fillsPerSec': 94209.496, 'queries': 0, 'unfinished': 0, 'peakInFlight': 256, 'measuredCycles': 2209, 'totalCycles': 3286, 'triggerExecutions': 0}。
+- mixedVerify PASS：fundsDiff0、population/hftPositions/reservations/loss通过，offered与terminal相等，unfinished0。初始化强平/保险/ADL校验通过；稳定交易流queries0/triggerExecutions0，不把初始化业务当稳定期吞吐。
+
+|业务|requests|items|p50/p90/p95/p99/p999/max μs|
+|---|---:|---:|---|
+|PLACE_ORDER|565504|565504|4853/9363/10297/12460/25214/211419|
+|CANCEL_ORDER|565504|565504|4997/6914/7528/9904/24559/33079|
+|APPLY_MARK_PRICE|7718|7718|4571/8839/9969/14049/25116/25952|
+|PLACE_ORDER_BATCH|848256|16965120|5705/11378/12419/15884/33308/258342|
+|CANCEL_ORDER_BATCH|282752|5655040|11927/13213/13967/22822/42008/258342|
+
+- 饱和判定UNCONFIRMED，窗口等待48.920101s/60.020576s（81.5056%）；peak inflight256，Lane执行墙钟平均45.6766%，非有效CPU占比；队列高水位{'matcher': 212, 'completion': 206, 'context': 254, 'lanes': [74, 74, 70, 74]}，缺持续占用时序，不能证明业务饱和。
+- 批撤P99=22.822ms，但批下/批撤最大258.342ms、单下最大211.419ms，不能只报吞吐而称长尾已解决。由于本轮无JFR且已限频，这些极端请求的具体原因未定位，不能强行归因于GC、Owner或UDP。
+- UDP/CNC稳定窗口增量与覆盖：{'udpFullBufferDropDelta': 19, 'udpCoverageSeconds': 56.50910711288452, 'cncCoverageSeconds': 59.942, 'naksSentDelta': 82, 'naksReceivedDelta': 8, 'retransmitsDelta': 7, 'sendBackpressureDelta': 287}。UDP为宿主聚合，loss全程报告含预热；NAK sent不等于本节点重传，不用于逐请求根因推断。
+- 系统资源：{'sampleCount': 14, 'freeGiBMin': 494.27979278564453, 'swapFirst': 'vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)', 'swapLast': 'vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)', 'Swapins': {'first': 0, 'last': 0, 'delta': 0}, 'Swapouts': {'first': 0, 'last': 0, 'delta': 0}, 'Pageouts': {'first': 0, 'last': 1, 'delta': 1}, 'Pages throttled': {'first': 0, 'last': 0, 'delta': 0}, 'java': {'1861': {'ppid': '1713', 'n': 12, 'cpuMean': 0.20833333333333334, 'rssMaxMiB': 58.19140625}, '1872': {'ppid': '1860', 'n': 12, 'cpuMean': 982.3333333333334, 'rssMaxMiB': 1771.2109375}, '1886': {'ppid': '1860', 'n': 12, 'cpuMean': 0.0, 'rssMaxMiB': 69.01953125}, '1889': {'ppid': '1886', 'n': 12, 'cpuMean': 364.575, 'rssMaxMiB': 422.66015625}}}。各进程ps CPU含忙转，不能代替有用工作时间。NMT完整分类baseline/diff与总量保留，短窗口不证明无泄漏。
+- 本轮无JFR/-prof gc，线程CPU/分配/GC暂停/分段无法提供新证据，不能填0；沿用上轮诊断只能作背景。未改业务Java/负载/缓冲/线程，未新增快照恢复、三节点、真实Archive重启、外围API/WebSocket或长稳验证。闭环背压无CO修正，batch20按item计business，fills另报。
+- JMH整次调用60.0472088 s/op，单fork/single-shot，error=NaN、CI=['NaN', 'NaN']，不把整次调用时长当逐笔延迟。
+- 同一运行内启动前CPU speed100%，预热及稳定负载再次66–72%，说明重启未消除此现象；pmset数值不是实际GHz或温度，尚未区分热/功耗等具体限频原因。
+
+- 清理完成：本轮node/client/watch均退出，runtime/Archive/Aeron/tmp、CNC/loss二进制和分析class已清理，无JFR原始文件；完整命令/env/构建校验/日志/分析JSON/NMT/系统与counter时序/源脚本/hash保留在/Users/atomex/.Trash/surprising-reboot2-20260922（2,684,877bytes）。未操作其他项目进程/文件；git diff --check通过。本轮仅追加验证记录，不改业务实现。
