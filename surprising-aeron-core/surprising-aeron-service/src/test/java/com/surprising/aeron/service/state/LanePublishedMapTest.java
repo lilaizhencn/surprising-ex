@@ -55,8 +55,8 @@ class LanePublishedMapTest {
         assertThat(map.get(1)).isSameAs(value);
         map.applyPublished(1, "changed", event);
         assertThat(map.get(1)).isEqualTo("changed");
-        map.removePublished(1, event);
-        map.removePublished(1, event);
+        map.removePublished(1, event, false);
+        map.removePublished(1, event, false);
         assertThat(event.orderGets).isEqualTo(4);
         assertThat(event.orderEquals).isEqualTo(3);
         assertThat(event.orderEqualHits).isEqualTo(2);
@@ -78,14 +78,14 @@ class LanePublishedMapTest {
         for (int i = 0; i < 3; i++) map.put(collisions[i], "value" + i);
         var event = new OwnerSettlementMergeEvent();
         event.mapShape = true;
-        map.removePublished(collisions[0], event);
+        map.removePublished(collisions[0], event, false);
         assertThat(event.shapeSearchSlots).isEqualTo(1);
         assertThat(event.shapeScanSlots).isEqualTo(2);
         assertThat(event.shapeMoves).isEqualTo(2);
         assertThat(map.size()).isEqualTo(2);
         assertThat(map.get(collisions[1])).isEqualTo("value1");
         assertThat(map.get(collisions[2])).isEqualTo("value2");
-        map.removePublished(collisions[3], event);
+        map.removePublished(collisions[3], event, false);
         assertThat(event.shapeSearchSlots).isEqualTo(4);
         assertThat(event.shapeMisses).isEqualTo(1);
         assertThat(event.shapeCensored).isZero();
@@ -108,7 +108,7 @@ class LanePublishedMapTest {
         for (long key : collisions) map.put(key, "retained");
         var event = new OwnerSettlementMergeEvent();
         event.mapShape = true;
-        map.removePublished(collisions[0], event);
+        map.removePublished(collisions[0], event, false);
         assertThat(event.shapeCensored).isEqualTo(1);
         assertThat(event.shapeScanSlots).isEqualTo(128);
         assertThat(map.size()).isEqualTo(129);

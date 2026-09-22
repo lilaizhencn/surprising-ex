@@ -63,12 +63,22 @@ final class LanePublishedMap<V> {
         return previous;
     }
 
-    void removePublished(long key, OwnerSettlementMergeEvent timing) {
+    void removePublished(long key, OwnerSettlementMergeEvent timing, boolean reservation) {
         if (timing != null && timing.mapShape) RemovalShape.observe(values, key, timing);
         long started = timing != null && timing.mapTiming ? System.nanoTime() : 0;
         V previous = values.remove(key);
         if (timing != null && timing.mapTiming) {
-            timing.removalNanos += System.nanoTime() - started;
+            long elapsed = System.nanoTime() - started;
+            timing.removalNanos += elapsed;
+            if (reservation) {
+                timing.reservationRemovals++;
+                timing.reservationRemovalNanos += elapsed;
+                if (previous == null) timing.reservationRemovalMisses++;
+            } else {
+                timing.orderRemovals++;
+                timing.orderRemovalNanos += elapsed;
+                if (previous == null) timing.orderRemovalMisses++;
+            }
             timing.removals++;
             if (previous == null) timing.removalMisses++;
         }

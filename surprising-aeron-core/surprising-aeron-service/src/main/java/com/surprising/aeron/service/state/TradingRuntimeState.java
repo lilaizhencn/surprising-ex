@@ -1507,10 +1507,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }
             removedOrderRoutes.forEach(id -> {
-                state.publishedOrders.removePublished(id, timing);
+                state.publishedOrders.removePublished(id, timing, false);
                 if (changedOrders != null) changedOrders.add(id);
             });
-            removedReservationRoutes.forEach(id -> state.publishedReservations.removePublished(id, timing));
+            removedReservationRoutes.forEach(id -> state.publishedReservations.removePublished(id, timing, true));
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
             publicationPrepared = false;
@@ -2296,6 +2296,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (event == null || !event.complete()) return null;
         OwnerSettlementMergeEvent timing = OwnerSettlementMergeEvent.sample(event.plan().coreSequence(), "collection", -1);
+        long stepStarted = timing == null ? 0 : System.nanoTime();
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
         if (event.replacementIdentityAllocations() != 0)
             event.identities().recordLaneClientAllocations(event.replacementIdentityAllocations());
@@ -2308,6 +2309,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         long laneMask = event.requiredLaneMask();
         MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
                 ? event.takeChanges() : null;
+        if (timing != null) { timing.prepareNanos = System.nanoTime() - stepStarted; stepStarted = System.nanoTime(); }
         try {
             // Admission already created the immutable Owner candidate needed by Matcher and Lane
             // settlement. Adopt that same object before applying the terminal primitive after-image
@@ -2326,38 +2328,48 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                 }
             }
+            if (timing != null) timing.admissionNanos = System.nanoTime() - stepStarted;
             long remainingLanes = laneMask;
             int completed = 0;
             while (remainingLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
-                if (changes == null) flushPublishedChanges(laneId, changedUsers, changedOrders);
+                if (timing != null) stepStarted = System.nanoTime();
+                if (changes == null) {
+                    flushPublishedChanges(laneId, changedUsers, changedOrders);
+                    if (timing != null) timing.laneMergeNanos += System.nanoTime() - stepStarted;
+                }
                 else {
                     completed += changes.completedPending[laneId];
                     if (fundsAccumulator != null) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
+                    if (timing != null) { timing.fundsNanos += System.nanoTime() - stepStarted; stepStarted = System.nanoTime(); }
                     if (changes.directPositionIdentities) {
                         var positions = changes.laneDeltas[laneId].positions;
                         for (int index = 0; index < positions.size; index++)
                             event.identities().releasePublishedPosition(positions.keyAt(index));
                     }
+                    if (timing != null) { timing.identitiesNanos += System.nanoTime() - stepStarted; stepStarted = System.nanoTime(); }
                     changes.laneDeltas[laneId].commitTerminalToOwner(
                             this, laneId, terminalOrderSink, event.plan().coreSequence(),
                             changedUsers, changedOrders);
+                    if (timing != null) { timing.laneMergeNanos += System.nanoTime() - stepStarted; stepStarted = System.nanoTime(); }
                     LaneBalancePatches balances = changes.balancePatches[laneId];
                     for (int index = 0; index < balances.size(); index++) {
                         balances.publishAvailableAt(this, index);
                         if (changedUsers != null) changedUsers.add(balances.userId(index));
                         markBalancesChanged();
                     }
+                    if (timing != null) timing.balancesNanos += System.nanoTime() - stepStarted;
                 }
             }
             long trimStarted = timing == null ? 0 : System.nanoTime();
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             if (timing != null) timing.trimNanos = System.nanoTime() - trimStarted;
+            if (timing != null) stepStarted = System.nanoTime();
             if (changes != null) {
                 pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
             }
-            if (timing != null) timing.completed = true;
+            if (timing != null) { timing.pendingNanos = System.nanoTime() - stepStarted; timing.completed = true; }
             return aggregate;
         } finally {
             long releaseStarted = timing == null ? 0 : System.nanoTime();

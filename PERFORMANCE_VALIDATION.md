@@ -4113,3 +4113,102 @@ JFR配置owner-commit-profile.jfc包含新OwnerPublication，每进程max256m；
 归档目标`/Users/atomex/.Trash/surprising-owner-recheck-20260922`；原始/tmp路径仅用于历史定位。主结论所用分布在serial-cost.txt、head-residence.txt、head-wait.txt、head-pauses.txt，资源证据在各进程window/summary/view文本；原始JFR删除后仍可核对本节数字与分析方法。
 
 - 清理完成：确认本轮节点/客户端/驱动退出；清理失败启动和3轮成功运行的runtime/Archive/Aeron/tmp、3份原始JFR及分析class文件。保留源码、脚本、完整命令/日志、分析/测试/校验/系统时序与cleanup.json，归档`/Users/atomex/.Trash/surprising-owner-recheck-20260922`共13,272,181bytes。未停止或删除其他项目/用户进程与文件。
+
+
+## 2026-09-22 终态合并与删除成本：采集前计划
+
+- 当前master9634d655；对照commit不适用（仅当前master）。CodeGraph工具未暴露，直接核对已有源码和上轮归档。继续定位collection剩余耗时与订单/冻结公共表删除；不改每8条复查策略、不改任何提交业务条件。此前mapTiming15346次删除/10240miss（66.73%）只是已观察到的基线线索，不作为本轮性能对照，不据此直接删逻辑。
+- 假设：公共表删除miss可能来自未发布的立即终态订单/冻结；高miss率未必占多数耗时。扩展现有OwnerSettlementMerge稀疏1/64事件的collection互斥阶段：prepare、admission对象采用、funds累计、position identities释放、laneMerge、balances发布、trim、pending计数、release。laneMerge包住原lane事件，不能重复相加。已有1/2048 mapTiming分开order/reservation删除数、miss和操作经过时间；沿用真实remove返回值，不增加contains/get探测或改变删除行为；mapShape仍用另一抽样桶，避免预热被计时的查找。
+- 业务入口为Lane结算完成后Owner有序收集，资金/余额/终态保留/索引仍按原顺序；诊断只在已有局部事件中累计，无新业务状态、集合、线程或框架。按原异常规则失败恢复；默认diagnostics关闭。测试检查时间分区不超过total、分表计数/耗时等于原总数，订单身份/碰撞删除/恢复保持。
+- 只跑1次真实JMH+JFR诊断，不另跑无profiler/GC主成绩，不声称性能优化。真实单Aeron成员/网络/Archive，LINEAR_PERPETUAL MIXED、batch20/128symbols/1385用户/seed25620、4Lane/1Matcher、global/session inflight256、Owner/Matcher pipeline/settlement BUSY_SPIN、input64；冷却60s、预热30s、稳定60s、排空单列。G1节点512m–1536m/客户端128m–512m，HotSpot Corretto27+33-FR/Maven3.9.16，i9-9880H/16GiB/macOS26.7。
+- JFR每进程独立/max256m，owner-poll明确开启；脚本/env/命令/PID、5s ps/vm_stat/swap/pmset/disk入档，磁盘现505GiB，低于10GiB停止。CPU限频/swap使性能无效；DataLoss/负时间/计数分区不一致使对应诊断无效；资金差额/未完成必须0，没有预设吞吐SLO。诊断开销未量化，不把纳秒级采样均值当成本本身的精确下界。
+- 回归LanePublishedMapTest、ClusterCommandWindowRoutingTest、ClusterCommandPipelineTest、CoreOrderedOrderBatchTest、RuntimeCommitRecoveryTest、ContinuousOwnerBenchmarkTest，开启diagnostics。没有真实Archive重启/长稳/三节点/外围API-WebSocket，不作相关通过声明。复现python3 /tmp/surprising-owner-merge-detail-20260922/run.py，构建命令与结果一并入档。源diff SHA256 f7de47e38eb47e2f010a6ccd4e44e9c960fe9ce12e159023250062a455e212f9。归档后只清理本轮runtime/Archive/rawJFR。
+
+
+## 2026-09-22 终态合并与删除成本：诊断结果
+
+本轮仅扩展已有稀疏诊断字段和断言，未改变提交、删除、索引或资金语义，无新增业务状态/线程/框架。结论为**正确性检查通过、定位部分验证、性能验收无效**：CPU_Speed_Limit=66–70；不能由此次profiler结果评价优化幅度或39万目标。Owner-poll诊断还产生Owner同步日志，按统一标准也不满足正式主链路I/O验收要求。
+
+### 完成性、复现与适用范围
+
+- master9634d655加计划所列诊断diff，1成员/网络/Archive、1Matcher/4Lane、global/session inflight256、MIXED/batch20/128symbols/1385users/seed25620，实际配置无偏差。冷却60s/预热30s/测量60.014729s。完整环境和命令见environment.txt、owner.command.json、node.command、client.command、run.py。入口：`python3 /tmp/surprising-owner-merge-detail-20260922/run.py`；分析：`python3 .../analyze.py`、`python3 .../jfr-analyze.py`。归档后替换脚本中的历史root即可复查文本/源方法；原始JFR清理后不可重放录制。
+- 构建：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dcore.settlementLatencyDiagnostics=true -Dtest=LanePublishedMapTest,ClusterCommandWindowRoutingTest,ClusterCommandPipelineTest,CoreOrderedOrderBatchTest,RuntimeCommitRecoveryTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`，HotSpot Corretto27+33-FR/Maven3.9.16，327测试通过/0失败/0跳过（9+1+250+28+8+31），BUILD SUCCESS。覆盖碰撞删除、诊断字段分区、顺序/批量/窗口、资金与恢复回归。
+- 稳定窗口终态22,207,900 business ops、2,122,012 Core messages、5,286,400 fills：370,040.825 business/s、35,358.187 messages/s、88,085.043 fills/s；仅为本次无效性能环境中的诊断记录，不是无profiler主成绩。排空单列5.973677ms/2684 business/252messages。最终offered=terminal=22,210,584 business、2,122,264messages、unfinished=0；clientPass=true，fundsDiff=0，population/hftPositions/reservations/loss通过，businessHash=62031d4fd0047e89。风险/强平/保险/ADL启动场景通过，不把setup检查当持续阶段吞吐。
+- 窗口阻塞49.436327s/60.014729s=82.37%，617179次；inflight峰值256，非恒定到达率，记录为窗口背压的闭环已达负载，未作coordinated omission校正，不能解释为任意外部到达率的延迟SLO。10s区间业务速率376538/374890/354876/379581/376252/358016；队列峰值matcher213/completion210/context256/Lane49,55,48,51。无独立外围HTTP API吞吐。
+- 真实Archive重启/三节点/外围API-WebSocket/长稳未测；恢复证据仅来自上述回归，不声称真实集群恢复或无泄漏。预热后仍有编译活动，本轮不证明完全稳态。无额外无profiler或GC轮次，诊断开销未定量。
+
+分业务延迟来自客户端request入口到终态（μs；样本含排空），不混为Owner执行成本；Core入口→admission与各阶段采样在node-window.txt，无API accepted三段完整直方图，不补造：
+
+|业务|requests/items|p50|p90|p95|p99|p99.9|max|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|PLACE_ORDER|528640/528640|5320|9437|10223|12697|23674|29900|
+|CANCEL_ORDER|528640/528640|5480|8163|8790|11427|19611|25509|
+|APPLY_MARK_PRICE|7704/7704|5095|9478|10928|15261|21495|27033|
+|PLACE_ORDER_BATCH|792960/15859200|7020|11706|12730|16097|27787|35782|
+|CANCEL_ORDER_BATCH|264320/5286400|11919|13361|14098|25477|31375|35586|
+
+批量下单/撤单均20items/batch，约13211.5/4403.8 batches/s（总request/含排空60.021s），不与item速率混算。
+
+### Owner串行阶段的证据
+
+保护窗口03:31:20.711–03:32:16.727 UTC（稳定窗口两端各裁2s，共56.016s）；三个进程DataLoss=0。MapDetail校验30752个collection，无负时间/分区超total/删除计数或耗时拆分不一致，missingHead=0。SerialCost按sequence关联命令，普通1/64样本排除mapTiming/mapShape；同一命令跨Lane求和。下表均为**每条批量Core命令的采样经过时间均值μs，不是单item，也不是纯CPU成本**。
+
+|互斥collection阶段|批量下单(n=10801)|批量撤单(n=3615)|
+|---|---:|---:|
+|prepareNanos|0.304502|0.260639|
+|admissionNanos|1.418111|0.920018|
+|fundsNanos|0.183373|0.080985|
+|identitiesNanos|0.283124|0.079446|
+|laneMergeNanos|13.359286|12.318860|
+|balancesNanos|0.395053|0.256460|
+|trimNanos|0.519272|0.705650|
+|pendingNanos|0.326407|0.142484|
+|releaseNanos|0.973106|0.289830|
+|totalNanos|18.697719|15.861847|
+
+laneMerge是父区间，内部公共状态发布6.572044/6.216947μs、终态记录2.732251/3.163212μs、changed索引缓冲移交0.282531/0.188464μs；**不可再与父区间相加**。内部Lane total10.068697/9.909416μs，父区间减它=3.290589/2.409444μs，其中包含`OwnerSettlementMergeEvent.sample`与`finish.end/commit`未被内部total覆盖的录制成本、调用边界及调度，不能称作未优化的业务CPU。新增exclusive阶段之外剩余约0.9355/0.8075μs同样含计时与循环边界。没有分离采样开销前，不对这些差值做吞吐收益估计。
+
+- 资金累计仅0.183/0.081μs、position身份释放0.283/0.079μs、余额发布0.395/0.256μs。虽然RuntimeFundsAccumulator.add使用小数组线性合并，本轮证据不支持优先换结构；身份引用计数和余额提交边界也不能为了省检查跳过。admission对象采用1.418/0.920μs，值得观察但不是最大项。
+- 公共状态发布内部删除路由阶段2.456075/3.813338μs（包含遍历/changedIDs/clear），冻结发布1.568519/1.010185μs，订单发布1.157405/0.512894μs；余下users/positions及边界见serial-cost.txt。
+- Fact发布3.999179/5.713101μs；所有命令OwnerPublication n=30859，总3.589153μs，其中indexes2.218970μs=61.82%，clear0.663061、funds0.232348、journal0.070066、realtimeCapture0.059323、other0.345384μs。发布编码/egress与索引不同，不把该总值说成网络发送耗时。批量结果准备0.113313/0.107848μs、结果账本0.738039/0.749154μs、批量清理2.152567/1.355772μs；响应准备仍不是首要项。
+- 终态记录batchplace最大6.255039ms不代表哈希慢6ms：其中Lane事件sequence2052869在03:31:48.478090268–48.484412525，terminalIndex=6.254970ms，GC pause03:31:48.478217997–48.484296167（6.078170ms）落在同一Lane区间。该样本明显受GC污染，不能当作表操作CPU热点；全分布保留，不删异常后报优分。见pause-overlap.txt。分析器首次误用coreSequence字段报错，修正为sequence后重读成功；非业务运行失败。
+
+### 删除未命中的真实含义
+
+mapTiming独立1/2048样本：
+
+|业务|命令样本|订单remove/miss|冻结remove/miss|订单/冻结累计耗时μs|
+|---|---:|---:|---:|---:|
+|PLACE_ORDER|234|0/0|0/0|0/0|
+|CANCEL_ORDER|249|249/0|249/0|32.127/37.778|
+|PLACE_ORDER_BATCH|360|4780/4780|4780/4780|549.141/545.500|
+|CANCEL_ORDER_BATCH|116|2320/0|2320/0|236.658/272.978|
+
+本次删除总数=14698，miss9560（65.043%）；批量下单订单/冻结每次约114.883/114.121ns，批量撤单102.008/117.663ns。批量下单每命令两表remove累计约3.041μs（包含无删除的样本命令），撤单4.393μs。**这些来自额外nanoTime的另一抽样桶，不能直接与普通removals阶段相减**，也不能认定全部3μs都能省掉。单次操作与增加membership探测/标记维护处于相同数量级，未证明跳过逻辑净收益。
+
+独立mapShape：batchplace9800次全miss，search15030slots，scan/moves=0；batchcancel4840次0miss、search7502/scan4400/moves818；普通cancel456次0miss、search672/scan266/moves8；censored=0。不存在本轮证据支持的超长探测链。采样覆盖的是已埋点公共表删除路径，不声称覆盖所有直接remove。
+
+源码解释：Lane的removedOrderRoutes/removedReservationRoutes记录私有状态删除；立即终态订单已跳过Owner公共表插入，因此其公共表remove miss符合路径，不是资金漏结算。ActiveOrderIndex维护活动订单的用户/symbol查询与撤单路由，职责不同，不能与公共表删除简单去重。OrderChangeBuffer热路径已经复用Owner对象并应用primitive after-image，不走通用LanePublishedMap.applyPublished的equals；不要用通用map equality计数推断这里有多余对象比较。OwnerIndexedChanges.adopt在空目标可交换storage，不是总会复制一遍所有数据。
+
+### 下一项最小验证
+
+继续优先查`RuntimeFactIndexes`内各子索引和`TerminalStateRetention.acceptBatch → TerminalTombstoneStore.putIfAbsent`，而不是改资金/身份语义或直接去掉miss删除。下一次只细分订单/持仓/风险索引访问与终态entity/client索引工作量，并将录制成本与业务区间隔开；同时保留持仓身份、订单clientId/FIFO淘汰、快照恢复验证。终态store已经使用primitive FIFO槽位、单次entity探测和已知slot直接解链，不能把已实现的优化重新当方案。当前仍是Owner上的多项串行成本，未证明某一个方法单独限制全系统吞吐；无需据此新增Owner分片或跨线程提交协议。
+
+### 资源、等待与证据限制
+
+- 11个热控样本CPU限制66–70，scheduler100；swap0/无swapin-out，Pageouts+9，磁盘最少501.64GiB。节点RSS峰1791.61MiB/平均进程CPU958.91%，发压fork442.95MiB/370.28%；Owner/Matcher/Lane单核约98.4%含busy-spin，Lane useful约43.4%，不可由CPU推断全阶段有效饱和。没有证明客户端无限供给或Core容量上限。
+- 节点保护窗口80次G1 young pause，合计438.274644ms（0.782%），p50/p95/p99/max=5.302212/6.487826/6.832087/6.965024ms；客户端fork425次/361.922549ms，max1.916226ms。尾延迟受GC与抢占影响。节点69次Compilation合计508.051ms/max262.676ms、2次deopt；85次safepoint begin到达合计6.655ms/max0.262ms，87次VM operation合计440.191ms。
+- ThreadAllocationStatistics：Owner91.106MB/s、Matcher85.136MB/s、各Lane56.003–56.161MB/s、clustered-service36.222MB/s；fork发压线程284.148MB/s，计数取相邻采样54.61/54.556s，非精确稳定窗口byte/op。未跑-prof gc，不提供伪精确对象/op。TLAB51141、outside656、sample51142事件；sample权重总24.471GB仅抽样估计，观测最大单对象65552bytes不是全局最大。热点为协议字符串解码、Lane订单/快照、MatcherResult/事件集合，完整栈在node-window.txt。
+- 节点heap committed512MiB，after-GC172.170–175.451MB（首173.019/尾173.818MB）；forkafter-GC12.925–13.549MB。Direct8buffers/9,575,136bytes窗口稳定。NMT末Total committed734580KB/reserved3160208KB、相对启动committed−8803KB；Code+28499KB说明启动/JIT参与，完整各类与时序入档。未测长期native/FD增长斜率或泄漏。
+- Owner execution samples1923，acceptBatch栈53，另有decode/place-admission/冲突前缀/哈希删除，分散且采样有限，不能只用hot-method排名断定总瓶颈。Archive file writes1,041,735次/1,864,326,976bytes/12.8345s，属于独立archive线程。Owner有33次同步Console日志write、12,393bytes/0.861594ms，来自显式开启owner-poll诊断；正式主链路I/O验收不通过，不能漏报或当纯业务I/O。未见录制的Owner数据库/socket阻塞；NIO/Aeron原生I/O不保证都被JFR socket事件捕获。异常录制0不代表关闭事件的异常为0。
+- 原始JFR、summary、五类view、保护窗口聚合、OwnerFocus/HeadWait/HeadResidence/SerialCost/MapDetail源与文本、运行日志/系统时序/测试结果均入档；JFR配置和完整JVM参数复制保存。JMH wrapper之外的引擎门槛PASS不覆盖本报告热控/I/O失败条件。
+
+|原始JFR文件|bytes|SHA256|DataLoss|
+|---|---:|---|---:|
+|/tmp/surprising-owner-merge-detail-20260922/owner/window-256/end_to_end/client-57564.jfr|9915281|dc4143cbfd48e184ca9331120fc08512f2dab72c99ac1f994cc93846730c2b20|0|
+|/tmp/surprising-owner-merge-detail-20260922/owner/window-256/end_to_end/client-57569.jfr|123066431|7f237b9f7ba130293943cdc7ea620f41687beda3637f99d325f784d229621dc3|0|
+|/tmp/surprising-owner-merge-detail-20260922/owner/window-256/end_to_end/node.jfr|140252026|2f7d1c1f0e2e867c341ad0e9dc7e226a5bbcaa4bae75bf866ba3b9c89dbf1a70|0|
+
+归档目录`/Users/atomex/.Trash/surprising-owner-merge-detail-20260922`，运行/tmp地址仅作历史定位；清理状态另追加。
+
+- 清理完成：本轮节点/客户端/驱动PID已退出；删除本轮runtime/Archive/Aeron/tmp、3份rawJFR及分析class，保留完整日志/命令/脚本/测试与聚合证据、JFR配置、原始大小SHA和artifact-sha256.json。归档`/Users/atomex/.Trash/surprising-owner-merge-detail-20260922`共5,262,782bytes；未影响其他进程或项目文件。

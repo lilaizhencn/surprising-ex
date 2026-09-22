@@ -26,6 +26,8 @@ final class OwnerSettlementMergeEvent extends Event {
     public long trimNanos;
     public long releaseNanos;
     public long changedIndexNanos;
+    // Collection-only exclusive intervals; laneMerge encloses nested lane events.
+    public long prepareNanos, admissionNanos, fundsNanos, identitiesNanos, laneMergeNanos, balancesNanos, pendingNanos;
     // Disjoint 1/2048 streams: shape inspection must not warm timed map operations.
     public boolean mapTiming;
     public boolean mapShape;
@@ -33,6 +35,8 @@ final class OwnerSettlementMergeEvent extends Event {
     public long orderGetNanos, orderEqualsNanos, orderPutNanos;
     public int removals, removalMisses;
     public long removalNanos;
+    public int orderRemovals, orderRemovalMisses, reservationRemovals, reservationRemovalMisses;
+    public long orderRemovalNanos, reservationRemovalNanos;
     public int shapeRemovals, shapeMisses, shapeCensored, shapeSearchSlots, shapeScanSlots, shapeMoves;
     public int shapeMaxSearch, shapeMaxScan, shapeMaxSize, shapeMaxCapacity;
     private long started;

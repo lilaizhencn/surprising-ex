@@ -34,7 +34,7 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
         long key = keyAt(index);
         OrderRuntime source = valueAt(index);
         if (source == null) {
-            target.removePublished(key, timing);
+            target.removePublished(key, timing, false);
             return null;
         }
         OrderRuntime ownerValue = target.get(key);

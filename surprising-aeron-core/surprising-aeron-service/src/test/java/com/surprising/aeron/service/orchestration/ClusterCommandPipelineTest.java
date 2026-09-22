@@ -108,12 +108,19 @@ class ClusterCommandPipelineTest {
                 assertThat(total).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
                 long stages = 0;
                 for (String field : List.of("publicationNanos", "terminalIndexNanos", "trimNanos",
-                        "releaseNanos", "changedIndexNanos")) {
+                        "releaseNanos", "changedIndexNanos", "prepareNanos", "admissionNanos",
+                        "fundsNanos", "identitiesNanos", "laneMergeNanos", "balancesNanos", "pendingNanos")) {
                     long value = merge.getLong(field);
                     assertThat(value).as(field).isBetween(0L, total);
                     stages += value;
                 }
                 assertThat(stages).isLessThanOrEqualTo(total);
+                assertThat(merge.getInt("orderRemovals") + merge.getInt("reservationRemovals"))
+                        .isEqualTo(merge.getInt("removals"));
+                assertThat(merge.getInt("orderRemovalMisses") + merge.getInt("reservationRemovalMisses"))
+                        .isEqualTo(merge.getInt("removalMisses"));
+                assertThat(merge.getLong("orderRemovalNanos") + merge.getLong("reservationRemovalNanos"))
+                        .isEqualTo(merge.getLong("removalNanos"));
                 long publication = 0;
                 for (String field : List.of("usersNanos", "ordersNanos", "reservationsNanos", "positionsNanos", "removalsNanos")) {
                     assertThat(merge.getLong(field)).as(field).isNotNegative();
