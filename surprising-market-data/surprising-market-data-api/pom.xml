@@ -12,20 +12,6 @@
 
     <artifactId>surprising-market-data-api</artifactId>
     <name>surprising-market-data-api</name>
-    <description>Market-data RPC contracts and shared candlestick models</description>
+    <description>Shared candlestick event and status for realtime and gateway</description>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-openfeign-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>jakarta.validation</groupId>
-            <artifactId>jakarta.validation-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-web</artifactId>
-        </dependency>
-    </dependencies>
 </project>

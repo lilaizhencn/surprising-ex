@@ -157,3 +157,11 @@ bash scripts/test-production-chain-preflight.sh
 
 本轮业务应用、Core、PostgreSQL、Kafka 和 Redis 均已停止；已清理隔离运行目录、Archive、
 preflight 数据、临时日志及已汇总的测试报告，保留构建产物和逐测试类验证摘要。
+
+## 合并后的 API 收敛（2026-09-22）
+
+- 删除无生产调用的 Feign 接口、旧命令/查询模型和两份无人使用的账户缓存。
+- 单应用专用类型及对应测试迁入 gateway、realtime 或 derivatives-lifecycle；移动保留包名、源码和接口字段。
+- funding-api 的剩余类型全部属于 derivatives-lifecycle，删除旧 funding 父 POM、API POM 和 gateway 的空依赖。
+- market-data-api 保留 `CandleUpdatedEvent`、`CandleStatus`，供 realtime 产出、gateway WebSocket 消费；其余 K 线类型迁入 realtime。
+- account、trading、instrument 保留 maker/后台/Core 使用的共享契约，以及通过通用 JSON 消费的现有事件契约。

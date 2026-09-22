@@ -202,3 +202,5 @@ Operational audit entries preserve actor, reason, time and before/after values. 
 `InstrumentCoreSyncService` 注册及独立行情/价格/衍生品进程的快照加载仍保留。
 服务间内部查询无需凭证；公共及管理查询通过 gateway 入口，管理操作仍需要管理员登录和权限。
 数据库建表和种子数据初始化不是重复的 JVM 缓存初始化，不能一并删除。
+
+API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。

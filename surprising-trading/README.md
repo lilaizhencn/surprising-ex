@@ -3,13 +3,13 @@
 本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-gateway` 中的 订单业务包 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。行情查询投影已迁入 `surprising-market-data-provider`。
+Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-gateway` 中的 订单业务包 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。盘口查询位于 gateway，成交导出和 K 线投影位于 realtime。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
 - `surprising-gateway` 中的 订单业务包：统一订单和止盈止损条件单入口 provider。
-- `surprising-market-data-provider`（位于 `surprising-market-data`）：Aeron Core 行情与公共成交的可重建查询投影。
+- `surprising-realtime-provider`：成交导出、K 线和实时查询投影；盘口查询由 gateway 调用 Core。
 
 ## long 定点数模型
 
@@ -375,7 +375,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 每个 `ProductLine` 的 Aeron Core 内嵌一个 fork exchange-core；它是该产品线唯一价格树、FIFO 和可执行盘口。
 `TradingRuntimeState` 保存 owner-thread 热路径业务状态和 primitive/有界索引；`TradingCoreState` 只作为快照、事实、恢复、hash 与对账投影，
-两者都不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-market-data-provider` 只负责行情/成交查询投影，
+两者都不保存 `CoreBookState`、价格桶或 priority sequence。realtime 只负责行情/成交查询投影，
 不持有、恢复或裁决第二个 exchange-core。
 
 命令在 Core 单写 transition 内按以下顺序执行：
@@ -531,19 +531,20 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 # Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl surprising-gateway -am package -DskipTests
 java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
+mvn -pl surprising-realtime/surprising-realtime-provider -am package -DskipTests
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
-mvn -pl :surprising-market-data-provider -am spring-boot:run
+java -jar surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar
 ```
 
 端口：
 
 - `9094`：统一业务应用；用户订单经 `/api/v1/gateway/trading` 进入。
-- `9081`：统一 Market Data Provider，提供撮合行情投影和 K 线查询。
+- `9095`：realtime 行情应用，提供 K 线查询；盘口查询使用 gateway 的 `9094`。
 
 ## 生产注意事项
 
 - 订单业务包与身份、账户、合约同进程部署。Aeron Core 独立；业务应用的 PostgreSQL、价格 Kafka 和查询投影依赖保留，数据库不作为 Core 资金状态回退。
-- `surprising-market-data-provider` 独立于 trading provider，但只维护可重建的行情、成交和 K 线查询投影，不持有可执行订单簿。
+- realtime 独立于 gateway，维护可重建的行情、成交和 K 线查询投影，不持有可执行订单簿。
 - Aeron Core 使用 HotSpot JDK 27 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
   父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 27 可用的 2026.x BOM；service Maven `validate`
   同时验证 whole dependency JAR 与内嵌 provenance。
@@ -566,10 +567,12 @@ mvn -pl :surprising-market-data-provider -am spring-boot:run
 
 ```bash
 mvn -pl surprising-gateway -am test
-mvn -pl :surprising-market-data-provider -am test
+mvn -pl surprising-realtime/surprising-realtime-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```
 
 
 Core 仅保留启动时注册并封存的 canonical instrument；启动器一次冻结并注册完整集合，交易热路径不再复制配置或传递版本号。
 纯维护状态使用独立 maintenance 命令更新同一对象，不替换订单、持仓及结算路径持有的引用。
+
+API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。

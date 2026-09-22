@@ -226,3 +226,5 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 测试以删除前的 81 个 API 路径作为本地分派契约基线，并检查 maker 的三个 Feign 契约均仍有内部 HTTP 映射。本轮不改变 Core 协议、事件可靠投递、产品线隔离或资金结算规则。
 
 内部认证清理：删除 `BusinessEndpointConfiguration`、业务 token 请求头、账户内部 HMAC/时间戳/audience 校验及发送端签名。`BUSINESS_INTERNAL_TOKEN`、`ACCOUNT_INTERNAL_SERVICE_SECRET`、`GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET` 不再需要。内部控制器仍执行 DTO 校验、产品线检查和原有业务拒绝处理；公共用户 JWT、管理员权限/审批及外部托管钱包签名保持原有行为。
+
+合并后仅本应用使用的账户、订单、条件单、费用和合约管理请求/响应类型已迁入本模块 `src/main/java/com/surprising/{account,trading,instrument}/api`。保留原包名和内容，HTTP/JSON 契约不变；跨进程共享类型仍来自对应 API 模块。

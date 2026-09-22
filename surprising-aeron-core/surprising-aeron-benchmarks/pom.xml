@@ -22,6 +22,11 @@
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-realtime-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-tools</artifactId>
             <version>${project.version}</version>
         </dependency>

@@ -301,3 +301,5 @@ java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 ```bash
 mvn -pl surprising-gateway -am test
 ```
+
+API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。

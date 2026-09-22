@@ -63,7 +63,7 @@ Core 六产品资金/快照回归在前一修复提交已通过。不能把组�
 mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests install
 mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway test
 mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -Dtest=LifecycleApplicationContextTest test
-mvn -pl surprising-aeron-core/surprising-aeron-client,surprising-funding/surprising-funding-api,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api test
+mvn -pl surprising-aeron-core/surprising-aeron-client,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api test
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -Dtest=W4LifecycleQaMainTest test
 mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-aeron-core/surprising-aeron-benchmarks -DskipTests package
 PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=funding-merge-review ACTION=dry-run AERON_CLUSTER_HOSTNAMES=127.0.0.1 bash scripts/start-product-line-providers.sh
@@ -92,3 +92,5 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 
 本轮 lifecycle 34 项测试全部通过，含五产品完整组件配置与共享快照实际更新；gateway 537 通过、34 外部环境测试跳过。
 完整外部数据库/Kafka/Core 重启和吞吐未测。详见 [清理验证摘要](../docs/validation/merged-config-cleanup-20260922.json)。
+
+资金费 API 类型已直接归入本模块 `src/main/java/com/surprising/funding/api`；旧 funding 聚合 POM、API 模块及无调用的 `FundingRpcApi` 已删除。网关继续按原 HTTP 路径转发资金费查询，不依赖资金费 DTO JAR。

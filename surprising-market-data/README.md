@@ -1,9 +1,9 @@
 # 市场数据契约
 
-此目录保留 `surprising-market-data-api`（K 线 RPC 和事件模型），不再构建或启动独立 market-data provider。
+此目录保留 `surprising-market-data-api`（gateway 与 realtime 共用的 `CandleUpdatedEvent`、`CandleStatus`），不再构建或启动独立 market-data provider。
 
 - 盘口查询实现迁入 `surprising-gateway` 的 `com.surprising.trading.matching` 包。
-  公共 URL `/api/v1/gateway/trading-market/orderbook` 不变，网关本地调用原 Controller/Service，
+  公共 URL `/api/v1/gateway/trading-market/orderbook` 不变，网关本地调用 Service，
   使用现有 `OrderAeronGateway` 查询 Core；没有复制订单簿或把行情状态写入账户。
   旧内部 `/api/v1/trading/market/orderbook` 由 gateway 9094 承接，独立内部调用方无需凭证。
 - K 线实现和测试迁入 `surprising-realtime-provider` 的 `com.surprising.candlestick.provider` 包，
@@ -14,3 +14,5 @@
 K 线消费同产品 `match.trades` topic 并聚合、落库。产出实时 K 线仍依赖成交导出器实际运行。
 
 完整数据路径及部署要求见 [realtime 行情应用](../surprising-realtime/README.md)。
+
+K 线查询 DTO、周期枚举和成交聚合输入已迁入 realtime 的 `src/main/java/com/surprising/candlestick/api`，无调用的 `CandlestickRpcApi` 已删除。Java 包名及事件 JSON 保持不变。

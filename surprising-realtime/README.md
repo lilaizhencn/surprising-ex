@@ -275,3 +275,5 @@ gateway 重启会中断共用 Driver 的实时传输；现有 Sender/Receiver/Ro
 Driver 仍使用 SHARED 模式，线程、共享内存与 term buffer 开销保留；仅减少独立 JVM 的开销。
 迁移前停止旧独立 Driver；同一个目录只允许一个活跃 Driver，不能让多个 gateway 同时占用。
 这是同机共享目录的部署方式；跨主机不能用目录字符串代替各主机本地的 Driver。
+
+K 线查询、周期和聚合输入类型已迁入本模块 `src/main/java/com/surprising/candlestick/api`；`surprising-market-data-api` 仅保留与 gateway WebSocket 共用的 K 线事件和状态。
