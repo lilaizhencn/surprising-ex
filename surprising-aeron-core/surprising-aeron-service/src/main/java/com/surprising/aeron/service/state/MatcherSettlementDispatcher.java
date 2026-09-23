@@ -14,14 +14,6 @@ final class MatcherSettlementDispatcher {
 
     MatcherSettlementDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
-    MatcherSettlementEvent prepareDirect(long sequence, long laneMask, OrderRuntime single,
-            OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
-            RuntimeIdentityRegistry identities, long timestamp, long position,
-            List<Long> cancellations, LaneOrderResultTarget target) {
-        return prepareDirect(sequence, sequence, laneMask, single, orders, count, commandId, shard,
-                identities, timestamp, position, cancellations, target);
-    }
-
     MatcherSettlementEvent prepareDirect(long coreSequence, long commitSequence, long laneMask,
             OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
             RuntimeIdentityRegistry identities, long timestamp, long position,
