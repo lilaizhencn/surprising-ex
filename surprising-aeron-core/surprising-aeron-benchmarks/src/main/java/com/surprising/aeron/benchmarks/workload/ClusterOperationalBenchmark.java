@@ -37,7 +37,7 @@ public class ClusterOperationalBenchmark {
         System.setProperty("surprising.aeron.mixed-fill-heavy", Boolean.toString("FILL_HEAVY".equals(tradingProfile)));
         workload = new ClusterMixedCapacityMain(controlPageSize, batchSize);
         try {
-            workload.verifyDependencyCollisionCoverage();
+            workload.verifyRoutingCollisionCoverage();
             workload.prepareMeasuredRun();
         }
         catch (RuntimeException | Error failure) { workload.close(); throw failure; }

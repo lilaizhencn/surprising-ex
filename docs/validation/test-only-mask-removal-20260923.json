@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Amazon Corretto HotSpot 27.0.0",
+  "change": "Remove benchmark/test-only TradingDependencyMask from core service; select account collisions through LaneTopology and matcher collisions through matcherShardId; use distinct order IDs and symbols directly.",
+  "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package",
+  "tests": {
+    "tests": 1414,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "result": "PASS",
+  "serviceStateClassesWithoutProductionSourceReferences": [],
+  "jars": {
+    "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar": {
+      "sha256": "746dd19a6be79c73356c2b4ebfdfe826930737765e79566f2b514fb58a96ba18",
+      "deletedClassAbsent": true,
+      "jmhBenchmarkList": false
+    },
+    "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {
+      "sha256": "0208c15149a697b879580458cacab9f40b34ad18181f5d0de06ad44cbaee6625",
+      "deletedClassAbsent": true,
+      "jmhBenchmarkList": true
+    }
+  },
+  "logSha256": "45e1cc5232468b0601dbe531e996a413eb572153d16a1f60641f7cb60638777e",
+  "scope": "Core service and benchmarks reactor tests, shaded JMH artifact inspection. External cluster capacity run and sustained throughput measurement were not run because workload setup only changed.",
+  "cleanup": "Removed this run Surefire reports and temporary build log after recording evidence; jars retained."
+}

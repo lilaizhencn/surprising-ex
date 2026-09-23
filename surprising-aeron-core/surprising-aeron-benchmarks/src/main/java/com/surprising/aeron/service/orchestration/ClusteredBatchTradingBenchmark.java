@@ -534,9 +534,6 @@ public class ClusteredBatchTradingBenchmark {
             ContractType type=ContractType.valueOf(productLine.contractTypeCode());
             settleAsset=type.isInverse()?"BTC":"USDT";
             pipelineSymbolB = "JMH-PIPE-B-USDT";
-            while (com.surprising.aeron.service.state.TradingDependencyMask.account(pipelineSymbolB.hashCode())
-                    == com.surprising.aeron.service.state.TradingDependencyMask.account("JMH-PIPE-A-USDT".hashCode()))
-                pipelineSymbolB = "X" + pipelineSymbolB;
             String[] startupSymbols = {"JMH-PIPE-A-USDT", pipelineSymbolB, "JMH-BTC-USDT"};
             for (String symbol : startupSymbols) {
                 apply(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(

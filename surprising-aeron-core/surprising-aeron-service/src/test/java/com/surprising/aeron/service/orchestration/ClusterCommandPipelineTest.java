@@ -5,7 +5,7 @@ import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.TradingDependencyMask;
+import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
@@ -585,8 +585,7 @@ class ClusterCommandPipelineTest {
     private static String differentMatcherSymbol(TradingCoreRuntime state, String firstSymbol) {
         for (int i = 0; i < 256; i++) {
             String candidate = "PARTITION-" + i + "-USDT";
-            if (state.matchingAdapter.matcherShardId(candidate) != state.matchingAdapter.matcherShardId(firstSymbol)
-                    && TradingDependencyMask.account(candidate.hashCode()) != TradingDependencyMask.account(firstSymbol.hashCode()))
+            if (state.matchingAdapter.matcherShardId(candidate) != state.matchingAdapter.matcherShardId(firstSymbol))
                 return candidate;
         }
         throw new AssertionError("cannot find an independent order book partition");
@@ -1381,12 +1380,13 @@ class ClusterCommandPipelineTest {
              Fixture replay = new Fixture(product, Cluster.Role.FOLLOWER)) {
             var setup = live.setup(); serial.applyAll(setup); replay.applyAll(setup);
             // Real fills in both independent batches; the suffix must not enter the prefix's realtime export.
-            long used = TradingDependencyMask.account(11) | TradingDependencyMask.account(disjointUser(11));
+            LaneTopology topology = live.service.state().runtimeState.topology();
+            long used = topology.accountLaneMask(11) | topology.accountLaneMask(disjointUser(11));
             int symbolNumber = 0;
             for (String symbol : List.of("BTC-USDT", disjointSymbol("BTC-USDT"))) {
                 long seller = 100;
-                while ((TradingDependencyMask.account(seller) & used) != 0) seller++;
-                used |= TradingDependencyMask.account(seller);
+                while ((topology.accountLaneMask(seller) & used) != 0) seller++;
+                used |= topology.accountLaneMask(seller);
                 ContractType type = ContractType.valueOf(product.contractTypeCode());
                 String asset = product == ProductLine.SPOT || type.isInverse() ? "BTC" : "USDT";
                 var deposit = live.message(CoreMessageType.ADJUST_BALANCE, seller,
@@ -1433,7 +1433,8 @@ class ClusterCommandPipelineTest {
         try (Fixture live = new Fixture(ProductLine.SPOT); Fixture serial = new Fixture(ProductLine.SPOT)) {
             serial.applyAll(live.setup());
             long a = 11, b = disjointUser(a), shared = b + 1;
-            while ((TradingDependencyMask.account(shared) & (TradingDependencyMask.account(a) | TradingDependencyMask.account(b))) != 0) shared++;
+            LaneTopology topology = live.service.state().runtimeState.topology();
+            while ((topology.accountLaneMask(shared) & (topology.accountLaneMask(a) | topology.accountLaneMask(b))) != 0) shared++;
             var deposit = live.message(CoreMessageType.ADJUST_BALANCE, shared,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 20_000)));
             live.apply(deposit); serial.apply(deposit);
@@ -1679,15 +1680,16 @@ class ClusterCommandPipelineTest {
     private void independentFills(ProductLine product, boolean batch, boolean collidingMakers) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             var setup = live.setup(); serial.applyAll(setup);
-            long buyers = TradingDependencyMask.account(11) | TradingDependencyMask.account(disjointUser(11));
+            LaneTopology topology = live.service.state().runtimeState.topology();
+            long buyers = topology.accountLaneMask(11) | topology.accountLaneMask(disjointUser(11));
             long makerA = 77;
-            while ((TradingDependencyMask.account(makerA) & buyers) != 0) makerA++;
-            long occupied = buyers | TradingDependencyMask.account(makerA);
+            while ((topology.accountLaneMask(makerA) & buyers) != 0) makerA++;
+            long occupied = buyers | topology.accountLaneMask(makerA);
             long makerB = makerA + 1;
             if (collidingMakers) {
-                while (TradingDependencyMask.account(makerB) != TradingDependencyMask.account(makerA)) makerB++;
+                while (topology.accountLaneMask(makerB) != topology.accountLaneMask(makerA)) makerB++;
             } else {
-                while ((TradingDependencyMask.account(makerB) & occupied) != 0) makerB++;
+                while ((topology.accountLaneMask(makerB) & occupied) != 0) makerB++;
             }
             String asset = product == ProductLine.SPOT || ContractType.valueOf(product.contractTypeCode()).isInverse()
                     ? "BTC" : "USDT";
@@ -1941,21 +1943,17 @@ class ClusterCommandPipelineTest {
     }
 
     private static long disjointUser(long user) {
-        var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
+        var topology = LaneTopology.productionDefault();
         long lane = topology.accountLaneMask(user);
         for (long next = user + 1;; next++) {
-            if (topology.accountLaneMask(next) != lane
-                    && TradingDependencyMask.account(next) != TradingDependencyMask.account(user)) return next;
+            if (topology.accountLaneMask(next) != lane) return next;
         }
     }
     private static long disjointOrder(long id) {
-        for (long next = id + 1;; next++) if (TradingDependencyMask.account(next) != TradingDependencyMask.account(id)) return next;
+        return Math.incrementExact(id);
     }
     private static String disjointSymbol(String symbol) {
-        for (int i = 0;; i++) {
-            String candidate = "ALT" + i + "-USDT";
-            if (TradingDependencyMask.account(candidate.hashCode()) != TradingDependencyMask.account(symbol.hashCode())) return candidate;
-        }
+        return "ALT0-USDT".equals(symbol) ? "ALT1-USDT" : "ALT0-USDT";
     }
 
     @ParameterizedTest

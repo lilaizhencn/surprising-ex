@@ -146,14 +146,16 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     private long retail(int i) { return users.get(i+1); }
-    // Setup-only coverage gate: this real-Cluster JMH run must exercise exact dependency
-    // checks, configured batch decode/encode, terminal index churn and realtime terminal emission.
-    void verifyDependencyCollisionCoverage() {
+    // Setup-only coverage gate: require repeated Lane and matcher routes in the workload.
+    // The measured run also covers batch codec, terminal index churn and realtime emission.
+    void verifyRoutingCollisionCoverage() {
+        LaneTopology topology = LaneTopology.productionDefault();
         long accounts = 0, symbols = 0;
         int accountCollisions = 0, symbolCollisions = 0;
         for (int i = 0; i < SYMBOLS; i++) {
-            long account = com.surprising.aeron.service.state.TradingDependencyMask.account(maker(i));
-            long symbol = com.surprising.aeron.service.state.TradingDependencyMask.account(symbol(i).hashCode());
+            long account = topology.accountLaneMask(maker(i));
+            // Instruments are registered in index order; a different starting ID only rotates shards.
+            long symbol = 1L << topology.matcherShardId(i + 1);
             if ((accounts & account) != 0) accountCollisions++;
             if ((symbols & symbol) != 0) symbolCollisions++;
             accounts |= account;
