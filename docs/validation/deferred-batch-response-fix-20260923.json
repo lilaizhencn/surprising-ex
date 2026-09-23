@@ -1,0 +1,2026 @@
+{
+  "date": "2026-09-23",
+  "base_commit": "60e978a6f7dc9f17c7efb345a301fcf608a4a32f",
+  "resolved_report": "docs/validation/api-contract-cleanup-20260922.json",
+  "root_cause": "Benchmark Harness retained CoreResponse beyond releaseResponse; subsequent arena slot reuse overwrote the deferred batch payload. Reproduced unsupported order batch result version: 5 before change.",
+  "fix": "Capture owned response.data() before terminal consumer releases arena; delayed decoder uses owned bytes. No production Core/protocol changes. One latest payload per Harness, replaced on each batch.",
+  "toolchain": "Amazon Corretto HotSpot JDK 27.0.0 / Maven 3.9.16",
+  "regression": "Four derivative product lines run three consecutive 256-message windows; each verifies completions, finances and restoration through scenario.verify(). Existing all-derivative workload and entire benchmark suite also run.",
+  "limitations": [
+    "No external full trading E2E or throughput/JFR measurement",
+    "Payload copy is benchmark validation overhead; no throughput improvement claimed"
+  ],
+  "logs": {
+    "/tmp/deferred-batch-regression.log": {
+      "sha256": "24bade9288735b56c9c6f5adbe7be3da8bdc0b354f27278fc0879386795cff8b",
+      "success": true,
+      "historical_path_after_cleanup": true
+    },
+    "/tmp/deferred-batch-package.log": {
+      "sha256": "75677222df8243dea2f33006816e1b26c376f0482e568b278a1cdd3ee863e1dd",
+      "success": true,
+      "historical_path_after_cleanup": true
+    },
+    "/tmp/deferred-batch-focused.log": {
+      "sha256": "11c4adb203aeefff921e8082ef5562dfebf644cc31267d39ec1336aa72971513",
+      "success": true,
+      "historical_path_after_cleanup": true
+    },
+    "/tmp/deferred-batch-before.log": {
+      "sha256": "6a346c75ba54b57404ab6b131358f0d822b40331638dd37fef6d0c8d23630a87",
+      "success": false,
+      "historical_path_after_cleanup": true
+    }
+  },
+  "modules": {
+    "surprising-product-api": {
+      "totals": {
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.surprising.product.api.ProductLineTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3f983f276b5a539bff600a6435b8f9bff2bfc04a5b09b54018d7021286ea6533",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.product.api.ProductTopicNamesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c8307518e99f3841036b1b4591617bdf215d5836404531e9d1463a5a7384cb15",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-instrument/surprising-instrument-api": {
+      "totals": {
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.surprising.instrument.api.InstrumentEventKeysTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "6e7c6fd89072bba9dcb84ae1de3033492c88d8c8c5161471c0d2260557b4216e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3df1246367dfdf0a27ba834577ebb0167e720a2be95ce9e79d93cdba90a23a94",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "49ea42bb95db8f74f055b57cec62d75f5b3c7efa9a071aae18c974acc25c9422",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "20e34a7621d59f805c16119e8130d9c0a6cc67303228e1505fc7ceeffe3a8360",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-realtime/surprising-realtime-api": {
+      "totals": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.surprising.realtime.api.ValkeyReadViewIntegrationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "aabf5adf3f024cb925d04ceeb16ff38bbc81804bc2a267252784a554cf408830",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-aeron-core/surprising-aeron-benchmarks": {
+      "totals": {
+        "tests": 298,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      },
+      "suites": [
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterStreamFillCountTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "eb3000eb451a70805e62ba8ecbbfaa43fd04bed21ea8f3e0cbb1370601c045c0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SettlementSolvencyBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "6a754efb0eaefcb05822ea090287aa3c992b186d8a718bea37ef569ddc59104f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.LifecyclePaginationBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e9ef704572d22ddb1053bcf36eccb4acc1a9398ef0a8ef42ea18ae9f033eafb0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupportTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "42b9ebb7a7debf7da342c1db174e014dd27db7a83c3a33ffb66efc016e9e4e66",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TriggerCommitBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "87ea2e16453cdd21ed2cda5e1a548375e9a5e7c7e1e26d1ae0a38d4b2c389052",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.OrderBookBootstrapLoaderTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c7340a38b687ec26908a681a34ba8598be5ae7b836d5279fbb3140fd06bb7dab",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e0329d3c741fca386af8cd73dbeb901c0d2f17e5d21ce7cbeeee3810e3f391d6",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.HttpOpenLoopLoadTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "1d4c104447c6be8c60bdacdbb1749be65495b4cfaebfa36e219ee13a9325dfc8",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.FundingCutBenchmarkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8a01f9995457bd47e25f5e0721b97f6e0d3ab249475ea655f34d02d2034857d7",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "85115a1b274d3ef42a8eab4458e46fca40dbb7247a232339be0fc69473c9cdfb",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ContinuousOwnerBenchmarkTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "sha256": "b1ed8907e53735e80cef5fd27d9f6ba10e2d1234db4939bdb3cd8b497a9614fb",
+          "skip_reasons": [
+            "System property [core.settlementLatencyDiagnostics] does not exist"
+          ]
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.GeneratedPriceClockTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4ce1aa1c7523931b8a3b9fde545df038aa206ee1fd0798084468aa9531cdf589",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.P10CapacityGateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c4b2942f877abbacd23f0bea8604e8ee652d479bb3662e41ccb538d81f857c37",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SpotMixedWorkloadTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "48f57c5ed5d3a0c37f2868313f944888799182df3d60955ff2e76dee32e5302f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.DerivativeRiskBoundaryBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "28e0ef85d078897176b5b9bac1d13e6318ee1e82355cf84ee522a868b0bbbe19",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.DerivativeMixedWorkloadTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "147349c0f1c5e76384a78280cab36ffad1be1ef1c7313f67540a7de7101f1684",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusteredBatchTradingBenchmarkTest",
+          "tests": 125,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c49e23955c30e87592aa6529ad91d00f9d040167a82a89b2e6bf90b45dde986f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "110de530d16f615993cfd138c3c9d60028de258ce98d5fbe3c1969c463e91f9e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.transport.CommandReplicationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "979fb8a150c51cd70ab42d3be30a5065f5f0e6ac25ac79b7def1f3bdb58a8380",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.StableIdentityLedgerTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c39b1e5a9002222fc4bff762bd23b0eb7b2d9215bb49ce285eaa833fe3af7557",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.OperationalLifecycleAuditTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "be33158095e7e75ed7a7350b3704b425dfbd3e246458c4c46ee450d03b3d85f6",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "78d80aae958c2e29f90ce4c791baff7347cf631c70dd80d42710e98c00d7e82c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterOfferRetryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "a2ccd3ec959ff9c9be45878d740ffc5b7ba44ea972f66d17273fd8818afc10d2",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.HttpArtifactsLoadTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8335f5aa0a423a2e7b9f12931fbce0226f397d5c8542f2ef426bfafcf73a4b5e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterAsyncPairTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "df938a2eab2e109205a9d10482e1d301a169b67b8f338902a920cac60ff89fdb",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "0d0543fea8da84aa85cc2e525620b412f1f9956d10e90f34cb912d0887fc671d",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.GeneratedMarkPriceSourceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "bf922c7190b32ccad1b8bda6d1785668a380c160eb02b9c63a9c8fd7d32ffcf6",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RealtimeWorkloadTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c9d1a1550847944e32f8d8d72fe464fe43d69aca2f1aa7097f98e1a982b895e4",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterMarkPriceGateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "883090951159052fdfbcbb6bb89288848a1214be44e680a13ee155c8423e70f6",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.LifecycleGuardTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3e828b7d487a72ae751ac57d484e0091d5fbdbfcf233f40c96e450dd090752b4",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.InstrumentPauseAdmissionBenchmarkTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "f0184c4846fe5703211c3a78cf9f967836322a6a65465dae639453e21a17c913",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.benchmarks.workload.ClusterCapacityMetricsTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "584a8798a5732f4016ee634fbf9b8de2f7d7061577058161efd7ca62793d931f",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-aeron-core/surprising-aeron-tools": {
+      "totals": {
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      },
+      "suites": [
+        {
+          "name": "com.surprising.aeron.tools.instrument.InstrumentSeedCoreContractTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "sha256": "ed391eb35f4b2ce6e93020b5492820f4a4197781d0bc74afff78f2e94248f69a",
+          "skip_reasons": [
+            "Environment variable [INSTRUMENT_SEED_TEST_JDBC_URL] does not exist"
+          ]
+        },
+        {
+          "name": "com.surprising.aeron.tools.replay.OfflineReplayMainTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c26fdd75522fec5054dced98c95e3b34074ce1cdeb940bfd48b072e92b48bf11",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "7a4d7288887050e9ed3989d00fdf466bedd2347f75a25d833a17552230949f90",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c42b36ac1821bb2fae0422dfe44d50df3da50a2b863984755c8f3a65c101e445",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-aeron-core/surprising-aeron-service": {
+      "totals": {
+        "tests": 918,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      },
+      "suites": [
+        {
+          "name": "com.surprising.aeron.service.state.LaneTopologyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "6eaf5c7ef076cbd4281cfd65d4398eb78de97d592cc2622c473e15a76deae522",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8c5219b4747a672cd217c87001641d59feb4264279bc95f21ec8460232ac3461",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.SurprisingCoreApplicationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "564c309d372db1d014207472db36dbcbdde987d1cfa7d7f655d6ac90ce016b56",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OwnerIndexChurnTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4a9403cb618aa25d12d04d8c68e354bbab2d5bdca9411f6dd8df41732347961f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "fac70603d68de9db6cf5c5aa922cd84e73a05662670dcc818aa96554971d1166",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreUserStateTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "fed5c934411260cf2d52ef465bc152e6cd26962ebbade5c9d7291b653bb0a1b9",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+          "tests": 250,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "sha256": "23abd8b854485d5dc9f046b3bbbfc75c8ca1e13e0405a8fc070139a7c61c9792",
+          "skip_reasons": [
+            "System property [core.settlementLatencyDiagnostics] does not exist"
+          ]
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "86f16fee59ace41309866afd4b0f3026c5023baa56791760c22d6062461748ef",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.index.ActiveOrderIndexTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "40926a6893f4f34c84f2fbc9c61ec62fbdb7f035fba297ef17ea22b09cd117df",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreContractMathTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "d3b2449429f4c8d3112dae3bc29bd4dd92143fb4068ca09257effe4ffc4e297d",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreValueValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "83f5039640ad7bbfe8f22c2d873a5aac9147d1dce53be0d1ea594e2c5697d77e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "54ea688dfd2625c591fa866d3d51e2c6731751f7414de6103242786248016810",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommandSlotTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3c49bc7011fda5512352542a8fc9b88415eec8a94f36c5d1000872d180b7f1c1",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e962e21891837e25e67e28d57e4e4ee2dc3376e972e38dfb1b1f64390c5a507c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "097922a973f6385226fc69fe996c6feb809f28641223805cdfd7267313714a49",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMatchingStateTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e3eea88169507b0770ea23d2b93bffee59b4a9960ac1d532abeeb1d7a7027018",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AccountLanePendingReservationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8dd4d13ee8432e29fb49a485c582fe7f422e85f4ff60fe59353cee15d6e02bcb",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "f8c839b7fe7b4d4a8d503de32ecc57c8e612e8f13c2c47a0ec61a5c73062d485",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.MatcherSettlementPlanTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "981451c7687f7c0672d894458ed8f814285ed3cef2aae7ce637c2a20432d2d5e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "bedb736298d1300d3d3405111bd59dbd62c28b6434e309dc58e3dae6dfc3e72a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "949e65df1f8e6e336c060390def3d011f898a18325fd01403a302d48732dcd23",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "280b1c163988c1293d5141c2b7d340b7b1d58bac738aa21944adb1ae698c414b",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RiskBatchBudgetTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3570ec5add7dcba3f33777cb99d6fed34f3d09b40f599948b5fb41cdc614aea9",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3e1a49856512386be64a8293c6c759a61165cfb27bcb57a33dd2a2bfb70c1f97",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+          "tests": 28,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "cd7b387f6f79535f2ac12c65d3f2ec1b82cde20ba0977d5000e3755fab1e5295",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TradingRuntimeStateTest",
+          "tests": 59,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "679ffd701646f3b9d261ccec3b6490eabcac8e20cc83c3bea1a6e10c8bca54de",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LanePublishedMapTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "70ca56c257d7d374fd513083c97b31f43f0ea9bf10dd87ba05210ae3bc109911",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommandSlotRingTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "177b1c28f213e99bdaed36aa01f9e96410edb5a8bec52189677e8565182aea0a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.MatchingNotificationProbeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "75f7e1545777115614375b956ff1d5b75ef04c4d99dda28870d2676f56c3d2e5",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TriggerOrderIndexTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "b9924b23716955a054e3e379b2b30c1e21e49bb550a2db180751a9f65200f2e3",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "245ab55824cdfed73b0d36ef099606543ae01141fc7641597e69965eae7d3430",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "7d9f5827491d5f05e518924636c84fd3ad873fb1c70729dcd1bc5e7244d4375a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "80f7714e9627ec4f63fee9823949286741c70f9618b18380434ed96705409c7a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "5baba4ea38c4fa517b6a1cbe76aa73bdd5f9565482e5128ee399cfef19320c64",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "15c4adf14d6dad13724c3bb6f03341c7f1c39d42929922acb3c7e610ec46f74e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3bb2a9ae354915505e8897ef83178e4b29b73658c228a8aafab524917e9440ea",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "47aa636b4c18efd678a35e48fa0a9c68ef609b183db8d5e98ebfb6c8860c10d8",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OwnerIndexedChangesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "614bef9adfbf25afd710e796d38d3bf8ef6cadb4d3fc8ab0744486c285fa4bbe",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.PositionUserIndexTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "343de06c7e0dc62f84243e0b9c9f48962c4e199e0d6005115bcca8a934a57dd8",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneAdmissionAggregateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "6261143b63236bd2440ac3508338a0ff2e2460330808a46ff13dea13b2647361",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneEntityMembershipTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e74ff60556c64678ab9f1f8fcfd678abeba10766f2581b09486023571d3da0c9",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "fde7a4af04b4c608e3436d897a37d71406c5d0d04b736f58730a8ee2fc0d986c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "f880fe1a5a64b1c93ef03cec683ef6b38d140c74abe8203eafac9e58260dd8d2",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "d20f0f7061f7d90ce8e74848576f3345eb60420b9feb1e4a7f0a225b3243981f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SettlementLaneWorkerTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e2b8f89b0505cf6d4342c334e5e1f6a0567b193e201211fd13fd6f4da187c5de",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c6b938439c09031f2e834a03002a87bb5346df5e26e164ff89d2af6240ac8a13",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeCommitJournalTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "2553b23609f2ad9b14b3739f6a0da711e485021408a1003ce3e27486f6bd1e7d",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "505c02c9ef0c08cd8e686f3e872e68ff0f1ffcadc9bf3e56190c14ac59931ae5",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "d0e71a5f3a92f9cef1970068caa01da21f9eb1054a7b324bf65d68ac4b9470f3",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "50f00aaf25a6e9e428bd402b53d4a5a89239b67c561ed73f398024846ed06ab5",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "bf6b928741314e8749b9d8a99251b9fd8955b430fa09d6017e44458701f4171c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.FundsDeltaTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "b2be627fb80638159f39a4b8082208cb5f10d55cbaf030630339715708107412",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneTerminalSummaryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "416253e4d948b36d1039bcb3a0679143cd07e74f9671bf925844982c5aa52bb0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ReservationRuntimeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "039bcf906f2e0025cfadece034b872d4b249b74763175ee58fd5876e6b114ced",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "ec233cb8fc86e5a92fcc14b0ea307531d9e6405149bd14edc37b950b1a197b99",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "96f6e5bd243088207514c563a49ece52ae6cfaf7e8f793b253ca60044ee63e04",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreLifecycleStateTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "57801b2667230d0a0ef1da4508ebe9f2f457f526e7dfe0adb72434bb5947b893",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateTransitionsTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "1fa15d00c55ee7ded1c89e560f7f7e19644f96a8ded0f31b28d288a51fba13ba",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.StateMapSupportTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c986cea2edc11a345bfe971e1d556b77e8bc57082d9161c7857b4b2b8c08a478",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "92183340875afab4eb021ba93a9f54c721ed9334c8ecd4eb1ac62f81144c5b46",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderRuntimeTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "526fffdf46ae8f024fe3473977764823f7fff4d1d34e1ee233293960ba2f863f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeChangeBufferTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8bce41e9523cad4e9016bc4046561aaf13d74e31d022cc38019def5a98609bcf",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AdlPositionIndexTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "230ca4b776869bac60f744203a6c2675e4c5417a1f9bdb2b6dc237f586536e7c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "54da387d9ef82473b3985c80b94fad2fe948cfb45f509a0e13609246a894270f",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "45636c40c1e86d443669a41e76a19e61352c26ac30fea2b4bb71fe51c8919573",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CrossShardCancellationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "353250a55df45d49a7e2c26e2fae75ec288c3f3ac137ef5f9217725ca3637e76",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "812de4f18485e3e438a1506413bf17cae9d6982e81bf5ae2e7020cfa4a15fd2a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "064bf161a2bea4708f7c5a8921af5179e1a48783713a96675f69f51f6d8c6333",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TerminalStateRetentionTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8fc78b8562f5f70e0a8cf05260deac0537d7349edbfa4e838c8e46df9115b390",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ParallelRiskScanTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4db0a0ba84eefffa40b1edf10911d4bb9045c0fb06b626071ccf2d96b0f2d8ad",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SettlementChangesReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "b1cf48793456db3a380d97a34c41d8537d3e8723dd3b3f2f629ee39892740224",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "dd41786a37bd566676d6c39715b78e2af50c36b8ade89c2e37006119c56d6822",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneSequenceQueueTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "a86e0258cea96cfa4df0d6b44869124c651eb01c8b5f647ab42b119898c153b4",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMaintenanceTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8bdf4554512276ec5c6e559315369797091e16311cfb6b9021d827c8e4abbc28",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreResultLedgerTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "db2e778c285d9dd643928cba03151a45485e00f0ca4c90655eb77851b07fd148",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "076d4cfe540b6a11ca1e058faa2a4a7e2a561b2c5de40c041109392348c3b366",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CaptureBufferReuseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "0d0c8864fbd1275f7f4014189adf91d5730ce8715900bbbde6efbb1052ad6a4a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderClientKeyIndexTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "610ef0052ab8b02e70921333b11073596be83c7d25d38b3037ef0c1515e4ca55",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "34fc92fb13eeca88163459734d16554b7284cb5a32846663588bb4606f08f617",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateQueryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "cae6a44e3c625ed33d1009e288c58d367bb61ead5c9bf332e4e75e890b48d815",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "36a4b6ba7e79b98da53e594d58a50c85fc8aceef0c0ff9322442f463f3c63297",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "5b52e03b5748fb66a2cc74a2f66e00ce248df1e4f94ef5c4d22338f0b4c21799",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "603a33db73fca29cf4ae40c6e45fa0c58b609f4487eefa6ca2d520bbfac955a4",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "33e5074012180e95b8865992800e6f8344102dd0d32f3966b26d561e0cd50ce5",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreTreasuryStateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "c9124d6a476161a3cb46035edeebfa1244219728ee737b6fc219eb67d3534706",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreRoundingPolicyTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "cfcb0e7384976eff203cd8bdf42f6846ea4cfc280f45085e9bd0d9debd184efc",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.config.ClusterFatalErrorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "ab3bb9f84e08ba8f2e611b1598960bbff12ea965048439745e71e0ce0be13e39",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "47b89e4f3d982c610f518d9fd03d0ed217113f8bbf66d84a33bd0b313e79f8fb",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "bb9c62aedb5a93f2c40670cdb0c542ae986e3f3d60e71fcbc536775c2dfd4b79",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "57d7334fb6b7fe826e7986b65cfdab7e2827eae3c079f0ae12649cc597f3af72",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PendingMatchingRingTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "56c99c5bfe5eb7d4ac7908a77f4700eb3147db05bf4ccbc7796939ac7cef1db7",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TradingStateSnapshotCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "15911ec45fda8e591d07ff4ae240c504d4ef6f851ba409d3897c4609f8f1d072",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ControlLaneDispatcherTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "9cee00c968eb5821ed8dea719685c5b61ef8285938c1674133e386e1ccf27fe4",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ResponseArenaTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "964d50f71bf2256fb640ab54cfec065f64f2974d2dd15d361fbf3cfc033fa1fa",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreRiskStateTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "b2d103cfda6790c15a5a9f7abc156e2f4637abc46350d00c9db482f5183ea12c",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4d3983bb1d36d1e3d6fe888d02efb6bc35222f87e5cb6085a1aecd47c9940a60",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-aeron-core/surprising-aeron-client": {
+      "totals": {
+        "tests": 50,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.surprising.aeron.client.AeronClientPoolTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "de0f76a292f49a89f73c9dd91fe4f8e1342f3171a0cebc52a1debd52aed67f4b",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.CoreQueryClassTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "9878722a7daf2cc616f36ac8174784bb133d0adfd630225939f2642cc5739c98",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "7bc5ddf669515bb6ae8eb12a9d0983c0605e5e8ec1ffef17f158e4939563495b",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "28d9aa75e1d3b4fc0036019eea7f0a4d63385973195208a511e2c0656c453a3b",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "61ab212fbb55a63e560f2cea8cb40299139bb0a72975faa1d5552cc645331c29",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "9e5e35a54c0f9ad759f54259f386e8bde79aad636725ccdfcf72ddec7cb928f7",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronClientAgentTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "71147adc43005bfe3384f45f5816e26a1f2f5c7a784649c2fd0ca42587167a74",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.RealtimeOutboxTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "866d16d9b0ef97c4b14a04f143b3e34403e329ec94739febce42ca853367aa03",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3a418f3e14e1030af57f113435d9abe5ee035d96ed21a48d6859dd01102636f0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronClientCapacityTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "3047ea1ca457c96dc3bdc86b44697f1c7460677dcba1bee9f998b5403f030ef1",
+          "skip_reasons": []
+        }
+      ]
+    },
+    "surprising-aeron-core/surprising-aeron-protocol": {
+      "totals": {
+        "tests": 95,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "d317f18d75c4b8c02ef55c3a8871be20ceab7f44a9877c12422d48625cf01175",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "5ad98c6e107ec0679d3ae2fd850e770d86699e45608686d27a64516a1240d893",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "93bd1bf1707c4a17e0984ca66722cabca6ade80f36116bc328e94efb87dcc618",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "ea3316f6404c5305183c846e14ed18433ca582bfba533fb24f03d48deecf54bd",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "f7508064668988851795915d5c8d8372079564e82d19ba9b38b877ffb51190ea",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "1ea4ae7df6b8e94106fc32e50a500cc5b32b45eaf56dc4a281004a86c358bdd7",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "6a416192e8ad23159160a50eec68855b009748144e3028def671ab7e85908a50",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "83dd316efd1d76cab3375c9b34aab62e8603c2cc8caa6ee33a8f6ec788a79fd0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "47468e5cd38c32ddbd88a819e789c13ba2c616e70a398cd3014db81d898e57c0",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e7d46202f878e9d08ecbc63fade658ce2917139577cb9d16f38b864d24f17433",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8f64712111962d8d498299efc9afad3ebc93a29bfcdc4ef1b6fb3d1d048e2466",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreInputEventCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "18775f123d59637c3f36603263c71d2e534f685035a00f3ee93c723718490e42",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "5ffe66fbf39b2109af9854eb951e14b05a5dcfa202a23c44e21c7891f4e9e02e",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreResponseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "673eeb2fdcc8d630a4a0ea644ed6116a5328c79176f5d4b992948e37806aaa7a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "27ea67ac74a35e91753c5fa567c826c1a46426b52b0c1a2e3c668a76ca127cbc",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4a7575e0bd49629063a98d3f6f494fd1372401e7bce74fc688012b35a2ea384a",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "7e6016a50e2ac50f9ef863d6d1ce376b38eed51afa8e3f36a3f37e399d7f5576",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "09aa1071ac8c850dfff624ff00e08bbc64e35b9789659b37c18735f65872cff9",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "7c04bbaec72baa39db7633ddebedcafb0ad86030bde3bd6a6ec6bfb8f3c77313",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8751dfc58fd9037545b2a36dd4790b3d6caab7f0bef393ae8481aba80dc98c93",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "82ab645b8a2c01f8d7e5dc7d17cce880023af585865a90add5c24905dc54df75",
+          "skip_reasons": []
+        },
+        {
+          "name": "com.surprising.aeron.protocol.WireCodeLookupTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "86b8ffd38838d3abe1990eda178ea41c7393ad28eaac4bf2769e4f69314000bc",
+          "skip_reasons": []
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": {
+      "sha256": "456376e36d4933a9c009a27e8b4b5dffe1ef05c47bcf43f471e0794b9025be18"
+    },
+    "surprising-aeron-core/surprising-aeron-benchmarks/target/original-product-core-benchmarks.jar": {
+      "sha256": "7e0ae476dc658a7625320fd785af2307b343616e69db4ff9458337cff742ff04"
+    },
+    "surprising-aeron-core/surprising-aeron-benchmarks/target/surprising-aeron-benchmarks-1.0.0-SNAPSHOT.jar": {
+      "sha256": "8af37a33dcfa4ea87865ab13b1a64470f8fbb8f9ab05128d1db3addfcfae5d6e"
+    }
+  },
+  "cleanup": {
+    "status": "completed",
+    "removed_own_reports_and_logs": [
+      "surprising-product-api/target/surefire-reports/com.surprising.product.api.ProductLineTest.txt",
+      "surprising-product-api/target/surefire-reports/com.surprising.product.api.ProductTopicNamesTest.txt",
+      "surprising-product-api/target/surefire-reports/TEST-com.surprising.product.api.ProductLineTest.xml",
+      "surprising-product-api/target/surefire-reports/TEST-com.surprising.product.api.ProductTopicNamesTest.xml",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/com.surprising.instrument.api.InstrumentEventKeysTest.txt",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest.txt",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/TEST-com.surprising.instrument.api.InstrumentEventKeysTest.xml",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/com.surprising.instrument.api.model.ContractTypeProductLineTest.txt",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/TEST-com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest.xml",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/com.surprising.instrument.api.math.PerpetualContractMathTest.txt",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/TEST-com.surprising.instrument.api.model.ContractTypeProductLineTest.xml",
+      "surprising-instrument/surprising-instrument-api/target/surefire-reports/TEST-com.surprising.instrument.api.math.PerpetualContractMathTest.xml",
+      "surprising-realtime/surprising-realtime-api/target/surefire-reports/TEST-com.surprising.realtime.api.ValkeyReadViewIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-api/target/surefire-reports/com.surprising.realtime.api.ValkeyReadViewIntegrationTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterAsyncPairTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterStreamFillCountTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupportTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterMarkPriceGateTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterStreamFillCountTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SettlementSolvencyBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.LifecyclePaginationBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.LifecycleGuardTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupportTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.transport.CommandReplicationTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.OrderBookBootstrapLoaderTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.state.TriggerCommitBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.OrderBookBootstrapLoaderTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.HttpOpenLoopLoadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.FundingCutBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.FundingCutBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.OperationalLifecycleAuditTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ContinuousOwnerBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.GeneratedPriceClockTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.DerivativeRiskBoundaryBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.StableIdentityLedgerTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.DerivativeMixedWorkloadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.P10CapacityGateTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.LifecyclePaginationBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SpotMixedWorkloadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.P10CapacityGateTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.DerivativeRiskBoundaryBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.DerivativeMixedWorkloadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.SettlementSolvencyBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ClusteredBatchTradingBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.RealtimeWorkloadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.transport.CommandReplicationTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.StableIdentityLedgerTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.OperationalLifecycleAuditTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.ClusteredBatchTradingBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.HttpArtifactsLoadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterOfferRetryTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.SpotMixedWorkloadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.InstrumentPauseAdmissionBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.HttpOpenLoopLoadTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterOfferRetryTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.HttpArtifactsLoadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.state.TriggerCommitBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterAsyncPairTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.GeneratedPriceClockTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.GeneratedMarkPriceSourceTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.GeneratedMarkPriceSourceTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.RealtimeWorkloadTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.ClusterCapacityMetricsTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterMarkPriceGateTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.LifecycleGuardTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.InstrumentPauseAdmissionBenchmarkTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/TEST-com.surprising.aeron.benchmarks.workload.ClusterCapacityMetricsTest.xml",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.ContinuousOwnerBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmarkTest.txt",
+      "surprising-aeron-core/surprising-aeron-benchmarks/target/surefire-reports/com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest.txt",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/TEST-com.surprising.aeron.tools.instrument.InstrumentSeedCoreContractTest.xml",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/TEST-com.surprising.aeron.tools.replay.OfflineReplayMainTest.xml",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/TEST-com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest.xml",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/com.surprising.aeron.tools.instrument.InstrumentSeedCoreContractTest.txt",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest.txt",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/TEST-com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest.xml",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest.txt",
+      "surprising-aeron-core/surprising-aeron-tools/target/surefire-reports/com.surprising.aeron.tools.replay.OfflineReplayMainTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LaneTopologyTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.SurprisingCoreApplicationTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeCommitJournalTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.OwnerIndexChurnTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LaneTerminalSummaryTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.FundsDeltaTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreUserStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.ParallelRiskScanTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.index.ActiveOrderIndexTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreContractMathTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreOrderDecisionResolverTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreValueValidationTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeChangeBufferTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.SettlementLaneWorkerTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CommandSlotTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.AccountLanePendingReservationTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.AsyncFundingCommandTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.RiskBatchBudgetTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.AdlPositionIndexTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.OrderBatchSettlementWaitTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreMatchingStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.AccountLanePendingReservationTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.MatcherSettlementPlanTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LaneEntityMembershipTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.RiskBatchBudgetTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.TradingRuntimeStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.MatcherSettlementPlanTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LanePublishedMapTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CommandSlotRingTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.OrderRuntimeTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.MatchingNotificationProbeTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LaneSequenceQueueTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.TriggerOrderIndexTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TradingStateSnapshotCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.OrderBatchSettlementWaitTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CommandSlotRingTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.OwnerIndexedChangesTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.OrderClientKeyIndexTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.SettlementChangesReuseTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreUserStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.PositionUserIndexTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LaneAdmissionAggregateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LaneEntityMembershipTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreTreasuryStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.AsyncFundingCommandTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.SettlementLaneWorkerTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeCommitJournalTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.FundsDeltaTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.StateMapSupportTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeStateTransitionsTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.SurprisingCoreApplicationTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LaneTerminalSummaryTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.ReservationRuntimeTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.PendingMatchingRingTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.config.ClusterFatalErrorTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreLifecycleStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreMatchingStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeStateTransitionsTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.StateMapSupportTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreValueValidationTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.TradingCoreOwnerTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.OrderRuntimeTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeChangeBufferTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.AdlPositionIndexTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CommandSlotTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CaptureBufferReuseTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.TerminalStateRetentionTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreRiskStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreResultLedgerTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CrossShardCancellationTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreRoundingPolicyTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CrossShardCancellationTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreContractMathTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.TerminalStateRetentionTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.ParallelRiskScanTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.SettlementChangesReuseTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TradingRuntimeStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LaneAdmissionAggregateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeStateQueryServiceTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreOrderDecisionResolverTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TriggerOrderIndexTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.LaneSequenceQueueTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreMaintenanceTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreResultLedgerTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeIdentityRegistryTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CaptureBufferReuseTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.OwnerIndexedChangesTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreMaintenanceTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.OrderClientKeyIndexTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeStateQueryServiceTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.PositionUserIndexTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeIdentityRegistryTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LaneTopologyTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreTreasuryStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreRoundingPolicyTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.config.ClusterFatalErrorTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.ControlLaneDispatcherTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.ReservationRuntimeTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.ResponseArenaTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.OwnerIndexChurnTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.index.ActiveOrderIndexTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.PendingMatchingRingTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.MatchingNotificationProbeTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.TradingStateSnapshotCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.TradingCoreOwnerTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.ControlLaneDispatcherTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.ResponseArenaTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.LanePublishedMapTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreLifecycleStateTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.CoreRiskStateTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.RealtimeOutboxTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.AeronClientPoolTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.AeronClientCapacityTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.AeronRealtimeTransportTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.CoreQueryClassTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.AeronClientAgentTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.CoreQueryClassTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.CoreCommandOutcomeTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.CoreCommandOutcomeTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.AeronRealtimeTransportTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.AeronClientAgentTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.AeronClientPoolTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest.txt",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.RealtimeOutboxTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest.xml",
+      "surprising-aeron-core/surprising-aeron-client/target/surefire-reports/TEST-com.surprising.aeron.client.AeronClientCapacityTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreLaneMetricsCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreRiskQueryCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.RealtimeFrameCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreInputEventCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.TradingOrderBatchCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreOpenInterestCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreMaintenanceCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreOrderPreflightCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.ProductLineClusterLayoutTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.WireCodeLookupTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreStateQueryCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreAlgoOrderCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreOrderPreflightCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreTriggerOrderCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreRiskQueryCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreCommandResultCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.RealtimeFrameCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreStateQueryCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreSettlementProgressCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreAlgoOrderCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreRiskScanControlCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreInputEventCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreResponseTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreSettlementProgressCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreResponseTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreOpenInterestCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.TradingOrderBatchCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreMessageCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.ProductLineClusterLayoutTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreMessageCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.TradingCommandCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreMaintenanceCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.TradingCommandCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreCommandResultCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreRiskScanControlCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/com.surprising.aeron.protocol.CoreLaneMetricsCodecTest.txt",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.CoreTriggerOrderCodecTest.xml",
+      "surprising-aeron-core/surprising-aeron-protocol/target/surefire-reports/TEST-com.surprising.aeron.protocol.WireCodeLookupTest.xml",
+      "/tmp/deferred-batch-regression.log",
+      "/tmp/deferred-batch-package.log",
+      "/tmp/deferred-batch-focused.log",
+      "/tmp/deferred-batch-before.log"
+    ],
+    "notes": "Maven processes completed; retained build artifacts; no external service stack launched."
+  },
+  "source_diff_sha256": "e962a69a61e8c19cd34eacc9871bbf6940335583b0f1da662f8e43f1e5c79f77"
+}

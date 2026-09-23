@@ -1111,7 +1111,7 @@ final class LinearPerpetualBenchmarkSupport {
         /** Saturation runs use the same asynchronous command scope as Cluster ingress. */
         private boolean clusterMatchingPipeline;
         private ClusterCommandWindow clusterCommandWindow;
-        private CoreResponse deferredBatchResponse;
+        private byte[] deferredBatchResponseData;
         private int deferredBatchOperationWeight;
         private OpenLoopBusinessLatencyRecorder businessLatencies;
 
@@ -1469,24 +1469,26 @@ final class LinearPerpetualBenchmarkSupport {
                     || command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH
                     || command.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH) {
                 if (TradingOrderBatchCodec.firstNonAppliedItem(response, operationWeight) >= 0) {
-                    validateBatchResponse(response, operationWeight);
+                    validateBatchResponse(response.data(), operationWeight);
                 }
                 if (deferBatchResponseValidation) {
-                    deferredBatchResponse = response;
+                    // The terminal consumer releases the arena lease after this method returns.
+                    // Keep an owned payload for verification after subsequent commands reuse that slot.
+                    deferredBatchResponseData = response.data();
                     deferredBatchOperationWeight = operationWeight;
-                } else validateBatchResponse(response, operationWeight);
+                } else validateBatchResponse(response.data(), operationWeight);
             }
         }
 
         void verifyDeferredBatchResponse() {
-            if (!deferBatchResponseValidation || deferredBatchResponse == null) {
+            if (!deferBatchResponseValidation || deferredBatchResponseData == null) {
                 return;
             }
-            validateBatchResponse(deferredBatchResponse, deferredBatchOperationWeight);
+            validateBatchResponse(deferredBatchResponseData, deferredBatchOperationWeight);
         }
 
-        private static void validateBatchResponse(CoreResponse response, int operationWeight) {
-            var result = TradingOrderBatchCodec.decodeResult(response.data());
+        private static void validateBatchResponse(byte[] responseData, int operationWeight) {
+            var result = TradingOrderBatchCodec.decodeResult(responseData);
             if (result.items().size() != operationWeight
                     || result.items().stream().anyMatch(item -> item.status() != ResponseStatus.APPLIED)) {
                 throw new IllegalStateException("benchmark order batch did not complete every item: " + result);

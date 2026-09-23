@@ -15,11 +15,14 @@ class DerivativeMixedWorkloadTest {
                 ProductLine.INVERSE_DELIVERY, ProductLine.OPTION}) {
             var template = DerivativeMixedWorkload.template(productLine, 4, 256, 256);
             try (var scenario = DerivativeMixedWorkload.scenario(template, 1, 2)) {
-                scenario.run();
-                assertThat(scenario.maxBacklog()).as(productLine.name()).isEqualTo(256);
-                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
-                assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
-                scenario.verify();
+                // Repeated windows recycle the response arena before deferred verification.
+                for (int iteration = 0; iteration < 3; iteration++) {
+                    scenario.run();
+                    assertThat(scenario.maxBacklog()).as(productLine.name()).isEqualTo(256);
+                    assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                    assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+                    scenario.verify();
+                }
             }
         }
     }

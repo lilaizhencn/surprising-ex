@@ -23,3 +23,9 @@ Lane 字段改为 `executionWallNanos`、`executionWallRatio` 和 `laneExecution
 例如，在已锁定的相同负载命令前增加 `ASYNC_SOCKET_RCVBUF_BYTES=4194304`，将接收缓冲请求值设为 4MiB；再使用空值恢复默认做反转验证。生产进程可使用 Aeron 原生 JVM 参数，无需新增业务层配置或线程。
 
 2026-09-22 的本机诊断中，4MiB 轮稳定窗口未观察到接收缓冲溢出丢包和节点 NAK，但批量撤单 P99 仍为 24.38ms。因此该设置是缓解缓冲溢出的手段，**尚不是主要 P99 长尾的修复**；完整 A/B/A 证据与限制见性能记录。不能据此修改全产品默认值或宣称吞吐提升。
+
+## 延迟批量响应校验的生命周期
+
+`LinearPerpetualBenchmarkSupport.Harness` 在终态回调中先读取批量响应，再释放 Core 响应 arena 的租约。启用延迟校验时，必须在释放前通过 `CoreResponse.data()` 保存独立 payload；不能把引用 arena 存储的 `CoreResponse` 留到 `scenario.verify()`，否则后续命令复用槽位会覆盖待校验数据。
+
+Harness 只保存最后一份批量 payload，每次新批量终态覆盖它，生命周期与 Harness 相同；生产 Core 的响应池、协议和结算路径不变。该复制属于压测端的验证成本，本次修复未测量吞吐影响。回归覆盖四条衍生品线连续三轮 256 消息窗口，以及全部 benchmark 模块测试。
