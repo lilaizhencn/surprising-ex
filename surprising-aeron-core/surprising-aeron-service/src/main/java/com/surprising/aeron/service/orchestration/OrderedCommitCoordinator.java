@@ -269,7 +269,7 @@ final class OrderedCommitCoordinator {
             Long submitNanos = owner.matchingSubmitNanos.remove(sequence);
             if (submitNanos != null) owner.matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
         }
-        long applyStartNanos = System.nanoTime();
+        long applyStartNanos = TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED ? System.nanoTime() : 0;
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             OrderBatchPending failedBatch = owner.batches.batch(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
@@ -506,14 +506,7 @@ final class OrderedCommitCoordinator {
         CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
         long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.validateFundsConservation(pending.command());
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
-            owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
-            owner.completedMatchingCount++;
-            if (owner.completedMatchingCount % TradingCoreRuntime.MATCHING_PHASE_LOG_INTERVAL == 0) {
-                TradingCoreRuntime.LOG.log(System.Logger.Level.DEBUG, "matching phases count=" + owner.completedMatchingCount + " "
-                        + owner.matchingPhaseMetrics.reportAndReset());
-            }
-        }
+        recordMatchingCompletion(applyStartNanos);
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
@@ -606,14 +599,7 @@ final class OrderedCommitCoordinator {
             throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required",
                     exception);
         }
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
-            owner.matchingPhaseMetrics.recordApply(System.nanoTime() - pending.settlementApplyStartNanos());
-            owner.completedMatchingCount++;
-            if (owner.completedMatchingCount % TradingCoreRuntime.MATCHING_PHASE_LOG_INTERVAL == 0) {
-                TradingCoreRuntime.LOG.log(System.Logger.Level.DEBUG, "matching phases count=" + owner.completedMatchingCount + " "
-                        + owner.matchingPhaseMetrics.reportAndReset());
-            }
-        }
+        recordMatchingCompletion(pending.settlementApplyStartNanos());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         CoreResponse response = storeTerminalResponse(
@@ -660,10 +646,7 @@ final class OrderedCommitCoordinator {
             throw owner.failMatching(pending, "account lane cancel failed; snapshot/log recovery is required",
                     exception);
         }
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
-            owner.matchingPhaseMetrics.recordApply(System.nanoTime() - pending.settlementApplyStartNanos());
-            owner.completedMatchingCount++;
-        }
+        recordMatchingCompletion(pending.settlementApplyStartNanos());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         CoreResponse response = storeTerminalResponse(
@@ -672,6 +655,17 @@ final class OrderedCommitCoordinator {
         owner.removePendingMatching(pending.sequence());
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
         return owner.finishFactContext(response);
+    }
+
+    /** Owner-only statistics shared by normal settlement and cancellation completion. */
+    private void recordMatchingCompletion(long applyStartNanos) {
+        if (!TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) return;
+        owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
+        owner.completedMatchingCount++;
+        if (owner.completedMatchingCount % TradingCoreRuntime.MATCHING_PHASE_LOG_INTERVAL == 0) {
+            TradingCoreRuntime.LOG.log(System.Logger.Level.DEBUG, "matching phases count=" + owner.completedMatchingCount + " "
+                    + owner.matchingPhaseMetrics.reportAndReset());
+        }
     }
 
     long expectedLaneMask(

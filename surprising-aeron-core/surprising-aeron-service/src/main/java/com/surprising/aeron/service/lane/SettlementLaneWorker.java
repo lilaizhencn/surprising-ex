@@ -309,7 +309,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                             if (running && next < producerSequence.value
                                     && !ready(commands[(int) next & indexMask])) {
-                                parkCount++;
+                                if (WAIT_DIAGNOSTICS) parkCount++;
                                 LockSupport.park(this);
                             }
                             directReadySpins = 0;
@@ -330,7 +330,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         } else {
                             if (running && (next >= producerSequence.value
                                     || !ready(commands[(int) next & indexMask]))) {
-                                parkCount++;
+                                if (WAIT_DIAGNOSTICS) parkCount++;
                                 LockSupport.park(this);
                             }
                         }

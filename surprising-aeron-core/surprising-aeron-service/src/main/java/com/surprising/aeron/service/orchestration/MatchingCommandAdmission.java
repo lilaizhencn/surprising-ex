@@ -136,7 +136,7 @@ final class MatchingCommandAdmission {
     CoreResponse prepareMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                          TradingCoreRuntime.SourceKey sourceKey, CommandSlot.Operation operation,
                                          CommandFingerprint fingerprint, CommandSlot deferredPending) {
-        long matchingStartNanos = System.nanoTime();
+        long matchingStartNanos = TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED ? System.nanoTime() : 0;
         DecodedMatchingCommand decodedCommand;
         try {
             decodedCommand = deferredPending == null

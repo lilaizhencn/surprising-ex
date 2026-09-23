@@ -333,7 +333,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
                 else {
                     if (accepting && position >= submittedPosition.value && backgroundRead == null) {
-                        parkCount++;
+                        if (WAIT_DIAGNOSTICS) parkCount++;
                         LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
                     }
                 }

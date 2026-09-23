@@ -1,8 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
-
 final class CoreMatchingPhaseMetrics {
 
     /** Owner 本地非空 FIFO 调度轮次的稀疏样本，不持有业务命令或状态副本。 */
@@ -272,21 +269,25 @@ final class CoreMatchingPhaseMetrics {
                 + " apply=" + apply.reportAndReset();
     }
 
+    /** Written and drained exclusively by the Owner thread. */
     private static final class Phase {
-        private final LongAdder count = new LongAdder();
-        private final LongAdder totalNanos = new LongAdder();
-        private final AtomicLong maxNanos = new AtomicLong();
+        private long count;
+        private long totalNanos;
+        private long maxNanos;
 
         void record(long nanos) {
-            count.increment();
-            totalNanos.add(nanos);
-            maxNanos.accumulateAndGet(nanos, Math::max);
+            count++;
+            totalNanos += nanos;
+            maxNanos = Math.max(maxNanos, nanos);
         }
 
         String reportAndReset() {
-            long samples = count.sumThenReset();
-            long total = totalNanos.sumThenReset();
-            long max = maxNanos.getAndSet(0L);
+            long samples = count;
+            long total = totalNanos;
+            long max = maxNanos;
+            count = 0;
+            totalNanos = 0;
+            maxNanos = 0;
             long averageMicros = samples == 0 ? 0 : total / samples / 1_000L;
             return "avgMicros=" + averageMicros + ",maxMicros=" + max / 1_000L + ",count=" + samples;
         }

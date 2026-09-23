@@ -150,3 +150,7 @@ flowchart TB
 当前 U 永续单节点完整部署：gateway、Core、price、realtime（含 K 线与可靠成交导出）、
 derivatives-lifecycle（含 funding）、maker，共 6 个 Java 进程。应用侧共享 MediaDriver 内嵌在 gateway 中。
 成交导出由 `TRADE_EXPORT_ENABLED` 控制，配置与迁移要求见 [行情应用说明](surprising-realtime/README.md)。
+
+### Core 诊断统计的开关边界
+
+`surprising.aeron.matching-phase-log-interval` 默认为 0；关闭时准入、提交路径不采集阶段耗时。开启后由 Owner 单线程维护普通计数，正常结算和撤单共用完成计数及周期输出逻辑（DEBUG 日志）。`surprising.matcher.wait-diagnostics`、`surprising.settlement.wait-diagnostics` 关闭时不更新诊断用 park 计数，线程实际等待与唤醒逻辑不受影响。稀疏 JFR 事件和现有采样配置继续保留。

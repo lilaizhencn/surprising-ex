@@ -53,6 +53,31 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(
+            named = "surprising.aeron.matching-phase-log-interval", matches = "1")
+    void singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            assertThat(CoreTestCompletion.applyAsynchronously(state,
+                    command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
+                            TradingCommandCodec.encodePlaceOrder(place(86_101, "metrics-cancel", 1_000))))
+                    .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            long completedBefore = state.completedMatchingCount;
+            assertThat(CoreTestCompletion.applyAsynchronously(state,
+                    command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 3,
+                            TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(86_101))))
+                    .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.completedMatchingCount).isEqualTo(completedBefore + 1);
+            assertThat(state.matchingPhaseMetrics.reportAndReset())
+                    .contains("apply=avgMicros=0,maxMicros=0,count=0");
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits())
+                    .isEqualTo(10_000);
+        }
+    }
+
+    @Test
     void cancelBatchCommitsInItsSettlementTaskAndKeepsDuplicateAndSnapshotResults() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
