@@ -36,7 +36,7 @@ public interface LaneOrderResultTarget {
     default boolean includeTerminalAfterImage() { return false; }
 
     /** 直接消费本次 Lane 变更中的不可变 OrderRuntime，不查询全局发布表。 */
-    static void capture(LaneOrderResultTarget target, TradingRuntimeState.LaneCommitDelta changes,
+    static void capture(LaneOrderResultTarget target, LaneCommitDelta changes,
                         RuntimeIdentityRegistry identities, AccountLaneState lane) {
         for (int i = 0; i < target.resultCount(); i++) {
             long id = target.resultOrderId(i);

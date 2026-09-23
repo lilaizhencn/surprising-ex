@@ -1,6 +1,6 @@
 # Core state 复杂度审查（2026-09-23）
 
-范围：`surprising-aeron-service` 的 `state` 包，并沿命令、Lane、提交、快照、恢复和查询链路检查调用方。当前生产源码为 136 个 Java 文件、30,892 行；文件数不是删除依据，重点看一份事实是否被重复维护，以及抽象是否承担真实边界。
+范围：`surprising-aeron-service` 的 `state` 包，并沿命令、Lane、提交、快照、恢复和查询链路检查调用方。四个缓冲类型移出后，生产源码为 140 个 Java 文件、30,910 行；文件数不是删除依据，重点看一份事实是否被重复维护，以及抽象是否承担真实边界。
 
 ## 已确认并处理：测试快照混入生产源码
 
@@ -24,4 +24,4 @@
 
 `TradingCoreState` 是快照、恢复、查询及状态哈希的值模型；`RuntimeStateMaterializer` / `RuntimeStateProjector` 是运行态和快照态之间的转换边界。`AdmissionOrderIndex` 有 Lane、全局活动订单和批量预准入三个实现；`SettlementBatchInput` 跨 Owner 到结算批次；`RuntimeFactIndexes` 管理派生索引的应用/重建；`LaneColdState` 隔离冷索引；`TerminalPruneBatch` 传递终态清理结果。这些类型有实际状态所有权或线程/恢复边界，机械内联会增加耦合。
 
-最大的单文件阅读负担仍是 `TradingRuntimeState`（约 6,100 行）。`MatcherSettlementDispatcher` 约 430 行且执行真实结算分发；并回运行态只会使这个大类更难读。后续应按具体业务流程梳理运行态方法和所有权，避免仅为减少文件数而合并。
+`TradingRuntimeState` 原为 6,123 行，其中 `MatcherSettlementChanges`、`LaneCommitDelta`、`LaneClientOrderCaptures`、`LaneBalancePatches` 共 777 行。本轮把四个类型及其原有数据和操作移为同包独立类，运行态缩至 5,343 行；`BalanceState` 随余额补丁留在 `LaneBalancePatches.java`。这只改善文件导航，没有减少系统总代码量或改变 owner/Lane 所有权。`MatcherSettlementDispatcher` 约 430 行且执行真实结算分发；并回运行态只会使这个大类更难读。下阶段应优先梳理命令回滚的捕获字段与方法，再按业务流程整理运行态，避免仅为减少文件数而合并。

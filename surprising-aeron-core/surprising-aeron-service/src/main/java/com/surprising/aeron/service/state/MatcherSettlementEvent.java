@@ -48,7 +48,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private int[] batchQuoteAssetIds;
     private int[] batchSettleAssetIds;
     private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
-    private TradingRuntimeState.MatcherSettlementChanges changes;
+    private MatcherSettlementChanges changes;
     private boolean isolatedChanges;
     private boolean treasuryTrades;
     private long[] completedLanes;
@@ -1054,14 +1054,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     int baseAssetId() { return baseAssetId; }
     int quoteAssetId() { return quoteAssetId; }
     int settleAssetId() { return settleAssetId; }
-    TradingRuntimeState.MatcherSettlementChanges changes() {
+    MatcherSettlementChanges changes() {
         if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
         return changes;
     }
 
     boolean hasChanges() { return changes != null; }
-    TradingRuntimeState.MatcherSettlementChanges takeChanges() {
-        TradingRuntimeState.MatcherSettlementChanges value = changes();
+    MatcherSettlementChanges takeChanges() {
+        MatcherSettlementChanges value = changes();
         changes = null;
         return value;
     }

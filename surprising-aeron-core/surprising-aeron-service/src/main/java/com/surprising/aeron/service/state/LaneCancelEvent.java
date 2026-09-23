@@ -5,7 +5,7 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 /** Sequence-local cancellation applied entirely by the order owner's Account Lane. */
 public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     private TradingRuntimeState runtime;
-    private TradingRuntimeState.MatcherSettlementChanges changes;
+    private MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
     private long coreSequence;
     private long userId;
@@ -24,7 +24,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                             long timestamp, long clusterPosition, int ownerLaneId,
                             TradingRuntimeState owner,
                             RuntimeIdentityRegistry identityRegistry,
-                            TradingRuntimeState.MatcherSettlementChanges commandChanges) {
+                            MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderId <= 0 || timestamp < 0 || clusterPosition < 0
                 || ownerLaneId < 0 || owner == null || commandChanges == null || coreSequence != 0 || completed) {
             throw new IllegalStateException("invalid Account Lane cancel event");
@@ -41,7 +41,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                             boolean commitAccountLane,
                             TradingRuntimeState owner,
                             RuntimeIdentityRegistry identityRegistry,
-                            TradingRuntimeState.MatcherSettlementChanges commandChanges) {
+                            MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderIds == null
                 || targetOrderCount <= 0 || targetOrderCount > targetOrderIds.length
                 || timestamp < 0 || clusterPosition < 0 || ownerLaneId < 0 || owner == null
@@ -118,9 +118,9 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public boolean complete() { return completed; }
     RuntimeIdentityRegistry identities() { return identities; }
 
-    TradingRuntimeState.MatcherSettlementChanges takeChanges() {
+    MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) throw new IllegalStateException("cancel event is incomplete");
-        TradingRuntimeState.MatcherSettlementChanges result = changes;
+        MatcherSettlementChanges result = changes;
         changes = null;
         return result;
     }

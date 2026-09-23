@@ -175,7 +175,7 @@ class TradingRuntimeStateTest {
 
     @Test
     void admissionOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
-        var constructor = TradingRuntimeState.MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
+        var constructor = MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);
         var changes = constructor.newInstance(4);
         changes.ensureAdmissionCapacity(2, 20);

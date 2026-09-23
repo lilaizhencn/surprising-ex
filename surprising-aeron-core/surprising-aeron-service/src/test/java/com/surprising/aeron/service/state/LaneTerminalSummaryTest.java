@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LaneTerminalSummaryTest {
     @Test void mixedBatchRetainsOnlyTerminalsAfterSummaryGrowthAndReuse() {
         var state = new TradingRuntimeState();
-        var changes = new TradingRuntimeState.LaneCommitDelta();
+        var changes = new LaneCommitDelta();
         var expected = new ArrayList<Long>();
         for (long id = 1; id <= 40; id++) {
             var order = CoreStateTestFixtures.order(id, 7, 5, 10);
@@ -34,7 +34,7 @@ class LaneTerminalSummaryTest {
     }
     @Test void publishedOpenTerminalAndRemovedOrdersRemainCorrectAcrossReuse() {
         var state = new TradingRuntimeState();
-        var changes = new TradingRuntimeState.LaneCommitDelta();
+        var changes = new LaneCommitDelta();
         var retained = new ArrayList<Long>();
         TradingRuntimeState.TerminalOrderSink sink =
                 (orderId, userId, clientOrderId, sequence) -> retained.add(orderId);
@@ -61,7 +61,7 @@ class LaneTerminalSummaryTest {
 
     @Test void preparedPublicationVisitsTerminalOrdersWithoutLaneSummary() {
         var state = new TradingRuntimeState();
-        var changes = new TradingRuntimeState.LaneCommitDelta();
+        var changes = new LaneCommitDelta();
         changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2));
         changes.preparePublication();
         var retained = new ArrayList<Long>();

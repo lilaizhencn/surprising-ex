@@ -6,6 +6,7 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.LiquidationRuntime;
+import com.surprising.aeron.service.state.LaneCommitDelta;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ReservationRuntime;
 import com.surprising.aeron.service.state.TerminalPruneBatch;
@@ -80,7 +81,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
     }
 
     @Override
-    public void acceptBatch(TradingRuntimeState.LaneCommitDelta delta, long coreSequence) {
+    public void acceptBatch(LaneCommitDelta delta, long coreSequence) {
         for (int index = 0; index < delta.terminalOrderCount(); index++) {
             accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
                     delta.terminalOrderClient(index), coreSequence);

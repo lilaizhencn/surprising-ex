@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.*;
 class CaptureBufferReuseTest {
     @Test
     void clientOrderSlotsOverwritePresenceAcrossShorterReuse() {
-        var captures = new TradingRuntimeState.LaneClientOrderCaptures();
+        var captures = new LaneClientOrderCaptures();
         for (int i = 1; i <= 20; i++) captures.add(7, i, (long) i);
         captures.clear();
         captures.clear();
@@ -22,7 +22,7 @@ class CaptureBufferReuseTest {
 
     @Test
     void balancesSkipEmptyClearButInvalidateOldIndexAndAfterState() {
-        var captures = new TradingRuntimeState.LaneBalancePatches();
+        var captures = new LaneBalancePatches();
         int generation = captures.indexGeneration;
         captures.clear();
         assertThat(captures.indexGeneration).isEqualTo(generation);

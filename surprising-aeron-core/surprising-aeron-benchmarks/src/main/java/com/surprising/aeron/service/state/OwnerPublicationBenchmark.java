@@ -23,7 +23,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(1)
 public class OwnerPublicationBenchmark {
     private final TradingRuntimeState runtime = new TradingRuntimeState();
-    private final TradingRuntimeState.LaneCommitDelta delta = new TradingRuntimeState.LaneCommitDelta();
+    private final LaneCommitDelta delta = new LaneCommitDelta();
     private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
     private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>();
     private final UserRuntime[] users = new UserRuntime[20];

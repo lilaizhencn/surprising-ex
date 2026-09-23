@@ -26,7 +26,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private int laneId;
     private int matcherShard;
     private TradingRuntimeState runtime;
-    private TradingRuntimeState.MatcherSettlementChanges changes;
+    private MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
     private long identityAllocations;
     private RuntimeException rejection;
@@ -40,7 +40,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             int[] symbolIds, int[] assetIds,
             OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
-            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
+            TradingRuntimeState runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
                 || clientKeys == null || symbolIds == null
@@ -188,23 +188,23 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     int itemCount() { return itemCount; }
     OrderRuntime admittedOrder(int index) { return admittedOrders[index]; }
     ResolvedPlaceOrder order(int index) { return orders[index]; }
-    TradingRuntimeState.MatcherSettlementChanges takeChanges() {
+    MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) {
             throw new IllegalStateException("place batch admission changes are unavailable");
         }
-        TradingRuntimeState.MatcherSettlementChanges value = changes;
+        MatcherSettlementChanges value = changes;
         changes = null;
         return value;
     }
 
-    void copyBalanceBeforeTo(TradingRuntimeState.LaneBalancePatches target) {
+    void copyBalanceBeforeTo(LaneBalancePatches target) {
         if (!complete() || changes == null || target == null) {
             throw new IllegalStateException("place batch admission changes are unavailable");
         }
         changes.copyBalanceBeforeTo(target);
     }
-    TradingRuntimeState.MatcherSettlementChanges discardChanges() {
-        TradingRuntimeState.MatcherSettlementChanges value = changes;
+    MatcherSettlementChanges discardChanges() {
+        MatcherSettlementChanges value = changes;
         changes = null;
         completed = true;
         return value;

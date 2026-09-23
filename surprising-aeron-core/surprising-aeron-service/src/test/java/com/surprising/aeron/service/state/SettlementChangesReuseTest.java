@@ -25,7 +25,7 @@ class SettlementChangesReuseTest {
 
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
-            var delta = new TradingRuntimeState.LaneCommitDelta();
+            var delta = new LaneCommitDelta();
             long nextId = 1;
             for (int count : new int[]{65, 1, 0, 7, 0}) {
                 long firstId = nextId;
@@ -43,7 +43,7 @@ class SettlementChangesReuseTest {
                 delta.clear();
                 assertThat(delta.terminalOrderCount()).isZero();
                 assertThat(delta.orders.isEmpty()).isTrue();
-                var field = TradingRuntimeState.LaneCommitDelta.class.getDeclaredField("terminalOrderClients");
+                var field = LaneCommitDelta.class.getDeclaredField("terminalOrderClients");
                 field.setAccessible(true);
                 assertThat((Object[]) field.get(delta)).containsOnlyNulls();
             }
@@ -69,7 +69,7 @@ class SettlementChangesReuseTest {
     }
     @Test void positionPublicationCreatesUpdatesDeletesAndRecreatesOwnerValue() {
         try (var runtime = new TradingRuntimeState()) {
-            var delta = new TradingRuntimeState.LaneCommitDelta();
+            var delta = new LaneCommitDelta();
             var instrument = CoreStateTestFixtures.runtimeInstrument();
             var source = new PositionRuntime(7, 0, 0,
                     com.surprising.aeron.protocol.CoreMarginMode.CROSS,

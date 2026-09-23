@@ -20,7 +20,7 @@ class LanePublishedMapTest {
                         com.surprising.aeron.protocol.CorePositionSide.NET,
                         CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 17, 20);
                 runtime.publishedPositions.put(1, position.snapshot());
-                var delta = new TradingRuntimeState.LaneCommitDelta();
+                var delta = new LaneCommitDelta();
                 delta.positions.put(1, null);
                 if (prepared) delta.preparePublication();
                 capture.begin(1, 100, 0);
@@ -125,7 +125,7 @@ class LanePublishedMapTest {
                     runtime.publishedReservations.put(id, CoreStateTestFixtures.reservation(id, 7, 0, 1).snapshot());
                 }
                 var resting = runtime.publishedOrders.get(4);
-                var delta = new TradingRuntimeState.LaneCommitDelta();
+                var delta = new LaneCommitDelta();
                 // 1: deleted with an after-image; 2: explicit null plus a route deletion;
                 // 3: route only; 4: unchanged live value; 5: null only; 6: already absent.
                 delta.orders.put(1, CoreStateTestFixtures.order(1, 7, 0, 1, true).snapshot());
@@ -192,7 +192,7 @@ class LanePublishedMapTest {
 
     @Test void settlementDiscardsUnpublishedReferencesAcrossReuse() {
         var runtime = new TradingRuntimeState();
-        var delta = new TradingRuntimeState.LaneCommitDelta();
+        var delta = new LaneCommitDelta();
         runtime.publishedOrders.put(99, CoreStateTestFixtures.order(99, 7, 0, 1));
         runtime.publishedReservations.put(99, CoreStateTestFixtures.reservation(99, 7, 0, 1));
         delta.removeOrderRoute(99);

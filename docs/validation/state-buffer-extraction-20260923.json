@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Amazon Corretto HotSpot 27.0.0",
+  "change": "Moved MatcherSettlementChanges, LaneCommitDelta, LaneClientOrderCaptures, and LaneBalancePatches from TradingRuntimeState nested types into same-package standalone classes without changing state ownership or publication order.",
+  "sourceLines": {
+    "runtimeBefore": 6123,
+    "runtimeAfter": 5343,
+    "movedNestedTypeLines": 777
+  },
+  "build": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean package",
+    "serviceTests": 919,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2,
+    "logSha256": "27931e9f068eb40541c2296c9592bdda1fbdf2316cae5cc806664c009847028d"
+  },
+  "postImportCompile": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am test-compile -DskipTests",
+    "result": "BUILD SUCCESS",
+    "logSha256": "9082b001bf58b32eb5c180e20da457490e3af0ecc48d66dc14bdd0c87ee77305"
+  },
+  "benchmarkModuleCompile": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-benchmarks -am test-compile -DskipTests",
+    "result": "BUILD SUCCESS",
+    "logSha256": "ffece8593bf21b2528e9903fd63d4a650143083ebf418fb4eeb8f0bb39937a66"
+  },
+  "serviceJar": {
+    "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+    "sha256": "54ac0256870d496abeaa3291ca665e0e72b5ba2edcd7736fad904ee2591f6068",
+    "fourTopLevelTypesPresent": true,
+    "oldNestedTypesAbsent": true
+  },
+  "untested": "No throughput benchmark or external cluster deployment; state mutation, publication and recovery logic were moved without semantic changes.",
+  "cleanup": "Temporary build logs and this run Surefire reports removed after evidence capture; packaged jars retained."
+}
