@@ -33,7 +33,7 @@ final class MatcherCommandSubmission {
             if (pending.operation() == CommandSlot.Operation.PLACE && direct != null) {
                 var command = pending.decodedCommand().placeOrder();
                 var admittedOrder = pending.admittedPlaceOrder();
-                int shard = owner.matcherShard(pending);
+                int shard = owner.matchingFlow.matcherShard(pending);
                 if (admittedOrder != null) {
                     return directWithCancellations(pending, direct, preMatchingCancellations,
                             command.orderId(), pending.preparePlaceMatching(owner, shard, userId,
@@ -56,7 +56,7 @@ final class MatcherCommandSubmission {
                 var order = owner.runtimeState.order(command.orderId());
                 if (order != null) {
                     String symbol = owner.identities.symbol(order.symbolId());
-                    int shard = owner.matcherShard(pending);
+                    int shard = owner.matchingFlow.matcherShard(pending);
                     return directWithCancellations(pending, direct, preMatchingCancellations,
                             command.orderId(), pending.prepareCancelMatching(owner, shard, command.orderId(),
                                     userId, symbol, direct));
@@ -71,7 +71,7 @@ final class MatcherCommandSubmission {
                 String symbol = owner.runtimeOrderSymbol(order);
                 return directWithCancellations(pending, direct, preMatchingCancellations,
                         admission.resolved().orderId(), pending.prepareReplaceMatching(
-                                owner, owner.matcherShard(pending), admission.resolved().orderId(), userId,
+                                owner, owner.matchingFlow.matcherShard(pending), admission.resolved().orderId(), userId,
                                 admission.originalOrderId(), symbol, admission.matchingOrder(), direct));
             }
             if (pending.operation() == CommandSlot.Operation.TRIGGER
@@ -80,7 +80,7 @@ final class MatcherCommandSubmission {
                 if (matchingOrder == null) throw new IllegalStateException("trigger matcher order is missing");
                 return directWithCancellations(pending, direct, preMatchingCancellations,
                         matchingOrder.orderId(), pending.preparePlaceMatching(
-                                owner, owner.matcherShard(pending), userId,
+                                owner, owner.matchingFlow.matcherShard(pending), userId,
                                 null, matchingOrder, direct));
             }
             MatchingSubmission matching = switch (pending.operation()) {
@@ -136,14 +136,14 @@ final class MatcherCommandSubmission {
                         yield new MatchingSubmission(command.liquidationId(), () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
                     }
-                    var orders = owner.lifecycleOrders(liquidation.userId(),
+                    var orders = owner.matchingFlow.lifecycleOrders(liquidation.userId(),
                             owner.runtimeLiquidationSymbol(liquidation), command.cursorOrderId(),
                             command.maxOrders()).orders();
                     yield new MatchingSubmission(command.liquidationId(),
                             () -> owner.matchingAdapter.cancelBatch(orders));
                 }
                 case LIQUIDATION_BATCH -> {
-                    var orders = owner.batchCancellationOrders(pending);
+                    var orders = owner.matchingFlow.batchCancellationOrders(pending);
                     yield new MatchingSubmission(0, () -> owner.matchingAdapter.cancelBatch(orders));
                 }
                 case SETTLEMENT -> {
@@ -153,7 +153,7 @@ final class MatcherCommandSubmission {
                         yield new MatchingSubmission(0, () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
                     }
-                    var orders = owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(),
+                    var orders = owner.matchingFlow.lifecycleOrders(0, command.symbol(), command.cursorOrderId(),
                             command.maxOrders()).orders();
                     yield new MatchingSubmission(0,
                             () -> owner.matchingAdapter.cancelBatch(orders));
@@ -182,7 +182,7 @@ final class MatcherCommandSubmission {
             List<DeterministicExchangeCoreAdapter.CancellationOrder> cancellations,
             long logicalOrderId, Supplier<?> submission) {
         if (cancellations.isEmpty()) return submission;
-        int shard = owner.matcherShard(pending);
+        int shard = owner.matchingFlow.matcherShard(pending);
         return () -> {
             for (int index = 0; index < cancellations.size(); index++) {
                 var cancellation = cancellations.get(index);
@@ -209,7 +209,7 @@ final class MatcherCommandSubmission {
         long coreSequence = pending.sequence();
         UUID commandId = pending.command().header().commandId();
         long aeronTimestamp = pending.command().header().submittedAtEpochMillis();
-        int shard = control ? -1 : owner.matcherShard(pending);
+        int shard = control ? -1 : owner.matchingFlow.matcherShard(pending);
         return control
                 ? () -> owner.matchingAdapter.executeControlWithEvidenceSync(
                         coreSequence, commandId, orderId, aeronTimestamp, command)

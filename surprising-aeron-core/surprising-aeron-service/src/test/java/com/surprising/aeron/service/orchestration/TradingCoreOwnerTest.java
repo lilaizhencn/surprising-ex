@@ -856,7 +856,7 @@ class TradingCoreOwnerTest {
             long pendingSequence = preparePendingPlace(service.state(), 903);
             var matchingResult = awaitMatching(service.state(), pendingSequence);
             assertThat(matchingResult).isNotNull();
-            service.state().publishMatchingCompletion(pendingSequence, matchingResult);
+            service.state().matchingFlow.publishMatchingCompletion(pendingSequence, matchingResult);
 
             // When
             assertThat(service.doBackgroundWork(0)).isZero();

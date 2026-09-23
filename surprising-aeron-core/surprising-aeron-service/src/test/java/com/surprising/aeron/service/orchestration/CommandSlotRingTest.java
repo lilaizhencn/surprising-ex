@@ -6,12 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
-import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.settlement.FundsPosting;
-import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -179,30 +176,26 @@ class CommandSlotRingTest {
 
     @Test
     void ownsSuspendedCommitStateBySequence() {
-        TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
-        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
-                ProductLine.LINEAR_PERPETUAL, initial)) {
-            CommandSlotRing ring = new CommandSlotRing(4, 4);
-            CommandSlot context = ring.claim(2);
-            RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-            RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
-            CommandResultBuilder builder = new CommandResultBuilder(null);
-            builder.changedUserIds.add(7L);
-            builder.changedOrderIds.add(11L);
-            context.suspendCommitContext(builder, funds, true, false);
+        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlot context = ring.claim(2);
+        RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+        RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
+        CommandResultBuilder builder = new CommandResultBuilder(null);
+        builder.changedUserIds.add(7L);
+        builder.changedOrderIds.add(11L);
+        context.suspendCommitContext(builder, funds, true, false);
 
-            assertThat(context.hasCommitContext()).isTrue();
-            assertThat(context.commitChangedUserIds()).containsExactly(7L);
-            assertThat(context.commitChangedOrderIds()).containsExactly(11L);
-            context.takeCommitFundsTo(restoredFunds);
-            assertThat(restoredFunds.toDelta()).isSameAs(RuntimeFundsDelta.empty());
-            assertThat(context.commitSnapshotDirty()).isTrue();
-            assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
-            context.clearCommitContext();
-            assertThat(context.hasCommitContext()).isFalse();
+        assertThat(context.hasCommitContext()).isTrue();
+        assertThat(context.commitChangedUserIds()).containsExactly(7L);
+        assertThat(context.commitChangedOrderIds()).containsExactly(11L);
+        context.takeCommitFundsTo(restoredFunds);
+        assertThat(restoredFunds.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        assertThat(context.commitSnapshotDirty()).isTrue();
+        assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
+        context.clearCommitContext();
+        assertThat(context.hasCommitContext()).isFalse();
 
-            ring.discard(2);
-        }
+        ring.discard(2);
     }
 
     @Test

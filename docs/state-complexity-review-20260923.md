@@ -18,7 +18,9 @@
 
 `RuntimeInsuranceFundStateTransitions`（27 行）只有 `InsuranceFundCommands` 一个生产调用方。其业务顺序是校验 owner、解析资产、检查保险基金余额、调整余额、增加 revision；可直接放回命令入口并保留现有保险基金和恢复测试。测试夹具也直接调用此类，需同步改为通过命令或运行态入口。这个改动能消除一次跨包跳转，但不解决主要阅读负担。
 
-`RuntimeCommitJournal`（79 行）只保存已发布序号及激活/关闭标志，并不存事件。`ProjectionVersion` 只在 `CoreSnapshotLifecycle` 使用。可以考虑把发布序号并入 `CommitPublication`，快照记录放回 `CoreSnapshotLifecycle`，但要先核对启动激活、序号连续性和恢复场景。它有真实的提交门控语义，优先级低于旧增量 Map 模型。
+`RuntimeCommitJournal` 原只保存已发布序号及激活/关闭标志，并不存事件。本轮已将发布序号、激活与关闭校验并入 `CommitPublication`；快照屏障直接保存状态及业务哈希，删除仅在该屏障中使用的 `ProjectionVersion`。提交发布仍检查健康状态，恢复时初始化原有发布序号；资金结算和快照格式未变。
+
+交易 Owner 原有“入队并立即推进”和“只入队、稍后轮询”两个入口。本轮保留生产使用的入队入口，测试显式轮询，删除入口模式参数和额外转发。`TradingCoreRuntime` 至撮合流程以及撮合流程至在途推进器的同包纯转发也已删除。独立回放和工具仍依赖 `apply` 返回 `MATCHING_PENDING` 后逐序号完成撮合；在途幂等、批量提交屏障测试也验证这一阶段性语义。尝试把 `apply` 直接改为阻塞等待异步终态时，这些断言和提交屏障失败，因此本轮保留同步调用契约，只收敛集群 Owner 的重复入口和相同条件分支。后续若要彻底删除同步分支，须先迁移回放协议与在途状态测试，并单独验证六产品线资金和恢复行为。
 
 ## 不建议按类数删除的边界
 

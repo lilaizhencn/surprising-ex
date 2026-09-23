@@ -141,7 +141,7 @@ final class CoreDirectCommandFlow {
         runtime.commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) runtime.validateFundsConservation(message);
         runtime.appliedCommandCount = nextAppliedCommandCount;
-        runtime.refreshCommittedCoreSequence();
+        runtime.matchingFlow.refreshCommittedCoreSequence();
         runtime.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         runtime.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())

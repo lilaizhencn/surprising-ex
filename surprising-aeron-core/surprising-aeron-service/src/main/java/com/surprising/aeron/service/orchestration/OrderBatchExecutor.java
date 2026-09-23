@@ -112,19 +112,19 @@ final class OrderBatchExecutor {
             return owner.rejected(CoreResultCode.fromRejectionCode(exception.code()));
         } catch (ArithmeticException | IllegalArgumentException exception) {
             releaseOrderBatchPending(batch);
-            return owner.recordRejectedMatching(message, sourceKey, fingerprint,
+            return owner.matchingFlow.recordRejectedMatching(message, sourceKey, fingerprint,
                     exception instanceof ArithmeticException
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
         CommandSlot pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
         batch.sequence = sequence;
-        owner.putPendingMatching(pending);
+        owner.matchingFlow.putPendingMatching(pending);
         owner.admissions.registerPendingLifecycle(pending);
         registerBatch(pending, batch);
         owner.pendingMatching.registerSubmission(sequence, orderBatchMatcherShard(batch));
         owner.appliedCommandCount = sequence;
-        owner.refreshCommittedCoreSequence();
+        owner.matchingFlow.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
@@ -162,7 +162,7 @@ final class OrderBatchExecutor {
                 batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
             batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.activated(true);
-            owner.submitMatching(pending);
+            owner.matchingFlow.submitMatching(pending);
             return true;
         }
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE
@@ -371,7 +371,7 @@ final class OrderBatchExecutor {
                 }
                 pending = pending.withPreMatchingCancellations(batch.currentPreMatchingCancellationOrderIds);
                 owner.pendingMatching.put(pending);
-                owner.submitMatching(pending);
+                owner.matchingFlow.submitMatching(pending);
                 // 撮合跨回调完成；变更上下文归本序号持有，不能占用下一条命令的 owner。
                 owner.suspendMatchingCommitContext(pending);
                 return null;
@@ -486,7 +486,7 @@ final class OrderBatchExecutor {
                     if (owner.runtimeState.order(command.replacementOrderId()) != null) {
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
                     }
-                    PlaceOrderCommand replacement = owner.replacementForAmend(command, order);
+                    PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
                     ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
                             owner.identities, userId, replacement, owner.currentClusterTimestamp);
                     long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
@@ -1041,7 +1041,7 @@ final class OrderBatchExecutor {
         long ledgerStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
-        owner.commitMatchingSequence(batch.sequence);
+        owner.matchingFlow.commitMatchingSequence(batch.sequence);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 batch.sequence, responseData, 0, responseLength);
@@ -1056,9 +1056,9 @@ final class OrderBatchExecutor {
             }
         }
         unregisterBatch(pending, batch);
-        owner.removePendingMatching(batch.sequence);
+        owner.matchingFlow.removePendingMatching(batch.sequence);
         unregisterPipelinedBatchSymbols(batch);
-        owner.submitDeferredMatchingAfterBatch();
+        owner.matchingProgress.submitDeferredMatchingAfterBatch();
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence,
                 responseData, 0, responseLength);
@@ -1277,7 +1277,7 @@ final class OrderBatchExecutor {
             case AMEND -> {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
                 OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                PlaceOrderCommand replacement = owner.replacementForAmend(command, order);
+                PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
                 orderId = replacement.orderId();
                 String symbol = owner.runtimeOrderSymbol(order);
                 var matchingOrder = batch.replacementAdmission.matchingOrder();

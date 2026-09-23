@@ -94,29 +94,13 @@ public final class TradingCoreOwner {
         realtimeBoundary.start(cluster, state);
     }
 
-    /** 接收一条已复制命令，并在当前日志回调内推进命令流水线。 */
-    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
-        acceptCommittedCommand(session, request, timestamp, position, null);
-    }
-
-    /** 指纹来自服务内部解码后的日志记录，不能接受客户端提供的摘要。 */
-    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
-                                CommandFingerprint fingerprint) {
-        acceptCommittedCommand(session, request, timestamp, position, fingerprint, true);
-    }
-
     /** 独立 Owner 连续收取入口后统一推进；容量不足仍立即推进，日志上下文逐条保留。 */
     void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                  CommandFingerprint fingerprint) {
-        acceptCommittedCommand(session, request, timestamp, position, fingerprint, false);
-    }
-
-    /** 统一处理两种入口，确保入队、推进和异常转换使用同一顺序。 */
-    private void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
-                                        CommandFingerprint fingerprint, boolean advance) {
         try {
             processingLogCallback = true;
-            processIngress(session, request, timestamp, position, fingerprint, advance);
+            awaitIngressCapacity(request);
+            commandPipeline.pendingIngress().add(session, request, timestamp, position, fingerprint);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -131,14 +115,6 @@ public final class TradingCoreOwner {
     /** 保留当前队首命令的解码准备状态，避免等待异步完成时重复解码。 */
     private void retainPendingPreparation() {
         commandPipeline.retainPendingPreparation();
-    }
-
-    /** 把一条已复制命令放入 Owner 队列，并按入口模式决定是否立即推进。 */
-    private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position,
-                                CommandFingerprint fingerprint, boolean advance) {
-        awaitIngressCapacity(request);
-        commandPipeline.pendingIngress().add(session, request, timestamp, position, fingerprint);
-        if (advance) progressCommands();
     }
 
     /** 队列满时暂停日志消费，在原日志上下文内推进已复制命令；不改变业务顺序或拒绝结果。 */

@@ -18,20 +18,17 @@ final class DirectMatcherSettlementPreparation {
     }
 
     MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
-        if (pending.operation() == CommandSlot.Operation.PLACE && owner.runtimeState.asynchronousCommands()) {
-            return preparePlace(pending);
-        }
         if (pending.operation() == CommandSlot.Operation.REPLACE
                 || pending.operation() == CommandSlot.Operation.AMEND) {
             return prepareReplacement(pending);
         }
-        if (pending.operation() == CommandSlot.Operation.TRIGGER && owner.runtimeState.asynchronousCommands()) {
-            return prepareTrigger(pending);
-        }
-        if (pending.operation() == CommandSlot.Operation.CANCEL && owner.runtimeState.asynchronousCommands()) {
-            return prepareCancellation(pending);
-        }
-        return null;
+        if (!owner.runtimeState.asynchronousCommands()) return null;
+        return switch (pending.operation()) {
+            case PLACE -> preparePlace(pending);
+            case TRIGGER -> prepareTrigger(pending);
+            case CANCEL -> prepareCancellation(pending);
+            default -> null;
+        };
     }
 
     MatcherSettlementEvent preparePipelinedPlaceBatch(
@@ -87,13 +84,13 @@ final class DirectMatcherSettlementPreparation {
         if (pending.placeAdmission() != null) {
             direct = owner.runtimeState.prepareDirectMatcherSettlement(
                     pending.sequence(), directInitialLaneMask(pending.placeAdmission().userId()),
-                    pending.placeAdmission(), pending.command().header().commandId(), owner.matcherShard(pending),
+                    pending.placeAdmission(), pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending),
                     owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         } else if (directTaker != null) {
             direct = owner.runtimeState.prepareDirectMatcherSettlement(
                     pending.sequence(), directInitialLaneMask(directTaker.userId()), directTaker, null, 1,
-                    pending.command().header().commandId(), owner.matcherShard(pending), owner.identities,
+                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         }
@@ -109,7 +106,7 @@ final class DirectMatcherSettlementPreparation {
         owner.requireUnchangedAdmissionState(admission);
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
                 pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
-                pending.command().header().commandId(), owner.matcherShard(pending), owner.identities,
+                pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         pending.settlement(direct, direct.plan(), System.nanoTime());
@@ -125,7 +122,7 @@ final class DirectMatcherSettlementPreparation {
         OrderRuntime triggerOrder = owner.runtimeOrder(pending.admittedMatchingOrder().orderId());
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                 directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
-                pending.command().header().commandId(), owner.matcherShard(pending), owner.identities,
+                pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         direct.triggerCompletion(trigger, execute[3]);
@@ -137,7 +134,7 @@ final class DirectMatcherSettlementPreparation {
     private MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
         OrderRuntime canceledOrder = owner.runtimeOrder(pending.decodedCommand().cancelOrder().orderId());
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
-                pending.command().header().commandId(), owner.matcherShard(pending), owner.identities,
+                pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
         reserveMatcherPublication(pending, direct);
         return direct;

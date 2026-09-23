@@ -56,11 +56,11 @@ final class MatchingCommandAdmission {
             CommandSlot pending = newPendingMatching(sequence, CommandSlot.Operation.TRIGGER, command);
             pending.triggerAdmission(queued.order());
             pending.establishCommitFence(clusterTimestamp, clusterPosition);
-            owner.putPendingMatching(pending);
+            owner.matchingFlow.putPendingMatching(pending);
             registerPendingLifecycle(pending);
             owner.appliedCommandCount = sequence;
-            owner.refreshCommittedCoreSequence();
-            owner.submitMatching(pending);
+            owner.matchingFlow.refreshCommittedCoreSequence();
+            owner.matchingFlow.submitMatching(pending);
         }
         queuedMatching.clear();
     }
@@ -155,11 +155,11 @@ final class MatchingCommandAdmission {
         try {
             rejectLifecycleOverlap(message, operation, decodedCommand);
         } catch (CoreStateRejectedException exception) {
-            CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
-            CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
@@ -199,7 +199,7 @@ final class MatchingCommandAdmission {
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
             else owner.commits.abortCommitPublicationBatch();
-            CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -210,7 +210,7 @@ final class MatchingCommandAdmission {
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
             else owner.commits.abortCommitPublicationBatch();
-            CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
@@ -233,7 +233,7 @@ final class MatchingCommandAdmission {
                         .withAdmission(admission);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         if (deferredPending == null) {
-            owner.putPendingMatching(pending);
+            owner.matchingFlow.putPendingMatching(pending);
         } else {
             owner.pendingMatching.put(pending);
             pending.activateDeferredMatching();
@@ -242,7 +242,7 @@ final class MatchingCommandAdmission {
         registerPendingLifecycle(pending);
         if (deferredPending == null) {
             owner.appliedCommandCount = sequence;
-            owner.refreshCommittedCoreSequence();
+            owner.matchingFlow.refreshCommittedCoreSequence();
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         }
         byte[] responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
@@ -254,7 +254,7 @@ final class MatchingCommandAdmission {
         // Matcher input is immutable and already resolved above.  Publish it immediately while
         // the Account Lane performs the funds reservation in parallel; the ordered commit head
         // collects the Lane admission only when both facts are ready.
-        owner.submitMatching(pending);
+        owner.matchingFlow.submitMatching(pending);
         return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
                 sequence, responseData);
     }
@@ -273,21 +273,21 @@ final class MatchingCommandAdmission {
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
         CommandSlot pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
-        owner.putPendingMatching(pending);
+        owner.matchingFlow.putPendingMatching(pending);
         pending.deferMatching(clusterTimestamp, clusterPosition, sourceKey);
         owner.appliedCommandCount = sequence;
-        owner.refreshCommittedCoreSequence();
+        owner.matchingFlow.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
                 sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {
-        owner.commitMatchingSequence(pending.sequence());
+        owner.matchingFlow.commitMatchingSequence(pending.sequence());
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, pending.sequence(),
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-        owner.removePendingMatching(pending.sequence());
+        owner.matchingFlow.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 pending.sequence(), TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
@@ -318,7 +318,7 @@ final class MatchingCommandAdmission {
         if (amend && order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
         }
-        PlaceOrderCommand replacement = owner.replacementFor(decodedCommand,
+        PlaceOrderCommand replacement = owner.matchingFlow.replacementFor(decodedCommand,
                 amend ? CommandSlot.Operation.AMEND : CommandSlot.Operation.REPLACE, order);
         if (replacement.orderId() != originalOrderId) {
             owner.requireOrderIdentityAvailable(message.header().userId(), replacement);
@@ -344,7 +344,7 @@ final class MatchingCommandAdmission {
         if (trigger == null) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
         }
-        PlaceOrderCommand child = owner.triggerPlacement(trigger, execute[2]);
+        PlaceOrderCommand child = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
         var instrument = owner.runtimeState.instrument(child.symbol());
         if (instrument != null) instrument.requireTrading(false);
         var order = owner.runtimeState.order(child.orderId());
@@ -374,7 +374,7 @@ final class MatchingCommandAdmission {
                 long[] execute = decodedCommand.trigger();
                 var trigger = owner.runtimeState.triggerOrder(execute[0]);
                 if (trigger == null) return List.of();
-                placement = owner.triggerPlacement(trigger, execute[2]);
+                placement = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
                 excludedOrderId = placement.orderId();
             }
             case REPLACE, AMEND -> {
@@ -478,7 +478,7 @@ final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not executable");
         }
         owner.resultBuilder.setSingleChangedUser(liquidation.userId());
-        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                 command.cursorOrderId(), command.maxOrders());
         owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
     }
@@ -542,7 +542,7 @@ final class MatchingCommandAdmission {
                     liquidation.liquidationId(), true, false));
             batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
-                TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(liquidation.userId(), liquidationSymbol,
+                TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), liquidationSymbol,
                         action.cursorOrderId(), remaining);
                 for (CoreOrderState order : chunk.orders()) batchChangedOrders.add(order.orderId());
                 remaining -= chunk.orders().size();
@@ -573,7 +573,7 @@ final class MatchingCommandAdmission {
                 || progress.nextCursorUserId() != command.cursorUserId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
-        TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders());
+        TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.matchingFlow.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders());
         boolean orderPhase = progress == null || !progress.ordersComplete();
         if (orderPhase && !orderChunk.more()) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());

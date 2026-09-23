@@ -959,7 +959,7 @@ class CoreMatchingStateTest {
     }
 
     private static int awaitMatchingHash(TradingCoreRuntime state) {
-        CompletableFuture<Integer> future = state.matchingStateHashAsync();
+        CompletableFuture<Integer> future = state.matchingFlow.matchingStateHashAsync();
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (!future.isDone() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertThat(future).isDone();

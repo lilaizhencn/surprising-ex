@@ -147,7 +147,6 @@ class RiskBatchBudgetTest {
             var before = state.tradingState();
             var scan = command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
-            assertThat(state.requiresOwnerLaneAccessForPreparation(scan)).isFalse();
             var response = apply(state, scan);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.ARITHMETIC_OVERFLOW);

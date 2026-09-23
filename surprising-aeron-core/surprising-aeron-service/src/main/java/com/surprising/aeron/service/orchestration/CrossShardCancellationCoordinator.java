@@ -52,9 +52,9 @@ final class CrossShardCancellationCoordinator {
                     command.command().header().submittedAtEpochMillis(), () -> aggregate);
             pending.removeFirst();
             command.crossShardCancellationStarted = false;
-            owner.publishMatchingCompletion(command.sequence(), evidenced);
+            owner.matchingFlow.publishMatchingCompletion(command.sequence(), evidenced);
             command.matchingSubmitted();
-            owner.matchingSubmissionCompleted(command);
+            owner.matchingProgress.submissionCompleted(command);
         }
     }
 

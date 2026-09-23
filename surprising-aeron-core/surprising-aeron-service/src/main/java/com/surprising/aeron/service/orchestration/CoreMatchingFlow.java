@@ -202,7 +202,7 @@ final class CoreMatchingFlow {
     }
 
     private void submitMatchingInCommandScope(CommandSlot pending) {
-        if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
+        if (pending.crossShardCancellationStarted || owner.matchingProgress.submissionDeferred(pending.sequence())) return;
         pending.prepareLaneResultTarget(owner.responseArena);
         if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
             if (!collectPlaceAdmissionIfReady(pending)
@@ -210,7 +210,7 @@ final class CoreMatchingFlow {
         }
         if (pending.orderBatch != null) {
             owner.batches.submitOrderBatchMatching(pending);
-            if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
+            if (pending.isMatchingSubmitted()) owner.matchingProgress.submissionCompleted(pending);
             return;
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
@@ -224,7 +224,7 @@ final class CoreMatchingFlow {
             owner.matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
                     pending.sequence(), owner.matcherCommands.prepareMatchingCommand(pending, null));
             pending.matchingSubmitted();
-            matchingSubmissionCompleted(pending);
+            owner.matchingProgress.submissionCompleted(pending);
             return;
         }
         var direct = owner.directMatcherSettlements.prepareForMatching(pending);
@@ -240,7 +240,7 @@ final class CoreMatchingFlow {
         }
         owner.matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();
-        if (pending.placeAdmission() == null) matchingSubmissionCompleted(pending);
+        if (pending.placeAdmission() == null) owner.matchingProgress.submissionCompleted(pending);
         if (direct != null && !direct.matcherOwnedPublication()) {
             predispatchDirectSettlement(pending, direct);
         }
@@ -275,19 +275,10 @@ final class CoreMatchingFlow {
         return shardId;
     }
 
-    void progressPlaceBatchAdmissions() { owner.matchingProgress.progressPlaceBatchAdmissions(); }
-    void drainPlaceAdmissionNotifications() { owner.matchingProgress.drainPlaceAdmissionNotifications(); }
-    boolean matchingSubmissionDeferred(long sequence) {
-        return owner.matchingProgress.submissionDeferred(sequence);
-    }
-    void matchingSubmissionCompleted(CommandSlot pending) {
-        owner.matchingProgress.submissionCompleted(pending);
-    }
     int pendingSubmissionShard(CommandSlot pending) {
         OrderBatchPending batch = pending.orderBatch;
         return batch == null ? matcherShard(pending) : owner.batches.orderBatchMatcherShard(batch);
     }
-    void submitDeferredMatchingAfterBatch() { owner.matchingProgress.submitDeferredMatchingAfterBatch(); }
 
     void publishMatchingCompletion(long sequence, CoreMatchingResult result) {
         if (result == null || result.nativeCoreSequence() != sequence) {
@@ -407,6 +398,7 @@ final class CoreMatchingFlow {
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }
 
+    /** Collect a completed PLACE admission once before ordered commit. */
     boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
         if (pending == null || pending.placeAdmission() == null) return true;
         var admission = pending.placeAdmission();
@@ -444,7 +436,7 @@ final class CoreMatchingFlow {
     private void completePlaceAdmissionSubmission(CommandSlot pending) {
         if (pending != null && pending.isMatchingSubmitted()
                 && owner.pendingMatching.submissionShard(pending.sequence()) >= 0) {
-            matchingSubmissionCompleted(pending);
+            owner.matchingProgress.submissionCompleted(pending);
         }
     }
 

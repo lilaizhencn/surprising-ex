@@ -19,7 +19,7 @@ final class RuntimeStateMaterializationCache {
         owner.runtimeState.requireSnapshotFenceReady();
         long currentRevision = owner.runtimeState.revision();
         long currentMarketRevision = owner.runtimeState.marketRevision();
-        long currentSequence = owner.runtimeProjectionJournal.publishedSequence();
+        long currentSequence = owner.commits.publication.publishedSequence();
         if (state == null || revision != currentRevision || marketRevision != currentMarketRevision
                 || sequence != currentSequence) {
             state = RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);

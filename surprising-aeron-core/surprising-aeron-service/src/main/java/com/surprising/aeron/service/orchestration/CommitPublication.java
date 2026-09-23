@@ -18,6 +18,9 @@ final class CommitPublication {
     private boolean dirty;
     private boolean provisionalOnly;
     private boolean active;
+    private long publishedSequence;
+    private boolean activated;
+    private boolean closed;
 
     CommitPublication(TradingCoreRuntime owner) {
         this.owner = Objects.requireNonNull(owner);
@@ -27,12 +30,29 @@ final class CommitPublication {
     boolean dirty() { return dirty; }
     boolean provisionalOnly() { return provisionalOnly; }
 
-    void initialize(long runtimePatchRevision) {
+    void initialize(long runtimePatchRevision, long publishedSequence) {
         if (deferred || dirty || provisionalOnly || active) {
             throw new IllegalStateException("cannot initialize an active commit publication");
         }
+        if (publishedSequence < 0) throw new IllegalArgumentException("initial commit sequence is negative");
         this.runtimePatchRevision = runtimePatchRevision;
+        this.publishedSequence = publishedSequence;
     }
+
+    void activate() {
+        if (closed) throw new IllegalStateException("cannot activate closed commit publication");
+        activated = true;
+    }
+
+    boolean activated() { return activated; }
+    long publishedSequence() { return publishedSequence; }
+
+    void assertHealthy() {
+        if (closed) throw new IllegalStateException("commit publication is closed");
+        if (!activated) throw new IllegalStateException("commit publication is not activated");
+    }
+
+    void close() { closed = true; }
 
     void request() {
         if (deferred) {
@@ -81,7 +101,8 @@ final class CommitPublication {
         CoreMatchingPhaseMetrics.OwnerPublication timing = null;
         long timingStart = 0;
         try {
-            long sequence = Math.incrementExact(owner.runtimeProjectionJournal.publishedSequence());
+            assertHealthy();
+            long sequence = Math.incrementExact(publishedSequence);
             timing = CoreMatchingPhaseMetrics.sampleOwnerPublication(sequence);
             timingStart = timing == null ? 0 : System.nanoTime();
             long stepStart = timingStart;
@@ -97,7 +118,7 @@ final class CommitPublication {
                     throw new IllegalStateException("runtime changed-index commit is out of order");
                 owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
                 if (timing != null) { timing.indexesNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
-                owner.runtimeProjectionJournal.publish(sequence);
+                publishedSequence = sequence;
                 runtimePatchRevision = owner.runtimeState.committedRevision();
                 if (timing != null) { timing.journalNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 owner.runtimeState.clearCommittedChanges(owner.identities);

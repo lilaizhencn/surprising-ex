@@ -106,7 +106,7 @@ final class OrderBookQueryService {
         CompletedBookQuery completed = completedBookQueries.remove(queryId);
         if (completed == null) return null;
         queryIds.values().removeIf(value -> value == queryId);
-        long exportSequence = owner.runtimeProjectionJournal.publishedSequence();
+        long exportSequence = owner.commits.publication.publishedSequence();
         if (completed.bootstrapSnapshot() == null) {
             var view = new com.surprising.aeron.protocol.CoreOrderBookView(exportSequence, completed.levels());
             byte[] encoded = CoreStateQueryCodec.encodeOrderBookView(view);

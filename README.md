@@ -4,11 +4,15 @@
 
 生产入口统一为 `AeronTradingClusterService → TradingOwnerLoop → TradingCoreOwner`。
 Owner 通过必填的响应出口交接已提交结果，`ClusterServiceEgress` 在集群线程编码和处理有界背压；
-Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。回调模拟仅位于测试目录的
-`TradingOwnerTestSupport`，局部批量基准直接调用实际 Owner，并提供显式的结果消费出口。
+Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。复制日志命令统一先入 Owner 队列，
+再由 Owner 轮询推进；`TradingOwnerTestSupport` 在测试目录用同一入口入队并显式轮询。
+局部批量基准直接调用实际 Owner，并提供显式的结果消费出口。
 
-`CommitPublication` 保留逐命令索引更新、延迟发布及失败处理边界；`RuntimeCommitJournal`
-只维护权威发布序号和生命周期校验，不再提供只有深度计数的 downstream publication batch。
+`CoreMatchingFlow` 承担撮合提交和结果收集，同包调用方直接访问该职责；
+`MatchingPipelineProgress` 负责准入通知和延迟提交推进，不再经过 `TradingCoreRuntime` 的转发方法。
+`CommitPublication` 持有权威发布序号，并负责逐命令索引更新、延迟发布、连续性和生命周期校验；
+`CoreSnapshotLifecycle` 在快照屏障中保存状态及业务哈希，不再构造额外的投影值对象。
+集群命令使用异步 Lane 路径；独立回放和工具仍使用同步调用契约，不能直接删除其完成分支。
 撮合和账户 Lane 的完成条件、资金结算、终态去重及快照恢复顺序不变。
 
 ## 项目介绍

@@ -141,22 +141,18 @@ final class CoreSnapshotLifecycle {
             }
             owner.runtimeState.requireSnapshotFenceReady();
             if (fence.projectionSequence < 0) {
-                fence.projectionSequence = owner.runtimeProjectionJournal.publishedSequence();
+                fence.projectionSequence = owner.commits.publication.publishedSequence();
                 fence.snapshotState = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
                         owner.runtimeState, owner.identities);
                 long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
                         fence.snapshotState.businessStateHash(), owner.runtimeState.feePoliciesSnapshot(),
                         owner.runtimeState.pendingTransfersSnapshot());
-                long fundsStateHash = com.surprising.aeron.service.state.FundsStateHash.compute(
-                        fence.snapshotState);
-                fence.projection = new com.surprising.aeron.service.state.RuntimeCommitJournal.ProjectionVersion(
-                        fence.projectionSequence, fence.snapshotState, businessStateHash, fundsStateHash);
+                fence.businessStateHash = businessStateHash;
             }
-            var projection = fence.projection;
             if (fence.matcherSnapshot == null) {
                 fence.coreSequence = owner.appliedCommandCount;
                 CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
-                        fence.snapshotId, fence.coreSequence, projection.businessStateHash(),
+                        fence.snapshotId, fence.coreSequence, fence.businessStateHash,
                         fence.snapshotState, owner.activeOrderIndex.orders());
                 if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
                     throw new TradingCoreRuntime.SnapshotNotReadyException();
@@ -225,8 +221,8 @@ final class CoreSnapshotLifecycle {
         long projectionSequence = -1;
         /** 快照边界物化的状态，只在快照生命周期内持有。 */
         TradingCoreState snapshotState;
-        /** 受版本保护的提交视图，快照结束时释放。 */
-        com.surprising.aeron.service.state.RuntimeCommitJournal.ProjectionVersion projection;
+        /** 与快照状态一同捕获的业务哈希。 */
+        long businessStateHash;
         /** 正在收集的撮合快照 Future。 */
         CompletableFuture<MatcherSnapshot> matcherSnapshot;
         /** 正在编码的快照 Future，完成后交给持久化边界。 */

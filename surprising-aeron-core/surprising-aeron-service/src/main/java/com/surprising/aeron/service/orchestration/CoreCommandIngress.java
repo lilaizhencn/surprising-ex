@@ -79,22 +79,9 @@ final class CoreCommandIngress {
         return applyCommandIngress(message, clusterTimestamp, clusterPosition);
     }
 
+    /** Queries can borrow Lane state for a read fence; commands hand mutations to their Lane. */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
-        return switch (message.header().messageType()) {
-            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER -> false;
-            case UPSERT_ALGO_ORDER, EXECUTE_TRIGGER_ORDER -> false;
-            case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
-                    UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
-                    ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE,
-                    UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
-                    UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, REGISTER_INSTRUMENT,
-                    UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
-            case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER, CANCEL_ORDER_BATCH -> false;
-            case CONTINUE_RISK_SCAN, AMEND_ORDER_BATCH, PLACE_ORDER_BATCH, EXECUTE_ADL,
-                    RESOLVE_LIQUIDATION, EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH,
-                    SETTLE_INSTRUMENT -> false;
-            default -> true;
-        };
+        return message.header().kind() == WireMessageKind.QUERY;
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {

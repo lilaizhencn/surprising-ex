@@ -52,8 +52,7 @@ public final class CoreFaults {
                 state.activated(),
                 ((com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter)
                         get(state, "matchingAdapter")).activated(),
-                ((com.surprising.aeron.service.state.RuntimeCommitJournal)
-                        get(state, "runtimeProjectionJournal")).activated());
+                state.commits.publication.activated());
     }
 
     record ActivationState(boolean core, boolean runtime, boolean matcher, boolean projector) {

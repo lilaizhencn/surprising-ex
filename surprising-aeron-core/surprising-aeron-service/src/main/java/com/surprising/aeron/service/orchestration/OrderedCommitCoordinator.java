@@ -59,7 +59,7 @@ final class OrderedCommitCoordinator {
     CoreResponse completeRejectedMatching(long sequence) {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
-        if (pending == null || !owner.hasPendingMatchingRejection(sequence)) return null;
+        if (pending == null || !owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
         var direct = pending.settlementEvent();
         if (pending.isMatchingSubmitted()) {
@@ -74,7 +74,7 @@ final class OrderedCommitCoordinator {
         }
         CoreResultCode resultCode = owner.laneCommandContexts.required(sequence).matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
-        owner.commitMatchingSequence(sequence);
+        owner.matchingFlow.commitMatchingSequence(sequence);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, sequence,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
@@ -102,7 +102,7 @@ final class OrderedCommitCoordinator {
                 applyMatcherProgress(matcherResult);
             }
         }
-        owner.removePendingMatching(sequence);
+        owner.matchingFlow.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return owner.finishFactContext(response);
@@ -353,7 +353,7 @@ final class OrderedCommitCoordinator {
                     var command = pending.decodedCommand().liquidation();
                     var liquidation = owner.runtimeState.liquidation(command.liquidationId());
                     TradingCoreRuntime.LifecycleOrderChunk chunk = liquidation == null ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
-                            : owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                            : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             command.cursorOrderId(),
                             command.maxOrders());
                     owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
@@ -437,7 +437,7 @@ final class OrderedCommitCoordinator {
     private CoreResponse storeTerminalResponse(CommandSlot pending, MatchingResult matchingResult,
             ResponseStatus status, CoreResultCode resultCode) {
         long applied = pending.sequence();
-        owner.commitMatchingSequence(applied);
+        owner.matchingFlow.commitMatchingSequence(applied);
         boolean builderEncoded = pending.resultData == null;
         // Control continuations may have prepared the response into resultData before the
         // terminal commit.  That byte slice still belongs to the reusable result builder until
@@ -513,9 +513,9 @@ final class OrderedCommitCoordinator {
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
-        owner.removePendingMatching(sequence);
+        owner.matchingFlow.removePendingMatching(sequence);
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
-            owner.submitDeferredMatchingAfterBatch();
+            owner.matchingProgress.submitDeferredMatchingAfterBatch();
         }
         CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
         return owner.finishFactContext(response);
@@ -530,8 +530,8 @@ final class OrderedCommitCoordinator {
         // Admission is consumed once, at the ordered terminal boundary. The Matcher has
         // already consumed the primitive Lane receipt; no Owner-side admission poll is needed.
         if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
-            if (!owner.collectPlaceAdmissionIfReady(pending)) return null;
-            if (owner.hasPendingMatchingRejection(pending.sequence()))
+            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
+            if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
                 return completeRejectedMatching(pending.sequence());
         }
         owner.captureRealtimeTrades(pending);
@@ -614,8 +614,8 @@ final class OrderedCommitCoordinator {
             }
         }
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
-        owner.removePendingMatching(pending.sequence());
-        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
+        owner.matchingFlow.removePendingMatching(pending.sequence());
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
         return owner.finishFactContext(response);
     }
 
@@ -655,8 +655,8 @@ final class OrderedCommitCoordinator {
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseCancel(pending.takeCancelEvent());
-        owner.removePendingMatching(pending.sequence());
-        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
+        owner.matchingFlow.removePendingMatching(pending.sequence());
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
         return owner.finishFactContext(response);
     }
 
@@ -705,7 +705,7 @@ final class OrderedCommitCoordinator {
             var command = pending.decodedCommand().settlement();
             var progress = owner.runtimeLifecycleProgress(command.symbol());
             if (progress != null && progress.ordersComplete()
-                    || !owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders()).more()) {
+                    || !owner.matchingFlow.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders()).more()) {
                 for (long userId : owner.instrumentSettlement.settlementUsers(command.symbol(), command.cursorUserId(), command.maxUsers())) {
                     mask |= owner.matchingAdapter.topology().accountLaneMask(userId);
                 }
@@ -840,7 +840,7 @@ final class OrderedCommitCoordinator {
                     ExecuteLiquidationCommand single = new ExecuteLiquidationCommand(action.liquidationId(),
                             action.triggerPriceSequence(), action.executionPriceTicks(), batch.liquidationFeeRatePpm(),
                             action.cursorOrderId(), Math.min(remaining, ExecuteLiquidationCommand.DEFAULT_MAX_ORDERS));
-                    var chunk = owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                    var chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             action.cursorOrderId(), remaining);
                     for (CoreOrderState order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
@@ -1029,7 +1029,7 @@ final class OrderedCommitCoordinator {
             return batch.settlementEvent.complete();
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
-        if (owner.hasPendingMatchingRejection(pending.sequence())) {
+        if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
             if (!pending.isMatchingSubmitted()) return true;
             if (pending.settlementEvent() != null && pending.settlementEvent().direct())
                 return pending.settlementEvent().complete();
@@ -1043,15 +1043,6 @@ final class OrderedCommitCoordinator {
         if (pending.hasLaneContinuation()) return pending.laneContinuationComplete();
         CommandSlot context = pending;
         return context.hasMatchingCompletion() || context.matchingResult() != null;
-    }
-
-    /**
-     * Collect one completed ordinary PLACE admission at the ordered commit head.  The event is
-     * already immutable and complete before this method is called; all reservation/publication
-     * semantics remain unchanged while the old per-shard submission poll disappears.
-     */
-    private boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
-        return owner.collectPlaceAdmissionIfReady(pending);
     }
 
     void drainMatcherSettlementCompletions() {
@@ -1206,7 +1197,7 @@ final class OrderedCommitCoordinator {
     private CoreResponse commitReadyPending(CommandSlot pending, long clusterTimestamp, long clusterPosition) {
         long sequence = pending.sequence();
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
-        if (owner.hasPendingMatchingRejection(sequence)) {
+        if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
             if (pending.isMatchingSubmitted()
                     && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
                 if (!pending.settlementEvent().complete()) return null;
@@ -1268,7 +1259,7 @@ final class OrderedCommitCoordinator {
                 continue;
             }
             if (pending == null || pending.sequence() > throughSequence || pending.operation() != CommandSlot.Operation.PLACE
-                    || pending.settlementEvent() != null || owner.hasPendingMatchingRejection(pending.sequence())) {
+                    || pending.settlementEvent() != null || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
                 return;
             }
             OrderBatchPending batch = pending.orderBatch;
@@ -1327,8 +1318,8 @@ final class OrderedCommitCoordinator {
             // sequences whose Lane admission has not yet been collected.
             if (pending.settlementEvent() == null || !pending.settlementEvent().direct()) return;
             CommandSlot laneContext = pending;
-            if (pending.placeAdmission() != null && !collectPlaceAdmissionIfReady(pending)) return;
-            if (owner.hasPendingMatchingRejection(pending.sequence())) return;
+            if (pending.placeAdmission() != null && !owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return;
+            if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return;
             com.surprising.aeron.service.matching.CoreMatchingResult matching = laneContext.matchingCompletion();
             if (matching == null || !matching.accepted()) return;
             matching = laneContext.takeMatchingCompletion();
@@ -1357,8 +1348,8 @@ final class OrderedCommitCoordinator {
     boolean commitPublicationDeferred() { return publication.deferred(); }
     boolean commitPublicationDirty() { return publication.dirty(); }
     boolean commitPublicationProvisionalOnly() { return publication.provisionalOnly(); }
-    void initializeCommitPublication(long runtimePatchRevision) {
-        publication.initialize(runtimePatchRevision);
+    void initializeCommitPublication(long runtimePatchRevision, long publishedSequence) {
+        publication.initialize(runtimePatchRevision, publishedSequence);
     }
     void deferProvisionalCommitPublication() { publication.deferProvisionalProjection(); }
     void suspendCommitPublication() { publication.suspend(); }

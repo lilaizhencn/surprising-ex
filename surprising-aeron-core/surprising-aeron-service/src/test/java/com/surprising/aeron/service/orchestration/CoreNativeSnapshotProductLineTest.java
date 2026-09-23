@@ -16,7 +16,7 @@ class CoreNativeSnapshotProductLineTest {
         int bookHash;
         try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             snapshot = state.snapshot(101);
-            bookHash = state.matchingStateHashAsync().join();
+            bookHash = state.matchingFlow.matchingStateHashAsync().join();
         }
 
         CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
@@ -24,7 +24,7 @@ class CoreNativeSnapshotProductLineTest {
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(manifest.topology().routeVersion()).isEqualTo(3);
             assertThat(restored.productLine()).isEqualTo(productLine);
-            assertThat(restored.matchingStateHashAsync().join()).isEqualTo(bookHash);
+            assertThat(restored.matchingFlow.matchingStateHashAsync().join()).isEqualTo(bookHash);
         }
     }
 }

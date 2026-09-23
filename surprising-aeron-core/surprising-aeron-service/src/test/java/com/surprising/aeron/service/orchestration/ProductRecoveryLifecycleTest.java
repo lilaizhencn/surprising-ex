@@ -134,7 +134,7 @@ class ProductRecoveryLifecycleTest {
 
     private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {
         assertThat(actual.tradingState().businessStateHash()).isEqualTo(expected.tradingState().businessStateHash());
-        assertThat(actual.matchingStateHashAsync().join()).isEqualTo(expected.matchingStateHashAsync().join());
+        assertThat(actual.matchingFlow.matchingStateHashAsync().join()).isEqualTo(expected.matchingFlow.matchingStateHashAsync().join());
         assertThat(actual.committedCoreSequence()).isEqualTo(expected.committedCoreSequence());
     }
 

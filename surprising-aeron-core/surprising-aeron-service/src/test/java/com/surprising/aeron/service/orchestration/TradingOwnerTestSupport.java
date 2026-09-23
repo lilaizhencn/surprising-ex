@@ -69,12 +69,14 @@ final class TradingOwnerTestSupport implements ClusteredService {
     }
 
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
-        owner.acceptCommittedCommand(session, request, timestamp, position);
+        owner.enqueueCommittedCommand(session, request, timestamp, position, null);
+        owner.pollCommands();
     }
 
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                 CommandFingerprint fingerprint) {
-        owner.acceptCommittedCommand(session, request, timestamp, position, fingerprint);
+        owner.enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
+        owner.pollCommands();
     }
 
     void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,

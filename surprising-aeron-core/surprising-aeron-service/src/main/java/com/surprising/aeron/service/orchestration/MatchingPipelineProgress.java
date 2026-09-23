@@ -31,7 +31,7 @@ final class MatchingPipelineProgress {
     boolean submissionDeferred(long sequence) {
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending != null) {
-            int shardId = owner.pendingSubmissionShard(pending);
+            int shardId = owner.matchingFlow.pendingSubmissionShard(pending);
             if (!owner.pendingMatching.isSubmissionHead(sequence, shardId)) return true;
         }
         if (pending != null && pending.clusterIndependent || !owner.batches.hasPendingBatches()) return false;
@@ -40,7 +40,7 @@ final class MatchingPipelineProgress {
 
     void submissionCompleted(CommandSlot pending) {
         owner.pendingMatching.progressChanged();
-        int shard = owner.pendingSubmissionShard(pending);
+        int shard = owner.matchingFlow.pendingSubmissionShard(pending);
         owner.pendingMatching.completeSubmission(pending.sequence());
         // Wake the next command on this shard as soon as the submission head is released. A
         // normal PLACE may have been followed by a cancel/control command whose submission was
@@ -61,7 +61,7 @@ final class MatchingPipelineProgress {
         drainPlaceAdmissionNotifications();
         if (readyShardMask == 0 && hasDeferredMatchingSubmission()) {
             CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
-            readyShardMask |= 1L << owner.pendingSubmissionShard(head);
+            readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(head);
         }
         long readyShards = readyShardMask;
         while (readyShards != 0) {
@@ -88,7 +88,7 @@ final class MatchingPipelineProgress {
                 if (admission == null && batchAdmission == null) {
                     if (orderBatch != null && pending.clusterIndependent
                             && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.activated()) {
-                        owner.submitMatching(pending);
+                        owner.matchingFlow.submitMatching(pending);
                         if (pending.isMatchingSubmitted()) continue;
                     }
                     // A control or matching command may have been held behind an earlier
@@ -96,7 +96,7 @@ final class MatchingPipelineProgress {
                     // resumed by OrderBatchExecutor; submitting them here would route the same
                     // matcher token twice.
                     if (orderBatch == null && !pending.isMatchingSubmitted() && !pending.deferredMatching()) {
-                        owner.submitMatching(pending);
+                        owner.matchingFlow.submitMatching(pending);
                         if (pending.isMatchingSubmitted()) continue;
                     }
                     readyShardMask &= ~shardBit;
@@ -165,7 +165,7 @@ final class MatchingPipelineProgress {
                 // Matcher even while its Account Lane admission is still running. This is a
                 // submission-head transition, not an admission poll.
                 if (!pending.isMatchingSubmitted()) {
-                    owner.submitMatching(pending);
+                    owner.matchingFlow.submitMatching(pending);
                     if (pending.isMatchingSubmitted()) continue;
                 }
                 readyShardMask &= ~shardBit;
@@ -243,8 +243,8 @@ final class MatchingPipelineProgress {
                 CommandSlot pending = owner.pendingMatching.get(sequence);
                 if (pending == null || pending.placeAdmission() == null) continue;
                 if (!pending.isMatchingSubmitted()) {
-                    readyShardMask |= 1L << owner.pendingSubmissionShard(pending);
-                } else if (owner.collectPlaceAdmissionIfReady(pending)) {
+                    readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(pending);
+                } else if (owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) {
                     owner.pendingMatching.progressChanged();
                 }
             }

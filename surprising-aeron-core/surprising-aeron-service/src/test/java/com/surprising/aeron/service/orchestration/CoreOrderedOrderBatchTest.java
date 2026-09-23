@@ -35,7 +35,6 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
-import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
@@ -1250,7 +1249,6 @@ class CoreOrderedOrderBatchTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
-        RuntimeCommitJournal journal = field(state, "runtimeProjectionJournal");
         UUID commandId = UUID.randomUUID();
         CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(

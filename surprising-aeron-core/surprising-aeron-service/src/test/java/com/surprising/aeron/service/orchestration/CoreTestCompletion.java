@@ -63,9 +63,9 @@ final class CoreTestCompletion {
             long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
                     ? requestedSequence : owner.firstPendingMatchingSequence();
             if (sequence == 0) break;
-            owner.progressPlaceBatchAdmissions();
+            owner.matchingProgress.progressPlaceBatchAdmissions();
             CoreResponse response;
-            if (owner.hasPendingMatchingRejection(sequence)) {
+            if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
                 response = owner.commits.completeRejectedMatching(sequence);
             } else {
                 CommandSlot pending = owner.pendingMatching.get(sequence);
@@ -78,7 +78,7 @@ final class CoreTestCompletion {
                                 ? owner.laneCommandContexts.required(sequence).matchingResult()
                                 : awaitMatchingResult(owner, sequence);
                 if (matching == null) matching = awaitMatchingResult(owner, sequence);
-                if (matching == null && owner.hasPendingMatchingRejection(sequence)) {
+                if (matching == null && owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
                 } else if (matching == null) {
                     throw new IllegalStateException(
@@ -111,19 +111,19 @@ final class CoreTestCompletion {
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
         CommandSlot pending = state.pendingMatching.get(sequence);
-        while (pending != null && state.placeAdmissionOutstanding(pending)
-                && !state.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            state.progressPlaceBatchAdmissions();
-            if (state.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
+        while (pending != null && state.matchingFlow.placeAdmissionOutstanding(pending)
+                && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
+            state.matchingProgress.progressPlaceBatchAdmissions();
+            if (state.matchingFlow.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
-        if (state.hasPendingMatchingRejection(sequence)) return null;
+        if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
         while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
             CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
             state.drainMatchingCompletions();
-            if (state.hasPendingMatchingRejection(sequence)) return null;
+            if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             CommandSlot context = state.laneCommandContexts.required(sequence);
             com.surprising.aeron.service.matching.MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
