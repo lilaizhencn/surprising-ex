@@ -1,0 +1,38 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Amazon Corretto HotSpot 27.0.0",
+  "deletedMainClasses": [
+    "com.surprising.aeron.service.state.ReducerSettlementSupport",
+    "com.surprising.aeron.service.state.math.CoreRoundingPolicy"
+  ],
+  "deletedTest": "com.surprising.aeron.service.state.CoreRoundingPolicyTest",
+  "reason": "ReducerSettlementSupport has no source callers; CoreRoundingPolicy has only its own test caller. No production command, state, snapshot or settlement path refers to either class.",
+  "firstBuild": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean package",
+    "counts": {
+      "tests": 1089,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "logSha256": "ca580e73ad6885fe8e4699e89b6bdfa699308b890cacb512e2f99bde13cc61b5"
+  },
+  "finalBuild": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean package",
+    "counts": {
+      "tests": 1088,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "logSha256": "c88271e057856a369d99f9585e6852008f11443efb8404bd840399c5cd167af7"
+  },
+  "serviceJar": {
+    "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+    "sha256": "cc51155ba15f85e3de4984ea9375636afed997afeebf31550fbf7c56143a0c4d",
+    "deletedClassesAbsent": true
+  },
+  "remainingAssessment": "TradingDependencyMask has benchmark/test callers only but cannot be directly removed without rewriting those scenarios. Snapshot materialization, lane-owned state, order aliases, cancellation, risk and settlement classes have active callers and business or concurrency boundaries.",
+  "untested": "No sustained throughput benchmark or external multi-process deployment; deletion touches no active production path.",
+  "cleanup": "Temporary test logs and this run Surefire reports removed after recording evidence. Packaged jars retained."
+}
