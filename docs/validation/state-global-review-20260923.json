@@ -1,0 +1,21 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Amazon Corretto HotSpot 27.0.0",
+  "scope": "surprising-aeron-service state package and production callers across surprising-ex",
+  "change": "Moved test-only RuntimeSnapshotBuilder and TradingRuntimeSnapshot to src/test; removed TradingRuntimeState.snapshot(long); preserved parity assertions.",
+  "build": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean package",
+    "serviceTests": 919,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2,
+    "logSha256": "0f054e7ed3e8c6792e64df3a3e21a4ca78583b5b7271e99a605c5cec4b65a590"
+  },
+  "serviceJar": {
+    "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+    "sha256": "48cc5da66af3a165024a76782f69b81046f9c6e8a89210a93155cb8991f7d34f",
+    "testSnapshotTypesAbsent": true
+  },
+  "untested": "No throughput benchmark or external cluster deployment; this change does not alter the production state transition path.",
+  "cleanup": "Temporary build log and this run Surefire reports removed after evidence capture; packaged jars retained."
+}

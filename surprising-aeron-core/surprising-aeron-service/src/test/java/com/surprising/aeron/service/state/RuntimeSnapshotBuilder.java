@@ -8,12 +8,13 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-public final class RuntimeSnapshotBuilder {
+final class RuntimeSnapshotBuilder {
 
     private RuntimeSnapshotBuilder() {
     }
 
-    public static TradingRuntimeSnapshot capture(TradingRuntimeState state, long revision) {
+    static TradingRuntimeSnapshot capture(TradingRuntimeState state, long revision) {
+        state.assertOwner();
         if (revision < 0) {
             throw new IllegalArgumentException("snapshot revision must not be negative");
         }

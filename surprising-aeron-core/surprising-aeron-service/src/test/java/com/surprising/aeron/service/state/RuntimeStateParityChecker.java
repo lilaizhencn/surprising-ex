@@ -16,8 +16,8 @@ final class RuntimeStateParityChecker {
         TradingCoreState materialized = RuntimeStateMaterializer.materialize(actual, identities);
         if (!expected.equals(materialized) || expected.businessStateHash() != materialized.businessStateHash()) {
             TradingRuntimeState projected = RuntimeStateProjector.project(expected, identities);
-            TradingRuntimeSnapshot expectedSnapshot = projected.snapshot(expected.revision());
-            TradingRuntimeSnapshot actualSnapshot = actual.snapshot(expected.revision());
+            TradingRuntimeSnapshot expectedSnapshot = RuntimeSnapshotBuilder.capture(projected, expected.revision());
+            TradingRuntimeSnapshot actualSnapshot = RuntimeSnapshotBuilder.capture(actual, expected.revision());
             throw new IllegalStateException("runtime parity mismatch at revision " + expected.revision()
                     + ": " + mismatch(expectedSnapshot, actualSnapshot)
                     + " hashes=" + expected.businessStateHash() + '/' + materialized.businessStateHash()

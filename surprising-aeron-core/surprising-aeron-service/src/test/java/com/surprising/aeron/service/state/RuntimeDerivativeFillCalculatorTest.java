@@ -36,19 +36,19 @@ class RuntimeDerivativeFillCalculatorTest {
             var actualTreasury = new RuntimeTreasuryDelta();
             var cursor = RuntimeDerivativeFillCalculator.beginTaker(batched, instrument, batched.order(11),
                     key, 10_000_000, asset, 555, 999);
-            var before = batched.snapshot(1);
+            var before = RuntimeSnapshotBuilder.capture(batched, 1);
             try {
                 for (long price : new long[]{111, 109, 113, 107}) {
                     RuntimeDerivativeFillCalculator.apply(sequential, identities, instrument, sequential.order(11),
                             key, price, 1, true, 10_000_000, asset, expectedTreasury, 555, 999);
                     cursor.applyNext(price, 1, actualTreasury);
                 }
-                assertThat(batched.snapshot(1)).as("intermediate scalar state must not escape").isEqualTo(before);
+                assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).as("intermediate scalar state must not escape").isEqualTo(before);
                 cursor.publish(batched);
             } finally { cursor.clear(); }
             expectedTreasury.apply(sequential.treasury());
             actualTreasury.apply(batched.treasury());
-            assertThat(batched.snapshot(1)).isEqualTo(sequential.snapshot(1));
+            assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).isEqualTo(RuntimeSnapshotBuilder.capture(sequential, 1));
             assertThat(batched.position(key).signedQuantitySteps()).isEqualTo(-2);
             assertThat(batched.order(11).revision()).isEqualTo(5);
             assertThat(batched.user(7).revision()).isEqualTo(4);
@@ -62,7 +62,7 @@ class RuntimeDerivativeFillCalculatorTest {
         int symbol = identities.symbolId(instrument.symbol()), asset = identities.assetId(instrument.settleAsset());
         long key = identities.positionKey(7, instrument.symbol());
         try (var runtime = runtime(symbol, asset, 200)) {
-            var before = runtime.snapshot(1);
+            var before = RuntimeSnapshotBuilder.capture(runtime, 1);
             var cursor = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
@@ -70,7 +70,7 @@ class RuntimeDerivativeFillCalculatorTest {
                 assertThatThrownBy(() -> cursor.applyNext(100, 2, new RuntimeTreasuryDelta()))
                         .isInstanceOf(IllegalArgumentException.class);
             } finally { cursor.clear(); }
-            assertThat(runtime.snapshot(1)).isEqualTo(before);
+            assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
             var retry = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
@@ -118,13 +118,13 @@ class RuntimeDerivativeFillCalculatorTest {
         int assetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(7, instrument.symbol());
         TradingRuntimeState runtime = runtime(symbolId, assetId, 21);
-        TradingRuntimeSnapshot before = runtime.snapshot(1);
+        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
         assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
                 runtime.order(11), positionKey, 100, 2, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
 
-        assertThat(runtime.snapshot(1)).isEqualTo(before);
+        assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
     }
 
     @Test
@@ -212,12 +212,12 @@ class RuntimeDerivativeFillCalculatorTest {
         long positionKey = identities.positionKey(7, instrument.symbol());
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
-        TradingRuntimeSnapshot before = runtime.snapshot(1);
+        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
         assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
                 runtime.order(11), positionKey, 120, 3, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
-        assertThat(runtime.snapshot(1)).isEqualTo(before);
+        assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
     }
 
     private static TradingRuntimeState runtime(int symbolId, int assetId, long reservationUnits) {

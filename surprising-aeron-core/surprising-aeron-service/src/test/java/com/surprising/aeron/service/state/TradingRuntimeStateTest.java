@@ -805,7 +805,7 @@ class TradingRuntimeStateTest {
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
-        TradingRuntimeSnapshot snapshot = state.snapshot(4);
+        TradingRuntimeSnapshot snapshot = RuntimeSnapshotBuilder.capture(state, 4);
 
         assertThat(snapshot.revision()).isEqualTo(4);
         assertThat(snapshot.totalAvailableUnits()).isEqualTo(800);
@@ -828,7 +828,7 @@ class TradingRuntimeStateTest {
         state.treasury().setFee(3, 7);
         state.treasury().setInsurance(3, 11, 0);
 
-        TradingRuntimeSnapshot snapshot = state.snapshot(5);
+        TradingRuntimeSnapshot snapshot = RuntimeSnapshotBuilder.capture(state, 5);
 
         assertThat(snapshot.positions()).containsKey(new TradingRuntimeSnapshot.PositionKey(7, 9));
         assertThat(snapshot.positions().get(new TradingRuntimeSnapshot.PositionKey(7, 9)).signedQuantitySteps())

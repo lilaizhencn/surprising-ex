@@ -11,7 +11,6 @@ import com.surprising.aeron.service.state.risk.*;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
 
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
@@ -5042,11 +5041,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD) return new ConcurrentHashMap<>();
         values.clear();
         return values;
-    }
-
-    TradingRuntimeSnapshot snapshot(long revision) {
-        assertOwner();
-        return RuntimeSnapshotBuilder.capture(this, revision);
     }
 
     LongObjectHashMap<UserRuntime> usersForSnapshot() {
