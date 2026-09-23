@@ -1013,11 +1013,6 @@ public class MarketMakerService {
         return new TradeTarget(Math.max(1L, targetPriceTicks - slippage), cumulativeQuantity);
     }
 
-    private long bestAvailableQuantity(OrderSide side, OrderBookSnapshotResponse orderBook) {
-        OrderBookLevel level = side == OrderSide.BUY ? firstAsk(orderBook) : firstBid(orderBook);
-        return level == null ? 0L : level.quantitySteps();
-    }
-
     private long tradeQuantity(InstrumentResponse instrument,
                                MarketMakerProperties.Trade trade,
                                long availableQuantity) {
@@ -1366,20 +1361,12 @@ public class MarketMakerService {
                 strategy.getOrderLevels());
     }
 
-    private MarketMakerProperties.Strategy findStrategy(String strategyId) {
-        return findStrategy(strategyId, null);
-    }
-
     private MarketMakerProperties.Strategy findStrategy(String strategyId, ProductLine productLine) {
         String normalized = normalizeRequired(strategyId, "strategyId");
         return strategiesSnapshot(productLine).stream()
                 .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("unknown market-maker strategy: " + strategyId));
-    }
-
-    private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId) {
-        return findConfiguredStrategy(strategyId, null);
     }
 
     private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId, ProductLine productLine) {

@@ -595,12 +595,6 @@ public class OrderService {
         return aeronOrderProjection;
     }
 
-    private OrderResponse singleProjection(ProjectionReadResult result, String notFoundMessage) {
-        List<OrderResponse> orders = readyProjection(result);
-        if (orders.isEmpty()) throw new IllegalStateException(notFoundMessage);
-        return orders.getFirst();
-    }
-
     private List<OrderResponse> readyProjection(ProjectionReadResult result) {
         if (result.status() == ProjectionReadResult.Status.PROJECTION_LAG) {
             throw new ProjectionReadResult.ProjectionLagException(result.observedExportSequence(),

@@ -394,17 +394,6 @@ public class AccountService {
         }
     }
 
-    private InstrumentResponse requireLifecycleInstrument(InstrumentResponse instrument,
-                                                          String symbol,
-                                                          long version) {
-        if (instrument == null || !normalizeSymbol(symbol).equals(normalizeSymbol(instrument.symbol()))
-                || instrument.changeId() != version) {
-            throw new IllegalArgumentException("生命周期事件缺少匹配的不可变 instrument 快照");
-        }
-        return instrument;
-    }
-
-
     private static void requireRequest(Object request) {
         if (request == null) {
             throw new IllegalArgumentException("request is required");

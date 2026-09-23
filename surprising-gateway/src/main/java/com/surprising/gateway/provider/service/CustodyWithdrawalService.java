@@ -262,11 +262,6 @@ public class CustodyWithdrawalService {
         return stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null));
     }
 
-    private boolean lateBroadcastUnknownCanBeIgnored(String status) {
-        return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
-                || "REFUNDED".equals(status) || "REJECTED".equals(status);
-    }
-
     private boolean terminalWebhookIsIdempotent(String status, String eventType) {
         return ("COMPLETED".equals(status) && "WITHDRAWAL.CONFIRMED".equals(eventType))
                 || ("REFUNDED".equals(status) && "WITHDRAWAL.FAILED".equals(eventType));
@@ -473,14 +468,6 @@ public class CustodyWithdrawalService {
     private boolean terminal(String status) {
         return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
                 || "REFUNDED".equals(status) || "REJECTED".equals(status);
-    }
-
-    private CustodyWithdrawalRepository.WithdrawalRecord requireRecord(UUID withdrawalId) {
-        CustodyWithdrawalRepository.WithdrawalRecord record = repository.find(withdrawalId);
-        if (record == null) {
-            throw new IllegalArgumentException("withdrawal intent does not exist");
-        }
-        return record;
     }
 
     private void validateInput(long userId, String idempotencyKey, WithdrawalRequest request) {
