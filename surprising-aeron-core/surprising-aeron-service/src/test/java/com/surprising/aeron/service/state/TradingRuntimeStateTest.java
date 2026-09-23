@@ -314,12 +314,12 @@ class TradingRuntimeStateTest {
         ConcurrentHashMap<Long, Long> expanded = new ConcurrentHashMap<>();
         for (long key = 0; key < 512; key++) expanded.put(key, key);
 
-        ConcurrentHashMap<Long, Long> compacted = TradingRuntimeState.clearCapturedChanges(expanded);
+        ConcurrentHashMap<Long, Long> compacted = RuntimeGlobalRollback.clearCaptured(expanded);
         assertThat(compacted).isEmpty();
         assertThat(compacted).isNotSameAs(expanded);
 
         compacted.put(1L, 1L);
-        ConcurrentHashMap<Long, Long> reused = TradingRuntimeState.clearCapturedChanges(compacted);
+        ConcurrentHashMap<Long, Long> reused = RuntimeGlobalRollback.clearCaptured(compacted);
         assertThat(reused).isEmpty();
         assertThat(reused).isSameAs(compacted);
     }

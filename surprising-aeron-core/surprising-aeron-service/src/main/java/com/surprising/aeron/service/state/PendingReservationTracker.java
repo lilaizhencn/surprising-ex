@@ -76,9 +76,9 @@ final class PendingReservationTracker {
                 OrderRuntime order = batch.orders[i];
                 if (order == null || lane.pendingReservationSequences.getIfAbsent(order.orderId(), 0) != sequence) continue;
                 ReservationRuntime reservation = lane.reservations.get(order.orderId());
-                owner.captureBalanceBefore(batch.userId, reservation.assetId());
+                owner.accountRollback.captureBalanceBefore(batch.userId, reservation.assetId());
                 lane.completePendingReservation(order.orderId(), sequence);
-                owner.captureBalanceAfter(lane, batch.userId, reservation.assetId());
+                owner.accountRollback.captureBalanceAfter(lane, batch.userId, reservation.assetId());
                 owner.changedOrder(order.orderId());
                 owner.changedReservations.add(order.orderId());
                 owner.changedUsers.add(batch.userId);
@@ -107,7 +107,7 @@ final class PendingReservationTracker {
 
     public void markPendingReservation(long userId, long orderId, long coreSequence) {
         owner.assertOwner();
-        owner.captureReservationBefore(orderId);
+        owner.accountRollback.captureReservationBefore(orderId);
         if (pendingReservationUsers.containsKey(orderId)) {
             throw new IllegalStateException("reservation is already indexed as pending");
         }
@@ -117,9 +117,9 @@ final class PendingReservationTracker {
             if (reservation == null || reservation.userId() != userId) {
                 throw new IllegalStateException("pending reservation is missing");
             }
-            owner.captureBalanceBefore(userId, reservation.assetId());
+            owner.accountRollback.captureBalanceBefore(userId, reservation.assetId());
             lane.markPendingReservation(orderId, coreSequence);
-            owner.captureBalanceAfter(lane, userId, reservation.assetId());
+            owner.accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
             return null;
         });
         indexPendingReservation(userId, orderId, coreSequence, nextTotalPendingReservations);
@@ -133,10 +133,10 @@ final class PendingReservationTracker {
         ReservationRuntime reservation = lane.reservations.get(orderId);
         if (reservation == null || reservation.userId() != userId)
             throw new IllegalStateException("pending reservation is missing");
-        owner.captureReservationBefore(orderId);
-        owner.captureBalanceBefore(userId, reservation.assetId());
+        owner.accountRollback.captureReservationBefore(orderId);
+        owner.accountRollback.captureBalanceBefore(userId, reservation.assetId());
         lane.markPendingReservation(orderId, coreSequence);
-        owner.captureBalanceAfter(lane, userId, reservation.assetId());
+        owner.accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
     }
 
     void collectControlReservation(long userId, long orderId, long coreSequence) {
@@ -159,9 +159,9 @@ final class PendingReservationTracker {
 
     public void completePendingReservation(long userId, long orderId, long coreSequence) {
         owner.assertOwner();
-        owner.captureUserBefore(userId);
-        owner.captureOrderBefore(orderId);
-        owner.captureReservationBefore(orderId);
+        owner.accountRollback.captureUserBefore(userId);
+        owner.accountRollback.captureOrderBefore(orderId);
+        owner.accountRollback.captureReservationBefore(orderId);
         int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
         if (nextTotalPendingReservations < 0) {
             throw new IllegalStateException("pending reservation counters are inconsistent");
@@ -169,10 +169,10 @@ final class PendingReservationTracker {
         requirePendingReservationIndex(orderId, coreSequence, userId);
         PendingReservationCompletion completion = owner.onLane(userId, accountLane -> {
             ReservationRuntime reservation = accountLane.reservations.get(orderId);
-            if (reservation != null) owner.captureBalanceBefore(userId, reservation.assetId());
-            accountLane.clientKeysByOrderId.forEach(orderId, clientKey -> owner.captureClientOrderBefore(userId, clientKey));
+            if (reservation != null) owner.accountRollback.captureBalanceBefore(userId, reservation.assetId());
+            accountLane.clientKeysByOrderId.forEach(orderId, clientKey -> owner.accountRollback.captureClientOrderBefore(userId, clientKey));
             accountLane.completePendingReservation(orderId, coreSequence);
-            if (reservation != null) owner.captureBalanceAfter(accountLane, userId, reservation.assetId());
+            if (reservation != null) owner.accountRollback.captureBalanceAfter(accountLane, userId, reservation.assetId());
             return new PendingReservationCompletion(reservation);
         });
         owner.changedOrder(orderId);
@@ -212,7 +212,7 @@ final class PendingReservationTracker {
             for (PendingReservationBatchCompletion completion : completions) {
                 if (owner.topology.accountLaneId(completion.userId()) != laneId) continue;
                 lane.completePendingReservation(completion.orderId(), coreSequence);
-                owner.captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
+                owner.accountRollback.captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
             }
             return null;
         });
@@ -232,15 +232,15 @@ final class PendingReservationTracker {
         int remainingPendingReservations = totalPendingReservations;
         List<PendingReservationBatchCompletion> completions = new ArrayList<>(refs.size());
         for (PendingReservationRef ref : refs) {
-            owner.captureUserBefore(ref.userId());
-            owner.captureOrderBefore(ref.orderId());
-            owner.captureReservationBefore(ref.orderId());
+            owner.accountRollback.captureUserBefore(ref.userId());
+            owner.accountRollback.captureOrderBefore(ref.orderId());
+            owner.accountRollback.captureReservationBefore(ref.orderId());
             requirePendingReservationIndex(ref.orderId(), coreSequence, ref.userId());
             PendingReservationBatchCompletion completion = owner.onLane(ref.userId(), lane -> {
                 ReservationRuntime reservation = lane.reservations.get(ref.orderId());
-                if (reservation != null) owner.captureBalanceBefore(ref.userId(), reservation.assetId());
+                if (reservation != null) owner.accountRollback.captureBalanceBefore(ref.userId(), reservation.assetId());
                 lane.clientKeysByOrderId.forEach(ref.orderId(),
-                        clientKey -> owner.captureClientOrderBefore(ref.userId(), clientKey));
+                        clientKey -> owner.accountRollback.captureClientOrderBefore(ref.userId(), clientKey));
                 lane.requirePendingReservationCompletion(ref.orderId(), coreSequence);
                 return new PendingReservationBatchCompletion(ref.orderId(), ref.userId(), reservation);
             });

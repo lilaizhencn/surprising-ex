@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Amazon Corretto HotSpot 27.0.0",
+  "change": "Extracted command before-image capture, Lane restoration, owner publication restoration, and cleanup from TradingRuntimeState into RuntimeAccountRollback and RuntimeGlobalRollback. TradingRuntimeState retains rollback ordering and Lane completion control.",
+  "sourceLines": {
+    "runtimeBefore": 5343,
+    "runtimeAfter": 4819,
+    "accountRollback": 332,
+    "globalRollback": 233
+  },
+  "serviceBuild": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean package",
+    "serviceTests": 919,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2,
+    "logSha256": "62572d4e3953194dd5a25c64dcd47977067c37a9efb6d50cace22592a9cd9edd"
+  },
+  "benchmarkModuleCompile": {
+    "command": "mvn -B -pl surprising-aeron-core/surprising-aeron-benchmarks -am test-compile -DskipTests",
+    "result": "BUILD SUCCESS",
+    "logSha256": "b0a66d917265e9983dac4bcd48c1555aa0bdadb9f6253293bb7ba5033cad1881"
+  },
+  "serviceJar": {
+    "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+    "sha256": "dc78632b00e96ff2a2e65eabbf0bb139971788af41f62ec0634206a0d7c8b546",
+    "newRollbackTypesPresent": true,
+    "oldNestedPatchTypesAbsent": true
+  },
+  "untested": "No standalone throughput benchmark or external cluster deployment; the change only moves rollback code and preserves its call ordering.",
+  "cleanup": "Temporary build logs and this run Surefire reports removed after evidence capture; packaged jars retained."
+}

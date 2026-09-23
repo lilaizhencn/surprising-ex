@@ -48,7 +48,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 权威交易状态：可变账户归属各 Lane，owner 仅消费已发布状态。
@@ -229,9 +228,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     long nextLiquidationId = 1;
     /** owner 写入，Lane 在控制任务发布后读取；只随成功的行情输入推进。 */
     long marketRevision;
-    /** 命令回滚所需的行情输入序号原值。 */
-    long patchMarketRevisionBefore;
-    boolean patchMarketRevisionChanged;
     /** 风险扫描开关和预算；各产品线独立保存。 */
     CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     /** 当前提交范围内变化的用户；与提交/回滚边界同步维护。 */
@@ -267,18 +263,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             new RuntimeChangeBuffer<>();
     /** 当前提交范围内变化的手续费策略；与提交/回滚边界同步维护。 */
     final LongHashSet changedFeePolicies = new LongHashSet();
-    /** 回滚需要的变更前用户；按 Lane 隔离保存，完成后清理。 */
-    final LaneLongCaptures<UserRuntime>[] patchUsersBeforeByLane;
-    /** 回滚需要的变更前余额；按 Lane 隔离保存，完成后清理。 */
-    final LaneBalancePatches[] patchBalancesBeforeByLane;
-    /** 回滚需要的变更前预留；按 Lane 隔离保存，完成后清理。 */
-    final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
-    /** 回滚需要的变更前订单；按 Lane 隔离保存，完成后清理。 */
-    final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
-    /** 回滚需要的变更前持仓；按 Lane 隔离保存，完成后清理。 */
-    final LaneLongCaptures<PositionRuntime>[] patchPositionsBeforeByLane;
-    /** 回滚需要的变更前客户单号；按 Lane 隔离保存，完成后清理。 */
-    final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
+    /** 账户 before-image 归属各 Lane，失败时先恢复 Lane 再恢复 Owner 视图。 */
+    final RuntimeAccountRollback accountRollback;
     /** 是否处于批量变更范围，限制不支持的交叉全局修改。 */
     boolean orderBatchMutationScope;
     /**
@@ -287,49 +273,8 @@ public final class TradingRuntimeState implements AutoCloseable {
      * remains strict for every other mutation.
      */
     boolean admissionCapturePrelude;
-    /** 回滚需要的变更前清算；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前风险快照；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<RiskSnapshotRuntime>> patchRiskSnapshotsBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前杠杆；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<CoreLeverageKey, PatchBefore<Long>> patchLeveragesBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前算法单；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<CoreAlgoOrderState>> patchAlgoOrdersBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前触发单；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<CoreTriggerOrderState>> patchTriggerOrdersBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前定时器；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<CoreCancelAllAfterKey, PatchBefore<CoreCancelAllAfterState>> patchTimersBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前标记价；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Integer, PatchBefore<MarkPriceRuntime>> patchMarkPricesBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前风险扫描；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Integer, PatchBefore<RiskScanRuntime>> patchRiskScansBefore =
-            new ConcurrentHashMap<>();
-    /** 启动注册命令失败时仅需移除本命令新增的 symbol，不保存 canonical instrument 副本。 */
-    final HashSet<String> patchRegisteredInstruments = new HashSet<>();
-    /** 维护命令回滚只保留原值引用，不复制 canonical instrument。 */
-    ConcurrentHashMap<String, com.surprising.aeron.protocol.CoreInstrumentMaintenance>
-            patchInstrumentMaintenanceBefore = new ConcurrentHashMap<>();
-    /** 回滚需要的变更前待完成转账；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<TransferRuntime>> patchPendingTransfersBefore =
-            new ConcurrentHashMap<>();
-    /** 回滚需要的变更前手续费策略；与提交/回滚边界同步维护。 */
-    ConcurrentHashMap<Long, PatchBefore<CoreFeePolicyState>> patchFeePoliciesBefore =
-            new ConcurrentHashMap<>();
-    /** 本次修改前的清算 ID 分配器值，用于回滚。 */
-    long patchNextLiquidationIdBefore;
-    /** 清算 ID 分配器是否已记录修改前值。 */
-    boolean patchNextLiquidationIdChanged;
-    /** 本次修改前的风险扫描控制状态。 */
-    CoreRiskScanControlView patchRiskScanControlBefore;
-    /** 风险扫描控制是否已记录修改前值。 */
-    boolean patchRiskScanControlChanged;
+    /** 全局命令 before-image：首次变更时捕获，失败恢复，成功后清理。 */
+    final RuntimeGlobalRollback globalRollback = new RuntimeGlobalRollback(this);
     /** 当前 Lane 的线程局部上下文，防止越界读取可变状态。 */
     final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
     /** 当前结算事件的线程局部变更收集器。 */
@@ -365,25 +310,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             matcherSettlementChangesRing[index] = new MatcherSettlementChanges(accountLanes.length, index);
             freeMatcherSettlementChangeSlots[index] = index;
         }
-        @SuppressWarnings("unchecked")
-        LaneLongCaptures<UserRuntime>[] userPatches =
-                (LaneLongCaptures<UserRuntime>[]) new LaneLongCaptures<?>[
-                        topology.accountLaneCount()];
-        this.patchUsersBeforeByLane = userPatches;
-        this.patchBalancesBeforeByLane = new LaneBalancePatches[topology.accountLaneCount()];
-        @SuppressWarnings("unchecked")
-        LaneLongCaptures<PatchReservationBefore>[] reservationPatches =
-                (LaneLongCaptures<PatchReservationBefore>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
-        this.patchReservationsBeforeByLane = reservationPatches;
-        @SuppressWarnings("unchecked")
-        LaneLongCaptures<PatchOrderBefore>[] orderPatches =
-                (LaneLongCaptures<PatchOrderBefore>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
-        this.patchOrdersBeforeByLane = orderPatches;
-        @SuppressWarnings("unchecked")
-        LaneLongCaptures<PositionRuntime>[] positionPatches =
-                (LaneLongCaptures<PositionRuntime>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
-        this.patchPositionsBeforeByLane = positionPatches;
-        this.patchClientOrdersBeforeByLane = new LaneClientOrderCaptures[topology.accountLaneCount()];
+        this.accountRollback = new RuntimeAccountRollback(this, topology.accountLaneCount());
         this.laneDeltas = new LaneCommitDelta[topology.accountLaneCount()];
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
@@ -409,12 +336,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneHashes(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
-            patchUsersBeforeByLane[laneId] = new LaneLongCaptures<>();
-            patchBalancesBeforeByLane[laneId] = new LaneBalancePatches();
-            patchReservationsBeforeByLane[laneId] = new LaneLongCaptures<>();
-            patchOrdersBeforeByLane[laneId] = new LaneLongCaptures<>();
-            patchPositionsBeforeByLane[laneId] = new LaneLongCaptures<>();
-            patchClientOrdersBeforeByLane[laneId] = new LaneClientOrderCaptures();
             laneDeltas[laneId] = new LaneCommitDelta();
         }
     }
@@ -1531,8 +1452,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         // Capture the owner-visible state before exposing any irreversible Matcher observation.
         // A fatal pipelined batch must roll back to the pre-admission null order/reservation,
         // rather than treating the Lane-owned admission as its own before-image.
-        captureBatchAdmissionBefore(userId, event.admittedOrders(), event.itemCount(), laneId);
-        event.copyBalanceBeforeTo(patchBalancesBeforeByLane[laneId]);
+        accountRollback.captureBatchAdmissionBefore(userId, event.admittedOrders(), event.itemCount(), laneId);
+        event.copyBalanceBeforeTo(accountRollback.patchBalancesBeforeByLane[laneId]);
         admissionCapturePrelude = true;
         pendingReservations.registerBatch(event.coreSequence(), userId, event.admittedOrders(), event.itemCount());
         revision = Math.addExact(revision, event.itemCount());
@@ -2034,12 +1955,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (reservation == null || topology.accountLaneId(reservation.userId()) != lane.laneId()) {
                 throw new IllegalStateException("matcher pending reservation is missing from its owner lane");
             }
-            captureUserBefore(reservation.userId());
-            captureOrderBefore(orderId);
-            captureReservationBefore(orderId);
-            captureBalanceBefore(reservation.userId(), reservation.assetId());
+            accountRollback.captureUserBefore(reservation.userId());
+            accountRollback.captureOrderBefore(orderId);
+            accountRollback.captureReservationBefore(orderId);
+            accountRollback.captureBalanceBefore(reservation.userId(), reservation.assetId());
             lane.clientKeysByOrderId.forEach(orderId,
-                    clientKey -> captureClientOrderBefore(reservation.userId(), clientKey));
+                    clientKey -> accountRollback.captureClientOrderBefore(reservation.userId(), clientKey));
             lane.completePendingReservation(orderId, plan.coreSequence());
             MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
             if (changes != null) changes.completedPending[lane.laneId()]++;
@@ -2055,7 +1976,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     changedUsers.add(reservation.userId());
                 }
             }
-            captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
+            accountRollback.captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
         }
     }
 
@@ -2170,42 +2091,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !changedLeverages.isEmpty()
                 || !changedAlgoOrders.isEmpty() || !changedCancelAllAfterTimers.isEmpty()
                 || !changedTriggerOrders.isEmpty() || !changedFeePolicies.isEmpty()
-                || hasCapturedUsers() || hasCapturedBalances()
-                || hasCaptured(patchReservationsBeforeByLane) || hasCaptured(patchOrdersBeforeByLane)
-                || !patchLiquidationsBefore.isEmpty() || !patchRiskSnapshotsBefore.isEmpty()
-                || !patchLeveragesBefore.isEmpty() || !patchAlgoOrdersBefore.isEmpty()
-                || !patchTriggerOrdersBefore.isEmpty() || hasCapturedClientOrders()
-                || !patchTimersBefore.isEmpty() || !patchMarkPricesBefore.isEmpty()
-                || !patchRiskScansBefore.isEmpty() || !patchRegisteredInstruments.isEmpty()
-                || !patchInstrumentMaintenanceBefore.isEmpty()
-                || !patchPendingTransfersBefore.isEmpty() || !patchFeePoliciesBefore.isEmpty()
-                || patchMarketRevisionChanged || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
-    }
-
-    boolean hasCapturedUsers() {
-        for (LaneLongCaptures<UserRuntime> captured : patchUsersBeforeByLane) {
-            if (!captured.isEmpty()) return true;
-        }
-        return false;
-    }
-
-    static boolean hasCaptured(LaneLongCaptures<?>[] capturedByLane) {
-        for (LaneLongCaptures<?> captured : capturedByLane) if (!captured.isEmpty()) return true;
-        return false;
-    }
-
-    boolean hasCapturedBalances() {
-        for (LaneBalancePatches captured : patchBalancesBeforeByLane) {
-            if (captured.size() != 0) return true;
-        }
-        return false;
-    }
-
-    boolean hasCapturedClientOrders() {
-        for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) {
-            if (captured.size() != 0) return true;
-        }
-        return false;
+                || accountRollback.hasCaptured() || globalRollback.hasCaptured();
     }
 
     public void restoreAccountLaneSnapshots(java.util.List<AccountLaneSnapshot> snapshots, long fenceSequence,
@@ -2378,8 +2264,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                     completed++;
                 }
             }
-            rollbackLaneAccountState(lane);
-            rollbackLaneCommandGlobals(lane);
+            accountRollback.restoreLane(lane);
+            globalRollback.restoreLane(lane);
             return completed;
         });
         return () -> {
@@ -2394,8 +2280,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                         Math.subtractExact(pendingReservations.totalPendingReservations, 1));
             }
             if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining);
-            rollbackOwnerAccountIndexes();
-            rollbackOwnerCommandGlobals();
+            accountRollback.restoreOwner();
+            globalRollback.restoreOwner();
             treasury.rollbackChangedValues();
             revision = revisionCheckpoint;
             clearChangedKeys();
@@ -2417,85 +2303,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> {
-                rollbackLaneAccountState(lane);
-                rollbackLaneCommandGlobals(lane);
+                accountRollback.restoreLane(lane);
+                globalRollback.restoreLane(lane);
                 return null;
             });
         }
-        rollbackOwnerAccountIndexes();
-        rollbackOwnerCommandGlobals();
+        accountRollback.restoreOwner();
+        globalRollback.restoreOwner();
         treasury.rollbackChangedValues();
         revision = revisionCheckpoint;
         clearChangedKeys();
-    }
-
-    /** Account-owned cold state is restored once per Lane, using the existing before images. */
-    void rollbackLaneCommandGlobals(AccountLaneState lane) {
-        lane.assertOwner();
-        int laneId = lane.laneId();
-        patchLiquidationsBefore.forEach((id, before) -> {
-            LiquidationRuntime current = lane.cold.liquidations.remove(id);
-            if (current != null) removeActiveLiquidation(lane, current);
-            LiquidationRuntime restored = before.value();
-            if (restored != null && topology.accountLaneId(restored.userId()) == laneId) {
-                lane.cold.liquidations.put(id, restored);
-                indexActiveLiquidation(lane, restored);
-            }
-        });
-        patchRiskSnapshotsBefore.forEach((key, before) -> {
-            lane.cold.riskSnapshots.remove(key);
-            RiskSnapshotRuntime restored = before.value();
-            if (restored != null && topology.accountLaneId(restored.userId()) == laneId)
-                lane.cold.riskSnapshots.put(key, restored);
-        });
-        patchLeveragesBefore.forEach((key, before) -> {
-            if (topology.accountLaneId(key.userId()) != laneId) return;
-            if (before.value() == null) {
-                lane.cold.leverages.remove(key);
-                Set<CoreLeverageKey> keys = lane.cold.leverageKeysByUser.get(key.userId());
-                if (keys != null) {
-                    keys.remove(key);
-                    if (keys.isEmpty()) lane.cold.leverageKeysByUser.remove(key.userId());
-                }
-            } else {
-                lane.cold.leverages.put(key, before.value());
-                lane.cold.leverageKeysByUser.getIfAbsentPut(key.userId(), HashSet::new).add(key);
-            }
-        });
-        patchAlgoOrdersBefore.forEach((id, before) -> {
-            lane.cold.algoOrders.remove(id);
-            CoreAlgoOrderState restored = before.value();
-            if (restored != null && topology.accountLaneId(restored.userId()) == laneId)
-                lane.cold.algoOrders.put(id, restored);
-        });
-        patchTriggerOrdersBefore.forEach((id, before) -> {
-            lane.removeTrigger(id);
-            CoreTriggerOrderState restored = before.value();
-            if (restored != null && topology.accountLaneId(restored.userId()) == laneId)
-                lane.putTrigger(restored);
-        });
-    }
-
-    /** Only called after account restoration has completed on all participating Lanes. */
-    void rollbackOwnerCommandGlobals() {
-        assertOwner();
-        patchLiquidationsBefore.forEach((id, before) -> putOrRemove(publishedLiquidations, id, before.value()));
-        patchRiskSnapshotsBefore.forEach((id, before) -> putOrRemove(publishedRiskSnapshots, id, before.value()));
-        patchAlgoOrdersBefore.forEach((id, before) -> putOrRemove(publishedAlgoOrders, id, before.value()));
-        patchTriggerOrdersBefore.forEach((id, before) -> putOrRemove(publishedTriggerOrders, id, before.value()));
-        patchTimersBefore.forEach((key, before) -> putOrRemove(cancelAllAfterTimers, key, before.value()));
-        patchMarkPricesBefore.forEach((id, before) -> putOrRemove(markPrices, id, before.value()));
-        patchRiskScansBefore.forEach((id, before) -> putOrRemove(riskScans, id, before.value()));
-        patchRegisteredInstruments.forEach(instruments::remove);
-        patchInstrumentMaintenanceBefore.forEach((symbol, maintenance) -> {
-            CoreInstrument instrument = instruments.get(symbol);
-            if (instrument != null) instrument.updateMaintenance(maintenance);
-        });
-        patchPendingTransfersBefore.forEach((id, before) -> putOrRemove(pendingTransfers, id, before.value()));
-        patchFeePoliciesBefore.forEach((id, before) -> putOrRemove(feePolicies, id, before.value()));
-        if (patchNextLiquidationIdChanged) nextLiquidationId = patchNextLiquidationIdBefore;
-        if (patchMarketRevisionChanged) marketRevision = patchMarketRevisionBefore;
-        if (patchRiskScanControlChanged) riskScanControl = patchRiskScanControlBefore;
     }
 
     static <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
@@ -2534,10 +2351,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("risk-scan control");
         if (riskScanControl == null) throw new IllegalArgumentException("risk scan control is required");
-        if (!patchRiskScanControlChanged) {
-            patchRiskScanControlBefore = this.riskScanControl;
-            patchRiskScanControlChanged = true;
-        }
+        globalRollback.captureRiskScanControl();
         this.riskScanControl = riskScanControl;
     }
 
@@ -2939,7 +2753,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (instrument == null || instruments.containsKey(instrument.symbol())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is already registered");
         }
-        patchRegisteredInstruments.add(instrument.symbol());
+        globalRollback.captureRegisteredInstrument(instrument.symbol());
         instruments.put(instrument.symbol(), instrument);
     }
 
@@ -2951,8 +2765,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (instrument == null || maintenance == null || instruments.get(instrument.symbol()) != instrument) {
             throw new IllegalArgumentException("invalid canonical instrument operation");
         }
-        patchInstrumentMaintenanceBefore.computeIfAbsent(
-                instrument.symbol(), symbol -> instrument.maintenance());
+        globalRollback.captureInstrumentMaintenance(instrument);
         instrument.updateMaintenance(maintenance);
     }
 
@@ -2986,7 +2799,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (key == null || leveragePpm < 1_000_000L) {
             throw new IllegalArgumentException("invalid runtime leverage");
         }
-        patchLeveragesBefore.computeIfAbsent(key, value -> new PatchBefore<>(leverage(value)));
+        globalRollback.captureLeverage(key);
         onLane(key.userId(), lane -> {
             lane.cold.leverages.put(key, leveragePpm);
             HashSet<CoreLeverageKey> userKeys = lane.cold.leverageKeysByUser.get(key.userId());
@@ -3030,8 +2843,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("algo-order state");
         if (algoOrder == null) throw new IllegalArgumentException("invalid runtime algo order");
-        patchAlgoOrdersBefore.computeIfAbsent(algoOrder.algoOrderId(),
-                id -> new PatchBefore<>(algoOrder(id)));
+        globalRollback.captureAlgoOrder(algoOrder.algoOrderId());
         onLane(algoOrder.userId(), lane -> lane.cold.algoOrders.put(algoOrder.algoOrderId(), algoOrder));
         if (laneCommandScope.get() == null) publishAlgoOrder(algoOrder);
     }
@@ -3039,7 +2851,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void removeAlgoOrder(long algoOrderId) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("algo-order state");
-        patchAlgoOrdersBefore.computeIfAbsent(algoOrderId, id -> new PatchBefore<>(algoOrder(id)));
+        globalRollback.captureAlgoOrder(algoOrderId);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> lane.cold.algoOrders.remove(algoOrderId));
         }
@@ -3056,7 +2868,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("timer state");
         if (key == null || timer == null) throw new IllegalArgumentException("invalid runtime cancel-all-after timer");
-        patchTimersBefore.computeIfAbsent(key, value -> new PatchBefore<>(cancelAllAfterTimers.get(value)));
+        globalRollback.captureTimer(key);
         cancelAllAfterTimers.put(key, timer);
         changedCancelAllAfterTimers.add(key);
     }
@@ -3072,8 +2884,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("trigger-order state");
         if (triggerOrder == null) throw new IllegalArgumentException("invalid runtime trigger order");
-        patchTriggerOrdersBefore.computeIfAbsent(triggerOrder.triggerOrderId(),
-                id -> new PatchBefore<>(triggerOrder(id)));
+        globalRollback.captureTriggerOrder(triggerOrder.triggerOrderId());
         onLane(triggerOrder.userId(), lane -> {
             lane.putTrigger(triggerOrder);
             publishTriggerOrder(triggerOrder.triggerOrderId(), triggerOrder);
@@ -3085,7 +2896,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("trigger-order state");
         CoreTriggerOrderState current = triggerOrder(triggerOrderId);
-        patchTriggerOrdersBefore.computeIfAbsent(triggerOrderId, id -> new PatchBefore<>(current));
+        globalRollback.captureTriggerOrder(triggerOrderId, current);
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) {
             scoped.removeTrigger(triggerOrderId);
@@ -3227,8 +3038,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     "pending transfer runtime capacity is full");
         }
         if (transfer == null) throw new IllegalArgumentException("pending transfer is required");
-        patchPendingTransfersBefore.computeIfAbsent(transfer.transferId(),
-                id -> new PatchBefore<>(pendingTransfers.get(id)));
+        globalRollback.capturePendingTransfer(transfer.transferId());
         if (pendingTransfers.putIfAbsent(transfer.transferId(), transfer) != null) {
             throw new IllegalArgumentException("pending transfer already exists");
         }
@@ -3242,7 +3052,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current.userId() != userId) {
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
         }
-        patchPendingTransfersBefore.computeIfAbsent(transferId, id -> new PatchBefore<>(current));
+        globalRollback.capturePendingTransfer(transferId, current);
         pendingTransfers.remove(transferId);
         return true;
     }
@@ -3275,7 +3085,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return;
         }
-        patchFeePoliciesBefore.computeIfAbsent(next.policyId(), id -> new PatchBefore<>(current));
+        globalRollback.captureFeePolicy(next.policyId(), current);
         feePolicies.put(next.policyId(), next);
         changedFeePolicies.add(next.policyId());
         setMetadata(productLine, Math.incrementExact(revision));
@@ -3352,7 +3162,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putUser(UserRuntime user) {
         assertOwner();
-        captureUserBefore(user.userId());
+        accountRollback.captureUserBefore(user.userId());
         onLane(user.userId(), lane -> {
             lane.users.put(user.userId(), user);
             lane.registerUser(user.userId());
@@ -3383,7 +3193,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             settlementChanges.addUserRevision(lane.laneId(), userId, count);
             return;
         }
-        captureUserBefore(userId);
+        accountRollback.captureUserBefore(userId);
         UserRuntime current = requireUser(userId);
         UserRuntime advanced = new UserRuntime(current.productLine(), userId,
                 Math.addExact(current.revision(), count), current.positionMode());
@@ -3394,7 +3204,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeUser(long userId) {
         assertOwner();
-        captureUserBefore(userId);
+        accountRollback.captureUserBefore(userId);
         onLane(userId, lane -> {
             LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
             if (userClientOrders != null) userClientOrders.forEachKeyValue((clientKey, orderId) -> {
@@ -3421,8 +3231,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         int assetId = balance.assetId();
         long availableUnits = balance.availableUnits();
         long lockedUnits = balance.lockedUnits();
-        captureUserBefore(userId);
-        captureBalanceBefore(userId, assetId);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
             if (userBalances == null) {
@@ -3430,7 +3240,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.balances.put(userId, userBalances);
             }
             userBalances.put(assetId, new BalanceRuntime(userId, assetId, availableUnits, lockedUnits));
-            captureBalanceAfter(lane, userId, assetId);
+            accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
         });
         if (laneCommandScope.get() == null) {
@@ -3441,8 +3251,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putOrder(OrderRuntime order) {
         assertOwner();
-        captureUserBefore(order.userId());
-        captureOrderBefore(order.orderId());
+        accountRollback.captureUserBefore(order.userId());
+        accountRollback.captureOrderBefore(order.orderId());
         onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         changedOrder(order.orderId(), order);
@@ -3451,8 +3261,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putReservation(ReservationRuntime reservation) {
         assertOwner();
-        captureUserBefore(reservation.userId());
-        captureReservationBefore(reservation.orderId());
+        accountRollback.captureUserBefore(reservation.userId());
+        accountRollback.captureReservationBefore(reservation.orderId());
         ReservationRuntime previous = reservation(reservation.orderId());
         if (previous != null && onLane(previous.userId(), lane -> lane.pendingReservation(previous.orderId()))) {
             throw new IllegalStateException("pending reservation must be replaced through its owner lane");
@@ -3480,8 +3290,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void replaceOrder(OrderRuntime order) {
         assertOwner();
-        captureUserBefore(order.userId());
-        captureOrderBefore(order.orderId());
+        accountRollback.captureUserBefore(order.userId());
+        accountRollback.captureOrderBefore(order.orderId());
         OrderRuntime previous = order(order.orderId());
         if (previous != null && previous.userId() != order.userId()) {
             throw new IllegalArgumentException("runtime order owner cannot change");
@@ -3500,10 +3310,10 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeOrder(long orderId) {
         assertOwner();
-        captureOrderBefore(orderId);
+        accountRollback.captureOrderBefore(orderId);
         OrderRuntime previous = order(orderId);
         if (previous != null) {
-            captureUserBefore(previous.userId());
+            accountRollback.captureUserBefore(previous.userId());
             onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
             publishOrder(orderId, null);
             changedOrder(orderId, null);
@@ -3513,8 +3323,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
-        captureUserBefore(reservation.userId());
-        captureReservationBefore(reservation.orderId());
+        accountRollback.captureUserBefore(reservation.userId());
+        accountRollback.captureReservationBefore(reservation.orderId());
         ReservationRuntime previous = reservation(reservation.orderId());
         if (previous != null && previous.userId() != reservation.userId()) {
             throw new IllegalArgumentException("runtime reservation owner cannot change");
@@ -3522,16 +3332,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         onLane(reservation.userId(), lane -> {
             boolean pending = previous != null && lane.pendingReservation(previous.orderId());
             if (pending) {
-                captureBalanceBefore(previous.userId(), previous.assetId());
-                captureBalanceBefore(reservation.userId(), reservation.assetId());
+                accountRollback.captureBalanceBefore(previous.userId(), previous.assetId());
+                accountRollback.captureBalanceBefore(reservation.userId(), reservation.assetId());
             }
             if (previous != null) lane.replacePendingReservation(previous, reservation);
             lane.reservations.put(reservation.orderId(), reservation.laneValue());
             if (previous == null)
                 addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
             if (pending) {
-                captureBalanceAfter(lane, previous.userId(), previous.assetId());
-                captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
+                accountRollback.captureBalanceAfter(lane, previous.userId(), previous.assetId());
+                accountRollback.captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
             }
             return null;
         });
@@ -3545,8 +3355,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeReservation(long orderId, long userId) {
         assertOwner();
-        captureUserBefore(userId);
-        captureReservationBefore(orderId);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureReservationBefore(orderId);
         onLane(userId, lane -> {
             ReservationRuntime current = lane.reservations.get(orderId);
             if (current == null || current.userId() != userId) {
@@ -3572,14 +3382,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Matching settlement fast path: update a Lane-owned balance without creating a replacement object. */
     void replaceBalance(long userId, int assetId, long availableUnits, long lockedUnits) {
         assertOwner();
-        captureUserBefore(userId);
-        captureBalanceBefore(userId, assetId);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
             BalanceRuntime current = balances == null ? null : balances.get(assetId);
             if (current == null) throw new IllegalArgumentException("runtime balance is not registered");
             current.replace(availableUnits, lockedUnits);
-            captureBalanceAfter(lane, userId, assetId);
+            accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
         });
         if (laneCommandScope.get() == null) {
@@ -3590,14 +3400,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeBalance(long userId, int assetId) {
         assertOwner();
-        captureUserBefore(userId);
-        captureBalanceBefore(userId, assetId);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
             if (userBalances == null || userBalances.remove(assetId) == null) {
                 throw new IllegalArgumentException("runtime balance is not registered: " + userId + '/' + assetId);
             }
-            captureBalanceAfter(lane, userId, assetId);
+            accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
         });
         markBalancesChanged();
@@ -3689,8 +3499,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void replacePosition(long positionKey, PositionRuntime position) {
         assertOwner();
-        captureUserBefore(position.userId());
-        capturePositionBefore(positionKey, position.userId());
+        accountRollback.captureUserBefore(position.userId());
+        accountRollback.capturePositionBefore(positionKey, position.userId());
         PositionRuntime previous = position(positionKey);
         if (previous != null && previous.userId() != position.userId()) {
             throw new IllegalArgumentException("runtime position owner cannot change");
@@ -3710,8 +3520,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putLiquidation(LiquidationRuntime liquidation) {
         assertOwner();
-        captureUserBefore(liquidation.userId());
-        captureLiquidationBefore(liquidation.liquidationId());
+        accountRollback.captureUserBefore(liquidation.userId());
+        globalRollback.captureLiquidation(liquidation.liquidationId());
         if (liquidation(liquidation.liquidationId()) != null) {
             throw new IllegalArgumentException("runtime liquidation already exists: " + liquidation.liquidationId());
         }
@@ -3729,15 +3539,15 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putMarkPrice(MarkPriceRuntime markPrice) {
         assertOwner();
-        captureMarkPriceBefore(markPrice.symbolId());
+        globalRollback.captureMarkPrice(markPrice.symbolId());
         markPrices.put(markPrice.symbolId(), markPrice);
         changedMarkPrices.add(markPrice.symbolId());
     }
 
     public void putRiskSnapshot(long positionKey, RiskSnapshotRuntime snapshot) {
         assertOwner();
-        captureUserBefore(snapshot.userId());
-        captureRiskSnapshotBefore(positionKey);
+        accountRollback.captureUserBefore(snapshot.userId());
+        globalRollback.captureRiskSnapshot(positionKey);
         onLane(snapshot.userId(), lane -> {
             lane.cold.riskSnapshots.put(positionKey, snapshot);
             publishRiskSnapshot(positionKey, snapshot);
@@ -3749,7 +3559,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putRiskScan(RiskScanRuntime scan) {
         assertOwner();
-        captureRiskScanBefore(scan.symbolId());
+        globalRollback.captureRiskScan(scan.symbolId());
         riskScans.put(scan.symbolId(), scan);
         changedRiskScans.add(scan.symbolId());
     }
@@ -3759,10 +3569,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void setMarketRevision(long value) {
         assertOwner();
         if (value < 0) throw new IllegalArgumentException("invalid market revision");
-        if (!patchMarketRevisionChanged) {
-            patchMarketRevisionBefore = marketRevision;
-            patchMarketRevisionChanged = true;
-        }
+        globalRollback.captureMarketRevision();
         marketRevision = value;
     }
 
@@ -3770,17 +3577,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("liquidation sequence");
         if (nextLiquidationId <= 0) throw new IllegalArgumentException("invalid next liquidation id");
-        if (!patchNextLiquidationIdChanged) {
-            patchNextLiquidationIdBefore = this.nextLiquidationId;
-            patchNextLiquidationIdChanged = true;
-        }
+        globalRollback.captureNextLiquidationId();
         this.nextLiquidationId = nextLiquidationId;
     }
 
     public void replaceLiquidation(LiquidationRuntime liquidation) {
         assertOwner();
-        captureUserBefore(liquidation.userId());
-        captureLiquidationBefore(liquidation.liquidationId());
+        accountRollback.captureUserBefore(liquidation.userId());
+        globalRollback.captureLiquidation(liquidation.liquidationId());
         LiquidationRuntime previous = liquidation(liquidation.liquidationId());
         if (previous == null) {
             throw new IllegalArgumentException("runtime liquidation is not registered: "
@@ -3810,8 +3614,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removePosition(long positionKey, long userId) {
         assertOwner();
-        captureUserBefore(userId);
-        capturePositionBefore(positionKey);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.capturePositionBefore(positionKey);
         onLane(userId, lane -> {
             PositionRuntime current = lane.positions.get(positionKey);
             if (current == null || current.userId() != userId) {
@@ -3828,10 +3632,10 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeLiquidation(long liquidationId) {
         assertOwner();
-        captureLiquidationBefore(liquidationId);
+        globalRollback.captureLiquidation(liquidationId);
         LiquidationRuntime previous = liquidation(liquidationId);
         if (previous != null) {
-            captureUserBefore(previous.userId());
+            accountRollback.captureUserBefore(previous.userId());
             onLane(previous.userId(), lane -> {
                 lane.cold.liquidations.remove(liquidationId);
                 removeActiveLiquidation(lane, previous);
@@ -3845,14 +3649,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeMarkPrice(int symbolId) {
         assertOwner();
-        captureMarkPriceBefore(symbolId);
+        globalRollback.captureMarkPrice(symbolId);
         markPrices.remove(symbolId);
         changedMarkPrices.add(symbolId);
     }
 
     public void removeRiskSnapshot(long positionKey) {
         assertOwner();
-        captureRiskSnapshotBefore(positionKey);
+        globalRollback.captureRiskSnapshot(positionKey);
         RiskSnapshotRuntime previous = riskSnapshot(positionKey);
         if (previous != null) {
             onLane(previous.userId(), lane -> {
@@ -3869,7 +3673,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeRiskScan(int symbolId) {
         assertOwner();
-        captureRiskScanBefore(symbolId);
+        globalRollback.captureRiskScan(symbolId);
         riskScans.remove(symbolId);
         changedRiskScans.add(symbolId);
     }
@@ -3895,9 +3699,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                              long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus,
                              OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
         assertOwner();
-        captureUserBefore(userId);
-        captureOrderBefore(orderId);
-        captureReservationBefore(orderId);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureOrderBefore(orderId);
+        accountRollback.captureReservationBefore(orderId);
         AccountLaneState scoped = laneCommandScope.get();
         CanceledOrder canceled = scoped == null
                 ? onLane(userId, lane -> releaseOrderToTerminalInLane(lane, orderId, userId, releaseUnits,
@@ -3936,7 +3740,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (balance == null) {
             throw new IllegalArgumentException("runtime cancellation balance is missing: " + orderId);
         }
-        captureBalanceBefore(userId, reservation.assetId());
+        accountRollback.captureBalanceBefore(userId, reservation.assetId());
         balance.release(releaseUnits);
         if (matcherSettlementChangesScope.get() != null && laneCommandScope.get() == lane) {
             long previousReserved = reservation.reservedUnits();
@@ -3944,7 +3748,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.updatePendingReservationInPlace(reservation, previousReserved);
             OrderRuntime terminalOrder = lane.updateOrderStatusInPlace(orderId, terminalStatus,
                     Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
-            captureBalanceAfter(lane, userId, reservation.assetId());
+            accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
             return new CanceledOrder(terminalOrder, reservation);
         }
         OrderRuntime terminalOrder = order.withStatus(terminalStatus,
@@ -3953,7 +3757,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         lane.replacePendingReservation(reservation, released);
         lane.putOrder(terminalOrder);
         lane.reservations.put(orderId, released.laneValue());
-        captureBalanceAfter(lane, userId, reservation.assetId());
+        accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
         return new CanceledOrder(terminalOrder, released);
     }
 
@@ -4007,22 +3811,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(order.userId());
         BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
         if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
-        captureBalanceBefore(order.userId(), reservation.assetId());
+        accountRollback.captureBalanceBefore(order.userId(), reservation.assetId());
         balance.release(releaseUnits);
         long previousReserved = reservation.reservedUnits();
         reservation.releaseInPlace(releaseUnits);
         lane.updatePendingReservationInPlace(reservation, previousReserved);
         publishReservation(orderId, reservation);
-        captureBalanceAfter(lane, order.userId(), reservation.assetId());
+        accountRollback.captureBalanceAfter(lane, order.userId(), reservation.assetId());
         return releaseUnits;
     }
 
     public void releaseTerminalReservation(long orderId) {
         assertOwner();
-        captureReservationBefore(orderId);
+        accountRollback.captureReservationBefore(orderId);
         OrderRuntime order = order(orderId);
         if (order == null) throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
-        captureUserBefore(order.userId());
+        accountRollback.captureUserBefore(order.userId());
         TerminalRelease release = onLane(order.userId(), lane -> {
             ReservationRuntime reservation = lane.reservations.get(orderId);
             if (reservation == null || !order.canceled()) {
@@ -4033,13 +3837,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(order.userId());
             BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
             if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
-            captureBalanceBefore(order.userId(), reservation.assetId());
+            accountRollback.captureBalanceBefore(order.userId(), reservation.assetId());
             balance.release(releaseUnits);
             ReservationRuntime released = reservation.release(releaseUnits);
             lane.replacePendingReservation(reservation, released);
             lane.reservations.put(orderId, released.laneValue());
             publishReservation(orderId, released);
-            captureBalanceAfter(lane, order.userId(), reservation.assetId());
+            accountRollback.captureBalanceAfter(lane, order.userId(), reservation.assetId());
             return new TerminalRelease(releaseUnits, reservation.assetId());
         });
         if (release.units() == 0) return;
@@ -4052,8 +3856,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putClientOrder(long userId, long clientKey, long orderId) {
         assertOwner();
-        captureUserBefore(userId);
-        captureClientOrderBefore(userId, clientKey);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureClientOrderBefore(userId, clientKey);
         onLane(userId, lane -> {
             putClientOrderIndex(lane, userId, clientKey, orderId);
             return null;
@@ -4063,8 +3867,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeClientOrder(long userId, long clientKey) {
         assertOwner();
-        captureUserBefore(userId);
-        captureClientOrderBefore(userId, clientKey);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureClientOrderBefore(userId, clientKey);
         onLane(userId, lane -> {
             removeClientOrderIndex(lane, userId, clientKey);
             return null;
@@ -4088,12 +3892,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (reservation != null && reservation.reservedUnits() != 0) {
                 throw new IllegalStateException("terminal order retains funded reservation: " + orderId);
             }
-            captureOrderBefore(orderId);
-            captureReservationBefore(orderId);
+            accountRollback.captureOrderBefore(orderId);
+            accountRollback.captureReservationBefore(orderId);
             prunes.add(new TerminalOrderPrune(orderId, order.userId(),
                     identities.clientKey(order.userId(), order.clientOrderId())));
             long clientKey = identities.clientKey(order.userId(), order.clientOrderId());
-            if (clientKey != 0) captureClientOrderBefore(order.userId(), clientKey);
+            if (clientKey != 0) accountRollback.captureClientOrderBefore(order.userId(), clientKey);
         }
         Object[] results = executeOwnerSettlements(prunes, TerminalOrderPrune::userId, laneId -> {
             AccountLaneState lane = laneCommandScope.get();
@@ -4342,7 +4146,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
         assertOwner();
         if (accumulator == null) throw new IllegalArgumentException("funds accumulator is required");
-        for (LaneBalancePatches balances : patchBalancesBeforeByLane) {
+        for (LaneBalancePatches balances : accountRollback.patchBalancesBeforeByLane) {
             appendBalanceFundsDelta(balances, accumulator);
         }
         treasury.changedAssets().forEach(assetId -> {
@@ -4435,25 +4239,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public PositionRuntime currentPatchPositionBefore(long positionKey) {
-        assertOwner();
-        PositionRuntime current = position(positionKey);
-        if (current != null) {
-            int laneId = topology.accountLaneId(current.userId());
-            LaneLongCaptures<PositionRuntime> captured = patchPositionsBeforeByLane[laneId];
-            return captured.containsKey(positionKey) ? captured.get(positionKey) : current;
-        }
-        for (LaneLongCaptures<PositionRuntime> captured : patchPositionsBeforeByLane) {
-            if (captured.containsKey(positionKey)) {
-                return captured.get(positionKey);
-            }
-        }
-        return null;
+        return accountRollback.currentPositionBefore(positionKey);
     }
 
     public OrderRuntime currentPatchOrderBefore(long orderId) {
-        assertOwner();
-        PatchOrderBefore captured = capturedOrderBefore(orderId);
-        return captured == null ? order(orderId) : captured.value();
+        return accountRollback.currentOrderBefore(orderId);
     }
 
     TreasuryRuntime.AssetState treasuryAssetValue(int assetId) {
@@ -4475,14 +4265,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         admissionCapturePrelude = false;
         balancesChanged = false;
-        // 同一次遍历释放各 Lane 捕获的引用；空缓冲自行跳过，余额仍在原发布边界清理。
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            patchUsersBeforeByLane[laneId].clear();
-            patchReservationsBeforeByLane[laneId].clear();
-            patchOrdersBeforeByLane[laneId].clear();
-            patchPositionsBeforeByLane[laneId].clear();
-            patchClientOrdersBeforeByLane[laneId].clear();
-        }
+        accountRollback.clearNonBalanceImages();
         clearChanged(changedUsers);
         changedOrders.clear();
         clearChanged(changedReservations);
@@ -4497,27 +4280,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedTriggerOrders.clear();
         clearChanged(changedFeePolicies);
         treasury.clearChangedKeys();
-        for (LaneBalancePatches capturedBalances : patchBalancesBeforeByLane) {
-            for (int index = 0; index < capturedBalances.size(); index++) {
-                capturedBalances.publishAvailableAt(this, index);
-            }
-            capturedBalances.clear();
-        }
-        patchLiquidationsBefore = clearCapturedChanges(patchLiquidationsBefore);
-        patchRiskSnapshotsBefore = clearCapturedChanges(patchRiskSnapshotsBefore);
-        patchLeveragesBefore = clearCapturedChanges(patchLeveragesBefore);
-        patchAlgoOrdersBefore = clearCapturedChanges(patchAlgoOrdersBefore);
-        patchTriggerOrdersBefore = clearCapturedChanges(patchTriggerOrdersBefore);
-        patchTimersBefore = clearCapturedChanges(patchTimersBefore);
-        patchMarkPricesBefore = clearCapturedChanges(patchMarkPricesBefore);
-        patchRiskScansBefore = clearCapturedChanges(patchRiskScansBefore);
-        patchRegisteredInstruments.clear();
-        patchInstrumentMaintenanceBefore = clearCapturedChanges(patchInstrumentMaintenanceBefore);
-        patchPendingTransfersBefore = clearCapturedChanges(patchPendingTransfersBefore);
-        patchFeePoliciesBefore = clearCapturedChanges(patchFeePoliciesBefore);
-        patchNextLiquidationIdChanged = false;
-        patchMarketRevisionChanged = false;
-        patchRiskScanControlChanged = false;
+        accountRollback.publishAndClearBalances();
+        globalRollback.clear();
     }
 
     static void clearChanged(LongHashSet values) {
@@ -4532,13 +4296,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
-    }
-
-    static <K, V> ConcurrentHashMap<K, V> clearCapturedChanges(ConcurrentHashMap<K, V> values) {
-        if (values.isEmpty()) return values;
-        if (values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD) return new ConcurrentHashMap<>();
-        values.clear();
-        return values;
     }
 
     LongObjectHashMap<UserRuntime> usersForSnapshot() {
@@ -4645,11 +4402,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (order(orderId) != null) {
             throw new IllegalArgumentException("runtime order already exists: " + orderId);
         }
-        captureUserBefore(userId);
-        captureOrderBefore(orderId);
-        captureReservationBefore(orderId);
-        captureBalanceBefore(userId, assetId);
-        if (clientKey != 0) captureClientOrderBefore(userId, clientKey);
+        accountRollback.captureUserBefore(userId);
+        accountRollback.captureOrderBefore(orderId);
+        accountRollback.captureReservationBefore(orderId);
+        accountRollback.captureBalanceBefore(userId, assetId);
+        if (clientKey != 0) accountRollback.captureClientOrderBefore(userId, clientKey);
         onLane(userId, lane -> {
             LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
             if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
@@ -4669,7 +4426,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.reservations.put(orderId, reservation.copyForLane());
             addUserEntity(lane.reservationIdsByUser, userId, orderId);
             if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
-            captureBalanceAfter(lane, userId, assetId);
+            accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
         });
         publishedOrders.put(orderId, order);
@@ -4737,7 +4494,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putPosition(long positionKey, PositionRuntime position) {
         assertOwner();
-        capturePositionBefore(positionKey, position.userId());
+        accountRollback.capturePositionBefore(positionKey, position.userId());
         PositionRuntime previous = position(positionKey);
         if (previous != null && previous.userId() != position.userId()) {
             throw new IllegalArgumentException("runtime position owner cannot change");
@@ -4826,282 +4583,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         TreeSet<Long> sorted = new TreeSet<>();
         for (int index = 0; index < values.size(); index++) sorted.add(values.get(index));
         return sorted;
-    }
-
-    void captureUserBefore(long userId) {
-        if (matcherSettlementChangesScope.get() != null) return;
-        LaneLongCaptures<UserRuntime> captured =
-                patchUsersBeforeByLane[topology.accountLaneId(userId)];
-        if (!captured.containsKey(userId)) captured.put(userId, user(userId));
-    }
-
-    /**
-     * Capture a pipelined batch's before-image in one owner-side pass.  Admission has already
-     * created the new order and reservation on the Lane, so every order/reservation identity is
-     * known to be absent from the owner view.  Avoiding one global lookup plus a cross-Lane capture
-     * scan per item removes a quadratic hot path for batch20 while preserving the same contains-key
-     * markers used by rollback.
-     */
-    private void captureBatchAdmissionBefore(long userId, OrderRuntime[] admittedOrders,
-                                             int itemCount, int laneId) {
-        if (userId <= 0 || admittedOrders == null || itemCount <= 0 || itemCount > admittedOrders.length
-                || laneId < 0 || laneId >= patchOrdersBeforeByLane.length) {
-            throw new IllegalArgumentException("invalid batch admission before-image");
-        }
-        captureUserBefore(userId);
-        LaneLongCaptures<PatchOrderBefore> orderCaptures = patchOrdersBeforeByLane[laneId];
-        LaneLongCaptures<PatchReservationBefore> reservationCaptures = patchReservationsBeforeByLane[laneId];
-        for (int index = 0; index < itemCount; index++) {
-            OrderRuntime admitted = admittedOrders[index];
-            if (admitted == null || admitted.userId() != userId) {
-                throw new IllegalStateException("batch admission order owner mismatch");
-            }
-            long orderId = admitted.orderId();
-            if (!orderCaptures.containsKey(orderId)) orderCaptures.put(orderId, ABSENT_ORDER_BEFORE);
-            if (!reservationCaptures.containsKey(orderId)) {
-                reservationCaptures.put(orderId, ABSENT_RESERVATION_BEFORE);
-            }
-        }
-    }
-
-    /** Restore only this Lane's account data; no Owner index or revision is changed here. */
-    void rollbackLaneAccountState(AccountLaneState lane) {
-        lane.assertOwner();
-        int laneId = lane.laneId();
-        LaneClientOrderCaptures clients = patchClientOrdersBeforeByLane[laneId];
-        for (int index = 0; index < clients.size(); index++) {
-            long userId = clients.userId(index);
-            long clientKey = clients.clientKey(index);
-            removeClientOrderIndex(lane, userId, clientKey);
-            Long before = clients.beforeOrderId(index);
-            if (before != null) putClientOrderIndex(lane, userId, clientKey, before);
-        }
-        LaneLongCaptures<PatchOrderBefore> orders = patchOrdersBeforeByLane[laneId];
-        for (int index = 0; index < orders.size(); index++) {
-            lane.removeOrder(orders.key(index));
-            OrderRuntime before = orders.value(index).value();
-            if (before != null) lane.putOrder(before);
-        }
-        LaneLongCaptures<PatchReservationBefore> reservations = patchReservationsBeforeByLane[laneId];
-        for (int index = 0; index < reservations.size(); index++) {
-            long orderId = reservations.key(index);
-            PatchReservationBefore captured = reservations.value(index);
-            if (captured.pending())
-                throw new IllegalStateException("order batch overlapped an existing pending reservation");
-            ReservationRuntime current = lane.reservations.remove(orderId);
-            if (current != null) {
-                removeUserEntityKeepingContainer(
-                        lane.reservationIdsByUser, current.userId(), orderId);
-            }
-            ReservationRuntime before = captured.value();
-            if (before != null) {
-                lane.reservations.put(orderId, before.laneValue());
-                addUserEntity(lane.reservationIdsByUser, before.userId(), orderId);
-            }
-        }
-        LaneLongCaptures<PositionRuntime> positions = patchPositionsBeforeByLane[laneId];
-        for (int index = 0; index < positions.size(); index++) {
-            long positionKey = positions.key(index);
-            PositionRuntime current = lane.positions.remove(positionKey);
-            if (current != null) unindexPosition(lane, positionKey, current);
-            PositionRuntime before = positions.value(index);
-            if (before != null) {
-                lane.positions.put(positionKey, before.laneValue());
-                indexPosition(lane, positionKey, before);
-            }
-        }
-        LaneBalancePatches balances = patchBalancesBeforeByLane[laneId];
-        for (int index = 0; index < balances.size(); index++) {
-            long userId = balances.userId(index);
-            int assetId = balances.assetId(index);
-            BalanceState before = balances.before(index);
-            IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
-            if (before == null) {
-                if (userBalances != null) {
-                    userBalances.remove(assetId);
-                    if (userBalances.isEmpty()) lane.balances.remove(userId);
-                }
-            } else {
-                if (userBalances == null) {
-                    userBalances = new IntObjectHashMap<>();
-                    lane.balances.put(userId, userBalances);
-                }
-                userBalances.put(assetId, new BalanceRuntime(userId, assetId,
-                        before.availableUnits(), before.lockedUnits()));
-            }
-        }
-        LaneLongCaptures<UserRuntime> users = patchUsersBeforeByLane[laneId];
-        for (int index = 0; index < users.size(); index++) {
-            long userId = users.key(index);
-            UserRuntime before = users.value(index);
-            if (before == null) {
-                lane.users.remove(userId);
-                lane.removeUser(userId);
-                lane.clientOrderIndex.remove(userId);
-                lane.reservationIdsByUser.remove(userId);
-                lane.activeOrderIdsByUser.remove(userId);
-            } else {
-                lane.users.put(userId, before);
-                lane.registerUser(userId);
-            }
-        }
-    }
-
-    /** Restore published references only after every Lane has restored its own account state. */
-    void rollbackOwnerAccountIndexes() {
-        assertOwner();
-        for (LaneLongCaptures<PatchOrderBefore> orders : patchOrdersBeforeByLane)
-            for (int index = 0; index < orders.size(); index++)
-                publishOrder(orders.key(index), orders.value(index).value());
-        for (LaneLongCaptures<PatchReservationBefore> reservations : patchReservationsBeforeByLane)
-            for (int index = 0; index < reservations.size(); index++)
-                publishReservation(reservations.key(index), reservations.value(index).value());
-        for (LaneLongCaptures<PositionRuntime> positions : patchPositionsBeforeByLane)
-            for (int index = 0; index < positions.size(); index++)
-                publishPosition(positions.key(index), positions.value(index));
-        for (LaneLongCaptures<UserRuntime> users : patchUsersBeforeByLane)
-            for (int index = 0; index < users.size(); index++)
-                publishUser(users.key(index), users.value(index));
-    }
-
-    void captureBalanceBefore(long userId, int assetId) {
-        MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
-        LaneBalancePatches captured = changes == null
-                ? patchBalancesBeforeByLane[topology.accountLaneId(userId)]
-                : changes.balancePatches[topology.accountLaneId(userId)];
-        if (captured.contains(userId, assetId)) return;
-        AccountLaneState scoped = laneCommandScope.get();
-        if (scoped != null) {
-            captureBalanceBefore(scoped, captured, userId, assetId);
-            return;
-        }
-        onLane(userId, lane -> {
-            captureBalanceBefore(lane, captured, userId, assetId);
-            return null;
-        });
-    }
-
-    static void captureBalanceBefore(AccountLaneState lane, LaneBalancePatches captured,
-                                             long userId, int assetId) {
-        IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
-        BalanceRuntime balance = balances == null ? null : balances.get(assetId);
-        captured.add(userId, assetId, balance, lane.pendingReservedUnits(userId, assetId));
-    }
-
-    void captureBalanceAfter(AccountLaneState lane, long userId, int assetId) {
-        MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
-        LaneBalancePatches captured = changes == null
-                ? patchBalancesBeforeByLane[lane.laneId()]
-                : changes.balancePatches[lane.laneId()];
-        IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
-        BalanceRuntime balance = balances == null ? null : balances.get(assetId);
-        captured.after(userId, assetId, balance, lane.pendingReservedUnits(userId, assetId));
-    }
-
-    void captureOrderBefore(long orderId) {
-        if (matcherSettlementChangesScope.get() != null) return;
-        if (capturedOrderBefore(orderId) != null) return;
-        OrderRuntime value = order(orderId);
-        int laneId = captureLane(orderId, value == null ? 0 : value.userId());
-        LaneLongCaptures<PatchOrderBefore> captured = patchOrdersBeforeByLane[laneId];
-        if (!captured.containsKey(orderId)) {
-            captured.put(orderId, value == null ? ABSENT_ORDER_BEFORE
-                    : new PatchOrderBefore(value, pendingReservations.pendingReservation(orderId, value.userId())));
-        }
-    }
-
-    void captureReservationBefore(long orderId) {
-        if (matcherSettlementChangesScope.get() != null) return;
-        if (capturedReservationBefore(orderId) != null) return;
-        ReservationRuntime value = reservation(orderId);
-        int laneId = captureLane(orderId, value == null ? 0 : value.userId());
-        LaneLongCaptures<PatchReservationBefore> captured = patchReservationsBeforeByLane[laneId];
-        if (!captured.containsKey(orderId)) {
-            captured.put(orderId, value == null ? ABSENT_RESERVATION_BEFORE
-                    : new PatchReservationBefore(value, pendingReservations.pendingReservation(orderId, value.userId())));
-        }
-    }
-
-    boolean reservationPendingBefore(long orderId) {
-        PatchReservationBefore before = capturedReservationBefore(orderId);
-        return before != null && before.pending();
-    }
-
-    int captureLane(long entityId, long userId) {
-        AccountLaneState scoped = laneCommandScope.get();
-        if (scoped != null) return scoped.laneId();
-        if (userId > 0) return topology.accountLaneId(userId);
-        return Math.floorMod(Long.hashCode(entityId), accountLanes.length);
-    }
-
-    PatchOrderBefore capturedOrderBefore(long orderId) {
-        for (LaneLongCaptures<PatchOrderBefore> captured : patchOrdersBeforeByLane) {
-            PatchOrderBefore value = captured.get(orderId);
-            if (value != null || captured.containsKey(orderId)) return value;
-        }
-        return null;
-    }
-
-    PatchReservationBefore capturedReservationBefore(long orderId) {
-        for (LaneLongCaptures<PatchReservationBefore> captured : patchReservationsBeforeByLane) {
-            PatchReservationBefore value = captured.get(orderId);
-            if (value != null || captured.containsKey(orderId)) return value;
-        }
-        return null;
-    }
-
-    boolean reservationPendingAfter(long orderId) {
-        ReservationRuntime current = reservation(orderId);
-        return current != null && pendingReservations.pendingReservation(orderId, current.userId());
-    }
-
-    Long visibleClientOrder(Long orderId, boolean before) {
-        if (orderId == null) return null;
-        boolean pending = before ? reservationPendingBefore(orderId) : reservationPendingAfter(orderId);
-        return pending ? null : orderId;
-    }
-
-    void capturePositionBefore(long positionKey) {
-        capturePositionBefore(positionKey, 0);
-    }
-
-    void capturePositionBefore(long positionKey, long fallbackUserId) {
-        if (matcherSettlementChangesScope.get() != null) return;
-        PositionRuntime before = position(positionKey);
-        long userId = before == null ? fallbackUserId : before.userId();
-        if (userId > 0) {
-            LaneLongCaptures<PositionRuntime> captured =
-                    patchPositionsBeforeByLane[topology.accountLaneId(userId)];
-            if (!captured.containsKey(positionKey)) captured.put(positionKey, before);
-        }
-    }
-
-    void captureLiquidationBefore(long liquidationId) {
-        rejectUnsupportedOrderBatchMutation("liquidation state");
-        patchLiquidationsBefore.computeIfAbsent(liquidationId, id -> new PatchBefore<>(liquidation(id)));
-    }
-
-    void captureRiskSnapshotBefore(long positionKey) {
-        rejectUnsupportedOrderBatchMutation("risk snapshot state");
-        patchRiskSnapshotsBefore.computeIfAbsent(positionKey, key -> new PatchBefore<>(riskSnapshot(key)));
-    }
-
-    void captureMarkPriceBefore(int symbolId) {
-        rejectUnsupportedOrderBatchMutation("mark-price state");
-        patchMarkPricesBefore.computeIfAbsent(symbolId, id -> new PatchBefore<>(markPrices.get(id)));
-    }
-
-    void captureRiskScanBefore(int symbolId) {
-        rejectUnsupportedOrderBatchMutation("risk-scan state");
-        patchRiskScansBefore.computeIfAbsent(symbolId, id -> new PatchBefore<>(riskScans.get(id)));
-    }
-
-    void captureClientOrderBefore(long userId, long clientKey) {
-        if (matcherSettlementChangesScope.get() != null) return;
-        LaneClientOrderCaptures captured = patchClientOrdersBeforeByLane[topology.accountLaneId(userId)];
-        if (!captured.contains(userId, clientKey)) {
-            captured.add(userId, clientKey, orderIdByClient(userId, clientKey));
-        }
     }
 
     static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
@@ -5209,12 +4690,7 @@ public final class TradingRuntimeState implements AutoCloseable {
      * work on the owner hot path.
      */
 
-    record PatchBefore<T>(T value) {}
-    private static final PatchOrderBefore ABSENT_ORDER_BEFORE = new PatchOrderBefore(null, false);
-    private static final PatchReservationBefore ABSENT_RESERVATION_BEFORE = new PatchReservationBefore(null, false);
 
-    record PatchOrderBefore(OrderRuntime value, boolean pending) {}
-    record PatchReservationBefore(ReservationRuntime value, boolean pending) {}
 
     public void collectControlReservation(long userId, long orderId, long coreSequence) {
         pendingReservations.collectControlReservation(userId, orderId, coreSequence);

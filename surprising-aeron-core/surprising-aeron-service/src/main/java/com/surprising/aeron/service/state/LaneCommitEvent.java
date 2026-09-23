@@ -106,8 +106,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
                 if (order == null) throw new IllegalStateException("commit order disappeared from its Lane");
                 if (order.updatedAtEpochMillis() == metadataTimestamp && order.clusterPosition() == metadataPosition)
                     continue;
-                runtime.captureUserBefore(order.userId());
-                runtime.captureOrderBefore(id);
+                runtime.accountRollback.captureUserBefore(order.userId());
+                runtime.accountRollback.captureOrderBefore(id);
                 OrderRuntime stamped = order.withCommitMetadata(metadataTimestamp, metadataPosition);
                 lane.putOrder(stamped);
                 stampedOrders[laneId][index] = stamped;

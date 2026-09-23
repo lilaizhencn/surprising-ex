@@ -317,7 +317,7 @@ final class MatcherSettlementDispatcher {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            owner.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
+            owner.accountRollback.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
         }
         return owner.collectMatcherSettlement(event, null, terminalOrderSink);
     }

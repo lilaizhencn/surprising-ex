@@ -988,14 +988,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         long clientKey = RuntimeIdentityRegistry.clientKeyValue(
                 identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
         replacementIdentityAllocations = lane.clientIdentityAllocations - allocationsBefore;
-        runtime.captureBalanceBefore(userId, replacementAssetId);
+        runtime.accountRollback.captureBalanceBefore(userId, replacementAssetId);
         runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,
                 replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,
                 directCoreSequence, prepared, commitTimestamp, commitClusterPosition);
         runtime.publishUser(userId, lane.users.get(userId));
         runtime.publishOrder(prepared.orderId(), prepared);
         runtime.publishReservation(prepared.orderId(), lane.reservations.get(prepared.orderId()));
-        runtime.captureBalanceAfter(lane, userId, replacementAssetId);
+        runtime.accountRollback.captureBalanceAfter(lane, userId, replacementAssetId);
     }
 
     /** Treasury slots follow the compact touched-Lane order used by laneSlot(). */
