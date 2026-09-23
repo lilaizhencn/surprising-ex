@@ -822,26 +822,20 @@ class TradingCoreOwnerTest {
             assertThat(service.captureSnapshot(7)).isNotEmpty();
             assertThat(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(service.snapshotFenceNotReadyCount()).isZero();
-            assertThat(service.snapshotFenceTimeoutCount()).isZero();
         } finally {
             service.onTerminate(null);
         }
     }
 
     @Test
-    void snapshotCaptureTimeoutIsFailClosedAndObservable() {
+    void snapshotCaptureTimeoutIsFailClosed() {
         TradingOwnerTestSupport service = service();
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(9, System.nanoTime()))
                     .isInstanceOf(TradingCoreRuntime.SnapshotFenceTimeoutException.class)
                     .hasMessage("snapshot fence timed out");
-            assertThat(service.snapshotFenceTimeoutCount()).isEqualTo(1);
-            assertThat(service.snapshotFenceNotReadyCount()).isZero();
-
             assertThat(service.captureSnapshot(10)).isNotEmpty();
-            assertThat(service.snapshotFenceNotReadyCount()).isZero();
         } finally {
             service.onTerminate(null);
         }

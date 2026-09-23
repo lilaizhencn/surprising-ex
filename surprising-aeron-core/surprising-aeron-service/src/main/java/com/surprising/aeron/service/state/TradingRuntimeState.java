@@ -154,10 +154,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     final long[][] accountLaneTotalLatencyNanos;
     /** 各 Lane 按业务类型观察到的最大延迟。 */
     final long[][] accountLaneMaxLatencyNanos;
-    /** owner 已收集的各 Lane 业务状态摘要。 */
-    final long[] publishedLaneStateHashes;
-    /** owner 已收集的各 Lane 资金状态摘要。 */
-    final long[] publishedLaneFundsHashes;
     /** owner 可见的各 Lane 已提交序号。 */
     final long[] publishedLaneCommittedSequences;
     /** 已派发到各 Lane 的提交序号，防止重复派发。 */
@@ -326,15 +322,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.accountLaneLatencySamples = laneMetricValues(topology.accountLaneCount());
         this.accountLaneTotalLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
-        this.publishedLaneStateHashes = new long[topology.accountLaneCount()];
-        this.publishedLaneFundsHashes = new long[topology.accountLaneCount()];
         this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
-            publishLaneHashes(accountLanes[laneId]);
+            publishLaneCommittedSequence(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             laneDeltas[laneId] = new LaneCommitDelta();
         }
@@ -342,22 +336,6 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public LaneTopology topology() {
         return topology;
-    }
-
-    public long accountLaneLocalStateHashById(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= accountLanes.length) {
-            throw new IllegalArgumentException("invalid laneId");
-        }
-        return publishedLaneStateHashes[laneId];
-    }
-
-    public long accountLaneLocalFundsHashById(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= accountLanes.length) {
-            throw new IllegalArgumentException("invalid laneId");
-        }
-        return publishedLaneFundsHashes[laneId];
     }
 
     /** Writes a single Lane snapshot; the encoder is exclusively handed off until onLane completes. */
@@ -819,13 +797,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         lane.applied(coreSequence);
         lane.committed(coreSequence);
-        publishLaneHashes(lane);
+        publishLaneCommittedSequence(lane);
     }
 
-    void publishLaneHashes(AccountLaneState lane) {
+    void publishLaneCommittedSequence(AccountLaneState lane) {
         int laneId = lane.laneId();
-        publishedLaneStateHashes[laneId] = lane.localStateHash();
-        publishedLaneFundsHashes[laneId] = lane.localFundsHash();
         publishedLaneCommittedSequences[laneId] = lane.committedSequence();
     }
 
@@ -1999,7 +1975,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         for (AccountLaneState lane : accountLanes) {
             lane.rebuildLocalHashes();
-            publishLaneHashes(lane);
+            publishLaneCommittedSequence(lane);
         }
     }
 
@@ -2098,7 +2074,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (AccountLaneSnapshot snapshot : snapshots) {
             onLane(snapshot.laneId(), lane -> {
                 lane.restore(snapshot);
-                publishLaneHashes(lane);
+                publishLaneCommittedSequence(lane);
                 return null;
             });
         }

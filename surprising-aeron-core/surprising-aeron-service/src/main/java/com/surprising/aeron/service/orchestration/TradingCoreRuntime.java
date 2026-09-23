@@ -1062,9 +1062,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     TradingCoreState snapshotTradingState() { return materializedState.snapshot(); }
     long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
-    long snapshotFundsStateHash() {
-        return com.surprising.aeron.service.state.FundsStateHash.compute(snapshotTradingState());
-    }
     long snapshotProjectionSequence() { return commits.publication.publishedSequence(); }
     boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
     boolean runtimeRiskScanComplete(String symbol) {

@@ -54,7 +54,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
     private final MatcherEvidenceLedger matcherEvidence;
     private final AtomicInteger dispatchInFlight = new AtomicInteger();
-    private final AtomicInteger dispatchHighWaterMark = new AtomicInteger();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
             snapshotPersistence;
     private Runnable deferredActivation;
@@ -64,7 +63,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private List<CoreOrderState> restoredActiveOrders = List.of();
     private long restoredCoreSequence;
     private MatcherShardSnapshot[] restoredShardHashes;
-    private boolean synchronousDispatchObserved;
     private static final class MatcherCommandScope {
         long aeronTimestamp;
         boolean active;
@@ -701,10 +699,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (failure != null) throw new IllegalStateException("matcher is poisoned by an earlier command", failure);
         MatcherCommandScope scope = commandScope.get();
         if (scope.active) throw new IllegalStateException("nested synchronous matcher command");
-        if (!synchronousDispatchObserved) {
-            synchronousDispatchObserved = true;
-            dispatchHighWaterMark.accumulateAndGet(1, Math::max);
-        }
         scope.active = true;
         scope.aeronTimestamp = aeronTimestamp;
         return scope;
@@ -733,7 +727,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             matcherFailure.compareAndSet(null, exhausted);
             return CompletableFuture.failedFuture(exhausted);
         }
-        dispatchHighWaterMark.accumulateAndGet(depth, Math::max);
         CompletableFuture<CoreMatchingResult> pipeline = executeWithEvidenceNow(
                 coreSequence, commandId, orderId, aeronTimestamp, controlShard, command);
         NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
@@ -1477,10 +1470,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("matcher symbol is required");
         return topology.matcherShardId(reserveSymbolId(symbol));
     }
-    public int dispatchDepth() { return dispatchInFlight.get(); }
-    public int dispatchCapacity() { return topology.matcherWindowSize(); }
-    public int dispatchHighWaterMark() { return dispatchHighWaterMark.get(); }
-
     private int matcherShardId(CoreMatchingResult result) {
         int symbolId = result.nativeMatcherResult() == null ? 0 : result.nativeMatcherResult().symbol();
         return symbolId <= 0 ? -1 : topology.matcherShardId(symbolId);

@@ -554,7 +554,6 @@ class TradingRuntimeStateTest {
         // When: the reservation is completed once and completion is retried.
         state.completePendingReservation(7, 11, 4);
         long revisionAfterFirstCompletion = state.revision();
-        LaneValues laneAfterFirstCompletion = laneValues(state, state.topology().accountLaneId(7));
         BalanceRuntime balanceAfterFirstCompletion = state.balance(7, 3);
         assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
@@ -567,10 +566,6 @@ class TradingRuntimeStateTest {
                 .isEqualTo(balanceAfterFirstCompletion.availableUnits());
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(balanceAfterFirstCompletion.lockedUnits());
         assertThat(state.revision()).isEqualTo(revisionAfterFirstCompletion);
-        assertThat(state.accountLaneLocalStateHashById(state.topology().accountLaneId(7)))
-                .isEqualTo(laneAfterFirstCompletion.localStateHash());
-        assertThat(state.accountLaneLocalFundsHashById(state.topology().accountLaneId(7)))
-                .isEqualTo(laneAfterFirstCompletion.localFundsHash());
     }
 
     @Test

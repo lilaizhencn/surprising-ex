@@ -1170,7 +1170,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.revision()).isGreaterThan(revisionBefore);
             assertThatThrownBy(state::snapshotBusinessStateHash)
                     .hasMessageContaining("unfinished reservation or patch work");
-            assertThatThrownBy(state::snapshotFundsStateHash)
+            assertThatThrownBy(() -> com.surprising.aeron.service.state.FundsStateHash.compute(
+                    state.snapshotTradingState()))
                     .hasMessageContaining("unfinished reservation or patch work");
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
@@ -1196,7 +1197,8 @@ class CoreOrderedOrderBatchTest {
             var indexesBefore = allIndexSnapshots(state);
             var treasuryBefore = treasurySnapshot(runtime);
             long businessBefore = state.snapshotBusinessStateHash();
-            long fundsBefore = state.snapshotFundsStateHash();
+            long fundsBefore = com.surprising.aeron.service.state.FundsStateHash.compute(
+                    state.snapshotTradingState());
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
             UUID fatalId = UUID.randomUUID();

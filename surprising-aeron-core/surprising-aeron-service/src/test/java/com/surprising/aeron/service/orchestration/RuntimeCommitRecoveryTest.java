@@ -722,7 +722,9 @@ class RuntimeCommitRecoveryTest {
                 .isEqualTo(expectedState.tradingState().treasuryState());
         assertThat(actualState.stateHash()).isEqualTo(expectedState.stateHash());
         assertThat(actualState.snapshotBusinessStateHash()).isEqualTo(expectedState.snapshotBusinessStateHash());
-        assertThat(actualState.snapshotFundsStateHash()).isEqualTo(expectedState.snapshotFundsStateHash());
+        assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(actualState.snapshotTradingState()))
+                .isEqualTo(com.surprising.aeron.service.state.FundsStateHash.compute(
+                        expectedState.snapshotTradingState()));
         assertThat(actualState.snapshotProjectionSequence()).isEqualTo(expectedState.snapshotProjectionSequence());
         assertThat(actualState.commandResults()).isEqualTo(expectedState.commandResults());
         assertThat(actualState.lastSourceSequences()).isEqualTo(expectedState.lastSourceSequences());
@@ -928,7 +930,9 @@ class RuntimeCommitRecoveryTest {
         assertThat(recovered.tradingState().riskState()).isEqualTo(reference.tradingState().riskState());
         assertThat(recovered.tradingState().treasuryState()).isEqualTo(reference.tradingState().treasuryState());
         assertThat(recovered.snapshotBusinessStateHash()).isEqualTo(reference.snapshotBusinessStateHash());
-        assertThat(recovered.snapshotFundsStateHash()).isEqualTo(reference.snapshotFundsStateHash());
+        assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(recovered.snapshotTradingState()))
+                .isEqualTo(com.surprising.aeron.service.state.FundsStateHash.compute(
+                        reference.snapshotTradingState()));
         assertThat(recovered.stateHash()).isEqualTo(reference.stateHash());
         assertThat(recovered.commandResults()).isEqualTo(reference.commandResults());
         assertThat(recovered.lastSourceSequences()).isEqualTo(reference.lastSourceSequences());

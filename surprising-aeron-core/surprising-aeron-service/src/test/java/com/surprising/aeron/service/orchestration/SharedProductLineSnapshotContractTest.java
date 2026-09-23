@@ -80,7 +80,8 @@ class SharedProductLineSnapshotContractTest {
             long laneFence = original.appliedCommandCount();
             long stateHash = original.stateHash();
             long businessHash = original.snapshotBusinessStateHash();
-            long fundsHash = original.snapshotFundsStateHash();
+            long fundsHash = com.surprising.aeron.service.state.FundsStateHash.compute(
+                    original.snapshotTradingState());
             long economicUnits = economicAssetUnits(original, settleAsset(productLine));
 
             assertThat(manifest.productLine()).isEqualTo(productLine);
@@ -94,7 +95,8 @@ class SharedProductLineSnapshotContractTest {
                 assertThat(restored.tradingState()).isEqualTo(original.tradingState());
                 assertThat(restored.stateHash()).isEqualTo(stateHash);
                 assertThat(restored.snapshotBusinessStateHash()).isEqualTo(businessHash);
-                assertThat(restored.snapshotFundsStateHash()).isEqualTo(fundsHash);
+                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(
+                        restored.snapshotTradingState())).isEqualTo(fundsHash);
                 assertThat(economicAssetUnits(restored, settleAsset(productLine))).isEqualTo(economicUnits);
                 assertThat(restored.accountLaneSnapshots(laneFence, restored.tradingState()))
                         .isEqualTo(original.accountLaneSnapshots(laneFence, original.tradingState()));

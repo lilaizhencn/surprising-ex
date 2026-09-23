@@ -63,10 +63,6 @@ public final class TradingCoreOwner {
 
     /** Matcher 完成通知使用的统一回调，最终结果回到命令流水线状态。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
-    /** 快照屏障尚未就绪的诊断次数，不参与业务判断。 */
-    private long snapshotFenceNotReadyCount;
-    /** 快照屏障超时的诊断次数，不参与业务判断。 */
-    private long snapshotFenceTimeoutCount;
 
     TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
         if (productLine == null) {
@@ -87,8 +83,6 @@ public final class TradingCoreOwner {
         if (state == null) state = new TradingCoreRuntime(productLine);
         processingLogCallback = false;
         commandPipeline.reset();
-        snapshotFenceNotReadyCount = 0;
-        snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
         log.info("Aeron core role productLine={} role={}", productLine, cluster.role());
         realtimeBoundary.start(cluster, state);
@@ -515,25 +509,9 @@ public final class TradingCoreOwner {
                 if (snapshot != null) return snapshot;
                 idleStrategy.idle();
             }
-        } catch (TradingCoreRuntime.SnapshotNotReadyException notReady) {
-            snapshotFenceNotReadyCount++;
-            throw notReady;
-        } catch (TradingCoreRuntime.SnapshotFenceTimeoutException timeout) {
-            snapshotFenceTimeoutCount++;
-            throw timeout;
         } finally {
             processingLogCallback = false;
         }
-    }
-
-    /** 返回快照因已有异步工作未就绪的次数。 */
-    public long snapshotFenceNotReadyCount() {
-        return snapshotFenceNotReadyCount;
-    }
-
-    /** 返回快照屏障超时次数。 */
-    public long snapshotFenceTimeoutCount() {
-        return snapshotFenceTimeoutCount;
     }
 
     /** 处理集群角色切换，清理不能跨 Leader 任期继续发送的出口状态。 */

@@ -459,14 +459,6 @@ public final class AeronClientPool implements AutoCloseable {
                 com.surprising.aeron.protocol.CoreStateQueryCodec.encodeCommandResultQuery(commandId));
     }
 
-    int agentThreadCount() {
-        return 1;
-    }
-
-    int configuredSessionCount() {
-        return commandAgents.length + 1;
-    }
-
     int commandMailboxCapacity() {
         return capacity.commandMailboxCapacity();
     }

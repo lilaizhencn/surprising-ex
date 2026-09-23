@@ -237,8 +237,6 @@ class AeronClientAgentTest {
             assertThat(polled.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(owners).containsExactly("agent-egress-dispatcher");
             assertThat(fragmentLimits).containsExactly(32);
-            assertThat(pool.agentThreadCount()).isEqualTo(1);
-            assertThat(pool.configuredSessionCount()).isEqualTo(2);
         }
     }
 

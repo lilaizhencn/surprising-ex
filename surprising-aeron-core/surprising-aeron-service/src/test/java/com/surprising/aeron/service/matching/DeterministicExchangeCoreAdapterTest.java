@@ -266,16 +266,11 @@ class DeterministicExchangeCoreAdapterTest {
                     });
 
             assertThat(submissions).hasValue(2);
-            assertThat(adapter.dispatchDepth()).isEqualTo(2);
-            assertThat(adapter.dispatchHighWaterMark()).isEqualTo(2);
-            assertThat(adapter.dispatchCapacity()).isEqualTo(adapter.topology().matcherWindowSize());
             firstNative.complete(result(true, "SUCCESS"));
             CoreMatchingResult firstResult = first.join();
 
             secondNative.complete(result(false, "MATCHING_INVALID_ORDER_ID"));
             CoreMatchingResult secondResult = second.join();
-            assertThat(adapter.dispatchDepth()).isZero();
-
             assertThat(firstResult.nativeMatcherSequence()).isEqualTo(1);
             assertThat(secondResult.nativeMatcherSequence()).isEqualTo(2);
         }

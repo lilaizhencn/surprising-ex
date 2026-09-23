@@ -111,14 +111,6 @@ final class TradingOwnerTestSupport implements ClusteredService {
         return owner.captureSnapshot(snapshotId, deadlineNanos);
     }
 
-    long snapshotFenceNotReadyCount() {
-        return owner.snapshotFenceNotReadyCount();
-    }
-
-    long snapshotFenceTimeoutCount() {
-        return owner.snapshotFenceTimeoutCount();
-    }
-
     @Override
     public void onRoleChange(Cluster.Role newRole) {
         responses.clear();

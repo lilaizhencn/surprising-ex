@@ -95,7 +95,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 if (resultTarget != null) LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
                 lane.applied(coreSequence);
                 lane.committed(coreSequence);
-                runtime.publishLaneHashes(lane);
+                runtime.publishLaneCommittedSequence(lane);
             }
         } finally {
             runtime.exitMatcherSettlementScope(lane, changes);

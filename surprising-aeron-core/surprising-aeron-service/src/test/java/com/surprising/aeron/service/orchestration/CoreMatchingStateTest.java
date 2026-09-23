@@ -146,7 +146,6 @@ class CoreMatchingStateTest {
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.runtimeClientIdentityCount()).isZero();
             assertThat(state.terminalRetention().containsOrder(202, 8, "client-202")).isTrue();
             CoreMessage duplicateClientId = message(state, 5, 8, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(

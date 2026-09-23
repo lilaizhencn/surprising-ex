@@ -31,8 +31,6 @@ class AeronClientCapacityTest {
                     opened.countDown();
                     return idleSession();
                 }, true)) {
-            assertThat(pool.agentThreadCount()).isEqualTo(1);
-            assertThat(pool.configuredSessionCount()).isEqualTo(5);
             assertThat(opened.await(1, TimeUnit.SECONDS)).isTrue();
         }
     }

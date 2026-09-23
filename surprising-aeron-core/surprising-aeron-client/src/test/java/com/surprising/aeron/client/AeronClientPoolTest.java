@@ -65,10 +65,6 @@ class AeronClientPoolTest {
     void hasNoRequestOrConnectionExecutor() {
         assertThat(Arrays.stream(AeronClientPool.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                 .doesNotContain("commandExecutor", "connectionExecutor");
-        try (AeronClientPool pool = pool(2)) {
-            assertThat(pool.agentThreadCount()).isEqualTo(1);
-            assertThat(pool.configuredSessionCount()).isEqualTo(3);
-        }
     }
 
     @Test

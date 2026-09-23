@@ -877,7 +877,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (commitSequence != 0) {
                 lane.applied(commitSequence);
                 lane.committed(commitSequence);
-                runtime.publishLaneHashes(lane);
+                runtime.publishLaneCommittedSequence(lane);
             }
         } finally {
             if (changes == null) runtime.exitLaneCommandScope(lane);
