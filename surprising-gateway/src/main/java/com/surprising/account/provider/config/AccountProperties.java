@@ -1,30 +1,23 @@
 package com.surprising.account.provider.config;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.UUID;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+@Getter
 @ConfigurationProperties(prefix = "surprising.account")
 public class AccountProperties {
 
+    @Setter
     private Kafka kafka = new Kafka();
     private Aeron aeron = new Aeron();
 
 
-    public Kafka getKafka() {
-        return kafka;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-
-    public Aeron getAeron() {
-        return aeron;
-    }
 
     public void setAeron(Aeron aeron) {
         this.aeron = aeron == null ? new Aeron() : aeron;
@@ -32,39 +25,24 @@ public class AccountProperties {
 
 
 
+    @Getter
     public static class Kafka {
+        @Setter
         private String bootstrapServers = "localhost:9092";
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
+        @Setter
         private ProductLine productLine;
         /** 账户 Kafka 客户端及事务 producer 前缀使用的实例标识。 */
         private String clientId = "account-provider-" + UUID.randomUUID();
+        @Setter
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
+        @Setter
         private int maxPollRecords = 500;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
-
-        public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine;
-        }
 
         public String getGroupId() {
             return productTopics().consumerGroup("account");
         }
 
-
-        public String getClientId() {
-            return clientId;
-        }
 
         public void setClientId(String clientId) {
             if (clientId == null || clientId.isBlank()) {
@@ -128,38 +106,19 @@ public class AccountProperties {
             return productLine.isOptionProduct();
         }
 
-        public String getInstrumentLifecycleDrainTopic() {
-            return instrumentLifecycleDrainTopic;
-        }
-
-        public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
-            this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
-        }
-
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("account-instrument-lifecycle");
         }
 
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
-        }
-
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
-        }
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
         }
     }
 
+    @Getter
     public static class Aeron {
         private String sourceIdentity = "account-provider-node";
-
-        public String getSourceIdentity() {
-            return sourceIdentity;
-        }
 
         public void setSourceIdentity(String sourceIdentity) {
             if (sourceIdentity == null || sourceIdentity.isBlank()) {
@@ -172,7 +131,6 @@ public class AccountProperties {
         private Duration responseTimeout = Duration.ofSeconds(5);
         private int clientConnections = 4;
 
-        public java.util.List<String> getHostnames() { return hostnames; }
         public void setHostnames(java.util.List<String> hostnames) {
             if (hostnames == null || (hostnames.size() != 1 && hostnames.size() != 3)
                     || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
@@ -180,17 +138,14 @@ public class AccountProperties {
             }
             this.hostnames = java.util.List.copyOf(hostnames);
         }
-        public String getEgressHostname() { return egressHostname; }
         public void setEgressHostname(String egressHostname) {
             if (egressHostname == null || egressHostname.isBlank()) throw new IllegalArgumentException("aeron egress hostname is required");
             this.egressHostname = egressHostname.trim();
         }
-        public Duration getResponseTimeout() { return responseTimeout; }
         public void setResponseTimeout(Duration responseTimeout) {
             if (responseTimeout == null || responseTimeout.isZero() || responseTimeout.isNegative()) throw new IllegalArgumentException("aeron response timeout must be positive");
             this.responseTimeout = responseTimeout;
         }
-        public int getClientConnections() { return clientConnections; }
         public void setClientConnections(int clientConnections) {
             if (clientConnections < 1 || clientConnections > 64) throw new IllegalArgumentException("aeron client connections must be in [1,64]");
             this.clientConnections = clientConnections;

@@ -154,3 +154,11 @@ derivatives-lifecycle（含 funding）、maker，共 6 个 Java 进程。应用�
 ### Core 诊断统计的开关边界
 
 `surprising.aeron.matching-phase-log-interval` 默认为 0；关闭时准入、提交路径不采集阶段耗时。开启后由 Owner 单线程维护普通计数，正常结算和撤单共用完成计数及周期输出逻辑（DEBUG 日志）。`surprising.matcher.wait-diagnostics`、`surprising.settlement.wait-diagnostics` 关闭时不更新诊断用 park 计数，线程实际等待与唤醒逻辑不受影响。稀疏 JFR 事件和现有采样配置继续保留。
+
+### Record 与 Lombok 的使用约定
+
+- 不可变请求、响应、分页结果和值对象优先使用 Java `record`；已有的 record 保留。
+- 需要 setter 绑定、默认值初始化或后续修改的配置类使用 Lombok `@Getter` / `@Setter`。只替代纯字段访问方法，带校验、归一化、空值处理及派生计算的方法保留手写。
+- 本轮不引入 `@Data`、自动 `toString`、`equals` 或 `hashCode`，避免改变身份语义或把凭证字段带入日志。已有访问权限、默认值和 Spring 配置绑定接口保持不变。
+- 父 POM 固定 Lombok 1.18.48（[JDK 27 支持说明](https://projectlombok.org/changelog)），使用 provided/optional 依赖，并显式配置 annotation processor。benchmark 模块追加 JMH processor，两者共同生效。Lombok 不进入运行时可执行 JAR。
+- IDE 使用 HotSpot JDK 27，启用注解处理并重新导入 Maven；`lombok.config` 阻止工作区外配置影响生成结果。命令行构建仍以 Maven 为准。

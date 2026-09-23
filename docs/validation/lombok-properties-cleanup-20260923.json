@@ -1,0 +1,162 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Corretto HotSpot 27.0.0",
+  "commands": [
+    "mvn -B clean test",
+    "mvn -B -DskipTests package"
+  ],
+  "result": "PASS",
+  "tests": {
+    "tests": 2238,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 38
+  },
+  "removedAccessors": 766,
+  "propertiesFiles": 16,
+  "compiledClassesWithIdenticalSignatures": 85,
+  "runtimeLombokAbsent": true,
+  "jars": [
+    {
+      "path": "surprising-product-api/target/surprising-product-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "41dde0db5b0d50a189faacc8aabfc3dc5b01d020812da67030bf23244c13256b",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "665d96f42e86926b532fa4dda6a8e87c5c5eb62b58b334d8f4892ffbc232cd74",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT.jar",
+      "sha256": "4ae4e00ceb66f6556da230933e4fd6dca7329c1d731cfb2bf88b82cd9abd4853",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "03ff2c38508c7574556e9ccbcc520684a2bd87df1741c521e2f72e45cc0b5809",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar",
+      "sha256": "0e368169897a87575a919b62efc08fe6740635fe74fe211b8240371c3d803ad3",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-instrument/surprising-instrument-api/target/surprising-instrument-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "00bfefca8e57c878f8cb7e7216048949411651dfe6c79c44ee4badc67547a663",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT.jar",
+      "sha256": "07df3d436191a01374462e3709649a04e3677052ab5219731207cf06e080be35",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "101f44d19f0b30186836b6bde7cc8f18ceee4861c144b21520b596a652deec46",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-api/target/surprising-realtime-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "7265f3a044959e0f5e6e4b05622c904fb9a2a668393fee0fe617ab3a46a493cc",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-trading/surprising-trading-api/target/surprising-trading-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "6a28cd65909cd497397e3933093fc3d43a6755d6d85b65e2ac841dba9429e9e8",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+      "sha256": "cf5d1960a57b27d66c0b6c6eba232161e3dc47270e524fe37694a834a3b61868",
+      "jmhMetadata": true
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/target/surprising-aeron-benchmarks-1.0.0-SNAPSHOT.jar",
+      "sha256": "a6ef89df2962a68d73012670a35a03e0689e20b4712f045af27d74cd26145cbc",
+      "jmhMetadata": true
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+      "sha256": "b5b0f1a88e18c0cd13e35249c693f20f699d9728da0161a0a8efe3600980ee74",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools-1.0.0-SNAPSHOT.jar",
+      "sha256": "8134dd291bd466f6836755cf6c8a95a31cbae3c794b29146fb3b9871b5e76673",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+      "sha256": "48b07226b542408dc0779e6e68c2d22bbf1a10277fee34b3e8c712e07b6a4a38",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/test-fault-agent.jar",
+      "sha256": "b16cbbb23e1ded82470df2b926083a7ee35e36d57d450ec3b485225a4f520765",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "sha256": "a6e27abc109c2aab878c8267c67aa195133cc8a004204d06d8e2e24cea5a14c1",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-client/target/surprising-aeron-client-1.0.0-SNAPSHOT.jar",
+      "sha256": "86434294d7d6e624259e4f02de47cbcc3690c2b46673e4313814e0900886ff85",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-protocol/target/surprising-aeron-protocol-1.0.0-SNAPSHOT.jar",
+      "sha256": "6dbf1e8a0974619783ffc4a86b4cc5d5a00dfa9b64387abc709f58b0e90107db",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-account/surprising-account-api/target/surprising-account-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "f334c8762f46241398a9322801fa5b83889baec843b9235c88331e3c4e368830",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/target/surprising-derivatives-lifecycle-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "a0f3a0d8008702b9e64eb3813504f711f5b70dbe95d536659875632b0bfbc80b",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT.jar",
+      "sha256": "8c12a8a96b067f1f7598844676b027441672fa4e199662887ea82c355949d8c4",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "aae95fef7fd1c15ba595ebc3402285abc99272b9166bf6a68a1dec6f9023f8c3",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar",
+      "sha256": "21fa3578abe2afe9089b795b370d78d9f945dfc57c5f09d6925b72bf2333adc8",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "e5bfa946d348c05876dba9be763f7effc29d9820bf0f7612cb6260da9ce9b3b9",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-price/surprising-price-api/target/surprising-price-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "ca8d6373fe4cef8e5483b5193dfb0fc6274a6b04e05ecff6d3e7c1ae8c776fcc",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-price/surprising-price-consumer/target/surprising-price-consumer-1.0.0-SNAPSHOT.jar",
+      "sha256": "d859ec11e151c51882182e0a59eea474dd5bb91f0960a7af2a67a61a33da222c",
+      "jmhMetadata": false
+    },
+    {
+      "path": "surprising-market-data/surprising-market-data-api/target/surprising-market-data-api-1.0.0-SNAPSHOT.jar",
+      "sha256": "e927f1c4a7d9d4e21bf83ad8c881d1a63a3944973542f958013c6a11664f43ee",
+      "jmhMetadata": false
+    }
+  ],
+  "cleanup": "Temporary verification files and Surefire reports removed after evidence collection; packaged jars retained."
+}

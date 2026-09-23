@@ -1,5 +1,8 @@
 package com.surprising.websocket.provider.config;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
@@ -8,6 +11,8 @@ import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+@Getter
+@Setter
 @ConfigurationProperties(prefix = "surprising.websocket")
 public class WebSocketProperties {
 
@@ -16,56 +21,20 @@ public class WebSocketProperties {
     private Security security = new Security();
     private Fanout fanout = new Fanout();
 
-    public Kafka getKafka() {
-        return kafka;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public Session getSession() {
-        return session;
-    }
-
-    public void setSession(Session session) {
-        this.session = session;
-    }
-
-    public Security getSecurity() {
-        return security;
-    }
-
-    public void setSecurity(Security security) {
-        this.security = security;
-    }
-
-    public Fanout getFanout() {
-        return fanout;
-    }
-
-    public void setFanout(Fanout fanout) {
-        this.fanout = fanout;
-    }
-
     public static class Kafka {
+        @Getter
+        @Setter
         private String bootstrapServers = "localhost:9092";
+        @Getter
         private ProductLine productLine;
+        @Setter
         private String groupId = "surprising-websocket-local";
+        @Getter
+        @Setter
         private int concurrency = 2;
+        @Getter
+        @Setter
         private int maxPollRecords = 1000;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
 
         public void setProductLine(ProductLine productLine) {
             if (productLine == null) {
@@ -76,26 +45,6 @@ public class WebSocketProperties {
 
         public String getGroupId() {
             return productTopics().consumerGroup("websocket") + "-" + groupId;
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
-
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
-        }
-
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
         }
 
         public String getCandleTopic() {
@@ -142,102 +91,31 @@ public class WebSocketProperties {
         }
     }
 
+    @Getter
+    @Setter
     public static class Session {
         private int maxSubscriptions = 200;
         private int outboundQueueCapacity = 1000;
         private Duration sendTimeout = Duration.ofSeconds(5);
 
-        public int getMaxSubscriptions() {
-            return maxSubscriptions;
-        }
-
-        public void setMaxSubscriptions(int maxSubscriptions) {
-            this.maxSubscriptions = maxSubscriptions;
-        }
-
-        public int getOutboundQueueCapacity() {
-            return outboundQueueCapacity;
-        }
-
-        public void setOutboundQueueCapacity(int outboundQueueCapacity) {
-            this.outboundQueueCapacity = outboundQueueCapacity;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Security {
         private String userIdHeader = "X-User-Id";
         private List<String> allowedOrigins = new ArrayList<>(List.of("*"));
         private String issuer = "surprising-ex-gateway";
         private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
 
-        public String getUserIdHeader() {
-            return userIdHeader;
-        }
-
-        public void setUserIdHeader(String userIdHeader) {
-            this.userIdHeader = userIdHeader;
-        }
-
-        public List<String> getAllowedOrigins() {
-            return allowedOrigins;
-        }
-
-        public void setAllowedOrigins(List<String> allowedOrigins) {
-            this.allowedOrigins = allowedOrigins;
-        }
-
-        public String getIssuer() {
-            return issuer;
-        }
-
-        public void setIssuer(String issuer) {
-            this.issuer = issuer;
-        }
-
-        public String getJwtSecret() {
-            return jwtSecret;
-        }
-
-        public void setJwtSecret(String jwtSecret) {
-            this.jwtSecret = jwtSecret;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Fanout {
         private Duration candlePartialCoalesceWindow = Duration.ofMillis(250);
         private Duration markPriceMaxAge = Duration.ofSeconds(3);
         private Duration markPriceAllowedFutureSkew = Duration.ofSeconds(1);
 
-        public Duration getCandlePartialCoalesceWindow() {
-            return candlePartialCoalesceWindow;
-        }
-
-        public void setCandlePartialCoalesceWindow(Duration candlePartialCoalesceWindow) {
-            this.candlePartialCoalesceWindow = candlePartialCoalesceWindow;
-        }
-
-        public Duration getMarkPriceMaxAge() {
-            return markPriceMaxAge;
-        }
-
-        public void setMarkPriceMaxAge(Duration markPriceMaxAge) {
-            this.markPriceMaxAge = markPriceMaxAge;
-        }
-
-        public Duration getMarkPriceAllowedFutureSkew() {
-            return markPriceAllowedFutureSkew;
-        }
-
-        public void setMarkPriceAllowedFutureSkew(Duration markPriceAllowedFutureSkew) {
-            this.markPriceAllowedFutureSkew = markPriceAllowedFutureSkew;
-        }
     }
 }

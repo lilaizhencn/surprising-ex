@@ -1,8 +1,13 @@
 package com.surprising.instrument.provider.config;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+@Getter
+@Setter
 @ConfigurationProperties(prefix = "surprising.instrument")
 public class InstrumentProperties {
 
@@ -10,30 +15,8 @@ public class InstrumentProperties {
     private Lifecycle lifecycle = new Lifecycle();
     private Outbox outbox = new Outbox();
 
-    public Kafka getKafka() {
-        return kafka;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public Lifecycle getLifecycle() {
-        return lifecycle;
-    }
-
-    public void setLifecycle(Lifecycle lifecycle) {
-        this.lifecycle = lifecycle;
-    }
-
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
+    @Getter
+    @Setter
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private String lifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
@@ -41,77 +24,19 @@ public class InstrumentProperties {
         private String deliverySettlementsTopic;
         private String optionExercisesTopic;
 
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public String getLifecycleDrainTopic() {
-            return lifecycleDrainTopic;
-        }
-
-        public void setLifecycleDrainTopic(String lifecycleDrainTopic) {
-            this.lifecycleDrainTopic = lifecycleDrainTopic;
-        }
-
-        public String getLifecycleDrainGroupId() {
-            return lifecycleDrainGroupId;
-        }
-
-        public void setLifecycleDrainGroupId(String lifecycleDrainGroupId) {
-            this.lifecycleDrainGroupId = lifecycleDrainGroupId;
-        }
-
-        public String getDeliverySettlementsTopic() {
-            return deliverySettlementsTopic;
-        }
-
-        public void setDeliverySettlementsTopic(String deliverySettlementsTopic) {
-            this.deliverySettlementsTopic = deliverySettlementsTopic;
-        }
-
-        public String getOptionExercisesTopic() {
-            return optionExercisesTopic;
-        }
-
-        public void setOptionExercisesTopic(String optionExercisesTopic) {
-            this.optionExercisesTopic = optionExercisesTopic;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Lifecycle {
         private boolean enabled = true;
         private long pollDelayMs = 1000L;
         private int batchSize = 100;
 
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public long getPollDelayMs() {
-            return pollDelayMs;
-        }
-
-        public void setPollDelayMs(long pollDelayMs) {
-            this.pollDelayMs = pollDelayMs;
-        }
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Outbox {
         private int batchSize = 100;
         private long publishDelayMs = 100L;
@@ -121,60 +46,5 @@ public class InstrumentProperties {
         private int cleanupBatchSize = 500;
         private int cleanupMaxBatches = 10;
 
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            this.retention = retention;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            this.cleanupMaxBatches = cleanupMaxBatches;
-        }
     }
 }

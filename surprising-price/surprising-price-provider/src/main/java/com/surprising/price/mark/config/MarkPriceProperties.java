@@ -1,5 +1,8 @@
 package com.surprising.price.mark.config;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import jakarta.validation.constraints.Max;
@@ -10,63 +13,32 @@ import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+@Getter
 @Validated
 @ConfigurationProperties(prefix = "surprising.price.mark")
 public class MarkPriceProperties {
 
+    @Setter
     private Kafka kafka = new Kafka();
+    @Setter
     private Calculation calculation = new Calculation();
+    @Setter
     private Coordination coordination = new Coordination();
+    @Setter
     private Audit audit = new Audit();
     private Aeron aeron = new Aeron();
-
-    public Kafka getKafka() {
-        return kafka;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public Calculation getCalculation() {
-        return calculation;
-    }
-
-    public void setCalculation(Calculation calculation) {
-        this.calculation = calculation;
-    }
-
-    public Coordination getCoordination() {
-        return coordination;
-    }
-
-    public void setCoordination(Coordination coordination) {
-        this.coordination = coordination;
-    }
-
-    public Audit getAudit() {
-        return audit;
-    }
-
-    public void setAudit(Audit audit) {
-        this.audit = audit;
-    }
-
-    public Aeron getAeron() {
-        return aeron;
-    }
 
     public void setAeron(Aeron aeron) {
         this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
+    @Getter
     public static class Aeron {
         private List<String> hostnames = List.of("localhost", "localhost", "localhost");
         private String egressHostname = "localhost";
         private Duration responseTimeout = Duration.ofSeconds(5);
         private int clientConnections = 1;
 
-        public List<String> getHostnames() { return hostnames; }
         public void setHostnames(List<String> hostnames) {
             if (hostnames == null || (hostnames.size() != 1 && hostnames.size() != 3)
                     || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
@@ -74,21 +46,18 @@ public class MarkPriceProperties {
             }
             this.hostnames = List.copyOf(hostnames);
         }
-        public String getEgressHostname() { return egressHostname; }
         public void setEgressHostname(String egressHostname) {
             if (egressHostname == null || egressHostname.isBlank()) {
                 throw new IllegalArgumentException("aeron egress hostname is required");
             }
             this.egressHostname = egressHostname.trim();
         }
-        public Duration getResponseTimeout() { return responseTimeout; }
         public void setResponseTimeout(Duration responseTimeout) {
             if (responseTimeout == null || responseTimeout.isZero() || responseTimeout.isNegative()) {
                 throw new IllegalArgumentException("aeron response timeout must be positive");
             }
             this.responseTimeout = responseTimeout;
         }
-        public int getClientConnections() { return clientConnections; }
         public void setClientConnections(int clientConnections) {
             if (clientConnections != 1) throw new IllegalArgumentException("price Aeron requires one client connection");
             this.clientConnections = clientConnections;
@@ -119,23 +88,15 @@ public class MarkPriceProperties {
         return ProductTopicNames.of(kafka.productLine);
     }
 
+    @Getter
     public static class Kafka {
+        @Setter
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        @Setter
         private int concurrency = 2;
+        @Setter
         private int maxPollRecords = 500;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
 
         public void setProductLine(ProductLine productLine) {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
@@ -145,27 +106,14 @@ public class MarkPriceProperties {
             return ProductTopicNames.of(productLine).consumerGroup("mark-price");
         }
 
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
-        }
-
         public String getInstrumentSnapshotGroupId() {
             return "surprising-" + productLine.topicSegment() + "-mark-instrument-snapshot-v1";
         }
 
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Calculation {
         @Min(100)
         @Max(1000)
@@ -176,122 +124,24 @@ public class MarkPriceProperties {
         private int defaultFundingIntervalHours = 8;
         private int scale = 18;
 
-        public long getPublishIntervalMs() {
-            return publishIntervalMs;
-        }
-
-        public void setPublishIntervalMs(long publishIntervalMs) {
-            this.publishIntervalMs = publishIntervalMs;
-        }
-
-        public Duration getBasisWindow() {
-            return basisWindow;
-        }
-
-        public void setBasisWindow(Duration basisWindow) {
-            this.basisWindow = basisWindow;
-        }
-
-        public Duration getMaxInputAge() {
-            return maxInputAge;
-        }
-
-        public void setMaxInputAge(Duration maxInputAge) {
-            this.maxInputAge = maxInputAge;
-        }
-
-        public BigDecimal getClampRatio() {
-            return clampRatio;
-        }
-
-        public void setClampRatio(BigDecimal clampRatio) {
-            this.clampRatio = clampRatio;
-        }
-
-        public int getDefaultFundingIntervalHours() {
-            return defaultFundingIntervalHours;
-        }
-
-        public void setDefaultFundingIntervalHours(int defaultFundingIntervalHours) {
-            this.defaultFundingIntervalHours = defaultFundingIntervalHours;
-        }
-
-        public int getScale() {
-            return scale;
-        }
-
-        public void setScale(int scale) {
-            this.scale = scale;
-        }
-
     }
 
+    @Getter
+    @Setter
     public static class Coordination {
         private boolean enabled = true;
         private String nodeId;
         private Duration leaseDuration = Duration.ofSeconds(15);
 
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public String getNodeId() {
-            return nodeId;
-        }
-
-        public void setNodeId(String nodeId) {
-            this.nodeId = nodeId;
-        }
-
-        public Duration getLeaseDuration() {
-            return leaseDuration;
-        }
-
-        public void setLeaseDuration(Duration leaseDuration) {
-            this.leaseDuration = leaseDuration;
-        }
     }
 
+    @Getter
+    @Setter
     public static class Audit {
         private Duration retention = Duration.ofDays(3);
         private long cleanupDelayMs = Duration.ofMinutes(1).toMillis();
         private int cleanupBatchSize = 10_000;
         private int maxBatchesPerRun = 10;
 
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getMaxBatchesPerRun() {
-            return maxBatchesPerRun;
-        }
-
-        public void setMaxBatchesPerRun(int maxBatchesPerRun) {
-            this.maxBatchesPerRun = maxBatchesPerRun;
-        }
     }
 }

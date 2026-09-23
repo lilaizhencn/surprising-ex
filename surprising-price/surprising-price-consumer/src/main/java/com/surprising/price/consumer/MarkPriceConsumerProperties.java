@@ -1,5 +1,8 @@
 package com.surprising.price.consumer;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
@@ -8,81 +11,29 @@ import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+@Getter
 @Component("markPriceConsumerProperties")
 @ConfigurationProperties(prefix = "surprising.price.consumer")
 public class MarkPriceConsumerProperties {
 
+    @Setter
     private String bootstrapServers = "localhost:9092";
+    @Setter
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+    @Setter
     private String groupId = "surprising-mark-price-cache-local";
+    @Setter
     private Duration maxAge = Duration.ofSeconds(3);
+    @Setter
     private Duration allowedFutureSkew = Duration.ofSeconds(1);
+    @Setter
     private int concurrency = 1;
+    @Setter
     private int maxPollRecords = 500;
     private List<String> requiredSymbols = List.of();
 
     public String resolvedTopic() {
         return ProductTopicNames.of(productLine).priceEventsTopic();
-    }
-
-    public String getBootstrapServers() {
-        return bootstrapServers;
-    }
-
-    public void setBootstrapServers(String bootstrapServers) {
-        this.bootstrapServers = bootstrapServers;
-    }
-
-    public ProductLine getProductLine() {
-        return productLine;
-    }
-
-    public void setProductLine(ProductLine productLine) {
-        this.productLine = productLine;
-    }
-
-    public String getGroupId() {
-        return groupId;
-    }
-
-    public void setGroupId(String groupId) {
-        this.groupId = groupId;
-    }
-
-    public Duration getMaxAge() {
-        return maxAge;
-    }
-
-    public void setMaxAge(Duration maxAge) {
-        this.maxAge = maxAge;
-    }
-
-    public Duration getAllowedFutureSkew() {
-        return allowedFutureSkew;
-    }
-
-    public void setAllowedFutureSkew(Duration allowedFutureSkew) {
-        this.allowedFutureSkew = allowedFutureSkew;
-    }
-
-    public int getConcurrency() {
-        return concurrency;
-    }
-
-    public void setConcurrency(int concurrency) {
-        this.concurrency = concurrency;
-    }
-
-    public int getMaxPollRecords() {
-        return maxPollRecords;
-    }
-
-    public void setMaxPollRecords(int maxPollRecords) {
-        this.maxPollRecords = maxPollRecords;
-    }
-
-    public List<String> getRequiredSymbols() {
-        return requiredSymbols;
     }
 
     public void setRequiredSymbols(List<String> requiredSymbols) {
