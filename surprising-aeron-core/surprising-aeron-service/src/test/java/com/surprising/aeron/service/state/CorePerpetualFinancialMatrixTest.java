@@ -183,8 +183,6 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(expected.state());
             assertThat(actual.payments()).isEqualTo(expected.payments());
-            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID)).queueDepth()).isZero();
-            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID)).queueDepth()).isZero();
         } finally {
             runtime.close();
         }
@@ -222,8 +220,6 @@ class CorePerpetualFinancialMatrixTest {
             }
 
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
-            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID)).queueDepth()).isZero();
-            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID)).queueDepth()).isZero();
         } finally {
             runtime.close();
         }

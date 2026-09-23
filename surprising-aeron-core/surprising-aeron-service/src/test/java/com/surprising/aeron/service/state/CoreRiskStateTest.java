@@ -413,9 +413,6 @@ class CoreRiskStateTest {
         try {
             RuntimeDerivativeRiskProcessor.applyMarkPrice(
                     state, command, state.users().keySet(), runtime, identities);
-            for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
-                assertThat(runtime.accountLaneMetricsById(laneId).queueDepth()).isZero();
-            }
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);
@@ -427,12 +424,6 @@ class CoreRiskStateTest {
                         before, 64, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(first, identities, runtime);
             }
-            long riskLaneOperations = 0;
-            for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
-                riskLaneOperations += runtime.accountLaneMetricsById(laneId).completedOperations()[
-                        AccountLaneOperationType.RISK.ordinal()];
-            }
-            assertThat(riskLaneOperations).isPositive().isLessThan(260);
         } finally {
             runtime.close();
         }

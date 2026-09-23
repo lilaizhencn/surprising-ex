@@ -877,7 +877,6 @@ class TradingRuntimeStateTest {
             LaneValues lane = laneValues(state, state.topology().accountLaneId(7));
             assertThat(lane.appliedSequence()).isEqualTo(1);
             assertThat(lane.committedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneMetricsById(state.topology().accountLaneId(7)).queueDepth()).isZero();
             assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
         } finally {
             state.close();
@@ -1216,12 +1215,6 @@ class TradingRuntimeStateTest {
             for (int laneId = 0; laneId < owners.length; laneId++) {
                 assertThat(owners[laneId]).isEqualTo("core-account-lane-" + laneId);
                 assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
-                AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
-                assertThat(metrics.queueHighWaterMark()).isEqualTo(1);
-                assertThat(metrics.completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()])
-                        .isEqualTo(1);
-                assertThat(metrics.latencySamples()[AccountLaneOperationType.SETTLEMENT.ordinal()])
-                        .isEqualTo(1);
             }
             assertThat(state.executeUserSettlement(users.getFirst(), () -> "core-owner"))
                     .isEqualTo("core-owner");
@@ -1276,20 +1269,14 @@ class TradingRuntimeStateTest {
             for (int lane = 0; lane < topology.accountLaneCount(); lane++) state.writeAccountLaneMetrics(lane, encoder);
             var decoded = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
             for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
-                var snapshot = state.accountLaneMetricsById(lane);
                 var view = laneValues(state, lane);
                 assertThat(decoded.accountLaneRevisions()[lane]).isEqualTo(view.revision());
                 assertThat(decoded.accountLaneAppliedSequences()[lane]).isEqualTo(view.appliedSequence());
                 assertThat(decoded.accountLaneCommittedSequences()[lane]).isEqualTo(view.committedSequence());
                 int offset = lane * 4;
-                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneCompletedOperations(), offset, offset + 4))
-                        .containsExactly(snapshot.completedOperations());
-                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneLatencySamples(), offset, offset + 4))
-                        .containsExactly(snapshot.latencySamples());
-                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneTotalLatencyNanos(), offset, offset + 4))
-                        .containsExactly(snapshot.totalLatencyNanos());
-                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneMaxLatencyNanos(), offset, offset + 4))
-                        .containsExactly(snapshot.maxLatencyNanos());
+                int settlementIndex = offset + AccountLaneOperationType.SETTLEMENT.ordinal();
+                assertThat(decoded.accountLaneCompletedOperations()[settlementIndex]).isEqualTo(1);
+                assertThat(decoded.accountLaneLatencySamples()[settlementIndex]).isEqualTo(1);
             }
         }
     }

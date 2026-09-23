@@ -360,28 +360,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         return publishedLaneFundsHashes[laneId];
     }
 
-    public AccountLaneMetricsSnapshot accountLaneMetricsById(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
-        int queueDepth = accountLanesStarted ? laneWorkers[laneId].depth() : 0;
-        AccountLaneState.MatcherSettlementMetrics matcherMetrics =
-                onLane(laneId, AccountLaneState::matcherSettlementMetrics);
-        int settlementIndex = AccountLaneOperationType.SETTLEMENT.ordinal();
-        long[] completed = accountLaneCompletedOperations[laneId].clone();
-        long[] samples = accountLaneLatencySamples[laneId].clone();
-        long[] totalLatency = accountLaneTotalLatencyNanos[laneId].clone();
-        long[] maxLatency = accountLaneMaxLatencyNanos[laneId].clone();
-        completed[settlementIndex] = Math.addExact(completed[settlementIndex], matcherMetrics.operations());
-        samples[settlementIndex] = Math.addExact(samples[settlementIndex], matcherMetrics.operations());
-        totalLatency[settlementIndex] = Math.addExact(
-                totalLatency[settlementIndex], matcherMetrics.totalLatencyNanos());
-        maxLatency[settlementIndex] = Math.max(
-                maxLatency[settlementIndex], matcherMetrics.maxLatencyNanos());
-        return new AccountLaneMetricsSnapshot(queueDepth, accountLanes[laneId].queueCapacity(),
-                accountLaneQueueHighWaterMarks[laneId], 0, 0,
-                completed, samples, totalLatency, maxLatency);
-    }
-
     /** Writes a single Lane snapshot; the encoder is exclusively handed off until onLane completes. */
     public void writeAccountLaneMetrics(int laneId, com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder) {
         assertOwner();
