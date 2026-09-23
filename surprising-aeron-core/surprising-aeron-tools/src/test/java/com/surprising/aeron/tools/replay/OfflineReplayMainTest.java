@@ -10,8 +10,6 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.product.api.ProductLine;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -30,16 +28,20 @@ class OfflineReplayMainTest {
                 .putInt(encoded.length)
                 .put(encoded)
                 .array());
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        PrintStream previous = System.out;
+        var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(OfflineReplayMain.class);
+        var output = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        output.start();
+        logger.addAppender(output);
         try {
-            System.setOut(new PrintStream(output));
             OfflineReplayMain.main(new String[]{"SPOT", log.toString()});
+            assertThat(output.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .anySatisfy(message -> assertThat(message).contains("messages=1", "appliedCommandCount=1"));
         } finally {
-            System.setOut(previous);
+            logger.detachAppender(output);
+            output.stop();
+            Files.deleteIfExists(log);
         }
 
-        assertThat(output.toString()).contains("messages=1", "appliedCommandCount=1");
     }
 
     @Test

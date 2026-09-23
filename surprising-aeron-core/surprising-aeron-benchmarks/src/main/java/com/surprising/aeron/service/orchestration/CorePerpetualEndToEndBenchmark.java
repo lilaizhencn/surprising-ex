@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -26,6 +28,7 @@ import java.util.Arrays;
 import java.util.UUID;
 
 /** Measures the local perpetual path from maker submission through taker fill application. */
+@Slf4j
 public final class CorePerpetualEndToEndBenchmark {
 
     private static final String SYMBOL = "BENCH-BTC-USDT";
@@ -43,7 +46,7 @@ public final class CorePerpetualEndToEndBenchmark {
         int warmupCycles = positive(args, 1, 100);
         int makerDepth = positive(args, 2, DEFAULT_MAKER_DEPTH);
         BaselineResult result = measure(cycles, warmupCycles, makerDepth);
-        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d makerDepth=%d orders=%d matchedQuantity=%d elapsedSeconds=%.3f "
+        log.info("{}", String.format(java.util.Locale.ROOT, "perpetualEndToEndBenchmark=PASS cycles=%d makerDepth=%d orders=%d matchedQuantity=%d elapsedSeconds=%.3f "
                         + "matchedCyclesPerSec=%.3f ordersPerSec=%.3f p50Micros=%d p95Micros=%d "
                         + "p99Micros=%d maxMicros=%d pendingMatching=%d%n",
                 result.cycles(), result.makerDepth(), result.finalizedOrders(), result.matchedQuantity(),
@@ -52,7 +55,7 @@ public final class CorePerpetualEndToEndBenchmark {
                 result.finalizedOrders() / (result.elapsedNanos() / 1_000_000_000.0),
                 percentile(result.latenciesNanos(), .50), percentile(result.latenciesNanos(), .95),
                 percentile(result.latenciesNanos(), .99), percentile(result.latenciesNanos(), 1.0),
-                result.pendingMatching());
+                result.pendingMatching()).stripTrailing());
     }
 
     public static BaselineResult measure(int cycles, int warmupCycles) {

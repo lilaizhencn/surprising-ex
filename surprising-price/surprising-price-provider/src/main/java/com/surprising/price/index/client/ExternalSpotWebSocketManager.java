@@ -1,5 +1,7 @@
 package com.surprising.price.index.client;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
 import com.surprising.price.index.service.IndexInstrumentConfigService;
@@ -30,16 +32,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 @Component
-    public class ExternalSpotWebSocketManager {
+@Slf4j
+public class ExternalSpotWebSocketManager {
 
-    private static final Logger log = LoggerFactory.getLogger(ExternalSpotWebSocketManager.class);
 
     private final IndexPriceProperties properties;
     private final IndexInstrumentConfigService indexInstrumentConfigService;

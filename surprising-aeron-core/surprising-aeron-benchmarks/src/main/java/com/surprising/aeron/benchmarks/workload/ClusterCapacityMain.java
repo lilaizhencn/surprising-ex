@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -41,6 +43,7 @@ import java.util.concurrent.atomic.LongAccumulator;
 import java.util.concurrent.locks.LockSupport;
 import org.HdrHistogram.Histogram;
 
+@Slf4j
 public final class ClusterCapacityMain implements AutoCloseable {
 
     private static final long FUNDING_UNITS = 1_000_000_000_000L;
@@ -161,9 +164,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             if ("verify".equals(mode)) {
                 benchmark.cancelOrders(System.getProperty("surprising.aeron.capacity-cancel-orders", ""));
                 benchmark.verifyFundsAndBook();
-                System.out.printf("capacityVerify=PASS productLine=%s workers=%d symbols=%d "
-                                + "fundsDiff=0 bookLevels=0%n",
-                        productLine, workers, symbols.size());
+                log.info("capacityVerify=PASS productLine={} workers={} symbols={} fundsDiff=0 bookLevels=0", productLine, workers, symbols.size());
             } else if ("run".equals(mode)) {
                 benchmark.run();
             } else {
@@ -214,7 +215,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                     + " fills=" + matchCount + " submitted=" + submittedRequests.get()
                     + " mark=" + marketDataCommands.get());
         }
-        System.out.printf("capacity=PASS scope=CLUSTER_NETWORK productLine=%s workload=%s symbols=%d users=%d workers=%d connections=%d "
+        log.info("{}", String.format(java.util.Locale.ROOT, "capacity=PASS scope=CLUSTER_NETWORK productLine=%s workload=%s symbols=%d users=%d workers=%d connections=%d "
                         + "targetOfferedPerSec=%d offered=%d accepted=%d finalized=%d matches=%d failures=%d elapsedSeconds=%.3f "
                         + "finalizedPerSec=%.3f coreMatchEventsPerSec=%.3f requestToTerminalP50Micros=%d "
                         + "requestToTerminalP99Micros=%d requestToTerminalP999Micros=%d "
@@ -222,18 +223,16 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 productLine, workload, symbols.size(), userCount, workers, connections, offeredCommandsPerSecond,
                 metrics.offered(), metrics.accepted(), metrics.finalized(), matchCount, failures.get(), elapsedSeconds,
                 metrics.finalizedPerSecond(), matchCount / elapsedSeconds, metrics.p50Micros(), metrics.p99Micros(),
-                metrics.p999Micros());
-        System.out.printf("marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
+                metrics.p999Micros()).stripTrailing());
+        log.info("{}", String.format(java.util.Locale.ROOT, "marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
                 marketDataCommands.get(), marketDataCommands.get() / elapsedSeconds,
-                Math.addExact(metrics.finalized() / ordersPerRequest, marketDataCommands.get()));
-        System.out.printf("ordersPerRequest=%d terminalOrderRequests=%d latencyScope=%s%n",
-                ordersPerRequest, metrics.finalized() / ordersPerRequest,
+                Math.addExact(metrics.finalized() / ordersPerRequest, marketDataCommands.get())).stripTrailing());
+        log.info("ordersPerRequest={} terminalOrderRequests={} latencyScope={}", ordersPerRequest, metrics.finalized() / ordersPerRequest,
                 workload == Workload.MATCH_BATCH_STREAM ? "BATCH_TERMINAL_PER_ITEM" : "COMMAND_TERMINAL");
-        System.out.printf("transientOfferRetries=%d%n", transientOfferRetries.get());
-        System.out.printf("totalWindow=%d observedRequestMax=%d unfinishedRequests=%d submittedRequests=%d completedRequests=%d%n",
-                asyncInFlight, peakRequests.get(), activeRequests.get(), submittedRequests.get(), completedRequests.get());
-        System.out.printf("requestOccupancySampleIntervalSeconds=1 samples=%d mean=%.3f%n",
-                occupancySamples, occupancySamples == 0 ? 0.0 : (double) occupancySum / occupancySamples);
+        log.info("transientOfferRetries={}", transientOfferRetries.get());
+        log.info("totalWindow={} observedRequestMax={} unfinishedRequests={} submittedRequests={} completedRequests={}", asyncInFlight, peakRequests.get(), activeRequests.get(), submittedRequests.get(), completedRequests.get());
+        log.info("{}", String.format(java.util.Locale.ROOT, "requestOccupancySampleIntervalSeconds=1 samples=%d mean=%.3f%n",
+                occupancySamples, occupancySamples == 0 ? 0.0 : (double) occupancySum / occupancySamples).stripTrailing());
         printLatency(workload.stream() ? "sell" : "maker", makerMetrics.snapshot(elapsedNanos));
         printLatency(workload.stream() ? "buy" : "taker", takerMetrics.snapshot(elapsedNanos));
         capacityMetrics.printHistogram();
@@ -307,8 +306,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                     occupancySum += activeRequests.get();
                     if (now - lastReport >= TimeUnit.SECONDS.toNanos(10)) {
                         long finalized = capacityMetrics.snapshot(Math.max(1, now - lastReport)).finalized();
-                        System.out.printf("progress terminalBusinessOps=%d intervalBusinessOpsPerSec=%.3f requestsInFlight=%d%n",
-                                finalized, (finalized - lastFinalized) * 1e9 / (now - lastReport), activeRequests.get());
+                        log.info("{}", String.format(java.util.Locale.ROOT, "progress terminalBusinessOps=%d intervalBusinessOpsPerSec=%.3f requestsInFlight=%d%n",
+                                finalized, (finalized - lastFinalized) * 1e9 / (now - lastReport), activeRequests.get()).stripTrailing());
                         lastReport = now;
                         lastFinalized = finalized;
                     }
@@ -740,14 +739,14 @@ public final class ClusterCapacityMain implements AutoCloseable {
             finalizationMetrics.recordFinalized(latency);
         }
         MetricsSnapshot finalization = finalizationMetrics.snapshot(perpetual.elapsedNanos());
-        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d makerDepth=%d orders=%d matchedQuantity=%d elapsedSeconds=%.3f "
+        log.info("{}", String.format(java.util.Locale.ROOT, "perpetualEndToEndBenchmark=PASS cycles=%d makerDepth=%d orders=%d matchedQuantity=%d elapsedSeconds=%.3f "
                         + "finalizedPerSec=%.3f corrected=true expectedIntervalMicros=1000 "
                         + "p50Micros=%d p99Micros=%d p999Micros=%d pendingMatching=%d%n",
                 perpetual.cycles(), perpetual.makerDepth(), perpetual.finalizedOrders(), perpetual.matchedQuantity(),
                 perpetual.elapsedNanos() / 1_000_000_000.0,
                 finalization.finalizedPerSecond(), finalization.p50Micros(), finalization.p99Micros(),
-                finalization.p999Micros(), perpetual.pendingMatching());
-        System.out.printf("clusterCapacityBaseline=PASS seed=%d suite=baseline makerDepth=%d%n", seed, makerDepth);
+                finalization.p999Micros(), perpetual.pendingMatching()).stripTrailing());
+        log.info("clusterCapacityBaseline=PASS seed={} suite=baseline makerDepth={}", seed, makerDepth);
     }
 
     static final class CapacityMetrics {
@@ -790,8 +789,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
 
         synchronized void printHistogram() {
-            System.out.println("requestToTerminalHistogramMicros highestTrackableNanos=" + HIGHEST_TRACKABLE_NANOS + " significantDigits=3");
-            finalizationLatency.outputPercentileDistribution(System.out, 1000.0);
+            log.info("{}", "requestToTerminalHistogramMicros highestTrackableNanos=" + HIGHEST_TRACKABLE_NANOS + " significantDigits=3");
+            var output = new java.io.ByteArrayOutputStream();
+            try (var stream = new java.io.PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)) {
+                finalizationLatency.outputPercentileDistribution(stream, 1000.0);
+            }
+            log.info("{}", output.toString(java.nio.charset.StandardCharsets.UTF_8).stripTrailing());
         }
 
         synchronized void reset() {
@@ -812,8 +815,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private static void printLatency(String business, MetricsSnapshot m) {
-        System.out.printf("latencyBusiness=%s samples=%d requestToTerminalMicros p50=%d p90=%d p95=%d p99=%d p999=%d max=%d%n",
-                business, m.finalized(), m.p50Micros(), m.p90Micros(), m.p95Micros(), m.p99Micros(), m.p999Micros(), m.maxMicros());
+        log.info("latencyBusiness={} samples={} requestToTerminalMicros p50={} p90={} p95={} p99={} p999={} max={}", business, m.finalized(), m.p50Micros(), m.p90Micros(), m.p95Micros(), m.p99Micros(), m.p999Micros(), m.maxMicros());
     }
 
     static int slotsForWorker(int total, int workers, int worker) {

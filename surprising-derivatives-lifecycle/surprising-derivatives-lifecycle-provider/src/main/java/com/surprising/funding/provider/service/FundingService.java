@@ -1,5 +1,7 @@
 package com.surprising.funding.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
@@ -23,16 +25,14 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class FundingService {
 
-    private static final Logger log = LoggerFactory.getLogger(FundingService.class);
 
     private final FundingProperties properties;
     private final FundingLeaseRepository leaseRepository;

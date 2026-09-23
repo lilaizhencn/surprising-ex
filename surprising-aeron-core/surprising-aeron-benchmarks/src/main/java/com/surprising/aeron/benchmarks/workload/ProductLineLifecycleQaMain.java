@@ -1,10 +1,13 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+@Slf4j
 public final class ProductLineLifecycleQaMain {
     private ProductLineLifecycleQaMain() {
     }
@@ -22,7 +25,7 @@ public final class ProductLineLifecycleQaMain {
                 .map(line -> line.equals("W4_STATUS=REAL_PASS") ? "TEST_STATUS=PASS" : line)
                 .toList();
         Files.write(manifest, normalized, StandardCharsets.UTF_8);
-        System.out.printf("PRODUCT_LINE_TEST=PASS path=%s%n", manifest);
+        log.info("PRODUCT_LINE_TEST=PASS path={}", manifest);
     }
 
     private static String requiredProperty(String name) {

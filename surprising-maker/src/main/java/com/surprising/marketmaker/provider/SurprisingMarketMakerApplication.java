@@ -1,13 +1,13 @@
 package com.surprising.marketmaker.provider;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
 import jakarta.annotation.PostConstruct;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -25,9 +25,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         OrderRpcApi.class
 })
 @EnableConfigurationProperties(MarketMakerProperties.class)
+@Slf4j
 public class SurprisingMarketMakerApplication {
 
-    private static final Logger log = LoggerFactory.getLogger(SurprisingMarketMakerApplication.class);
 
     private final MarketMakerProperties properties;
 

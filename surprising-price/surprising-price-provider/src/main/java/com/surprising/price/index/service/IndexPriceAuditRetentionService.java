@@ -1,16 +1,16 @@
 package com.surprising.price.index.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.index.config.IndexPriceProperties;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /** 通过有界批量删除控制指数价格审计表规模。 */
 @Component
-    public class IndexPriceAuditRetentionService {
+@Slf4j
+public class IndexPriceAuditRetentionService {
 
-    private static final Logger log = LoggerFactory.getLogger(IndexPriceAuditRetentionService.class);
 
     private final IndexPriceAuditService auditService;
     private final IndexPriceProperties properties;

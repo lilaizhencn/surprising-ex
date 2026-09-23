@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 public final class ClusterLifecycleCapacityMain implements AutoCloseable {
 
     private static final long INITIAL_USER_UNITS = 1_000;
@@ -154,14 +157,14 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         }
         verifyFundsAndPositions(true);
         Collections.sort(latencies);
-        System.out.printf("lifecycleCapacity=PASS scope=LOCAL_CAPACITY productLine=%s "
+        log.info("{}", String.format(java.util.Locale.ROOT, "lifecycleCapacity=PASS scope=LOCAL_CAPACITY productLine=%s "
                         + "scenario=LIQUIDATION_STORM pairs=%d completedLiquidations=%d elapsedMillis=%.3f "
                         + "completedLiquidationsPerSec=%.3f p50Micros=%d p95Micros=%d p99Micros=%d "
                         + "maxMicros=%d fundsDiff=0 bookLevels=0%n",
                 productLine, pairs, pairs, elapsed / 1_000_000.0,
                 pairs / (elapsed / 1_000_000_000.0), percentileMicros(latencies, 0.50),
                 percentileMicros(latencies, 0.95), percentileMicros(latencies, 0.99),
-                percentileMicros(latencies, 1.0));
+                percentileMicros(latencies, 1.0)).stripTrailing());
     }
 
     private void lifecycleBatch() {
@@ -173,12 +176,12 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         long elapsed = System.nanoTime() - started;
         verifyFundsAndPositions(false);
         long settledPositions = Math.multiplyExact(pairs, 2L);
-        System.out.printf("lifecycleCapacity=PASS scope=LOCAL_CAPACITY productLine=%s scenario=%s "
+        log.info("{}", String.format(java.util.Locale.ROOT, "lifecycleCapacity=PASS scope=LOCAL_CAPACITY productLine=%s scenario=%s "
                         + "pairs=%d settledPositions=%d elapsedMillis=%.3f settledPositionsPerSec=%.3f "
                         + "fundsDiff=0 bookLevels=0%n",
                 productLine, productLine == ProductLine.OPTION ? "OPTION_EXERCISE_BATCH" : "DELIVERY_BATCH",
                 pairs, settledPositions, elapsed / 1_000_000.0,
-                settledPositions / (elapsed / 1_000_000_000.0));
+                settledPositions / (elapsed / 1_000_000_000.0)).stripTrailing());
     }
 
     private void verifyFundsAndPositions(boolean liquidation) {

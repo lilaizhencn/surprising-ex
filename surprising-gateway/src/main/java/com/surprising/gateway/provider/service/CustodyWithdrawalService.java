@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.math.BigDecimal;
@@ -15,15 +17,13 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
+@Slf4j
 public class CustodyWithdrawalService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CustodyWithdrawalService.class);
 
     private final GatewayProperties properties;
     private final CustodyWithdrawalRepository repository;
@@ -174,7 +174,7 @@ public class CustodyWithdrawalService {
             try {
                 reconciliationService.reconcile(record);
             } catch (RuntimeException ex) {
-                LOGGER.warn("custody withdrawal failure reconciliation remains pending: {}", record.withdrawalId(), ex);
+                log.warn("custody withdrawal failure reconciliation remains pending: {}", record.withdrawalId(), ex);
             }
         }
     }

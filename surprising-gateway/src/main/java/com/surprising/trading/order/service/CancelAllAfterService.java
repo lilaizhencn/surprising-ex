@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelAllAfterResponse;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
@@ -11,15 +13,13 @@ import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
+@Slf4j
 public class CancelAllAfterService {
 
-    private static final Logger log = LoggerFactory.getLogger(CancelAllAfterService.class);
     private static final int CANCEL_LIMIT = 1000;
     private static final int CLAIM_LIMIT = 100;
     private static final long MAX_COUNTDOWN_MS = 120_000L;

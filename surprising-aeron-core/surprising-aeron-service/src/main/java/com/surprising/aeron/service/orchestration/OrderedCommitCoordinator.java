@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.order.OrderBatchKind;
@@ -28,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 有序提交阶段：验证撮合证据、收集 Lane 结算并发布已提交变化；不重新执行资金业务。 */
+@Slf4j
 final class OrderedCommitCoordinator {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
@@ -663,8 +666,8 @@ final class OrderedCommitCoordinator {
         owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
         owner.completedMatchingCount++;
         if (owner.completedMatchingCount % TradingCoreRuntime.MATCHING_PHASE_LOG_INTERVAL == 0) {
-            TradingCoreRuntime.LOG.log(System.Logger.Level.DEBUG, "matching phases count=" + owner.completedMatchingCount + " "
-                    + owner.matchingPhaseMetrics.reportAndReset());
+            log.debug("matching phases count={} {}", owner.completedMatchingCount,
+                    owner.matchingPhaseMetrics.reportAndReset());
         }
     }
 

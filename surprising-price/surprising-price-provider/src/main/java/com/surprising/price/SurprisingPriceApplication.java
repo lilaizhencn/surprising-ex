@@ -1,5 +1,7 @@
 package com.surprising.price;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.consumer.MarkPriceConsumerConfiguration;
@@ -15,8 +17,6 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import jakarta.annotation.PostConstruct;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @SpringBootConfiguration
 @EnableAutoConfiguration
@@ -27,9 +27,9 @@ import org.slf4j.LoggerFactory;
 @EnableKafka
 @EnableScheduling
 @EnableConfigurationProperties({IndexPriceProperties.class, MarkPriceProperties.class})
+@Slf4j
 public class SurprisingPriceApplication {
 
-    private static final Logger log = LoggerFactory.getLogger(SurprisingPriceApplication.class);
 
     private final IndexPriceProperties indexProperties;
     private final MarkPriceProperties markProperties;

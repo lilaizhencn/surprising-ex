@@ -1,21 +1,21 @@
 package com.surprising.account.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
+@Slf4j
 public class ExpiringContractSettlementConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(ExpiringContractSettlementConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final ExpiringContractSettlementFanoutService fanoutService;

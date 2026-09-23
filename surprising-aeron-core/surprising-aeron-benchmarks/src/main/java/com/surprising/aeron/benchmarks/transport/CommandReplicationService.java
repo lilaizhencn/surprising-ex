@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.transport;
 
+import lombok.extern.slf4j.Slf4j;
+
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
 import io.aeron.cluster.codecs.CloseReason;
@@ -16,6 +18,7 @@ import com.surprising.aeron.protocol.CoreProtocol;
  * 复制诊断服务：真实订单字节进入已提交日志后校验顺序并确认，不执行任何交易业务。
  * 只供新建的一次性诊断集群使用；不能恢复生产日志或替换生产服务。
  */
+@Slf4j
 public final class CommandReplicationService implements ClusteredService {
     /** 服务线程独占的诊断序号、字节计数与可复用确认缓冲区。 */
     private long sequence, bytes;
@@ -49,7 +52,7 @@ public final class CommandReplicationService implements ClusteredService {
 
     public void onSessionOpen(ClientSession session, long timestamp) {}
     public void onSessionClose(ClientSession session, long timestamp, CloseReason reason) {
-        System.out.printf("replicationSessionClosed sequence=%d bytes=%d%n", sequence, bytes);
+        log.info("replicationSessionClosed sequence={} bytes={}", sequence, bytes);
     }
     public void onTimerEvent(long correlationId, long timestamp) {}
     public void onTakeSnapshot(ExclusivePublication publication) {
@@ -57,6 +60,6 @@ public final class CommandReplicationService implements ClusteredService {
     }
     public void onRoleChange(Cluster.Role role) {}
     public void onTerminate(Cluster cluster) {
-        System.out.printf("replicationApplied sequence=%d bytes=%d%n", sequence, bytes);
+        log.info("replicationApplied sequence={} bytes={}", sequence, bytes);
     }
 }

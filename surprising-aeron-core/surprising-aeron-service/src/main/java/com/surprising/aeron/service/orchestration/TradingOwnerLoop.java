@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -14,16 +16,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
 @Component
+@Slf4j
 public final class TradingOwnerLoop implements Runnable {
     /** Owner 线程的生命周期和诊断日志，不参与命令处理。 */
-    private static final Logger log = LoggerFactory.getLogger(TradingOwnerLoop.class);
 
     private static final long DEADLINE_NS = 30_000_000_000L;
     private static final long INPUT_BYTES = 64L * 1024 * 1024;

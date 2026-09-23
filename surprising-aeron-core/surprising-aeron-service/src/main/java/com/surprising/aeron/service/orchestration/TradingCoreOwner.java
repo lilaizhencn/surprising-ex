@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -17,8 +19,6 @@ import io.aeron.logbuffer.FragmentHandler;
 import java.util.function.BooleanSupplier;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * 交易 Owner：按确定性边界推进交易，未完成命令与响应跨推进轮次保留。
@@ -27,10 +27,10 @@ import org.slf4j.LoggerFactory;
  * {@link com.surprising.aeron.service.cluster.AeronTradingClusterService} 持有；Owner 只接收已复制的不可变命令、
  * 推进交易状态并产生终态交接。</p>
  */
+@Slf4j
 public final class TradingCoreOwner {
 
     /** 交易 Owner 的运行日志；仅记录生命周期和诊断信息，不进入交易状态计算。 */
-    private static final Logger log = LoggerFactory.getLogger(TradingCoreOwner.class);
 
     /** 快照阶段的最长等待时间；交易命令本身使用命令流水线的截止时间。 */
     private static final long SNAPSHOT_TIMEOUT_SECONDS = Long.getLong(

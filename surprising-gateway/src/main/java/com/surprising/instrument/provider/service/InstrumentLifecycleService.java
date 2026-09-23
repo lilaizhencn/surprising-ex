@@ -1,17 +1,17 @@
 package com.surprising.instrument.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-    public class InstrumentLifecycleService {
+@Slf4j
+public class InstrumentLifecycleService {
 
-    private static final Logger log = LoggerFactory.getLogger(InstrumentLifecycleService.class);
 
     private final InstrumentStorageService storageService;
     private final InstrumentService instrumentService;

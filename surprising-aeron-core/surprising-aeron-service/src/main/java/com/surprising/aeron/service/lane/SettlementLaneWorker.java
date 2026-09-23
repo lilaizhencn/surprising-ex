@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.lane;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.service.state.AccountLaneState;
 import com.surprising.aeron.service.state.MatcherSettlementEvent;
 
@@ -7,17 +9,15 @@ import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Permanent SPSC event loop for one Account Lane. */
+@Slf4j
 public final class SettlementLaneWorker implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
     private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
     private static final boolean WAIT_DIAGNOSTICS =
             Boolean.getBoolean("surprising.settlement.wait-diagnostics");
     private static final long DIAGNOSTIC_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(5);
-    private static final Logger log = LoggerFactory.getLogger(SettlementLaneWorker.class);
     /**
      * A direct matcher event may be queued before its payload is published.  Keep a short
      * low-latency spin for that dependency, then park until the matcher signals publication.

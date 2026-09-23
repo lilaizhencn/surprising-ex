@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -26,6 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterDerivativeSmokeMain {
 
     private ClusterDerivativeSmokeMain() {
@@ -90,8 +93,7 @@ public final class ClusterDerivativeSmokeMain {
             }
 
             String label = verify ? "derivativeRecovery" : "derivativeSmoke";
-            System.out.printf("%s=PASS productLine=%s longUser=%d shortUser=%d usdtTotal=2000 fundingNet=0%n",
-                    label, productLine, longUser, shortUser);
+            log.info("{}=PASS productLine={} longUser={} shortUser={} usdtTotal=2000 fundingNet=0", label, productLine, longUser, shortUser);
         }
     }
 

@@ -1,10 +1,10 @@
 package com.surprising.realtime.provider.export;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.health.contributor.Health;
@@ -16,8 +16,8 @@ import org.springframework.stereotype.Component;
 @Component("tradeExport")
 @ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(TradeExportProperties.class)
+@Slf4j
 public class TradeExportService implements SmartLifecycle, HealthIndicator {
-    private static final Logger log = LoggerFactory.getLogger(TradeExportService.class);
     private final CommittedTradeExporter exporter;
     private final TradeExportProperties config;
     private final AtomicBoolean running = new AtomicBoolean();

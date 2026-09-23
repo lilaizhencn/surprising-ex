@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -32,6 +34,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterProductLineGateMain {
 
     private static final String SYMBOL = "BTC-USDT";
@@ -70,8 +73,7 @@ public final class ClusterProductLineGateMain {
             ClusterProductLineGateMain gate = new ClusterProductLineGateMain(productLine, client, seed);
             if (!verify) gate.execute();
             gate.verify();
-            System.out.printf("productLineGate=PASS mode=%s productLine=%s fundsDiff=0 bookLevels=0 seed=%d%n",
-                    verify ? "verify" : "execute", productLine, seed);
+            log.info("productLineGate=PASS mode={} productLine={} fundsDiff=0 bookLevels=0 seed={}", verify ? "verify" : "execute", productLine, seed);
         }
     }
 

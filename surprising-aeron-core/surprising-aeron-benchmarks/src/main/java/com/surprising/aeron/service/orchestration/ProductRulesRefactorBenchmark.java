@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.AuxCounters;
@@ -27,6 +29,7 @@ import org.openjdk.jmh.annotations.Warmup;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 })
 @Threads(1)
+@Slf4j
 public class ProductRulesRefactorBenchmark {
 
     @Benchmark
@@ -95,7 +98,7 @@ public class ProductRulesRefactorBenchmark {
         public void tearDownTrial() {
             try {
                 scenario.verify();
-                System.out.println("PRODUCT_RULES_VERIFIED productLine=" + productLine
+                log.info("{}", "PRODUCT_RULES_VERIFIED productLine=" + productLine
                         + " funds=true snapshot=true terminal=true maxBacklog=" + scenario.maxBacklog());
             } finally {
                 scenario.close();

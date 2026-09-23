@@ -1,5 +1,7 @@
 package com.surprising.aeron.tools.replay;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -13,6 +15,7 @@ import java.io.EOFException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+@Slf4j
 public final class OfflineReplayMain {
 
     private static final int MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
@@ -61,8 +64,8 @@ public final class OfflineReplayMain {
             }
         }
         state.close();
-        System.out.printf("productLine=%s messages=%d appliedCommandCount=%d stateHash=%016x%n",
-                productLine, messages, state.appliedCommandCount(), state.stateHash());
+        log.info("{}", String.format(java.util.Locale.ROOT, "productLine=%s messages=%d appliedCommandCount=%d stateHash=%016x%n",
+                productLine, messages, state.appliedCommandCount(), state.stateHash()).stripTrailing());
     }
 
     private static void drainMatching(TradingCoreRuntime state, int pendingBefore, CoreMessage message) {

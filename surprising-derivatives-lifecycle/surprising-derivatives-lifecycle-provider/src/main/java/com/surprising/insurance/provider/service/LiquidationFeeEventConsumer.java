@@ -1,19 +1,19 @@
 package com.surprising.insurance.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
+@Slf4j
 public class LiquidationFeeEventConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(LiquidationFeeEventConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final InsuranceService insuranceService;

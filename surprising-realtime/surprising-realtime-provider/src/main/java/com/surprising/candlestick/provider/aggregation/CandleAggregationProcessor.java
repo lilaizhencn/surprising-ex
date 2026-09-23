@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.aggregation;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
@@ -20,8 +22,6 @@ import org.apache.kafka.streams.processor.api.ProcessorContext;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Kafka Streams processor that turns keyed product-line trades into one-minute candle snapshots.
@@ -31,9 +31,9 @@ import org.slf4j.LoggerFactory;
  * keep hot candles, dedupe keys, dirty snapshots, and latest sequence locally, while Kafka Streams
  * changelog topics make the state restorable after restart or rebalance.</p>
  */
+@Slf4j
 public class CandleAggregationProcessor implements Processor<String, PublicTradeEvent, String, CandleUpdatedEvent> {
 
-    private static final Logger log = LoggerFactory.getLogger(CandleAggregationProcessor.class);
 
     private final CandlestickProperties properties;
     private final CandleSink candleSink;

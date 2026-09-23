@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -22,6 +24,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterApiAcceptanceMain {
 
     private static final long SPOT_BASE_UNITS = 20;
@@ -70,9 +73,7 @@ public final class ClusterApiAcceptanceMain {
                 case "verify-final" -> acceptance.verify(true);
                 default -> throw new IllegalArgumentException("unsupported acceptance mode: " + mode);
             }
-            System.out.printf(
-                    "apiAcceptance=PASS mode=%s productLine=%s symbol=%s seller=%d buyer=%d fundsDiff=0 seed=%d%n",
-                    mode, productLine, symbol, acceptance.seller(), acceptance.buyer(), seed);
+            log.info("apiAcceptance=PASS mode={} productLine={} symbol={} seller={} buyer={} fundsDiff=0 seed={}", mode, productLine, symbol, acceptance.seller(), acceptance.buyer(), seed);
         }
     }
 

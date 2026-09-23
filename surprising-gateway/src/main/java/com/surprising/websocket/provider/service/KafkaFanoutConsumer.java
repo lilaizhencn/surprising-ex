@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.product.api.ProductLine;
@@ -25,8 +27,6 @@ import java.util.Map;
 import java.time.Duration;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -41,9 +41,9 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Service
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="surprising.realtime.enabled",havingValue="false",matchIfMissing=true)
+@Slf4j
 public class KafkaFanoutConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(KafkaFanoutConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;

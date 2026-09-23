@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.sun.management.GarbageCollectionNotificationInfo;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import java.lang.management.BufferPoolMXBean;
@@ -19,6 +21,7 @@ import javax.management.NotificationEmitter;
 import javax.management.NotificationListener;
 import javax.management.openmbean.CompositeData;
 
+@Slf4j
 public final class LinearPerpetualScaleSoakMain {
 
     private LinearPerpetualScaleSoakMain() {
@@ -108,7 +111,7 @@ public final class LinearPerpetualScaleSoakMain {
                     maxHeap = Math.max(maxHeap, heap);
                     maxDirect = Math.max(maxDirect, directBytes);
                     double sampleSeconds = (now - sampleStartedAt) / 1_000_000_000.0;
-                    System.out.printf(Locale.ROOT,
+                    log.info("{}", String.format(Locale.ROOT,
                             "{\"type\":\"sample\",\"elapsedSeconds\":%.3f,"
                                     + "\"terminalBusinessOpsPerSec\":%.3f,\"usedHeapBytes\":%d,"
                                     + "\"oldGenerationBytes\":%d,\"directBytes\":%d,"
@@ -126,7 +129,7 @@ public final class LinearPerpetualScaleSoakMain {
                             threads.getThreadCount(),
                             openFileDescriptors(operatingSystem), direct == null ? 0 : direct.getCount(),
                             mapped == null ? 0 : mapped.getCount(), scenario.incompleteRiskScans(),
-                            scenario.incompleteFundingSettlements());
+                            scenario.incompleteFundingSettlements()).stripTrailing());
                     sampleOperations = 0;
                     postGcPointsSinceSample = 0;
                     sampleStartedAt = now;
@@ -163,7 +166,7 @@ public final class LinearPerpetualScaleSoakMain {
             workloadEvent.maxMatchingBacklog = maxBacklog;
             workloadEvent.commit();
             String status = leak.pass() ? "PASS" : "FAIL";
-            System.out.printf(Locale.ROOT,
+            log.info("{}", String.format(Locale.ROOT,
                     "{\"type\":\"summary\",\"status\":\"%s\",\"fundsInvariant\":true,"
                             + "\"activeUsers\":%d,\"listedSymbols\":%d,\"activeSymbols\":%d,"
                             + "\"maxPositionsPerUser\":%d,\"maxOpenOrdersPerUser\":%d,"
@@ -201,7 +204,7 @@ public final class LinearPerpetualScaleSoakMain {
                     leak.oldGenerationSlope(), leak.directSlope(), leak.mappedSlope(), leak.threadSlope(), leak.fdSlope(),
                     leak.directPoolSlope(), leak.mappedPoolSlope(), leak.maxLiveSetSlope(),
                     leak.maxNativeBufferSlope(), leak.maxThreadSlope(), leak.maxFdSlope(),
-                    leak.maxPoolBalanceSlope(), snapshot.sizeBytes(), restoreNanos / 1_000_000.0);
+                    leak.maxPoolBalanceSlope(), snapshot.sizeBytes(), restoreNanos / 1_000_000.0).stripTrailing());
             if (!leak.pass()) throw new IllegalStateException("soak leak slope threshold failed: " + leak);
         }
     }

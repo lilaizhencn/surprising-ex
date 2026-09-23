@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.gateway.provider.auth.AuthModels.AdminOperationLogResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -9,8 +11,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -19,9 +19,9 @@ import org.springframework.stereotype.Repository;
  * 只负责 {@code gateway_admin_operation_logs} 表。
  */
 @Repository
+@Slf4j
 public class AdminAuditRepository {
 
-    private static final Logger log = LoggerFactory.getLogger(AdminAuditRepository.class);
 
     private final JdbcTemplate jdbcTemplate;
 

@@ -1,5 +1,7 @@
 package com.surprising.price.index.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PriceEventType;
 import com.surprising.price.api.model.PricePublishedEvent;
@@ -7,17 +9,15 @@ import com.surprising.price.index.config.IndexPriceProperties;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** 异步持久化指数价格审计数据，实时价格消费者不读取这些表。 */
 @Component
+@Slf4j
 public class IndexPriceAuditConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(IndexPriceAuditConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final IndexPriceAuditService auditService;

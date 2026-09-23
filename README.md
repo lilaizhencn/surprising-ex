@@ -162,3 +162,9 @@ derivatives-lifecycle（含 funding）、maker，共 6 个 Java 进程。应用�
 - 本轮不引入 `@Data`、自动 `toString`、`equals` 或 `hashCode`，避免改变身份语义或把凭证字段带入日志。已有访问权限、默认值和 Spring 配置绑定接口保持不变。
 - 父 POM 固定 Lombok 1.18.48（[JDK 27 支持说明](https://projectlombok.org/changelog)），使用 provided/optional 依赖，并显式配置 annotation processor。benchmark 模块追加 JMH processor，两者共同生效。Lombok 不进入运行时可执行 JAR。
 - IDE 使用 HotSpot JDK 27，启用注解处理并重新导入 Maven；`lombok.config` 阻止工作区外配置影响生成结果。命令行构建仍以 Maven 为准。
+
+### 日志约定
+
+所有业务和 Core 子模块从 `surprising-parent` 继承 `spring-boot-starter-logging`，统一使用 SLF4J / Logback；有日志的类使用 Lombok `@Slf4j`，不再手写 Logger 字段或使用 `System.out` / `System.err` 输出。正常事件使用 INFO，告警使用 WARN，失败使用 ERROR 并保留异常堆栈；Core 阶段统计和风险扫描诊断保持 DEBUG。
+
+Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-tools` 和 `surprising-aeron-benchmarks` 的 `src/main/resources/logback.xml` 将工具结果以 `%msg%n` 输出到 stdout，运行诊断输出到 stderr，保持 JSON、Prometheus、压测指标和 QA 协议的可解析格式；格式化指标仍保留原来的精度。直方图报告文件属于数据导出，继续写入指定文件。两个 shaded jar 合并服务发现元数据，benchmarks 打包时排除 tools 的重复日志配置。

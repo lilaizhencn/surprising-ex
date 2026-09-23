@@ -1,5 +1,7 @@
 package com.surprising.aeron.client;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -17,6 +19,7 @@ import org.openjdk.jmh.annotations.*;
 @Measurement(iterations = 3, time = 1)
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseZGC"})
 @Threads(4)
+@Slf4j
 public class ClientSourceOrderingBenchmark {
     @State(Scope.Benchmark)
     public static class Shared {
@@ -49,7 +52,7 @@ public class ClientSourceOrderingBenchmark {
         @TearDown(Level.Trial) public void close() {
             pool.close();
             if (offered.get() != terminal.get()) throw new IllegalStateException("requests not drained");
-            System.out.printf("clientSourceOrder=PASS totalWindow=256 offered=%d terminal=%d unfinished=0%n", offered.get(), terminal.get());
+            log.info("clientSourceOrder=PASS totalWindow=256 offered={} terminal={} unfinished=0", offered.get(), terminal.get());
         }
     }
 

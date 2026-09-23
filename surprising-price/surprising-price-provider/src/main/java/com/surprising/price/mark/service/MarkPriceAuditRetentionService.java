@@ -1,17 +1,17 @@
 package com.surprising.price.mark.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /** 通过分批删除限制标记价审计表规模，避免单次无界删除。 */
 @Component
-    public class MarkPriceAuditRetentionService {
+@Slf4j
+public class MarkPriceAuditRetentionService {
 
-    private static final Logger log = LoggerFactory.getLogger(MarkPriceAuditRetentionService.class);
 
     private final MarkPriceTickRepository tickRepository;
     private final MarkPriceProperties properties;

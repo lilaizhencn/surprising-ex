@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
@@ -20,6 +22,7 @@ import org.openjdk.jmh.annotations.*;
 @Measurement(iterations = 2)
 @Fork(1)
 @Threads(1)
+@Slf4j
 public class ClusterDirectSettlementBenchmark {
     @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     public String productLine;
@@ -89,7 +92,7 @@ public class ClusterDirectSettlementBenchmark {
 
     @Benchmark
     public long matcherToLaneLifecycle() {
-        System.out.println("directLifecycleStartEpochMillis=" + System.currentTimeMillis());
+        log.info("{}", "directLifecycleStartEpochMillis=" + System.currentTimeMillis());
         long before = terminal;
         for (int round = 0; round < ROUNDS; round++) {
             int count = round % 2 == 0 ? 1 : 20;
@@ -126,9 +129,8 @@ public class ClusterDirectSettlementBenchmark {
                 }
             }
         }
-        System.out.printf("directSettlementCounts acceptedBusinessOperations=%d terminalBusinessOperations=%d terminalCoreMessages=%d unfinished=%d fills=%d%n",
-                accepted, terminal, messages, accepted - terminal, (terminal - marks) / 2);
-        System.out.println("directLifecycleEndEpochMillis=" + System.currentTimeMillis());
+        log.info("directSettlementCounts acceptedBusinessOperations={} terminalBusinessOperations={} terminalCoreMessages={} unfinished={} fills={}", accepted, terminal, messages, accepted - terminal, (terminal - marks) / 2);
+        log.info("{}", "directLifecycleEndEpochMillis=" + System.currentTimeMillis());
         return terminal - before;
     }
 
@@ -158,8 +160,7 @@ public class ClusterDirectSettlementBenchmark {
         }
         long hash = CoreStateQueryCodec.decodeStateHash(client.query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
                 UUID.randomUUID(), 0, new byte[0]).data());
-        System.out.printf("directSettlementVerify=PASS product=%s symbols=128 fundsDiff=0 positions=0 reservations=0 openOrders=0 businessHash=%s%n",
-                product, Long.toUnsignedString(hash, 16));
+        log.info("directSettlementVerify=PASS product={} symbols=128 fundsDiff=0 positions=0 reservations=0 openOrders=0 businessHash={}", product, Long.toUnsignedString(hash, 16));
     }
 
     @TearDown(Level.Trial)

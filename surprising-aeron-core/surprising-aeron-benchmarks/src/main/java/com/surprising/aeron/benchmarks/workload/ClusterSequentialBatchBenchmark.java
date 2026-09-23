@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
@@ -17,6 +19,7 @@ import org.openjdk.jmh.annotations.*;
 @Measurement(iterations = 1)
 @Fork(1)
 @Threads(1)
+@Slf4j
 public class ClusterSequentialBatchBenchmark {
     private static long commandSequence;
     @Benchmark
@@ -71,9 +74,9 @@ public class ClusterSequentialBatchBenchmark {
                 balance(client, user, asset, 0, 0);
                 balance(client, maker, "USDT", 1000, 0);
                 balance(client, maker, asset, 1, 0);
-                System.out.println("sequentialCase=" + i + " PASS fundsDiff=0 locked=0");
+                log.info("{}", "sequentialCase=" + i + " PASS fundsDiff=0 locked=0");
             }
-            System.out.println("sequentialBatch=PASS symbols=128");
+            log.info("sequentialBatch=PASS symbols=128");
         }
     }
 

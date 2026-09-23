@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -22,6 +24,7 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1, jvmArgsAppend = {"--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
+@Slf4j
 public class ClusteredBatchTradingBenchmark {
     /** 风险评估在实际开仓和平仓之间完成，包括扫描结束后的空续扫。 */
     @Benchmark
@@ -1148,13 +1151,12 @@ public class ClusteredBatchTradingBenchmark {
                         throw new IllegalStateException("snapshot recovery mismatch");
                     }
                 }
-                System.out.printf("clusterBatch acceptedCore=%d terminalCore=%d unfinished=0 endBacklog=0 maxBacklog=%d queries=%d%n",
-                        terminal, terminal, maxBacklog, queryResults);
+                log.info("clusterBatch acceptedCore={} terminalCore={} unfinished=0 endBacklog=0 maxBacklog={} queries={}", terminal, terminal, maxBacklog, queryResults);
             } finally {
                 service.terminate();
                 consuming=false;
                 if(realtimeConsumer!=null){try{realtimeConsumer.join(5000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
-                if(realtimeOutbox!=null)System.out.println("realtimeDroppedBatches="+realtimeOutbox.droppedBatches());
+                if(realtimeOutbox!=null)log.info("{}", "realtimeDroppedBatches="+realtimeOutbox.droppedBatches());
                 service = null;
                 if (previousMatchingEngines == null) System.clearProperty("surprising.aeron.matching-engines");
                 else System.setProperty("surprising.aeron.matching-engines", previousMatchingEngines);

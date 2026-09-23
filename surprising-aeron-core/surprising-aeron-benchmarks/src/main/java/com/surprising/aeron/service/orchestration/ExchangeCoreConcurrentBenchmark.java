@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
@@ -14,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@Slf4j
 public final class ExchangeCoreConcurrentBenchmark {
 
     private static final String SYMBOL = "BENCH-BTC-USDT";
@@ -31,14 +34,14 @@ public final class ExchangeCoreConcurrentBenchmark {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             run(adapter, producerPool, warmupOrders, asyncInFlight, producers, false);
             Result result = run(adapter, producerPool, orders, asyncInFlight, producers, true);
-            System.out.printf("exchangeCoreConcurrentBenchmark=PASS orders=%d asyncInFlight=%d "
+            log.info("{}", String.format(java.util.Locale.ROOT, "exchangeCoreConcurrentBenchmark=PASS orders=%d asyncInFlight=%d "
                             + "producers=%d elapsedSeconds=%.3f completePerSec=%.3f "
                             + "p50Micros=%d p95Micros=%d p99Micros=%d maxMicros=%d failures=%d%n",
                     result.orders(), asyncInFlight, producers, result.elapsedNanos() / 1_000_000_000.0,
                     result.orders() / (result.elapsedNanos() / 1_000_000_000.0),
                     percentile(result.latencies(), 0.50), percentile(result.latencies(), 0.95),
                     percentile(result.latencies(), 0.99), percentile(result.latencies(), 1.0),
-                    result.failures());
+                    result.failures()).stripTrailing());
         } finally {
             producerPool.shutdownNow();
         }

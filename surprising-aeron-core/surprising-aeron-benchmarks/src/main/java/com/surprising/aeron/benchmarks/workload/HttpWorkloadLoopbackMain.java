@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -10,6 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
+@Slf4j
 public final class HttpWorkloadLoopbackMain {
 
     private HttpWorkloadLoopbackMain() {
@@ -27,9 +30,7 @@ public final class HttpWorkloadLoopbackMain {
         try {
             HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(HttpWorkloadConfig.from(properties)).run();
             requireQa(summary);
-            System.out.printf("loopbackHttpQa=PASS requests=%d scheduled=%d completed=%d outstanding=%d "
-                            + "deliberately_aborted=%d maxInFlight=%d classifications=%s%n",
-                    requests.get(), summary.scheduled(), summary.completed(), summary.outstanding(),
+            log.info("loopbackHttpQa=PASS requests={} scheduled={} completed={} outstanding={} deliberately_aborted={} maxInFlight={} classifications={}", requests.get(), summary.scheduled(), summary.completed(), summary.outstanding(),
                     summary.deliberatelyAborted(), summary.maxObservedInFlight(), summary.classifications());
         } finally {
             server.stop(0);

@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.transport;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.client.AeronCluster;
@@ -16,6 +18,7 @@ import org.HdrHistogram.Histogram;
  * 使用生产编码器预构造订单消息，隔离消息复制与业务执行成本。
  * 重用订单内容，仅更新命令标识和序号；不可向生产交易服务发送此工作负载。
  */
+@Slf4j
 public final class CommandReplicationLoad {
     /** 单个发压线程独占窗口、发送时间及确认计数；确认必须连续且不能超过发送数。 */
     private long sent, acknowledged, retries;
@@ -66,14 +69,14 @@ public final class CommandReplicationLoad {
             Thread.onSpinWait();
         } while (System.nanoTime() < end || acknowledged < sent);
         double elapsed = (System.nanoTime() - start) / 1e9;
-        System.out.printf("replication=%s bytes=%d batch=%d elapsed=%.6f offered=%d committedAck=%d "
+        log.info("{}", String.format(java.util.Locale.ROOT, "replication=%s bytes=%d batch=%d elapsed=%.6f offered=%d committedAck=%d "
                         + "messagesPerSec=%.3f representedItemsPerSec=%.3f payloadMiBPerSec=%.3f "
                         + "unfinished=%d peak=%d retries=%d p50us=%.3f p99us=%.3f maxus=%.3f%n",
                 name, message.capacity(), batchSize, elapsed, sent - initial, acknowledged - initial,
                 (sent - initial) / elapsed, (sent - initial) * batchSize / elapsed,
                 (sent - initial) * (double) message.capacity() / elapsed / 1048576,
                 sent - acknowledged, peak, retries, latency.getValueAtPercentile(50) / 1e3,
-                latency.getValueAtPercentile(99) / 1e3, latency.getMaxValue() / 1e3);
+                latency.getValueAtPercentile(99) / 1e3, latency.getMaxValue() / 1e3).stripTrailing());
     }
 
     public static void main(String[] args) {
@@ -99,7 +102,7 @@ public final class CommandReplicationLoad {
                     }))) {
             load.phase(cluster, buffer, 10, batch, "warmup");
             load.phase(cluster, buffer, 30, batch, "measurement");
-            System.out.printf("replicationTotal sequence=%d%n", load.acknowledged);
+            log.info("replicationTotal sequence={}", load.acknowledged);
         }
     }
 }

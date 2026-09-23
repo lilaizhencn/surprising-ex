@@ -1,5 +1,7 @@
 package com.surprising.aeron.tools.reconciliation;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -12,6 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterFundsReconcileMain {
 
     private ClusterFundsReconcileMain() {
@@ -41,9 +44,7 @@ public final class ClusterFundsReconcileMain {
             result = FundsReconciliation.reconcile(config,
                     (type, userId, payload) -> query(client, productLine, type, userId, payload));
         }
-        System.out.printf("fundsReconcile=PASS productLine=%s users=%d makers=%d treasury=1 "
-                        + "liquidationPages=%d fundsDiff=%d coreStateHash=%d stateHash=%s fundsHash=%s assets=%s%n",
-                productLine, result.userCount(), result.makerCount(), result.liquidationPages(),
+        log.info("fundsReconcile=PASS productLine={} users={} makers={} treasury=1 liquidationPages={} fundsDiff={} coreStateHash={} stateHash={} fundsHash={} assets={}", productLine, result.userCount(), result.makerCount(), result.liquidationPages(),
                 result.fundsDifference(), result.coreStateHash(), result.stateHash(), result.fundsHash(),
                 result.assets());
     }

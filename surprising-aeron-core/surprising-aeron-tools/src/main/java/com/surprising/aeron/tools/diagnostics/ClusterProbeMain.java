@@ -1,5 +1,7 @@
 package com.surprising.aeron.tools.diagnostics;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -13,6 +15,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterProbeMain {
 
     private ClusterProbeMain() {
@@ -45,14 +48,14 @@ public final class ClusterProbeMain {
                 productLine, hostnames, egressHostname, Duration.ofSeconds(10))) {
             var response = client.submit(message);
             if (metricsOnly) {
-                System.out.print(CoreLaneMetricsPrometheusFormatter.format(productLine,
-                        CoreLaneMetricsCodec.decode(response.data())));
+                log.info("{}", CoreLaneMetricsPrometheusFormatter.format(productLine,
+                        CoreLaneMetricsCodec.decode(response.data())).stripTrailing());
                 return;
             }
             long stateHash = queryOnly
                     ? com.surprising.aeron.protocol.CoreStateQueryCodec.decodeStateHash(response.data()) : 0;
-            System.out.printf("status=%s appliedCommandCount=%d stateHash=%016x commandId=%s%n",
-                    response.status(), response.appliedCommandCount(), stateHash, commandId);
+            log.info("{}", String.format(java.util.Locale.ROOT, "status=%s appliedCommandCount=%d stateHash=%016x commandId=%s%n",
+                    response.status(), response.appliedCommandCount(), stateHash, commandId).stripTrailing());
         }
     }
 }

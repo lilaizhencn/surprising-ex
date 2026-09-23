@@ -1,5 +1,7 @@
 package com.surprising.aeron.tools.instrument;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -17,6 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterInstrumentSeedMain {
 
     private ClusterInstrumentSeedMain() {
@@ -49,8 +52,7 @@ public final class ClusterInstrumentSeedMain {
                 }
                 applied++;
             }
-            System.out.printf("instrumentSeed=PASS productLine=%s count=%d applied=%d%n",
-                    productLine, instruments.size(), applied);
+            log.info("instrumentSeed=PASS productLine={} count={} applied={}", productLine, instruments.size(), applied);
         }
     }
 

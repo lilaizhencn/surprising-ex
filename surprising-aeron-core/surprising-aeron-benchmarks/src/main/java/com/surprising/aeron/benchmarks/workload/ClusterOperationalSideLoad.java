@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +11,7 @@ import java.util.concurrent.locks.LockSupport;
 import org.HdrHistogram.Histogram;
 
 /** Concurrent price, risk/lifecycle and read-model traffic around the continuously loaded trader. */
+@Slf4j
 final class ClusterOperationalSideLoad implements AutoCloseable {
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final ConcurrentMap<String,Histogram> latency = new ConcurrentHashMap<>();
@@ -118,8 +121,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     void print() {
         for(String key:new TreeSet<>(latency.keySet())) {
             Histogram h=latency.get(key);
-            System.out.printf(Locale.ROOT,"operational=%s requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d%n",
-                    key,h.getTotalCount(),h.getValueAtPercentile(50)/1000,h.getValueAtPercentile(90)/1000,
+            log.info("operational={} requests={} p50us={} p90us={} p95us={} p99us={} p999us={} maxus={}", key,h.getTotalCount(),h.getValueAtPercentile(50)/1000,h.getValueAtPercentile(90)/1000,
                     h.getValueAtPercentile(95)/1000,h.getValueAtPercentile(99)/1000,h.getValueAtPercentile(99.9)/1000,h.getMaxValue()/1000);
         }
         lifecycle.print();queries.print();
@@ -128,7 +130,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
             if(!latency.containsKey(required) || latency.get(required).getTotalCount()==0)
                 throw new IllegalStateException("measured operational coverage missing: "+required);
         }
-        System.out.println("operationalCoverage=PASS");
+        log.info("operationalCoverage=PASS");
     }
     void printComposite(long tradingItems,long tradingMessages,long tradingFills,long elapsed) {
         long commands=0;
@@ -137,9 +139,9 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
             if(h!=null && type.kind()==WireMessageKind.COMMAND)commands+=h.getTotalCount();
         }
         double seconds=Math.max(elapsed,lastTerminal.get()-measurementStart)/1e9;
-        System.out.printf(Locale.ROOT,"operationalComposite=PASS terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d elapsedSeconds=%.3f businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fillsPerSec=%.3f unfinished=0%n",
+        log.info("{}", String.format(Locale.ROOT,"operationalComposite=PASS terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d elapsedSeconds=%.3f businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fillsPerSec=%.3f unfinished=0%n",
                 tradingItems+commands+extraBatchItems.get(),tradingMessages+commands,tradingFills+fills.get(),seconds,
-                (tradingItems+commands+extraBatchItems.get())/seconds,(tradingMessages+commands)/seconds,(tradingFills+fills.get())/seconds);
+                (tradingItems+commands+extraBatchItems.get())/seconds,(tradingMessages+commands)/seconds,(tradingFills+fills.get())/seconds).stripTrailing());
     }
     @Override public void close() {
         try {stop();}finally {queries.close();lifecycle.close();prices.close();}

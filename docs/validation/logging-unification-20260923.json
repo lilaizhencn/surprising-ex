@@ -1,0 +1,139 @@
+{
+  "date": "2026-09-23",
+  "jdk": "Corretto HotSpot 27.0.0",
+  "fullReactorTests": {
+    "tests": 2239,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 38
+  },
+  "commands": [
+    "mvn -B test",
+    "mvn -B -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=<all tools and benchmarks test classes> -Dsurefire.failIfNoSpecifiedTests=false test",
+    "mvn -B -DskipTests package"
+  ],
+  "result": "PASS",
+  "initialFailure": "Some originally indented top-level declarations missed @Slf4j; corrected before successful full reactor run.",
+  "loggingStarterModules": [
+    "surprising-parent",
+    "surprising-product-api",
+    "surprising-aeron-protocol",
+    "surprising-aeron-client",
+    "surprising-instrument",
+    "surprising-instrument-api",
+    "surprising-aeron-service",
+    "surprising-aeron-tools",
+    "surprising-realtime",
+    "surprising-realtime-api",
+    "surprising-aeron-benchmarks",
+    "surprising-aeron-core",
+    "surprising-market-data",
+    "surprising-market-data-api",
+    "surprising-price",
+    "surprising-price-api",
+    "surprising-price-consumer",
+    "surprising-trading",
+    "surprising-trading-api",
+    "surprising-price-provider",
+    "surprising-account",
+    "surprising-account-api",
+    "surprising-derivatives-lifecycle-api",
+    "surprising-derivatives-lifecycle-provider",
+    "surprising-derivatives-lifecycle",
+    "surprising-realtime-provider",
+    "surprising-gateway",
+    "surprising-maker"
+  ],
+  "mainClassesUsingSlf4j": 74,
+  "sourceConsolePrintingOccurrences": 0,
+  "validation": {
+    "surprising-aeron-tools.jar": {
+      "sha256": "951b4a1109b938d3ef4449a8145205c70ccfe03a7a88a1667ea7c36753ae59de",
+      "singleLogbackProvider": true,
+      "singleLogbackConfig": true,
+      "lombokAbsent": true
+    },
+    "product-core-benchmarks.jar": {
+      "sha256": "9a6a82f3d9e2e73444e66a47ac946a56594dd8a94dec0457f102424936a89384",
+      "singleLogbackProvider": true,
+      "singleLogbackConfig": true,
+      "lombokAbsent": true
+    },
+    "offlineReplay": {
+      "exitCode": 0,
+      "stderrBytes": 0,
+      "stdoutSha256": "b36e28f1a467e20b8f72b16bf9a238b36c7470678bf0e7cc8b615236453a0d60",
+      "stdoutLines": 1
+    },
+    "benchmarkResults": {
+      "exitCode": 0,
+      "stderrBytes": 0,
+      "stdoutSha256": "364c7b0c642483ddb8bc9e8d4bb32a3ed94708edfa1a990b4c03f3379ea6f32c",
+      "stdoutLines": 1
+    },
+    "benchmarkJson": {
+      "exitCode": 0,
+      "stderrBytes": 1473,
+      "stdoutSha256": "d2cfd37cf21f86dd23b2757a65b222eb77ee8c4d46a53683bff08a6553576fd8",
+      "stdoutLines": 1
+    },
+    "qaProtocol": {
+      "exitCode": 0,
+      "stderrBytes": 0,
+      "stdoutSha256": "49f2d02636239ba59da96e838a8bd94b24fbd8a5373fcc1785c4d70ab8899f69",
+      "stdoutLines": 1
+    },
+    "jmhDiscovery": {
+      "exitCode": 0,
+      "stderrBytes": 0,
+      "stdoutSha256": "dd6f563b7badadbc226f651e01d358dee1845e89eb02638c466343c7fef3da03",
+      "stdoutLines": 95
+    }
+  },
+  "bootJars": [
+    {
+      "jar": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "7a9223dfe060f3495fd423b390f43e89ddfb4422e95405fd3e1ac0a17a1379ef",
+      "singleLogbackClassic": true,
+      "singleSlf4jApi": true,
+      "runtimeLombokAbsent": true
+    },
+    {
+      "jar": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "8fb2150416712fb4e005908361d2c88b4618faaf4dfeeb599f6aefbaec5b7393",
+      "singleLogbackClassic": true,
+      "singleSlf4jApi": true,
+      "runtimeLombokAbsent": true
+    },
+    {
+      "jar": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "98f8c0495b93a6fab06a15e33bdd26dfe1cadb1054fc7711aadd2d8b089269a8",
+      "singleLogbackClassic": true,
+      "singleSlf4jApi": true,
+      "runtimeLombokAbsent": true
+    },
+    {
+      "jar": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "e060edf2698f613ddafa9885b6cd90d8514ceb770b04e3a1be6cd290786a37b8",
+      "singleLogbackClassic": true,
+      "singleSlf4jApi": true,
+      "runtimeLombokAbsent": true
+    },
+    {
+      "jar": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "0f1e89d5282205f1a7353a74749daba8fa48fc08b215113114022c890ca6b1e4",
+      "singleLogbackClassic": true,
+      "singleSlf4jApi": true,
+      "runtimeLombokAbsent": true
+    }
+  ],
+  "logSha256": {
+    "logging-cleanup-test.log": "9b4daf5c907f1c7d6fde6ada43c7db3b6d48d9c176e74ad1d5b9e8b9cf6064bb",
+    "logging-cleanup-test-final.log": "90a81f15e011db5735c1939c85bc730637a74a8e2f865820bd976bc9bdbc78ca",
+    "logging-cli-tests.log": "e3f661466d4c1eab024c387dcec8e7dbfa753cc29fc1c9a65f7a57107a9c7cc5",
+    "logging-cleanup-package.log": "5b4f04be398dafca0a2f038cb2337d3454d514ff464a7d19813f28116c404fc0",
+    "logging-effective.log": "cc22053a55e9a89ed2355bdbaa30a759199270d33ce6016f8a87d89f5ed68b33"
+  },
+  "scope": "Full Maven regression plus standalone packaged CLI smoke tests. No sustained throughput test, external multi-process deployment or production environment test. Existing conditional tests remain skipped. Histogram artifact serialization intentionally remains file output.",
+  "cleanup": "Removed this task temporary helpers, verification logs, effective POM and Surefire reports after recording evidence. Packaged jars retained. Smoke temporary directory removed automatically; no long-running service started."
+}

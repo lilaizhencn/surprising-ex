@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
@@ -38,16 +40,14 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class TriggerOrderService {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
-    private static final Logger log = LoggerFactory.getLogger(TriggerOrderService.class);
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
     private static final long MAX_TRAILING_CALLBACK_RATE_PPM = 100_000L;
 

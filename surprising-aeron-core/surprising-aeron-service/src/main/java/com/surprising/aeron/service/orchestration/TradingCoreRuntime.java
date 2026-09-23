@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
@@ -93,6 +95,7 @@ import java.util.concurrent.CompletableFuture;
  * 唯一交易执行入口，按集群日志顺序组织准入、撮合和有序提交。
  * 产品命令、批量执行、结果账本、查询及快照由所属组件管理；不持有旧探测运行时副本。
  */
+@Slf4j
 public final class TradingCoreRuntime implements AutoCloseable,
         CommandResultContext, BalanceCommandContext, FundingCommandContext,
         RiskCommandContext, LiquidationCommandContext, SettlementCommandContext,
@@ -241,8 +244,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     /** 未显式指定时，每轮触发扫描处理的条数。 */
     static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
-    /** 交易运行时日志输出器。 */
-    static final System.Logger LOG = System.getLogger(TradingCoreRuntime.class.getName());
     /** 撮合阶段指标日志的输出间隔配置；零表示关闭。 */
     static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
             "surprising.aeron.matching-phase-log-interval", 0);
@@ -1507,11 +1508,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
     @Override public void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt) {
         long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
         int pendingAfter = pendingRiskScanCount();
-        System.Logger.Level level = System.Logger.Level.DEBUG;
-        if (!LOG.isLoggable(level)) return;
-        LOG.log(level, "risk scan operation={0} symbol={1} batchSize={2} elapsedMicros={3} "
-                        + "pendingSymbolsBefore={4} pendingSymbolsAfter={5}",
-                new Object[]{operation, symbol, batchSize, elapsedMicros, pendingBefore, pendingAfter});
+        if (!log.isDebugEnabled()) return;
+        log.debug("risk scan operation={} symbol={} batchSize={} elapsedMicros={} "
+                        + "pendingSymbolsBefore={} pendingSymbolsAfter={}",
+                operation, symbol, batchSize, elapsedMicros, pendingBefore, pendingAfter);
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.cluster;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.benchmarks.transport.CommandReplicationService;
 
 import io.aeron.archive.Archive;
@@ -22,6 +24,7 @@ import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.YieldingIdleStrategy;
 
 /** 独立复制诊断启动器，仅随 benchmarks jar 发布，不加载交易 Core。 */
+@Slf4j
 public final class CommandReplicationNode {
 
     private CommandReplicationNode() {
@@ -95,8 +98,7 @@ public final class CommandReplicationNode {
             }
             try (ClusteredServiceContainer ignoredContainer = ClusteredServiceContainer.launch(
                     serviceContext.terminationHook(barrier::signalAll))) {
-                System.out.printf("Aeron core started productLine=%s nodeId=%d clusterId=%d host=%s%n",
-                        topology.productLine(), topology.nodeId(), topology.clusterId(), topology.hostname());
+                log.info("Aeron core started productLine={} nodeId={} clusterId={} host={}", topology.productLine(), topology.nodeId(), topology.clusterId(), topology.hostname());
                 barrier.await();
             }
         } finally {
@@ -112,12 +114,10 @@ public final class CommandReplicationNode {
         return throwable -> {
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.WARN) {
-                System.err.println("Aeron " + component + " warning");
-                System.err.println(aeronException);
+                log.warn("Aeron {} warning", component, aeronException);
                 return;
             }
-            System.err.println("Aeron " + component + " failure");
-            throwable.printStackTrace(System.err);
+            log.error("Aeron {} failure", component, throwable);
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.FATAL
                     || throwable instanceof org.agrona.concurrent.AgentTerminationException

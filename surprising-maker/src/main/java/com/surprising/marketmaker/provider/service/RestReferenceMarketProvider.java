@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
@@ -24,16 +26,14 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
+@Slf4j
 public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
-    private static final Logger log = LoggerFactory.getLogger(RestReferenceMarketProvider.class);
     private static final BigDecimal ONE_PPM = BigDecimal.valueOf(1_000_000L);
 
     private final MarketMakerProperties properties;

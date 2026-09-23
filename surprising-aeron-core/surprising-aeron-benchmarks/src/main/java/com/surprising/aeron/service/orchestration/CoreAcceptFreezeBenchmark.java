@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -20,6 +22,7 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
+@Slf4j
 public final class CoreAcceptFreezeBenchmark {
 
     private static final String SYMBOL = "BTC-USDT";
@@ -58,10 +61,10 @@ public final class CoreAcceptFreezeBenchmark {
                 }
             }
             long elapsed = System.nanoTime() - started;
-            System.out.printf("coreAcceptFreezeBenchmark=PASS productLine=%s orders=%d "
+            log.info("{}", String.format(java.util.Locale.ROOT, "coreAcceptFreezeBenchmark=PASS productLine=%s orders=%d "
                             + "elapsedSeconds=%.3f acceptedPerSec=%.3f pendingMatching=%d%n",
                     ProductLine.LINEAR_PERPETUAL, orders, elapsed / 1_000_000_000.0,
-                    orders / (elapsed / 1_000_000_000.0), state.pendingMatchingCount());
+                    orders / (elapsed / 1_000_000_000.0), state.pendingMatchingCount()).stripTrailing());
         }
     }
 

@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
@@ -25,6 +27,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterFundsSmokeMain {
 
     private ClusterFundsSmokeMain() {
@@ -56,8 +59,7 @@ public final class ClusterFundsSmokeMain {
                 productLine, hostnames, egressHostname, Duration.ofSeconds(10))) {
             if (verifyOnly) {
                 verifyReleasedFunds(client, productLine, sourceId, userId, seed, fundedUnits);
-                System.out.printf("fundsRecovery=PASS productLine=%s userId=%d totalUnits=%d lockedUnits=0%n",
-                        productLine, userId, fundedUnits);
+                log.info("fundsRecovery=PASS productLine={} userId={} totalUnits={} lockedUnits=0", productLine, userId, fundedUnits);
                 return;
             }
             submitApplied(client, command(productLine, sourceId + 1_000_000, seed, 1,
@@ -81,8 +83,7 @@ public final class ClusterFundsSmokeMain {
             submitApplied(client, command(productLine, sourceId, seed + 3, userId, CoreMessageType.CANCEL_ORDER,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
             verifyReleasedFunds(client, productLine, sourceId, userId, seed + 4, fundedUnits);
-            System.out.printf("fundsSmoke=PASS productLine=%s userId=%d orderId=%d totalUnits=%d lockedUnits=0%n",
-                    productLine, userId, orderId, fundedUnits);
+            log.info("fundsSmoke=PASS productLine={} userId={} orderId={} totalUnits={} lockedUnits=0", productLine, userId, orderId, fundedUnits);
         }
     }
 

@@ -1,21 +1,21 @@
 package com.surprising.price.consumer;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PriceEventType;
 import com.surprising.price.api.model.PricePublishedEvent;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
+@Slf4j
 public class MarkPriceKafkaConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(MarkPriceKafkaConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final LatestMarkPriceCache cache;

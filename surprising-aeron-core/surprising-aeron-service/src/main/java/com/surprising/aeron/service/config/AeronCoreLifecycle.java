@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.config;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.service.cluster.ClusterTopology;
 import com.surprising.aeron.service.cluster.AeronTradingClusterService;
 import io.aeron.archive.Archive;
@@ -21,8 +23,6 @@ import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.YieldingIdleStrategy;
 import org.jspecify.annotations.NonNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.stereotype.Component;
@@ -30,9 +30,9 @@ import org.springframework.beans.factory.DisposableBean;
 
 /** Owns the Aeron resources and their shutdown order for one Core node. */
 @Component
+@Slf4j
 public final class AeronCoreLifecycle implements ApplicationListener<ContextClosedEvent>, DisposableBean {
 
-    private static final Logger log = LoggerFactory.getLogger(AeronCoreLifecycle.class);
 
     private final ClusterTopology topology;
     private final AeronTradingClusterService clusteredService;

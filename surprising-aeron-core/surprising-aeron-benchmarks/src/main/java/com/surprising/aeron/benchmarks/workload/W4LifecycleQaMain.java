@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.client.SurprisingAeronClient;
@@ -57,6 +59,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongConsumer;
 
+@Slf4j
 public final class W4LifecycleQaMain implements AutoCloseable {
 
     static final List<ProductLine> REQUIRED_PRODUCT_LINES = List.of(
@@ -159,8 +162,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 qa.writeManifest(manifest, mode);
             }
         }
-        System.out.printf("W4_MANIFEST=REAL_PASS productLine=%s path=%s FUNDS_DIFFERENCE=0%n",
-                productLine, manifest);
+        log.info("W4_MANIFEST=REAL_PASS productLine={} path={} FUNDS_DIFFERENCE=0", productLine, manifest);
     }
 
     private void requireProviderCapabilities(String mode) {
@@ -574,8 +576,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         }
         String acceptedResponse = response;
         response = awaitOrderResult(response);
-        System.out.printf("W4_ORDER_RESPONSE userId=%d orderId=%d side=%s body=%s%n",
-                userId, orderId, side, response);
+        log.info("W4_ORDER_RESPONSE userId={} orderId={} side={} body={}", userId, orderId, side, response);
         if (!response.contains("\"outcome\":\"TERMINAL\"")
                 || !response.contains("\"code\":\"NONE\"")) {
             throw new IllegalStateException("order command did not complete: " + response);

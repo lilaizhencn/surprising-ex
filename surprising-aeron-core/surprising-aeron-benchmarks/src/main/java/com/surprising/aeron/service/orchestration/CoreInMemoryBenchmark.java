@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -21,6 +23,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import java.util.UUID;
 
+@Slf4j
 public final class CoreInMemoryBenchmark {
 
     private static final String SYMBOL = "BENCH-BTC-USDT";
@@ -35,12 +38,12 @@ public final class CoreInMemoryBenchmark {
         int warmupOrders = positive(args, 1, 10_000);
         run(warmupOrders, false);
         Result result = run(orders, true);
-        System.out.printf("inMemoryCoreBenchmark=PASS orders=%d elapsedSeconds=%.3f "
+        log.info("{}", String.format(java.util.Locale.ROOT, "inMemoryCoreBenchmark=PASS orders=%d elapsedSeconds=%.3f "
                         + "ordersPerSec=%.3f p50Micros=%d p95Micros=%d p99Micros=%d maxMicros=%d%n",
                 result.orders(), result.elapsedNanos() / 1_000_000_000.0,
                 result.orders() / (result.elapsedNanos() / 1_000_000_000.0),
                 percentile(result.latencies(), 0.50), percentile(result.latencies(), 0.95),
-                percentile(result.latencies(), 0.99), percentile(result.latencies(), 1.0));
+                percentile(result.latencies(), 0.99), percentile(result.latencies(), 1.0)).stripTrailing());
     }
 
     private static Result run(int orderCount, boolean measured) {

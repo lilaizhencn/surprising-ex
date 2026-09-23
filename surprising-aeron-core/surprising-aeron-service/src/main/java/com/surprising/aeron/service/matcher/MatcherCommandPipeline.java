@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.matcher;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.orchestration.CommandSlot;
 import com.surprising.aeron.service.state.MatcherSettlementEvent;
@@ -9,13 +11,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import java.util.concurrent.TimeUnit;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Single-producer/single-consumer matcher stage. The Aeron owner publishes immutable work,
  * one matcher thread owns exchange-core, and the Aeron owner consumes completions in order.
  */
+@Slf4j
 public final class MatcherCommandPipeline implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY =
             "surprising.aeron.matcher-pipeline-wait-strategy";
@@ -26,7 +27,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private static final boolean WAIT_DIAGNOSTICS =
             Boolean.getBoolean("surprising.matcher.wait-diagnostics");
     private static final long DIAGNOSTIC_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(5);
-    private static final Logger log = LoggerFactory.getLogger(MatcherCommandPipeline.class);
 
     private final Slot[] slots;
     private final int mask;

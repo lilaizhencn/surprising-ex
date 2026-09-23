@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.AeronClientCapacity;
 import com.surprising.aeron.protocol.*;
@@ -16,6 +18,7 @@ import org.HdrHistogram.Histogram;
 /** Network counterpart of LinearPerpetualMixedWorkload's UNIFORM scale scenario.
  * All state changes and reads go through the actual cluster; no local Core is instantiated.
  */
+@Slf4j
 public final class ClusterMixedCapacityMain implements AutoCloseable {
     /** Default single-member throughput baseline; scripts may override explicitly for diagnostics. */
     static final int USERS = 1000, SYMBOLS = Integer.getInteger("surprising.aeron.capacity-symbols", 256), WINDOW = 64;
@@ -69,11 +72,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 List.of(System.getProperty("surprising.aeron.hostnames").split(",")),
                 System.getProperty("surprising.aeron.egress-hostname"), Duration.ofSeconds(30),
                 "mixed-" + seed, UUID.randomUUID().toString(), capacity);
-        System.out.printf("mixedConfig globalWindow=%d sessionWindow=%d commandSessions=1 reservedQuerySessions=1 batchSize=%d tradingStream=%s%n",
-                window, sessionWindow, batchSize, tradingStream);
-        System.out.printf("mixedControlPageSize=%d%n", controlPageSize);
-        System.out.printf("mixedTradingProfile=%s expectedFillsPerCycle=%d%n",
-                fillHeavy ? "FILL_HEAVY" : "MIXED", SYMBOLS * batchSize * (fillHeavy ? 2 : 1));
+        log.info("mixedConfig globalWindow={} sessionWindow={} commandSessions=1 reservedQuerySessions=1 batchSize={} tradingStream={}", window, sessionWindow, batchSize, tradingStream);
+        log.info("mixedControlPageSize={}", controlPageSize);
+        log.info("mixedTradingProfile={} expectedFillsPerCycle={}", fillHeavy ? "FILL_HEAVY" : "MIXED", SYMBOLS * batchSize * (fillHeavy ? 2 : 1));
         for (int i=0;i<SYMBOLS;i++) { mark[i]=100; fundingId[i]=10_000+i; }
     }
 
@@ -160,8 +161,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         }
         if (accountCollisions == 0 || symbolCollisions == 0)
             throw new IllegalStateException("owner optimization workload coverage missing");
-        System.out.printf("ownerPathCoverage=PASS makerMaskCollisions=%d symbolMaskCollisions=%d batchSize=%d%n",
-                accountCollisions, symbolCollisions, batchSize);
+        log.info("ownerPathCoverage=PASS makerMaskCollisions={} symbolMaskCollisions={} batchSize={}", accountCollisions, symbolCollisions, batchSize);
     }
     private long positionMaker(int i) { return users.get(USERS+1+i); }
     private long maker(int i) { return users.get(USERS+1+SYMBOLS+i); }
@@ -216,7 +216,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         // The trading-only diagnostic completes the same one-off loss audit before timing.
         // It does not disguise sequential control queries as a continuously loaded matcher.
         if (tradingStream) lossLifecycle();
-        System.out.printf("mixedSetup=PASS users=%d retail=%d symbols=%d initialFunds=%d%n",users.size(),USERS,SYMBOLS,expectedFunds());
+        log.info("mixedSetup=PASS users={} retail={} symbols={} initialFunds={}", users.size(),USERS,SYMBOLS,expectedFunds());
     }
 
     private void runFor(int seconds,boolean measure) {
@@ -225,7 +225,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         measured=measure;
         if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;windowBlockedNanos=windowBlockedCount=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
-        if (measure) System.out.println("measurementStartEpochMillis=" + System.currentTimeMillis());
+        if (measure) log.info("{}", "measurementStartEpochMillis=" + System.currentTimeMillis());
         if (sideLoad != null && measure) sideLoad.beginMeasurement(started);
         long end=started+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<end) {
@@ -233,18 +233,16 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         }
         long loadEnd = System.nanoTime();
         long loadTerminal = terminal, loadCoreTerminal = coreTerminal, loadFills = fills;
-        if (measure) System.out.println("measurementEndEpochMillis=" + System.currentTimeMillis());
+        if (measure) log.info("{}", "measurementEndEpochMillis=" + System.currentTimeMillis());
         drain();
         if (measure) {
             elapsed = System.nanoTime() - started;
             double loadSeconds = (loadEnd - started) / 1e9;
-            System.out.printf(Locale.ROOT,
+            log.info("{}", String.format(Locale.ROOT,
                     "steadyCapacity elapsedSeconds=%.6f terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fillsPerSec=%.3f peakInFlight=%d windowBlockedCount=%d windowBlockedNanos=%d%n",
                     loadSeconds, loadTerminal, loadCoreTerminal, loadFills, loadTerminal / loadSeconds,
-                    loadCoreTerminal / loadSeconds, loadFills / loadSeconds, peak, windowBlockedCount, windowBlockedNanos);
-            System.out.printf(Locale.ROOT,
-                    "drain elapsedNanos=%d terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d%n",
-                    elapsed - (loadEnd - started), terminal - loadTerminal, coreTerminal - loadCoreTerminal, fills - loadFills);
+                    loadCoreTerminal / loadSeconds, loadFills / loadSeconds, peak, windowBlockedCount, windowBlockedNanos).stripTrailing());
+            log.info("drain elapsedNanos={} terminalBusinessOperations={} terminalCoreMessages={} fills={}", elapsed - (loadEnd - started), terminal - loadTerminal, coreTerminal - loadCoreTerminal, fills - loadFills);
         }
         if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
         measured=false;
@@ -266,14 +264,11 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for (int lane = 0; lane < after.accountLaneCount(); lane++) {
             for (int operation = 0; operation < CoreLaneMetricsView.OPERATION_TYPE_COUNT; operation++) {
                 int index = lane * CoreLaneMetricsView.OPERATION_TYPE_COUNT + operation;
-                System.out.printf(Locale.ROOT,
-                        "laneWork lane=%d operation=%d completed=%d executionNanos=%d measuredNanos=%d%n",
-                        lane, operation, Math.subtractExact(operationsAfter[index], operationsBefore[index]),
+                log.info("laneWork lane={} operation={} completed={} executionNanos={} measuredNanos={}", lane, operation, Math.subtractExact(operationsAfter[index], operationsBefore[index]),
                         Math.subtractExact(nanosAfter[index], nanosBefore[index]), elapsed);
             }
         }
-        System.out.printf("pipelineHighWater matcher=%d completion=%d context=%d lanes=%s%n",
-                after.matcherDispatchHighWaterMark(), after.matchingCompletionHighWaterMark(),
+        log.info("pipelineHighWater matcher={} completion={} context={} lanes={}", after.matcherDispatchHighWaterMark(), after.matchingCompletionHighWaterMark(),
                 after.commandContextHighWaterMark(), Arrays.toString(after.accountLaneQueueHighWaterMarks()));
     }
 
@@ -410,7 +405,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for(int pages=0;pages<10000;pages++) {
             var pending = work(CoreLiquidationWorkView.Purpose.EXECUTION);
             if(!pending.riskScanPending()) {
-                System.out.println("mixedRiskDrain=PASS batchPages=" + batchPages + " continuationPages=" + continuationPages);
+                log.info("{}", "mixedRiskDrain=PASS batchPages=" + batchPages + " continuationPages=" + continuationPages);
                 return;
             }
             int budget = controlPageSize == 0 ? 64 : controlPageSize;
@@ -451,7 +446,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         }
         if (liquidationCancellationBoundary && cancellationPages != 3)
             throw new IllegalStateException("liquidation cancellation boundary not exercised");
-        System.out.println("mixedLiquidationCancellation=PASS pages=" + cancellationPages);
+        log.info("{}", "mixedLiquidationCancellation=PASS pages=" + cancellationPages);
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions();
         if(insurance.size()!=1)throw new IllegalStateException("insurance work missing: "+insurance);
         long available=treasury().stream().filter(x->x.asset().equals("USDT")).findFirst().orElseThrow().insuranceBalanceUnits();
@@ -471,7 +466,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 || !work(CoreLiquidationWorkView.Purpose.ADL).resolutions().isEmpty()
                 || !flat(user(users.getFirst()).positions()))throw new IllegalStateException("loss lifecycle incomplete");
         lossCompleted=true;
-        System.out.println("mixedLossLifecycle=PASS liquidation=true insurance=true adl=true");
+        log.info("mixedLossLifecycle=PASS liquidation=true insurance=true adl=true");
     }
 
     static boolean flat(List<CorePositionView> positions) {
@@ -619,12 +614,11 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             long completedOrderLifecycles = Math.multiplyExact(measuredCycles, SYMBOLS * batchSize * 3L);
             if (completedOrderLifecycles < 2 * 65_536L)
                 throw new IllegalStateException("owner churn run did not cross two terminal retention windows");
-            System.out.printf("ownerChurnVerify=PASS completedOrderLifecycles=%d terminalIndexEmpty=true reservationsEmpty=true%n",
-                    completedOrderLifecycles);
+            log.info("ownerChurnVerify=PASS completedOrderLifecycles={} terminalIndexEmpty=true reservationsEmpty=true", completedOrderLifecycles);
         }
         long hash=CoreStateQueryCodec.decodeStateHash(
                 query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,0,new byte[0]).data());
-        System.out.printf("mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=%d businessHash=%s%n",totalCycles,Long.toUnsignedString(hash,16));
+        log.info("mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles={} businessHash={}", totalCycles,Long.toUnsignedString(hash,16));
     }
     private void requireItems(CoreMessageType type,long expected) {
         var s=stats.get(type);
@@ -632,15 +626,15 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
     private void report() {
         long now=System.nanoTime();if(!measured||now-lastReport<TimeUnit.SECONDS.toNanos(10))return;
-        System.out.printf(Locale.ROOT,"progress terminalBusinessOps=%d intervalBusinessOpsPerSec=%.3f requestsInFlight=%d%n",terminal,(terminal-reportTerminal)*1e9/(now-lastReport),pending.size());
+        log.info("{}", String.format(Locale.ROOT,"progress terminalBusinessOps=%d intervalBusinessOpsPerSec=%.3f requestsInFlight=%d%n",terminal,(terminal-reportTerminal)*1e9/(now-lastReport),pending.size()).stripTrailing());
         lastReport=now;reportTerminal=terminal;
     }
     private void print() {
         double seconds=elapsed/1e9;
-        System.out.printf("adminActionRetries=%d%n",client.adminActionRetries()-adminRetriesBefore);
-        System.out.printf(Locale.ROOT,"mixedCapacity=PASS elapsedSeconds=%.3f terminalBusinessOperations=%d offeredBusinessOperations=%d terminalCoreMessages=%d offeredCoreMessages=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fills=%d fillsPerSec=%.3f queries=%d unfinished=0 peakInFlight=%d measuredCycles=%d totalCycles=%d triggerExecutions=%d%n",
-                seconds,terminal,offered,coreTerminal,coreOffered,terminal/seconds,coreTerminal/seconds,fills,fills/seconds,queries,peak,measuredCycles,totalCycles,triggerExecutions);
-        stats.forEach((type,s)->System.out.printf(Locale.ROOT,"business=%s items=%d requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d meanus=%.3f%n",type,s.items,s.latency.getTotalCount(),s.latency.getValueAtPercentile(50)/1000,s.latency.getValueAtPercentile(90)/1000,s.latency.getValueAtPercentile(95)/1000,s.latency.getValueAtPercentile(99)/1000,s.latency.getValueAtPercentile(99.9)/1000,s.latency.getMaxValue()/1000,s.latency.getMean()/1000));
+        log.info("adminActionRetries={}", client.adminActionRetries()-adminRetriesBefore);
+        log.info("{}", String.format(Locale.ROOT,"mixedCapacity=PASS elapsedSeconds=%.3f terminalBusinessOperations=%d offeredBusinessOperations=%d terminalCoreMessages=%d offeredCoreMessages=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fills=%d fillsPerSec=%.3f queries=%d unfinished=0 peakInFlight=%d measuredCycles=%d totalCycles=%d triggerExecutions=%d%n",
+                seconds,terminal,offered,coreTerminal,coreOffered,terminal/seconds,coreTerminal/seconds,fills,fills/seconds,queries,peak,measuredCycles,totalCycles,triggerExecutions).stripTrailing());
+        stats.forEach((type,s)->log.info("{}", String.format(Locale.ROOT,"business=%s items=%d requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d meanus=%.3f%n",type,s.items,s.latency.getTotalCount(),s.latency.getValueAtPercentile(50)/1000,s.latency.getValueAtPercentile(90)/1000,s.latency.getValueAtPercentile(95)/1000,s.latency.getValueAtPercentile(99)/1000,s.latency.getValueAtPercentile(99.9)/1000,s.latency.getMaxValue()/1000,s.latency.getMean()/1000).stripTrailing()));
     }
     private static final class Stats {
         long items;final Histogram latency=new Histogram(TimeUnit.MINUTES.toNanos(1),3);

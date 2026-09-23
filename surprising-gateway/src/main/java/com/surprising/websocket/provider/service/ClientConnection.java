@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -11,8 +13,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -23,9 +23,9 @@ import org.springframework.web.socket.WebSocketSession;
  * <p>The queue is intentionally bounded. A slow client is closed instead of allowing one WebSocket
  * connection to hold memory or block Kafka fanout for other sessions on the same node.</p>
  */
+@Slf4j
 public class ClientConnection implements AutoCloseable {
 
-    private static final Logger log = LoggerFactory.getLogger(ClientConnection.class);
 
     private final WebSocketSession session;
     private volatile Long authenticatedUserId;

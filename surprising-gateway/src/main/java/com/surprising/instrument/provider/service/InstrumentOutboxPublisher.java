@@ -1,5 +1,7 @@
 package com.surprising.instrument.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.instrument.provider.model.InstrumentOutboxRecord;
 import com.surprising.instrument.provider.repository.InstrumentOutboxRepository;
@@ -7,15 +9,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class InstrumentOutboxPublisher {
 
-    private static final Logger log = LoggerFactory.getLogger(InstrumentOutboxPublisher.class);
     private static final Duration MINIMUM_LEASE = Duration.ofSeconds(30);
 
     private final InstrumentProperties properties;

@@ -1,5 +1,7 @@
 package com.surprising.price.mark.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PriceEventType;
 import com.surprising.price.api.model.PricePublishedEvent;
@@ -9,17 +11,15 @@ import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** 异步持久化审计流，实时消费链路不依赖该写入结果。 */
 @Component
+@Slf4j
 public class MarkPriceAuditConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(MarkPriceAuditConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final MarkPriceTickRepository tickRepository;

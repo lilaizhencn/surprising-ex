@@ -1,10 +1,13 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import java.util.Arrays;
 import java.util.Locale;
 
+@Slf4j
 public final class LinearPerpetualScaleProbeMain {
 
     private LinearPerpetualScaleProbeMain() {
@@ -37,7 +40,7 @@ public final class LinearPerpetualScaleProbeMain {
             }
         }
         metrics.finalRestoreNanos = System.nanoTime() - restoreStart;
-        System.out.println(metrics.json(probe, template, setupNanos, finalSnapshot));
+        log.info("{}", metrics.json(probe, template, setupNanos, finalSnapshot));
     }
 
     private static SnapshotTemplate runCycle(LinearPerpetualMixedWorkload.Template template,

@@ -1,9 +1,12 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.product.api.ProductLine;
 
 /** Finite correctness verification, without a load generator or throughput measurements. */
+@Slf4j
 public final class MaintenanceSettlementVerificationMain {
     private MaintenanceSettlementVerificationMain() { }
     public static void main(String[] args) {
@@ -15,7 +18,7 @@ public final class MaintenanceSettlementVerificationMain {
                 scenario.maxInFlight=256; scenario.settlementTrigger="MAINTENANCE";
                 scenario.prepare(); scenario.restore();
                 scenario.run(true); scenario.verify();
-                System.out.println("PASS "+line+" "+margin+": insurance pause/refill, replay, balances, positions and snapshot");
+                log.info("{}", "PASS "+line+" "+margin+": insurance pause/refill, replay, balances, positions and snapshot");
             }
         }
     }

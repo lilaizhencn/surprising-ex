@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** 独立 benchmarks 模块中的真实单成员少量命令验证入口；与 JMH 共用场景，不进入交易服务包。 */
+@Slf4j
 public final class SmallControlReproMain {
     private static final int TRIGGER_SYMBOLS = 128;
     private static final ProductLine PRODUCT = ProductLine.LINEAR_PERPETUAL;
@@ -32,10 +35,10 @@ public final class SmallControlReproMain {
                 var response = pool.command(CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), 1,
                         TradingCommandCodec.encodeRegisterInstrument(instrument("REPRO-POOL")));
                 requireApplied(response);
-                System.out.println("poolCommand=PASS");
+                log.info("poolCommand=PASS");
                 var query = pool.query(CoreMessageType.TREASURY_STATE_QUERY, UUID.randomUUID(), 0, new byte[0]);
                 if (query.status() != ResponseStatus.OK) throw new IllegalStateException("pool query failed");
-                System.out.println("poolQuery=PASS");
+                log.info("poolQuery=PASS");
             }
             return;
         }
@@ -44,7 +47,7 @@ public final class SmallControlReproMain {
             run.rejectTrigger = args[0].contains("reject");
             if (args[0].equals("ready")) {
                 run.query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]);
-                System.out.println("ready=PASS");
+                log.info("ready=PASS");
                 return;
             }
             if (args[0].equals("orders")) {
@@ -63,14 +66,14 @@ public final class SmallControlReproMain {
                     } else if (args[0].startsWith("verify")) run.verifyAmendRejection(i);
                     else run.amendRejection(i);
                 }
-                System.out.println("smallAmend=PASS symbols=" + TRIGGER_SYMBOLS);
+                log.info("{}", "smallAmend=PASS symbols=" + TRIGGER_SYMBOLS);
                 return;
             }
             for (int i = 0; i < TRIGGER_SYMBOLS; i++) {
                 if (args[0].startsWith("verify-trigger")) run.verifyTrigger(i);
                 else run.trigger(i, args[0].equals("trigger-scan"));
             }
-            System.out.println("smallTrigger=PASS symbols=" + TRIGGER_SYMBOLS);
+            log.info("{}", "smallTrigger=PASS symbols=" + TRIGGER_SYMBOLS);
         }
     }
 
@@ -91,7 +94,7 @@ public final class SmallControlReproMain {
             order(1002, symbol, 3002 + i * 2, CoreOrderSide.BUY, 1);
         }
         verifyOrders();
-        System.out.println("smallOrders=PASS orders=16 fills=8 fundsDiff=0");
+        log.info("smallOrders=PASS orders=16 fills=8 fundsDiff=0");
     }
 
     private void verifyOrders() {
@@ -106,7 +109,7 @@ public final class SmallControlReproMain {
                     Math.addExact(balance.availableUnits(), balance.lockedUnits()));
         }
         if (funds != 20_000) throw new IllegalStateException("catchup funds mismatch: " + funds);
-        System.out.println("verifyOrders=PASS positions=-8/+8 fundsDiff=0");
+        log.info("verifyOrders=PASS positions=-8/+8 fundsDiff=0");
     }
 
     private void amendCycle(int index) {
@@ -164,7 +167,7 @@ public final class SmallControlReproMain {
                     || state.balances().getFirst().availableUnits() != 10_000)
                 throw new IllegalStateException("amend/cancel cycle left account state: " + account);
         }
-        System.out.println("amendCycle=" + index + " PASS fundsDiff=0 positions=0 reservations=0");
+        log.info("{}", "amendCycle=" + index + " PASS fundsDiff=0 positions=0 reservations=0");
     }
 
     private void amendRejection(int index) {
@@ -208,7 +211,7 @@ public final class SmallControlReproMain {
             funds += balance.availableUnits() + balance.lockedUnits();
         }
         if (funds != 20_000) throw new IllegalStateException("amend funds mismatch");
-        System.out.println("amendCase=" + index + " PASS fundsDiff=0 positions=0 reservations=true");
+        log.info("{}", "amendCase=" + index + " PASS fundsDiff=0 positions=0 reservations=true");
     }
 
     private void trigger(int index, boolean scan) {
@@ -287,7 +290,7 @@ public final class SmallControlReproMain {
             }
         }
         if (funds != 20_000) throw new IllegalStateException("trigger funds mismatch");
-        System.out.println("triggerCase=" + index + " PASS quantity=" + quantity + " fundsDiff=0 margin=true ocoCanceled=true");
+        log.info("{}", "triggerCase=" + index + " PASS quantity=" + quantity + " fundsDiff=0 margin=true ocoCanceled=true");
     }
 
     private void order(long user, String symbol, long id, CoreOrderSide side, long quantity) {
@@ -304,10 +307,10 @@ public final class SmallControlReproMain {
 
     private CoreResponse submitCommand(CoreMessageType type, long user, byte[] payload) {
         long id = ++sequence;
-        System.out.println("SEND sequence=" + id + " type=" + type);
+        log.info("{}", "SEND sequence=" + id + " type=" + type);
         var response = client.submit(new CoreMessage(CoreMessageHeader.command(type, new UUID(990099, id), PRODUCT,
                 CommandSource.OPERATIONS, 990099, id, user, System.currentTimeMillis(), id), payload));
-        System.out.println("RESULT sequence=" + id + " status=" + response.commandStatus() + " code=" + response.resultCode());
+        log.info("{}", "RESULT sequence=" + id + " status=" + response.commandStatus() + " code=" + response.resultCode());
         return response;
     }
 

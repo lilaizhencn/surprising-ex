@@ -1,4 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
+
+import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
@@ -13,6 +15,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** Small, synchronous functional fault driver. Never packaged in the production tools jar. */
+@Slf4j
 public final class FaultClientMain {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final ProductLine PRODUCT = ProductLine.requireExternalCode(
@@ -22,14 +25,20 @@ public final class FaultClientMain {
         if (args.length > 0) {
             File directory = new File(args[1]);
             if (args[0].equals("snapshot")) {
-                if (!ClusterTool.snapshot(directory, System.out)) throw new IllegalStateException("snapshot rejected");
+                var output = new ByteArrayOutputStream();
+                boolean accepted;
+                try (var stream = new PrintStream(output, true, StandardCharsets.UTF_8)) {
+                    accepted = ClusterTool.snapshot(directory, stream);
+                }
+                log.info("{}", output.toString(StandardCharsets.UTF_8).stripTrailing());
+                if (!accepted) throw new IllegalStateException("snapshot rejected");
             } else if (args[0].equals("recordings")) {
-                try (RecordingLog log = new RecordingLog(directory, false)) {
-                    System.out.println("QA " + JSON.writeValueAsString(log.entries()));
+                try (RecordingLog recordingLog = new RecordingLog(directory, false)) {
+                    log.info("{}", "QA " + JSON.writeValueAsString(recordingLog.entries()));
                 }
             } else if (args[0].equals("snapshot-state")) {
-                try (RecordingLog log = new RecordingLog(directory, false)) {
-                    var snapshot = log.getLatestSnapshot(0);
+                try (RecordingLog recordingLog = new RecordingLog(directory, false)) {
+                    var snapshot = recordingLog.getLatestSnapshot(0);
                     if (snapshot == null) throw new IllegalStateException("no complete service snapshot");
                     File archive = new File(directory.getParentFile(), "archive");
                     File[] segments = archive.listFiles((dir, name) -> name.startsWith(snapshot.recordingId + "-") && name.endsWith(".rec"));
@@ -63,7 +72,11 @@ public final class FaultClientMain {
                     }
                 }
             } else {
-                ClusterTool.listMembers(System.out, directory);
+                var output = new ByteArrayOutputStream();
+                try (var stream = new PrintStream(output, true, StandardCharsets.UTF_8)) {
+                    ClusterTool.listMembers(stream, directory);
+                }
+                log.info("{}", output.toString(StandardCharsets.UTF_8).stripTrailing());
             }
             return;
         }
@@ -157,7 +170,6 @@ public final class FaultClientMain {
     }
 
     private static void emit(Object value) {
-        System.out.println("QA " + JSON.writeValueAsString(value));
-        System.out.flush();
+        log.info("{}", "QA " + JSON.writeValueAsString(value));
     }
 }

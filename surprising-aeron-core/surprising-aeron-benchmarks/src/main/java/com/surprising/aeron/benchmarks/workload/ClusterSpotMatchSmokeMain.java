@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -24,6 +26,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 public final class ClusterSpotMatchSmokeMain {
 
     private ClusterSpotMatchSmokeMain() {
@@ -60,7 +63,7 @@ public final class ClusterSpotMatchSmokeMain {
             requireBalance(buyerView, "BTC", 5, 0);
             requireBalance(buyerView, "USDT", 0, 0);
             String label = verify ? "spotMatchRecovery" : "spotMatchSmoke";
-            System.out.printf("%s=PASS seller=%d buyer=%d btcTotal=5 usdtTotal=500%n", label, seller, buyer);
+            log.info("{}=PASS seller={} buyer={} btcTotal=5 usdtTotal=500", label, seller, buyer);
         }
     }
 

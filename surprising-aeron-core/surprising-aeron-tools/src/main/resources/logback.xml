@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- CLI results remain machine-readable. Runtime diagnostics use stderr. -->
+    <appender name="RESULT" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.out</target>
+        <encoder><pattern>%msg%n</pattern></encoder>
+    </appender>
+    <appender name="DIAGNOSTIC" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder><pattern>%date %-5level [%thread] %logger{36} - %msg%n</pattern></encoder>
+    </appender>
+    <logger name="com.surprising.aeron.tools" level="INFO" additivity="false">
+        <appender-ref ref="RESULT"/>
+    </logger>
+    <root level="INFO"><appender-ref ref="DIAGNOSTIC"/></root>
+</configuration>

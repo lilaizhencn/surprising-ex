@@ -66,6 +66,16 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- Tests use reactor directories, so select our config over tools' config. -->
+                        <logback.configurationFile>${project.basedir}/src/main/resources/logback.xml</logback.configurationFile>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
                     <annotationProcessorPaths combine.children="append">
@@ -92,6 +102,10 @@
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <filters>
                                 <filter>
+                                    <artifact>com.surprising:surprising-aeron-tools</artifact>
+                                    <excludes><exclude>logback.xml</exclude></excludes>
+                                </filter>
+                                <filter>
                                     <artifact>*:*</artifact>
                                     <excludes>
                                         <exclude>META-INF/*.SF</exclude>
@@ -101,6 +115,7 @@
                                 </filter>
                             </filters>
                             <transformers combine.self="override">
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.openjdk.jmh.Main</mainClass>
                                 </transformer>

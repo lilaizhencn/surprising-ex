@@ -1,7 +1,10 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.Properties;
 
+@Slf4j
 public final class HttpOpenLoopWorkloadMain {
 
     private HttpOpenLoopWorkloadMain() {
@@ -23,10 +26,7 @@ public final class HttpOpenLoopWorkloadMain {
                 Boolean.parseBoolean(properties.getProperty("requireJfr", "true")));
         HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
         if (p10) P10CapacityGate.requireResult(summary);
-        System.out.printf("httpOpenLoop=PASS qualification=%s scheduled=%d completed=%d outstanding=%d "
-                        + "deliberately_aborted=%d maxInFlight=%d terminalWithinMeasurement=%d "
-                        + "terminalRatePerSecond=%d%n",
-                p10 ? "P10" : "NONE",
+        log.info("httpOpenLoop=PASS qualification={} scheduled={} completed={} outstanding={} deliberately_aborted={} maxInFlight={} terminalWithinMeasurement={} terminalRatePerSecond={}", p10 ? "P10" : "NONE",
                 summary.scheduled(), summary.completed(), summary.outstanding(), summary.deliberatelyAborted(),
                 summary.maxObservedInFlight(), summary.terminalWithinMeasurement(),
                 summary.terminalRatePerSecond());

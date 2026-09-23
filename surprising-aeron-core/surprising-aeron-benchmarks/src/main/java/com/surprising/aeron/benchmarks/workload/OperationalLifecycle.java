@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -7,6 +9,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /** A separate control producer; its response dependencies never drain the trading producer. */
+@Slf4j
 final class OperationalLifecycle implements AutoCloseable {
     private static final String ACTIVE="OPS-ACT-USDT", RISK="OPS-RISK-USDT";
     /** JMH 控制页参数；0 沿用原资金费页大小和运行中的风险预算。 */
@@ -151,8 +154,7 @@ final class OperationalLifecycle implements AutoCloseable {
                         && action.isPresent()) liquidationId=action.get().liquidationId();
             }
         }
-        System.out.printf("liquidationScan queries=%d batches=%d requeries=%d scanWork=%d scanDelayMs=%d elapsedMs=%d%n",
-                queries,batches,requeries,scanWork,scanDelayMs,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started));
+        log.info("liquidationScan queries={} batches={} requeries={} scanWork={} scanDelayMs={} elapsedMs={}", queries,batches,requeries,scanWork,scanDelayMs,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started));
         long expectedId=liquidationId;
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions().stream()
                 .filter(a->a.liquidationId()==expectedId).findFirst().orElseThrow();
@@ -189,6 +191,6 @@ final class OperationalLifecycle implements AutoCloseable {
         }
         return total;
     }
-    void print(){System.out.printf("operationalLifecycle=PASS cycles=%d netDeposits=%d manualClose=true triggerClose=true liquidation=true insurance=true adl=true%n",cycles,deposits);}
+    void print(){log.info("operationalLifecycle=PASS cycles={} netDeposits={} manualClose=true triggerClose=true liquidation=true insurance=true adl=true", cycles,deposits);}
     @Override public void close(){endpoint.close();}
 }

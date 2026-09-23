@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.client.*;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
@@ -17,6 +19,7 @@ import org.openjdk.jmh.annotations.*;
 @Measurement(iterations = 2)
 @Fork(1)
 @Threads(1)
+@Slf4j
 public class ClusterAccountControlBenchmark {
     @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     public String productLine;
@@ -103,7 +106,7 @@ public class ClusterAccountControlBenchmark {
                 if (!view.reservations().isEmpty()) throw new IllegalStateException("unfinished control fixture order");
             }
             if (total != 3 * FUNDS || quantity != 0) throw new IllegalStateException("control funds/position mismatch");
-            System.out.printf("accountControlVerify=PASS product=%s terminalBusinessOperations=%d unfinished=0 fundsDiff=0 netPosition=0%n", product, operations);
+            log.info("accountControlVerify=PASS product={} terminalBusinessOperations={} unfinished=0 fundsDiff=0 netPosition=0", product, operations);
         } finally { if (client != null) client.close(); }
     }
 }

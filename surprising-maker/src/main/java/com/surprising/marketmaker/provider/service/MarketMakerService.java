@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -64,14 +66,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class MarketMakerService {
 
-    private static final Logger log = LoggerFactory.getLogger(MarketMakerService.class);
     private static final int MAX_BATCH_PLACE_ORDERS = 20;
     // 预占结果通过账户 Kafka 异步返回。预占中的报价仍然占用一个报价槽位，
     // 若在下一轮被当成非活动订单撤掉，会形成“永远预占不成功”的并发活锁。

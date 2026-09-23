@@ -1,19 +1,19 @@
 package com.surprising.funding.provider.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** Rehydrates the latest predicted rate after node failover; no database prediction lookup is needed. */
 @Component
+@Slf4j
 public class FundingRateKafkaConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(FundingRateKafkaConsumer.class);
 
     private final ObjectMapper objectMapper;
     private final LatestFundingRateCache cache;

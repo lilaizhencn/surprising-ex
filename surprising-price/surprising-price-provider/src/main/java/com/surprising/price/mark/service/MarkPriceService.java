@@ -1,5 +1,7 @@
 package com.surprising.price.mark.service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
@@ -21,8 +23,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -30,11 +30,11 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-    public class MarkPriceService {
+@Slf4j
+public class MarkPriceService {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
 
-    private static final Logger log = LoggerFactory.getLogger(MarkPriceService.class);
     private static final String SEQUENCE_MODULE = "price-mark";
 
     private final ObjectMapper objectMapper;

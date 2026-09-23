@@ -1,5 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.ValkeyUserQueries;
 import java.time.Duration;
@@ -12,6 +14,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Calls the production read/materialization implementation; never falls back to a Core query. */
+@Slf4j
 final class OperationalUserQueries implements AutoCloseable {
     private final LettuceConnectionFactory connection;
     private final ValkeyUserQueries queries;
@@ -53,6 +56,6 @@ final class OperationalUserQueries implements AutoCloseable {
             owner.record("VALKEY_QUERY_UNAVAILABLE",start,System.nanoTime());
         }
     }
-    void print(){System.out.printf("operationalReadModel readyIncludingWarmup=%d unavailableIncludingWarmup=%d coreFallbacks=0%n",ready,unavailable);}
+    void print(){log.info("operationalReadModel readyIncludingWarmup={} unavailableIncludingWarmup={} coreFallbacks=0", ready,unavailable);}
     @Override public void close(){connection.destroy();}
 }

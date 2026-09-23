@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.orchestration.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
@@ -19,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
+@Slf4j
 final class CommittedTradeExporter {
     private final TradeExportProperties config;
     private final ProductLine product;
@@ -88,7 +91,7 @@ final class CommittedTradeExporter {
                                             .ownsAeronClient(false)
                                             .controlRequestChannel(config.archiveControlChannel())
                                             .controlResponseChannel("aeron:ipc"));
-                    var log = new RecordingLog(config.clusterDirectory().toFile(), false)) {
+                    var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false)) {
                 long cursor = checkpoint.logPosition();
                 long lastPartialCommit = -1;
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
@@ -121,10 +124,10 @@ final class CommittedTradeExporter {
                         LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
                         continue;
                     }
-                    log.reload();
+                    recordingLog.reload();
                     long start = cursor;
                     var terms =
-                            log.entries().stream()
+                            recordingLog.entries().stream()
                                     .filter(
                                             e ->
                                                     e.isValid
@@ -265,9 +268,7 @@ final class CommittedTradeExporter {
                         new TradeExportCheckpoint(
                                         product, cursor, sink.tradeSequence(), replay.snapshot())
                                 .write(checkpointPath);
-                        System.out.printf(
-                                "trade-export product=%s committedPosition=%d exportedPosition=%d"
-                                        + " trades=%d%n",
+                        log.info("trade-export product={} committedPosition={} exportedPosition={} trades={}",
                                 product, committed, cursor, sink.tradeSequence());
                         nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                     }
