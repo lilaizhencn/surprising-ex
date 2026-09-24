@@ -186,10 +186,10 @@ mvn -pl surprising-gateway -am test
 纯状态修改只推进后者，因此已有订单、持仓、价格和资金费计算不会因暂停/恢复而引用失效。
 这两个标识不提供历史配置执行或回滚功能。内部 `/trade-encoding` 仅返回已提交成交的四个计量单位，供 K 线和价格消费者正确解码延迟事件。
 
-Trading Provider 的 `InstrumentCoreSyncService` 每轮最多发送一个控制命令，默认间隔 250 ms，并在失败后退避 5 秒。
-它使用独立维护客户端队列；确认成功后后台显示 Core 已确认，数据库保存成功不等于 Core 已应用。
-暂停、恢复与维护门控分别保存，普通恢复交易不能解除维护任务的限制。状态和审计引用随 Core 快照恢复。
-启动和 Kafka 增量均从当前配置缓存收敛；受阻的计算配置需要先完成撤单/平仓，再由后台任务重试。
+Trading Provider 的 `InstrumentCoreSyncService` 每 250 ms 检查当前配置缓存；首次注册和后续变更都使用同一条 `REGISTER_INSTRUMENT` 命令应用 Core 配置，包括交易状态、订单类型与 TIF 支持范围、市价单、Post Only 和 Reduce Only 开关。
+它使用独立维护客户端队列；确认成功后后台显示当前配置已应用，数据库保存成功不等于 Core 已应用。失败后退避 5 秒，未知结果重试时复用原命令 ID。
+Gateway 根据 Kafka 快照前置校验，Core 在订单准入时再次校验这些开关。暂停、恢复与维护门控分别保存，普通恢复交易不能解除维护任务的限制。状态和开关随 Core 快照恢复。
+启动快照和 Kafka 增量都从当前配置缓存收敛。合约类型、资产、乘数、tick、结算尺度、到期和期权行权价属于注册身份，注册后不能修改；费率、保证金、杠杆上限和风险档位等计算参数可更新。
 
 Pre-launch databases use only the root `init.sql`. Instruments retain one executable configuration per product line and symbol.
 Operational audit entries preserve actor, reason, time and before/after values. Status-only changes keep existing trading calculation references valid.

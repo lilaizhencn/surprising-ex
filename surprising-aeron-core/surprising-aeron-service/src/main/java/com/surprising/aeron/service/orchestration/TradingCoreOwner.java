@@ -374,63 +374,6 @@ public final class TradingCoreOwner {
         return state != null && state.hasMatchingDrainWork();
     }
 
-    /** 只读诊断当前 Owner 门禁的等待原因；默认压测路径不调用。 */
-    String ownerWorkDiagnostics() {
-        if (state == null) return "state=uninitialized";
-        CommandSlot pendingHead = state.pendingMatching.head();
-        return "waitingForNotification=" + commandPipeline.waitingForMatchingNotification()
-                + " completionAvailable=" + ownerCompletionAvailable()
-                + " laneCommitComplete=" + state.hasCompletedLaneCommit()
-                + " runtimeMatchingNotifications=" + state.runtimeState.hasMatchingNotifications()
-                + " runtimeSettlementNotifications=" + state.runtimeState.hasSettlementNotifications()
-                + " matcherCompletions=" + state.matcherPipeline.hasMatchingCompletions()
-                + " matchingDrainWork=" + state.hasMatchingDrainWork()
-                + " localMatchingWork=" + state.hasLocalMatchingWork()
-                + " pendingIngress=" + commandPipeline.pendingIngress().size()
-                + " commandWindow=" + commandPipeline.commandWindow().size()
-                + " matcherSubmissionDepth=" + state.matcherPipeline.submissionDepth()
-                + " matcherCompletionDepth=" + state.matcherPipeline.completionDepth()
-                + " firstPendingSequence=" + state.firstPendingMatchingSequence()
-                + " pendingHead=" + pendingHeadDiagnostics(pendingHead);
-    }
-
-    private String pendingHeadDiagnostics(CommandSlot pending) {
-        if (pending == null) return "none";
-        String state = pending.matchingLifecycleName()
-                + ":submittedShard=" + pending.submittedMatcherShard()
-                + ":matchingResult=" + (pending.matchingResult() != null)
-                + ":matchingCompletion=" + pending.hasMatchingCompletion()
-                + ":expectedLaneMask=" + pending.expectedLaneMask()
-                + ":completedLaneMask=" + pending.completedLaneMask()
-                + ":laneComplete=" + pending.complete();
-        var settlement = pending.settlementEvent();
-        var admission = pending.placeAdmission();
-        if (settlement == null) {
-            return admission == null ? state
-                    : state + ":placeAdmissionComplete=" + admission.complete()
-                    + ":placeAdmissionLane=" + admission.laneId();
-        }
-        return state + ":settlementDirect=" + settlement.direct()
-                + ":settlementMatcherOwned=" + settlement.matcherOwnedPublication()
-                + ":settlementDispatched=" + settlement.dispatched()
-                + ":settlementReady=" + settlement.ready()
-                + ":settlementResultPrepared=" + settlement.resultPrepared()
-                + ":settlementRequiredLanes=" + settlement.requiredLaneMask()
-                + ":settlementCompletedLanes=" + settlement.completedLaneMask()
-                + ":settlementComplete=" + settlement.complete();
-    }
-
-    /** 返回一次 Owner gate 未放行的精确原因；仅由显式诊断路径调用。 */
-    String ownerWorkGateReason() {
-        if (pendingIngressReady()) return "pending-ingress-ready";
-        if (commandPipeline.waitingForMatchingNotification()) {
-            return ownerCompletionAvailable() ? "completion-ready" : "waiting-no-completion";
-        }
-        if (state != null && state.hasMatchingDrainWork()) return "drain-work";
-        if (commandPipeline.pendingIngress().size() != 0) return "pending-ingress-not-ready";
-        return "no-drain-work";
-    }
-
     /**
      * 已被当前队首依赖挡住的入站命令不能把 Owner 重新拉入完整推进循环；队首完成后
      * {@link #ownerCompletionAvailable()} 或 Runtime 的本地进展门禁会再次放行。

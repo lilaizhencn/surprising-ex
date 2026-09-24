@@ -28,10 +28,9 @@ class CoreMaintenanceTest {
             assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             var denied=apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(304,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            // Registration is startup-only; the canonical object cannot be replaced after startup.
-            var edit=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
+            var sameConfig=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(config(instrument))));
-            assertThat(edit.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(sameConfig.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             try (var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(501))) {
                 var recovered=restored.tradingState().instruments().get("BTC-USDT");
                 assertThat(recovered.maintenance()).isEqualTo(
@@ -53,7 +52,8 @@ class CoreMaintenanceTest {
         return new RegisterInstrumentCommand(v.symbol(),v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
                 v.notionalMultiplierUnits(),v.priceTickUnits(),v.settleScaleUnits(),v.initialMarginRatePpm(),v.maintenanceMarginRatePpm(),
                 v.makerFeeRatePpm(),v.takerFeeRatePpm(),v.expiryEpochMillis(),v.optionType()==null?-1:v.optionType().ordinal(),v.strikePriceTicks(),
-                v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),v.riskLimitBrackets());
+                v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),
+                v.riskLimitBrackets());
     }
 
 

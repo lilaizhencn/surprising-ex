@@ -108,7 +108,7 @@ class RuntimeStateTransitionsTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeInstrumentStateTransitions.register(runtime, identities, command);
+        RuntimeInstrumentStateTransitions.applyConfiguration(runtime, identities, command);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }

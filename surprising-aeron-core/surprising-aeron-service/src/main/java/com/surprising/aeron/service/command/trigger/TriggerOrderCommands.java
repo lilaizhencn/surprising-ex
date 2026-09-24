@@ -529,7 +529,9 @@ public final class TriggerOrderCommands {
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
         var maintenanceInstrument = owner.runtimeState().instrument(trigger.symbol());
-        if (maintenanceInstrument != null) maintenanceInstrument.requireTrading(false);
+        if (maintenanceInstrument != null) {
+            maintenanceInstrument.requireOrderEnabled(trigger.orderType(), trigger.timeInForce(), false, false);
+        }
         if (owner.runtimeState().triggerOrder(trigger.triggerOrderId()) == null
                 && owner.terminalTriggerRetained(trigger.triggerOrderId(), message.header().userId(),
                 trigger.clientTriggerOrderId())) {

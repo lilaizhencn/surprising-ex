@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.command.AccountLaneOperationType;
+
 /** owner 到永久 Account Lane 的控制任务派发器；任务槽复用，完成通知不携带共享状态写入。 */
 final class ControlLaneDispatcher {
     /** 唯一派发和收集方；账户工作仍由所属 Lane 单写。 */

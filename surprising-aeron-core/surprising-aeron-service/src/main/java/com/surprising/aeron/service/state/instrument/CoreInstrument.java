@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.CoreInstrumentMaintenance;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -15,25 +16,7 @@ import java.util.Objects;
 
 public final class CoreInstrument {
     private final String symbol;
-    private final ContractType contractType;
-    private final String baseAsset;
-    private final String quoteAsset;
-    private final String settleAsset;
-    private final long notionalMultiplierUnits;
-    private final long priceTickUnits;
-    private final long settleScaleUnits;
-    private final long initialMarginRatePpm;
-    private final long maintenanceMarginRatePpm;
-    private final long makerFeeRatePpm;
-    private final long takerFeeRatePpm;
-    private final long expiryEpochMillis;
-    private final OptionType optionType;
-    private final long strikePriceTicks;
-    private final long maxLeveragePpm;
-    private final long maxPositionNotionalUnits;
-    private final long userOpenInterestLimitRatePpm;
-    private final long userOpenInterestLimitFloorUnits;
-    private final List<CoreRiskLimitBracket> riskLimitBrackets;
+    private volatile Configuration configuration;
     private volatile CoreInstrumentMaintenance maintenance;
 
     public CoreInstrument(String symbol, ContractType contractType, String baseAsset,
@@ -44,26 +27,33 @@ public final class CoreInstrument {
             long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
             List<CoreRiskLimitBracket> riskLimitBrackets,
             CoreInstrumentMaintenance maintenance) {
+        this(symbol, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+                priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
+                makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
+                maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
+                userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, InstrumentStatus.TRADING,
+                true, true, true, 0b11, 0b1111);
+    }
+
+    public CoreInstrument(String symbol, ContractType contractType, String baseAsset,
+            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
+            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
+            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
+            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
+            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
+            List<CoreRiskLimitBracket> riskLimitBrackets, CoreInstrumentMaintenance maintenance,
+            InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
+            boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask) {
         this.symbol = OrderReservation.normalizeSymbol(symbol);
-        this.contractType = Objects.requireNonNull(contractType, "contractType");
-        this.baseAsset = AssetBalance.normalizeAsset(baseAsset);
-        this.quoteAsset = AssetBalance.normalizeAsset(quoteAsset);
-        this.settleAsset = AssetBalance.normalizeAsset(settleAsset);
-        this.notionalMultiplierUnits = notionalMultiplierUnits;
-        this.priceTickUnits = priceTickUnits;
-        this.settleScaleUnits = settleScaleUnits;
-        this.initialMarginRatePpm = initialMarginRatePpm;
-        this.maintenanceMarginRatePpm = maintenanceMarginRatePpm;
-        this.makerFeeRatePpm = makerFeeRatePpm;
-        this.takerFeeRatePpm = takerFeeRatePpm;
-        this.expiryEpochMillis = expiryEpochMillis;
-        this.optionType = optionType;
-        this.strikePriceTicks = strikePriceTicks;
-        this.maxLeveragePpm = maxLeveragePpm;
-        this.maxPositionNotionalUnits = maxPositionNotionalUnits;
-        this.userOpenInterestLimitRatePpm = userOpenInterestLimitRatePpm;
-        this.userOpenInterestLimitFloorUnits = userOpenInterestLimitFloorUnits;
-        this.riskLimitBrackets = List.copyOf(Objects.requireNonNull(riskLimitBrackets, "riskLimitBrackets"));
+        this.configuration = new Configuration(Objects.requireNonNull(contractType, "contractType"),
+                AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
+                AssetBalance.normalizeAsset(settleAsset), notionalMultiplierUnits, priceTickUnits,
+                settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm,
+                takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks, maxLeveragePpm,
+                maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits,
+                List.copyOf(Objects.requireNonNull(riskLimitBrackets, "riskLimitBrackets")),
+                Objects.requireNonNull(instrumentStatus, "instrumentStatus"), marketOrderEnabled,
+                postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask);
         this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
         validate();
     }
@@ -84,25 +74,37 @@ public final class CoreInstrument {
     }
 
     public String symbol() { return symbol; }
-    public ContractType contractType() { return contractType; }
-    public String baseAsset() { return baseAsset; }
-    public String quoteAsset() { return quoteAsset; }
-    public String settleAsset() { return settleAsset; }
-    public long notionalMultiplierUnits() { return notionalMultiplierUnits; }
-    public long priceTickUnits() { return priceTickUnits; }
-    public long settleScaleUnits() { return settleScaleUnits; }
-    public long initialMarginRatePpm() { return initialMarginRatePpm; }
-    public long maintenanceMarginRatePpm() { return maintenanceMarginRatePpm; }
-    public long makerFeeRatePpm() { return makerFeeRatePpm; }
-    public long takerFeeRatePpm() { return takerFeeRatePpm; }
-    public long expiryEpochMillis() { return expiryEpochMillis; }
-    public OptionType optionType() { return optionType; }
-    public long strikePriceTicks() { return strikePriceTicks; }
-    public long maxLeveragePpm() { return maxLeveragePpm; }
-    public long maxPositionNotionalUnits() { return maxPositionNotionalUnits; }
-    public long userOpenInterestLimitRatePpm() { return userOpenInterestLimitRatePpm; }
-    public long userOpenInterestLimitFloorUnits() { return userOpenInterestLimitFloorUnits; }
-    public List<CoreRiskLimitBracket> riskLimitBrackets() { return riskLimitBrackets; }
+    public Configuration configuration() { return configuration; }
+    public void updateConfiguration(CoreInstrument updated) {
+        if (updated == null || !symbol.equals(updated.symbol)) throw new IllegalArgumentException("instrument symbol mismatch");
+        this.configuration = updated.configuration;
+    }
+    public void restoreConfiguration(Configuration configuration) { this.configuration = Objects.requireNonNull(configuration); }
+    public ContractType contractType() { return configuration.contractType(); }
+    public String baseAsset() { return configuration.baseAsset(); }
+    public String quoteAsset() { return configuration.quoteAsset(); }
+    public String settleAsset() { return configuration.settleAsset(); }
+    public long notionalMultiplierUnits() { return configuration.notionalMultiplierUnits(); }
+    public long priceTickUnits() { return configuration.priceTickUnits(); }
+    public long settleScaleUnits() { return configuration.settleScaleUnits(); }
+    public long initialMarginRatePpm() { return configuration.initialMarginRatePpm(); }
+    public long maintenanceMarginRatePpm() { return configuration.maintenanceMarginRatePpm(); }
+    public long makerFeeRatePpm() { return configuration.makerFeeRatePpm(); }
+    public long takerFeeRatePpm() { return configuration.takerFeeRatePpm(); }
+    public long expiryEpochMillis() { return configuration.expiryEpochMillis(); }
+    public OptionType optionType() { return configuration.optionType(); }
+    public long strikePriceTicks() { return configuration.strikePriceTicks(); }
+    public long maxLeveragePpm() { return configuration.maxLeveragePpm(); }
+    public long maxPositionNotionalUnits() { return configuration.maxPositionNotionalUnits(); }
+    public long userOpenInterestLimitRatePpm() { return configuration.userOpenInterestLimitRatePpm(); }
+    public long userOpenInterestLimitFloorUnits() { return configuration.userOpenInterestLimitFloorUnits(); }
+    public List<CoreRiskLimitBracket> riskLimitBrackets() { return configuration.riskLimitBrackets(); }
+    public InstrumentStatus instrumentStatus() { return configuration.instrumentStatus(); }
+    public boolean marketOrderEnabled() { return configuration.marketOrderEnabled(); }
+    public boolean postOnlyEnabled() { return configuration.postOnlyEnabled(); }
+    public boolean reduceOnlyEnabled() { return configuration.reduceOnlyEnabled(); }
+    public int supportedOrderTypeMask() { return configuration.supportedOrderTypeMask(); }
+    public int supportedTimeInForceMask() { return configuration.supportedTimeInForceMask(); }
     public CoreInstrumentMaintenance maintenance() { return maintenance; }
 
     public void updateMaintenance(CoreInstrumentMaintenance maintenance) {
@@ -110,10 +112,47 @@ public final class CoreInstrument {
     }
 
     public void requireTrading(boolean reduceOnly) {
+        InstrumentStatus status = instrumentStatus();
+        if (status != InstrumentStatus.TRADING
+                && !(status == InstrumentStatus.SETTLING && reduceOnly)) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_TRADING",
+                    "instrument status does not allow this order");
+        }
+        if (reduceOnly && contractType().productLine() == ProductLine.SPOT) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
+                    "spot assets do not support reduce-only orders");
+        }
         var mode = maintenance().mode();
         if (mode != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.TRADING
                 && !(mode == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.REDUCE_ONLY && reduceOnly)) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_TRADING", "instrument is under maintenance");
+        }
+        if (reduceOnly && !reduceOnlyEnabled()) {
+            throw new CoreStateRejectedException("REDUCE_ONLY_DISABLED", "reduce-only orders are disabled");
+        }
+    }
+
+    public void requireOrderEnabled(com.surprising.aeron.protocol.PlaceOrderCommand command) {
+        requireOrderEnabled(command.orderType(), command.timeInForce(), command.postOnly(), command.reduceOnly());
+    }
+
+    public void requireOrderEnabled(com.surprising.aeron.protocol.CoreOrderType orderType,
+                                    com.surprising.aeron.protocol.CoreTimeInForce timeInForce,
+                                    boolean postOnly, boolean reduceOnly) {
+        requireTrading(reduceOnly);
+        int orderTypeBit = 1 << (orderType.wireCode() - 1);
+        int timeInForceBit = 1 << (timeInForce.wireCode() - 1);
+        if ((supportedOrderTypeMask() & orderTypeBit) == 0) {
+            throw new CoreStateRejectedException("ORDER_TYPE_DISABLED", "order type is not enabled");
+        }
+        if ((supportedTimeInForceMask() & timeInForceBit) == 0) {
+            throw new CoreStateRejectedException("TIME_IN_FORCE_DISABLED", "time in force is not enabled");
+        }
+        if (orderType == com.surprising.aeron.protocol.CoreOrderType.MARKET && !marketOrderEnabled()) {
+            throw new CoreStateRejectedException("MARKET_ORDER_DISABLED", "market orders are disabled");
+        }
+        if (postOnly && !postOnlyEnabled()) {
+            throw new CoreStateRejectedException("POST_ONLY_DISABLED", "post-only orders are disabled");
         }
     }
 
@@ -125,37 +164,45 @@ public final class CoreInstrument {
     }
 
     private void validate() {
-        if (baseAsset.equals(quoteAsset)) {
+        Configuration configuration = this.configuration;
+        if (configuration.baseAsset().equals(configuration.quoteAsset())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "base and quote assets must differ");
         }
-        if (notionalMultiplierUnits <= 0 || priceTickUnits <= 0
-                || settleScaleUnits <= 0 || initialMarginRatePpm <= 0 || maintenanceMarginRatePpm <= 0
-                || maxLeveragePpm < 1_000_000L || maxPositionNotionalUnits <= 0
-                || userOpenInterestLimitRatePpm < 0 || userOpenInterestLimitFloorUnits <= 0
-                || riskLimitBrackets.isEmpty()) {
+        if (configuration.notionalMultiplierUnits() <= 0 || configuration.priceTickUnits() <= 0
+                || configuration.settleScaleUnits() <= 0 || configuration.initialMarginRatePpm() <= 0
+                || configuration.maintenanceMarginRatePpm() <= 0
+                || configuration.maxLeveragePpm() < 1_000_000L || configuration.maxPositionNotionalUnits() <= 0
+                || configuration.userOpenInterestLimitRatePpm() < 0
+                || configuration.userOpenInterestLimitFloorUnits() <= 0
+                || configuration.riskLimitBrackets().isEmpty() || configuration.instrumentStatus() == null
+                || configuration.supportedOrderTypeMask() <= 0
+                || (configuration.supportedOrderTypeMask() & ~0b11) != 0
+                || configuration.supportedTimeInForceMask() <= 0
+                || (configuration.supportedTimeInForceMask() & ~0b1111) != 0) {
             throw new IllegalArgumentException("invalid instrument");
         }
         long previousCap = 0;
         int expectedBracketNo = 1;
-        for (CoreRiskLimitBracket bracket : riskLimitBrackets) {
+        for (CoreRiskLimitBracket bracket : configuration.riskLimitBrackets()) {
             if (bracket.bracketNo() != expectedBracketNo++
                     || bracket.notionalFloorUnits() != previousCap
-                    || bracket.maxLeveragePpm() > maxLeveragePpm) {
+                    || bracket.maxLeveragePpm() > configuration.maxLeveragePpm()) {
                 throw new IllegalArgumentException("risk limit brackets must be contiguous and bounded");
             }
             previousCap = bracket.notionalCapUnits();
         }
-        if (previousCap < maxPositionNotionalUnits) {
+        if (previousCap < configuration.maxPositionNotionalUnits()) {
             throw new IllegalArgumentException("risk limit brackets must cover max position notional");
         }
-        if (contractType.isDelivery() && expiryEpochMillis <= 0) {
+        if (configuration.contractType().isDelivery() && configuration.expiryEpochMillis() <= 0) {
             throw new IllegalArgumentException("delivery instrument requires expiry time");
         }
-        if (contractType.isOption()) {
-            if (expiryEpochMillis <= 0 || optionType == null || strikePriceTicks <= 0) {
+        if (configuration.contractType().isOption()) {
+            if (configuration.expiryEpochMillis() <= 0 || configuration.optionType() == null
+                    || configuration.strikePriceTicks() <= 0) {
                 throw new IllegalArgumentException("option instrument requires expiry, type, and strike");
             }
-        } else if (optionType != null || strikePriceTicks != 0) {
+        } else if (configuration.optionType() != null || configuration.strikePriceTicks() != 0) {
             throw new IllegalArgumentException("non-option instrument contains option parameters");
         }
     }
@@ -164,36 +211,21 @@ public final class CoreInstrument {
     public boolean equals(Object other) {
         if (this == other) return true;
         if (!(other instanceof CoreInstrument that)) return false;
-        return notionalMultiplierUnits == that.notionalMultiplierUnits
-                && priceTickUnits == that.priceTickUnits && settleScaleUnits == that.settleScaleUnits
-                && initialMarginRatePpm == that.initialMarginRatePpm
-                && maintenanceMarginRatePpm == that.maintenanceMarginRatePpm
-                && makerFeeRatePpm == that.makerFeeRatePpm && takerFeeRatePpm == that.takerFeeRatePpm
-                && expiryEpochMillis == that.expiryEpochMillis && strikePriceTicks == that.strikePriceTicks
-                && maxLeveragePpm == that.maxLeveragePpm
-                && maxPositionNotionalUnits == that.maxPositionNotionalUnits
-                && userOpenInterestLimitRatePpm == that.userOpenInterestLimitRatePpm
-                && userOpenInterestLimitFloorUnits == that.userOpenInterestLimitFloorUnits
-                && symbol.equals(that.symbol) && contractType == that.contractType
-                && baseAsset.equals(that.baseAsset) && quoteAsset.equals(that.quoteAsset)
-                && settleAsset.equals(that.settleAsset) && optionType == that.optionType
-                && riskLimitBrackets.equals(that.riskLimitBrackets) && maintenance.equals(that.maintenance);
+        return symbol.equals(that.symbol) && configuration.equals(that.configuration)
+                && maintenance.equals(that.maintenance);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(symbol, contractType, baseAsset, quoteAsset, settleAsset,
-                notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
-                maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis,
-                optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits,
-                userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets);
+        return Objects.hash(symbol, configuration);
     }
 
     @Override
     public String toString() {
-        return "CoreInstrument[symbol=" + symbol + ", contractType=" + contractType
-                + ", baseAsset=" + baseAsset + ", quoteAsset=" + quoteAsset
-                + ", settleAsset=" + settleAsset + ", maintenance=" + maintenance + ']';
+        Configuration current = configuration;
+        return "CoreInstrument[symbol=" + symbol + ", contractType=" + current.contractType()
+                + ", baseAsset=" + current.baseAsset() + ", quoteAsset=" + current.quoteAsset()
+                + ", settleAsset=" + current.settleAsset() + ", maintenance=" + maintenance + ']';
     }
 
     public static CoreInstrument from(ProductLine productLine, RegisterInstrumentCommand command) {
@@ -221,6 +253,25 @@ public final class CoreInstrument {
                 command.makerFeeRatePpm(), command.takerFeeRatePpm(), command.expiryEpochMillis(),
                 optionType, command.strikePriceTicks(), command.maxLeveragePpm(),
                 command.maxPositionNotionalUnits(), command.userOpenInterestLimitRatePpm(),
-                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets());
+                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets(),
+                CoreInstrumentMaintenance.TRADING, InstrumentStatus.values()[command.instrumentStatusCode()],
+                command.marketOrderEnabled(), command.postOnlyEnabled(), command.reduceOnlyEnabled(),
+                command.supportedOrderTypeMask(), command.supportedTimeInForceMask());
+    }
+
+    public record Configuration(ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+                                long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+                                long initialMarginRatePpm, long maintenanceMarginRatePpm,
+                                long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+                                OptionType optionType, long strikePriceTicks, long maxLeveragePpm,
+                                long maxPositionNotionalUnits, long userOpenInterestLimitRatePpm,
+                                long userOpenInterestLimitFloorUnits, List<CoreRiskLimitBracket> riskLimitBrackets,
+                                InstrumentStatus instrumentStatus, boolean marketOrderEnabled,
+                                boolean postOnlyEnabled, boolean reduceOnlyEnabled, int supportedOrderTypeMask,
+                                int supportedTimeInForceMask) {
+        public Configuration {
+            riskLimitBrackets = List.copyOf(riskLimitBrackets);
+            Objects.requireNonNull(instrumentStatus, "instrumentStatus");
+        }
     }
 }

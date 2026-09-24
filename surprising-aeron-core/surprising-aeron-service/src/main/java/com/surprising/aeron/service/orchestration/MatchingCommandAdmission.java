@@ -346,7 +346,7 @@ final class MatchingCommandAdmission {
         }
         PlaceOrderCommand child = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
         var instrument = owner.runtimeState.instrument(child.symbol());
-        if (instrument != null) instrument.requireTrading(false);
+        if (instrument != null) instrument.requireOrderEnabled(child);
         var order = owner.runtimeState.order(child.orderId());
         if (order == null || order.userId() != trigger.userId()) {
             throw new CoreStateRejectedException("ORDER_NOT_FOUND", "trigger child reservation is missing");

@@ -329,10 +329,11 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 ## Core Instrument 启动绑定
 
-- `InstrumentCoreSyncService` 在缓存首次就绪时冻结本产品线的启动集合，并在同一次启动同步中按 symbol 顺序注册全部 instrument。
-- Core 为每个 symbol 只创建一次 canonical `CoreInstrument`；订单、持仓、mark、触发单、撮合结算和账户 Lane 直接共享该对象引用，协议、撮合 evidence 与快照不携带 instrument 版本字段。
-- 运行中 instrument 配置事件不会替换或再次注册 Core 对象。暂停、只减仓、结算和关闭只通过独立 maintenance 命令修改 canonical 对象中的维护状态。
-- tick size、quantity step、multiplier、contract type、settlement asset 或风险参数需要变化时，必须停止业务流量并以新的启动配置重启对应产品线 Core，不能热替换。
+- `InstrumentCoreSyncService` 每 250 ms 检查本产品线当前配置缓存；首次注册和后续配置变更都使用同一条 `REGISTER_INSTRUMENT` 命令，按 symbol 顺序收敛到 Core。交易状态、支持的订单类型/TIF，以及市价单、Post Only、Reduce Only 开关也随此命令同步。
+- Core 为每个 symbol 保留稳定的 canonical `CoreInstrument` 对象；订单、持仓、mark、触发单、撮合结算和账户 Lane 共享该引用。计算配置作为一个不可变值原子替换，维护门控保持独立。
+- Gateway 用最新 Instrument 快照做前置校验；Core 在普通下单、改单/替换和触发单准入时再按已应用配置做最终校验。Core 配置快照包含这些开关，恢复后保持一致。
+- Core 对相同配置不重复变更状态；未知命令结果重试复用原命令 ID。
+- 合约类型、资产、乘数、tick、结算尺度、到期和期权行权价构成注册身份，注册后不可修改。手续费、保证金、杠杆上限、持仓上限和风险档位等计算参数通过同一配置命令更新。
 
 ## 幂等和多节点
 

@@ -15,7 +15,7 @@ public final class InstrumentConfigurationCommands {
 
     public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe());
-        RuntimeInstrumentStateTransitions.register(
+        RuntimeInstrumentStateTransitions.applyConfiguration(
                 owner.runtimeState(), owner.identities(), command);
         owner.requestCommitPublication();
     }

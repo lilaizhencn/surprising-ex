@@ -243,6 +243,20 @@ class TradingCommandCodecTest {
     }
 
     @Test
+    void registerInstrumentRoundTripPreservesTradingAdmissionSettings() {
+        var command = new RegisterInstrumentCommand("BTC-USDT", 1,
+                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
+                0, -1, 0, 10_000_000, 1_000_000, 0, 1_000_000,
+                java.util.List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000,
+                        100_000, 50_000, 1_000_000)),
+                3,
+                false, false, true, 0b01, 0b0011);
+
+        assertThat(TradingCommandCodec.decodeRegisterInstrument(
+                TradingCommandCodec.encodeRegisterInstrument(command))).isEqualTo(command);
+    }
+
+    @Test
     void responseRoundTripPreservesOriginalCommandStatusAndData() {
         CoreResponse response = new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.REJECTED,
                 CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 9, new byte[] {1, 2, 3});

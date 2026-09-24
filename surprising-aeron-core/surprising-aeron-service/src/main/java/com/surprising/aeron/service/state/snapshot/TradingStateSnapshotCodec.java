@@ -42,7 +42,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 33;
+    private static final int VERSION = 34;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -142,6 +142,12 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(instrument.maintenance().taskId());
             writer.intValue(instrument.maintenance().mode().ordinal());
             writer.longValue(instrument.maintenance().settlementPriceTicks());
+            writer.intValue(instrument.instrumentStatus().ordinal());
+            writer.byteValue(instrument.marketOrderEnabled() ? 1 : 0);
+            writer.byteValue(instrument.postOnlyEnabled() ? 1 : 0);
+            writer.byteValue(instrument.reduceOnlyEnabled() ? 1 : 0);
+            writer.intValue(instrument.supportedOrderTypeMask());
+            writer.intValue(instrument.supportedTimeInForceMask());
             writer.intValue(instrument.riskLimitBrackets().size());
             instrument.riskLimitBrackets().forEach(bracket -> {
                 writer.intValue(bracket.bracketNo());
@@ -445,6 +451,15 @@ public final class TradingStateSnapshotCodec {
             if (maintenanceMode < 0 || maintenanceMode >= maintenanceModes.length) throw new ProtocolException("invalid maintenance mode");
             var maintenance = new com.surprising.aeron.protocol.CoreInstrumentMaintenance(maintenanceTaskId,
                     maintenanceModes[maintenanceMode], reader.nonNegativeLong("maintenance price"));
+            int instrumentStatus = reader.intValue();
+            if (instrumentStatus < 0 || instrumentStatus >= com.surprising.instrument.api.model.InstrumentStatus.values().length) {
+                throw new ProtocolException("invalid instrument status: " + instrumentStatus);
+            }
+            boolean marketOrderEnabled = reader.booleanValue();
+            boolean postOnlyEnabled = reader.booleanValue();
+            boolean reduceOnlyEnabled = reader.booleanValue();
+            int supportedOrderTypeMask = reader.intValue();
+            int supportedTimeInForceMask = reader.intValue();
             int bracketCount = reader.count("risk limit brackets");
             if (bracketCount == 0) throw new ProtocolException("risk limit brackets are empty");
             java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
@@ -462,7 +477,10 @@ public final class TradingStateSnapshotCodec {
                     initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
                     optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
                     strikePrice, maxLeverage, maxPosition, openInterestRate, openInterestFloor,
-                    java.util.List.copyOf(brackets), maintenance);
+                    java.util.List.copyOf(brackets), maintenance,
+                    com.surprising.instrument.api.model.InstrumentStatus.values()[instrumentStatus],
+                    marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
+                    supportedOrderTypeMask, supportedTimeInForceMask);
             putUnique(instruments, symbol, instrument);
         }
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();

@@ -90,7 +90,7 @@ public final class CoreOrderDecisionResolver {
                                                     long clusterTimestamp, boolean lifecycleSettled,
                                                     PlaceOrderCommand intent) {
         if (!instrument.symbol().equals(intent.symbol())) throw new IllegalArgumentException("decision context symbol mismatch");
-        instrument.requireTrading(intent.reduceOnly());
+        instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis())
             throw new CoreStateRejectedException(lifecycleSettled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
@@ -125,6 +125,7 @@ public final class CoreOrderDecisionResolver {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
+        instrument.requireOrderEnabled(intent);
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
         CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.symbol());

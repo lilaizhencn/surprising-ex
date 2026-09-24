@@ -57,7 +57,6 @@ case "${JMH_PROFILER}" in
   gc) JMH_PROFILE_ARGS=(-prof gc) ;;
   *) echo "ASYNC_JMH_PROFILER must be empty or gc" >&2; exit 2 ;;
 esac
-OWNER_POLL_DIAGNOSTICS="${ASYNC_OWNER_POLL_DIAGNOSTICS:-false}"
 LANE_STAGE_LANES="${ASYNC_LANE_STAGE_LANES:-1}"
 MATCHER_STAGE_LANES="${ASYNC_MATCHER_STAGE_LANES:-1}"
 ONLY_STAGE="${ASYNC_ONLY_STAGE:-}"
@@ -86,8 +85,8 @@ if [[ "${SKIP_BUILD}" != true ]]; then
 fi
 [[ -s "${SERVICE_JAR}" && -s "${BENCHMARK_JAR}" ]] || { echo "Build artifacts are missing" >&2; exit 2; }
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
-printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nownerPollDiagnostics=%s\nmatcherWaitStrategy=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
-  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${OWNER_POLL_DIAGNOSTICS}" "${MATCHER_WAIT_STRATEGY}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
+printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
+  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
 
 NODE_PID=""
 NODE_LANES="${ACCOUNT_LANES}"
@@ -115,7 +114,6 @@ start_node() {
     -XX:NativeMemoryTracking=summary
     -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1
     -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0
-    "-Dsurprising.owner.poll-diagnostics=${OWNER_POLL_DIAGNOSTICS}"
     "-Dsurprising.aeron.account-lanes=${NODE_LANES}" "-Dsurprising.aeron.matching-engines=${NODE_MATCHERS}"
     "-Dsurprising.aeron.owner-command-window=${window}" "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
     "-Dsurprising.aeron.matcher-pipeline-wait-strategy=${MATCHER_PIPELINE_WAIT_STRATEGY}"

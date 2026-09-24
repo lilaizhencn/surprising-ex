@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.command.AccountLaneOperationType;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.account.TransferRuntime;
@@ -90,10 +91,10 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof CoreLeverageKey key
-                    && userId == key.userId()
-                    && symbol.equals(key.symbol())
-                    && marginMode == key.marginMode();
+            return other instanceof CoreLeverageKey(long id, String symbol1, CoreMarginMode mode)
+                    && userId == id
+                    && symbol.equals(symbol1)
+                    && marginMode == mode;
         }
     }
 
@@ -2709,6 +2710,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         globalRollback.captureRegisteredInstrument(instrument.symbol());
         instruments.put(instrument.symbol(), instrument);
+    }
+
+    void updateInstrumentConfiguration(CoreInstrument instrument, CoreInstrument updated) {
+        assertOwner();
+        rejectUnsupportedOrderBatchMutation("instrument configuration");
+        if (instrument == null || updated == null || instruments.get(instrument.symbol()) != instrument
+                || !instrument.symbol().equals(updated.symbol())) {
+            throw new IllegalArgumentException("invalid canonical instrument configuration update");
+        }
+        globalRollback.captureInstrumentConfiguration(instrument);
+        instrument.updateConfiguration(updated);
     }
 
     void updateInstrumentMaintenance(

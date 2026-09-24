@@ -1,5 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.state.account.TransferRuntime;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
@@ -12,7 +11,6 @@ import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.List;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 
 final class SectionedCoreSnapshotValidation {
 

@@ -460,7 +460,7 @@ public final class TradingCommandCodec {
         byte[] settle = text(command.settleAsset());
         int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
         ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + symbol.length + base.length + quote.length + settle.length
-                        + Integer.BYTES * 4 + Long.BYTES * 13 + bracketBytes)
+                        + Integer.BYTES * 7 + Long.BYTES * 13 + Byte.BYTES * 3 + bracketBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) symbol.length).put(symbol)
                 .putInt(command.contractTypeCode())
@@ -483,6 +483,12 @@ public final class TradingCommandCodec {
                     .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm())
                     .putLong(bracket.optionMarginFactorPpm());
         }
+        buffer.putInt(command.instrumentStatusCode())
+                .put((byte) (command.marketOrderEnabled() ? 1 : 0))
+                .put((byte) (command.postOnlyEnabled() ? 1 : 0))
+                .put((byte) (command.reduceOnlyEnabled() ? 1 : 0))
+                .putInt(command.supportedOrderTypeMask())
+                .putInt(command.supportedTimeInForceMask());
         return buffer.array();
     }
 
@@ -517,16 +523,24 @@ public final class TradingCommandCodec {
         if (bracketCount <= 0 || bracketCount > 128) {
             throw new ProtocolException("invalid risk bracket count");
         }
-        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6));
+        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6)
+                + Integer.BYTES + Byte.BYTES * 3 + Integer.BYTES * 2);
         java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
         for (int index = 0; index < bracketCount; index++) {
             brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
                     buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
+        int statusCode = buffer.getInt();
+        boolean marketOrderEnabled = readBoolean(buffer);
+        boolean postOnlyEnabled = readBoolean(buffer);
+        boolean reduceOnlyEnabled = readBoolean(buffer);
+        int supportedOrderTypeMask = buffer.getInt();
+        int supportedTimeInForceMask = buffer.getInt();
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(symbol, contractTypeCode,
                 base, quote, settle, multiplier, priceTick, settleScale, initialMargin, maintenanceMargin,
                 makerFee, takerFee, expiry, optionType, strike, maxLeverage, maxPosition, openInterestRate,
-                openInterestFloor, brackets);
+                openInterestFloor, brackets, statusCode, marketOrderEnabled, postOnlyEnabled,
+                reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask);
         requireConsumed(buffer);
         return command;
     }

@@ -32,6 +32,7 @@ final class RuntimeGlobalRollback {
     private ConcurrentHashMap<Integer, Before<RiskScanRuntime>> riskScans = new ConcurrentHashMap<>();
     private final HashSet<String> registeredInstruments = new HashSet<>();
     private ConcurrentHashMap<String, CoreInstrumentMaintenance> instrumentMaintenance = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, CoreInstrument.Configuration> instrumentConfigurations = new ConcurrentHashMap<>();
     private ConcurrentHashMap<Long, Before<TransferRuntime>> pendingTransfers = new ConcurrentHashMap<>();
     private ConcurrentHashMap<Long, Before<CoreFeePolicyState>> feePolicies = new ConcurrentHashMap<>();
     private long nextLiquidationIdBefore;
@@ -93,6 +94,10 @@ final class RuntimeGlobalRollback {
         instrumentMaintenance.computeIfAbsent(instrument.symbol(), symbol -> instrument.maintenance());
     }
 
+    void captureInstrumentConfiguration(CoreInstrument instrument) {
+        instrumentConfigurations.computeIfAbsent(instrument.symbol(), symbol -> instrument.configuration());
+    }
+
     void capturePendingTransfer(long transferId, TransferRuntime current) {
         pendingTransfers.computeIfAbsent(transferId, id -> new Before<>(current));
     }
@@ -130,7 +135,7 @@ final class RuntimeGlobalRollback {
         return !liquidations.isEmpty() || !riskSnapshots.isEmpty() || !leverages.isEmpty()
                 || !algoOrders.isEmpty() || !triggerOrders.isEmpty() || !timers.isEmpty()
                 || !markPrices.isEmpty() || !riskScans.isEmpty() || !registeredInstruments.isEmpty()
-                || !instrumentMaintenance.isEmpty() || !pendingTransfers.isEmpty()
+                || !instrumentMaintenance.isEmpty() || !instrumentConfigurations.isEmpty() || !pendingTransfers.isEmpty()
                 || !feePolicies.isEmpty() || nextLiquidationIdChanged || marketRevisionChanged
                 || riskScanControlChanged;
     }
@@ -197,6 +202,10 @@ final class RuntimeGlobalRollback {
             CoreInstrument instrument = state.instruments.get(symbol);
             if (instrument != null) instrument.updateMaintenance(maintenance);
         });
+        instrumentConfigurations.forEach((symbol, configuration) -> {
+            CoreInstrument instrument = state.instruments.get(symbol);
+            if (instrument != null) instrument.restoreConfiguration(configuration);
+        });
         pendingTransfers.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.pendingTransfers, id, before.value()));
         feePolicies.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.feePolicies, id, before.value()));
         if (nextLiquidationIdChanged) state.nextLiquidationId = nextLiquidationIdBefore;
@@ -215,6 +224,7 @@ final class RuntimeGlobalRollback {
         riskScans = clearCaptured(riskScans);
         registeredInstruments.clear();
         instrumentMaintenance = clearCaptured(instrumentMaintenance);
+        instrumentConfigurations = clearCaptured(instrumentConfigurations);
         pendingTransfers = clearCaptured(pendingTransfers);
         feePolicies = clearCaptured(feePolicies);
         nextLiquidationIdChanged = false;

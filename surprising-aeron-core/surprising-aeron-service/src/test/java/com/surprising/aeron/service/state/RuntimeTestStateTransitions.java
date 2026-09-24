@@ -84,10 +84,6 @@ final class RuntimeTestStateTransitions {
         });
     }
 
-    TradingCoreState placeOrder(TradingCoreState before, long userId, PlaceOrderCommand command, UUID commandId) {
-        return placeOrder(before, userId, command, commandId, 0, new ActiveOrderIndex(before));
-    }
-
     TradingCoreState placeOrder(TradingCoreState before, long userId, PlaceOrderCommand command,
                                 UUID commandId, long openInterestSteps, ActiveOrderIndex activeOrders) {
         return mutate(before, (runtime, identities) -> {
@@ -131,11 +127,6 @@ final class RuntimeTestStateTransitions {
     }
 
     FundingApplication applyFundingWithFacts(TradingCoreState before, ApplyFundingCommand command,
-                                              Iterable<Long> userIds) {
-        return applyFundingWithFacts(before, command, userIds, null);
-    }
-
-    FundingApplication applyFundingWithFacts(TradingCoreState before, ApplyFundingCommand command,
                                               Iterable<Long> userIds, UUID chunkCommandId) {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
@@ -170,11 +161,6 @@ final class RuntimeTestStateTransitions {
 
     TradingCoreState settleInstrument(TradingCoreState before, SettleInstrumentCommand command) {
         return settleInstrumentWithProgress(before, command, null, null, null).state();
-    }
-
-    TradingCoreState settleInstrument(TradingCoreState before, SettleInstrumentCommand command,
-                                      Iterable<Long> userIds) {
-        return settleInstrumentWithProgress(before, command, userIds, null, null).state();
     }
 
     TradingCoreState executeLiquidation(TradingCoreState before, ExecuteLiquidationCommand command) {

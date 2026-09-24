@@ -58,7 +58,6 @@ final class MatcherSettlementDispatcher {
         owner.assertOwner();
         if (admission == null) throw new IllegalArgumentException("place admission is missing");
         ResolvedPlaceOrder resolved = admission.preparedOrder();
-        if (resolved == null) throw new IllegalArgumentException("place admission order is missing");
         owner.ensureMatcherSettlementDispatchCapacity(laneMask);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
@@ -82,14 +81,6 @@ final class MatcherSettlementDispatcher {
     MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
             com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
-            long timestamp, long position, List<Long> cancellations) {
-        return prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
-                identities, timestamp, position, cancellations, null);
-    }
-
-    MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
-            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
-            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
         var resolved = admission.resolved();
@@ -99,13 +90,6 @@ final class MatcherSettlementDispatcher {
                 commandId, shard, identities, timestamp, position, cancellations, resultTarget);
         event.replacement(admission, identities.assetId(resolved.reservationAsset()));
         return event;
-    }
-
-    MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
-            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
-            long timestamp, long position) {
-        return prepareDirectCancellation(sequence, order, commandId, shard, identities,
-                timestamp, position, null);
     }
 
     MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,

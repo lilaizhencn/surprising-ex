@@ -11,8 +11,8 @@ public final class RuntimeInstrumentStateTransitions {
     private RuntimeInstrumentStateTransitions() {
     }
 
-    public static void register(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                         RegisterInstrumentCommand command) {
+    public static void applyConfiguration(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                         RegisterInstrumentCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument update");
         }
@@ -23,11 +23,39 @@ public final class RuntimeInstrumentStateTransitions {
                 || runtime.treasury().lifecycleProgress(symbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "instrument lifecycle is in progress");
         }
-        identities.assetId(instrument.baseAsset());
-        identities.assetId(instrument.quoteAsset());
-        identities.assetId(instrument.settleAsset());
-        runtime.registerInstrument(instrument);
+        CoreInstrument current = runtime.instrument(instrument.symbol());
+        if (current == null) {
+            identities.assetId(instrument.baseAsset());
+            identities.assetId(instrument.quoteAsset());
+            identities.assetId(instrument.settleAsset());
+            runtime.registerInstrument(instrument);
+        } else {
+            if (!sameInstrumentIdentity(current, instrument)) {
+                throw new CoreStateRejectedException("INSTRUMENT_IDENTITY_IMMUTABLE",
+                        "contract identity and price units cannot change after registration");
+            }
+            if (current.configuration().equals(instrument.configuration())) return;
+            identities.assetId(instrument.baseAsset());
+            identities.assetId(instrument.quoteAsset());
+            identities.assetId(instrument.settleAsset());
+            runtime.updateInstrumentConfiguration(current, instrument);
+        }
         runtime.incrementCommandRevision();
+    }
+
+    private static boolean sameInstrumentIdentity(CoreInstrument current, CoreInstrument updated) {
+        var before = current.configuration();
+        var after = updated.configuration();
+        return before.contractType() == after.contractType()
+                && before.baseAsset().equals(after.baseAsset())
+                && before.quoteAsset().equals(after.quoteAsset())
+                && before.settleAsset().equals(after.settleAsset())
+                && before.notionalMultiplierUnits() == after.notionalMultiplierUnits()
+                && before.priceTickUnits() == after.priceTickUnits()
+                && before.settleScaleUnits() == after.settleScaleUnits()
+                && before.expiryEpochMillis() == after.expiryEpochMillis()
+                && before.optionType() == after.optionType()
+                && before.strikePriceTicks() == after.strikePriceTicks();
     }
 
     public static void updateMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
