@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.orchestration.ClusterServiceEgress;
 import com.surprising.aeron.service.orchestration.TradingOwnerLoop;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.ClusterCoreSnapshotTransfer;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
@@ -17,7 +17,6 @@ import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.AgentTerminationException;
-import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -30,11 +29,9 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
-    private static final long DEADLINE_NS = java.util.concurrent.TimeUnit.SECONDS.toNanos(Long.getLong(
-            "surprising.aeron.snapshot-timeout-seconds", 300L));
-
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
+    private final ClusterCoreSnapshotTransfer snapshotTransfer = new ClusterCoreSnapshotTransfer();
     private Cluster cluster;
 
     /** Spring 使用的构造方法；注入已配置好的 Owner 与响应出口。 */
@@ -70,7 +67,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     public void onStart(Cluster cluster, Image snapshot) {
         this.cluster = cluster;
         egress.start(cluster);
-        owner.start(cluster, readSnapshot(snapshot));
+        owner.start(cluster, snapshotTransfer.read(snapshot, cluster));
     }
 
     /**
@@ -196,24 +193,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
         var snapshot = owner.captureSnapshotSections(cluster.logPosition(), cluster.time());
-        long deadline = System.nanoTime() + DEADLINE_NS;
-        for (byte[] chunk : snapshot.chunks()) {
-            UnsafeBuffer buffer = new UnsafeBuffer(chunk);
-            for (int offset = 0; offset < chunk.length;) {
-                int length = Math.min(publication.maxPayloadLength(), chunk.length - offset);
-                long result = publication.offer(buffer, offset, length);
-                if (result >= 0) {
-                    offset += length;
-                } else {
-                    if (result != io.aeron.Publication.BACK_PRESSURED
-                            && result != io.aeron.Publication.ADMIN_ACTION
-                            && result != io.aeron.Publication.NOT_CONNECTED) {
-                        throw new IllegalStateException("snapshot publication failed: " + result);
-                    }
-                    awaitProgress(deadline);
-                }
-            }
-        }
+        snapshotTransfer.write(snapshot, publication, this::awaitProgress);
     }
 
     /** 捕获当前交易运行态快照，供诊断和基准测试的恢复检查使用；Cluster 正式快照走 {@link #onTakeSnapshot(ExclusivePublication)}。 */
@@ -237,7 +217,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     }
 
     /**
-     * 快照读写发生背压时执行一次有界等待：检查 Owner 和超时状态、排空响应，再让出 Cluster 线程。
+     * 快照写入发生背压时执行一次有界等待：检查 Owner 和超时状态、排空响应，再让出 Cluster 线程。
      *
      * @param deadline 本次快照操作允许继续等待到达的单调时钟时间点
      */
@@ -250,23 +230,4 @@ public final class AeronTradingClusterService implements ClusteredService {
         cluster.idleStrategy().idle();
     }
 
-    /**
-     * 将 Cluster 恢复 Image 中的快照片段读入恢复缓冲区；无快照时返回 {@code null}。
-     *
-     * @param snapshot Cluster 提供的快照 Image
-     * @return 可交给 Owner 恢复运行态的 section 缓冲区
-     * @throws IllegalStateException 快照读取超过恢复期限时抛出
-     */
-    private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image snapshot) {
-        if (snapshot == null) return null;
-        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
-        long deadline = System.nanoTime() + DEADLINE_NS;
-        while (!snapshot.isEndOfStream()) {
-            int work = snapshot.poll((buffer, offset, length, header) ->
-                    recovery.accept(buffer, offset, length), 10);
-            if (System.nanoTime() > deadline) throw new IllegalStateException("snapshot recovery deadline");
-            cluster.idleStrategy().idle(work);
-        }
-        return recovery;
-    }
 }

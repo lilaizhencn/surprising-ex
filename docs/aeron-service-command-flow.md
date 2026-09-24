@@ -134,16 +134,17 @@ flowchart TD
 sequenceDiagram
     participant Cluster as Aeron Cluster Image
     participant Service as AeronTradingClusterService
-    participant Codec as Sectioned Snapshot Recovery
+    participant Transfer as ClusterCoreSnapshotTransfer
+    participant Codec as Sectioned Snapshot Codec
     participant Owner as TradingOwnerLoop / TradingCoreOwner
     participant Runtime as TradingCoreRuntime
     participant Lanes as Account Lanes + Matcher
 
     Cluster->>Service: onStart(cluster, snapshot Image)
-    Service->>Service: readSnapshot(Image)，逐 fragment 读取
-    Service->>Codec: RecoveryBuffer 接收 snapshot sections
+    Service->>Transfer: read(Image, cluster)
+    Transfer->>Codec: RecoveryBuffer 接收 snapshot sections
     Codec->>Codec: 解析 header、sections、hash 和产品线配对
-    Codec-->>Service: 校验通过的恢复数据
+    Codec-->>Service: 可供 Owner 恢复的恢复缓冲区
     Service->>Owner: start(recovery)
     Owner->>Runtime: restoreSnapshot(recovery)
     Runtime->>Lanes: 恢复账户 Lane、Matcher、序号、命令结果等状态
@@ -151,11 +152,11 @@ sequenceDiagram
     Cluster->>Service: 后续已提交命令
 ```
 
-源码顺序：[`AeronTradingClusterService.onStart`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/cluster/AeronTradingClusterService.java#L53) → `readSnapshot`（同文件）→ `SectionedCoreSnapshotRecovery.decode` / `SectionedCoreSnapshotParser.parse` → [`SectionedCoreSnapshotValidation`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/SectionedCoreSnapshotValidation.java) → [`TradingOwnerLoop.start`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/cluster/TradingOwnerLoop.java#L67) → [`TradingCoreOwner.restoreSnapshot`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java#L646) → `TradingCoreRuntime.fromSnapshot(...)` → `replaceState(...)`。
+源码顺序：[`AeronTradingClusterService.onStart`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/cluster/AeronTradingClusterService.java#L68) → [`ClusterCoreSnapshotTransfer.read`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/snapshot/ClusterCoreSnapshotTransfer.java#L18) → `RecoveryBuffer` 接收并解析 sections → `SectionedCoreSnapshotRecovery.decode` / `SectionedCoreSnapshotParser.parse` → `SectionedCoreSnapshotValidation` 校验 → [`TradingOwnerLoop.start`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java#L53) → [`TradingCoreOwner.restoreSnapshot`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java#L646) → `TradingCoreRuntime.fromSnapshot(...)` → `replaceState(...)`。
 
 快照 section 保存的是继续处理命令所需的运行状态，例如账户 Lane、Matcher、来源序号、命令结果账本、费率配置和转账运行态。恢复会校验版本 / header、section 完整性、hash、产品线和账户 Lane 配对等；校验失败时不能把不完整或互相矛盾的状态当作已恢复状态继续运行。
 
-**和普通命令的区别：** 快照恢复发生在 Owner 启动阶段，不是某个用户发来的 Core 命令。恢复完成后，Cluster 后续日志中的命令才进入前面的公共入口。快照写入方向由 `onTakeSnapshot` 请求 Owner 捕获各 section，再经 snapshot writer / codec 编码。
+**和普通命令的区别：** 快照恢复发生在 Owner 启动阶段，不是某个用户发来的 Core 命令。恢复完成后，Cluster 后续日志中的命令才进入前面的公共入口。快照写入时，`onTakeSnapshot` 让 Owner 在线程边界内捕获各 section，再由 [`ClusterCoreSnapshotTransfer.write`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/snapshot/ClusterCoreSnapshotTransfer.java#L34) 分块发布到 Cluster；背压时回调 Cluster 服务推进响应出口并让出线程。
 
 ## 调整用户资金：从账户 API 到 Account Lane
 
@@ -275,4 +276,4 @@ Core 路由与分支：`TradingCoreOwner.progressCommandsInScope` 准备路由�
 - **Owner**：按 Cluster 日志顺序协调命令和提交结果的专用线程 / 状态所有者入口。
 - **Account Lane**：账户状态串行修改边界；一个 Lane 上的账户状态按顺序应用。
 - **Matcher**：订单匹配计算所在的执行组件；撮合结果要交回有序提交和结算链路。
-- **快照**：恢复 Core 运行状态的 section 集合，不是只存用户列表，也不等于业务数据库的账户注册记录。
+- **快照**：恢复 Core 运行状态的 section 集合，不是只存用户列表，也不等于业务数据库的账户注册记录。Aeron Image 分片接收和 Cluster Publication 分块写入集中在 `orchestration.snapshot.ClusterCoreSnapshotTransfer`；Owner 内部的捕获、状态校验和恢复仍由 Owner/运行态持有，保证只在正确线程上操作交易状态。
