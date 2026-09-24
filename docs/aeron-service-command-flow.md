@@ -182,7 +182,9 @@ sequenceDiagram
     Owner-->>API: 提交结果并发送响应
 ```
 
-Gateway 侧从 [`AccountInternalController.adjustBalance`](../surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountInternalController.java#L38) → `AccountService.adjustBalance` → `AccountRequestService.adjustBalance` → `AccountCommandGateway.adjustBalance` 进入 Aeron 命令。
+Gateway 侧实际从 [`AccountInternalController.adjustBalance`](../surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountInternalController.java#L38) → [`AccountRequestService.adjustBalance`](../surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountRequestService.java#L50) → [`AccountCommandGateway.adjustBalance`](../surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java#L49) → `AccountAeronGateway.command` 进入 Aeron。`AccountService.adjustBalance` 当前没有调用方，不在这条请求链路中。
+
+这里 `AccountRequestService` 负责把命令超时和参数异常转换为 HTTP 状态；`AccountCommandGateway` 负责生成幂等命令 ID、编码并发送 Aeron 命令。`AccountService` 仍承载账户查询及其他账户业务，但它的 `adjustBalance` 包装方法目前是未使用方法，可以单独删除，不需要删除整个服务。
 
 Core 侧是 [`BalanceTransferCommands.executeAdjustBalance`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/BalanceTransferCommands.java#L22) → `adjustBalance`。Owner 异步运行时会准备 `AccountBalanceAdjustment`，根据用户所在 Lane 投递工作；[`AccountBalanceAdjustment.apply`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/AccountBalanceAdjustment.java#L49) 最终调用 `RuntimeAccountStateTransitions.adjustAccountBalance`。其 `poll` 等待被投递的 Lane 完成后，Owner 才继续命令提交和响应。
 
