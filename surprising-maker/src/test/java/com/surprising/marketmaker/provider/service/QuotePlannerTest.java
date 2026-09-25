@@ -56,6 +56,23 @@ class QuotePlannerTest {
     }
 
     @Test
+    void oneStepQuoteKeepsBothSidesUntilInventoryCap() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setBaseQuantitySteps(1L);
+        strategy.setMaxInventorySteps(10_000L);
+        strategy.setOrderLevels(50);
+        MarketMakerProperties.Quoting quoting = quoting();
+        quoting.setMaxPriceDeviationPpm(5_000L);
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting, risk(), instrument(10_000_000L),
+                orderBook(780_820L, 780_842L), mark(7_808_312_833_333L), 1L);
+
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)).hasSize(50);
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL)).hasSize(50);
+        assertThat(plan.quotes()).allSatisfy(quote -> assertThat(quote.quantitySteps()).isEqualTo(1L));
+    }
+
+    @Test
     void spotAssetBalanceDoesNotDisableBuyQuotes() {
         MarketMakerProperties.Strategy strategy = strategy();
         strategy.setProductLine(ProductLine.SPOT);

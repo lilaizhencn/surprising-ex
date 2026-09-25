@@ -221,7 +221,7 @@ public class MarketMakerService {
                 nonNegativeOrNull(safeRequest.levelSpacingTicks(), "levelSpacingTicks"),
                 positiveOrNull(safeRequest.maxInventorySteps(), "maxInventorySteps"),
                 boundedLongOrNull(safeRequest.maxInventorySkewPpm(), 0L, 1_000_000L, "maxInventorySkewPpm"),
-                boundedIntOrNull(safeRequest.orderLevels(), 1, 20, "orderLevels"),
+                boundedIntOrNull(safeRequest.orderLevels(), 1, 50, "orderLevels"),
                 normalizeRequired(adminUserId, "adminUserId"),
                 reason,
                 Instant.now(),

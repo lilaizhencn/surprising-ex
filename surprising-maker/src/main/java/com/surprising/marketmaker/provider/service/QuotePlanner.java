@@ -138,7 +138,7 @@ public class QuotePlanner {
         } else if (signedPositionSteps != 0) {
             scale = ONE_PPM + skewPpm / 2L;
         }
-        return multiplyDiv(base, scale, ONE_PPM);
+        return scale == 0L ? 0L : Math.max(1L, multiplyDiv(base, scale, ONE_PPM));
     }
 
     private long anchorPriceTicks(MarketMakerProperties.Strategy strategy,
@@ -183,7 +183,7 @@ public class QuotePlanner {
 
     private int orderLevels(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting) {
         if (strategy.getOrderLevels() != null && strategy.getOrderLevels() > 0) {
-            return Math.min(strategy.getOrderLevels(), 20);
+            return Math.min(strategy.getOrderLevels(), 50);
         }
         return quoting.getOrderLevels();
     }
