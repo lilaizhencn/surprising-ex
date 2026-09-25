@@ -49,6 +49,7 @@ Service 不包含 SQL，也不直接依赖 JDBC。
 ## 指数价格
 
 指数价格服务默认使用外部交易所 WebSocket 长连接接收 ticker，标准化价格，剔除过期源和异常源，重新归一化权重，然后为每个 symbol 发布一个公允指数价格。REST 只用于冷启动、WebSocket 缓存过期后的兜底，以及人工排障。
+OKX 指数成分使用 `index-tickers` REST 接口和指数频道解析规则。`PRICE_INDEX_REST_FALLBACK_ENABLED=true` 可在外部 WS 暂时断线时启用原有 REST 兜底；生产默认保持关闭，启用时需控制抓取频率及有效源数量。
 
 默认外部源：
 

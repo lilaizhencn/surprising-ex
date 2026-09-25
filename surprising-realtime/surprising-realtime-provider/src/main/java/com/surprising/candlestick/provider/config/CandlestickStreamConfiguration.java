@@ -18,6 +18,8 @@ import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -30,7 +32,9 @@ import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
+import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.config.KafkaStreamsConfiguration;
+import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 
 @Configuration
@@ -46,6 +50,17 @@ public class CandlestickStreamConfiguration {
     private com.surprising.realtime.provider.RealtimeRouter realtime;
     @org.springframework.beans.factory.annotation.Autowired
     private tools.jackson.databind.ObjectMapper objectMapper;
+
+    @Bean
+    public KafkaAdmin candleKafkaAdmin(CandlestickProperties properties) {
+        return new KafkaAdmin(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
+                properties.getKafka().getBootstrapServers()));
+    }
+
+    @Bean
+    public NewTopic candleEventsTopic(CandlestickProperties properties) {
+        return TopicBuilder.name(properties.getKafka().getCandleTopic()).partitions(32).build();
+    }
 
     /**
      * Shared Streams configuration for all nodes in the same deployment group.

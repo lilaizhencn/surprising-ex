@@ -490,7 +490,7 @@ SELECT symbol, product_line, b.bracket_no, b.floor_units, b.cap_units, GREATEST(
 ON CONFLICT (symbol, product_line, bracket_no) DO UPDATE SET notional_floor_units=EXCLUDED.notional_floor_units, notional_cap_units=EXCLUDED.notional_cap_units, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm, option_margin_factor_ppm=EXCLUDED.option_margin_factor_ppm;
 
 INSERT INTO instrument_index_sources (symbol, product_line, source, enabled, base_url, path, source_symbol, parser, quote_currency, target_quote_currency, conversion_base_url, conversion_path, conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm, websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm)
-SELECT symbol, product_line, 'OKX', TRUE, 'https://www.okx.com', CASE WHEN spot_index THEN '/api/v5/market/ticker?instId='||index_symbol ELSE '/api/v5/market/index-ticker?instId='||index_symbol END, index_symbol, 'OKX_TICKER', quote_asset, quote_asset, NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000, TRUE, 'wss://ws.okx.com:8443/ws/v5/public', CASE WHEN spot_index THEN '{"op":"subscribe","args":[{"channel":"tickers","instId":"'||index_symbol||'"}]}' ELSE '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"'||index_symbol||'"}]}' END, 'OKX_TICKER', 1000000
+SELECT symbol, product_line, 'OKX', TRUE, 'https://www.okx.com', CASE WHEN spot_index THEN '/api/v5/market/ticker?instId='||index_symbol ELSE '/api/v5/market/index-tickers?instId='||index_symbol END, index_symbol, CASE WHEN spot_index THEN 'OKX_TICKER' ELSE 'OKX_INDEX_TICKER' END, quote_asset, quote_asset, NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000, TRUE, 'wss://ws.okx.com:8443/ws/v5/public', CASE WHEN spot_index THEN '{"op":"subscribe","args":[{"channel":"tickers","instId":"'||index_symbol||'"}]}' ELSE '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"'||index_symbol||'"}]}' END, CASE WHEN spot_index THEN 'OKX_TICKER' ELSE 'OKX_INDEX_TICKER' END, 1000000
   FROM surprising_okx_instruments
 ON CONFLICT (symbol, product_line, source) DO UPDATE SET enabled=EXCLUDED.enabled, base_url=EXCLUDED.base_url, path=EXCLUDED.path, source_symbol=EXCLUDED.source_symbol, parser=EXCLUDED.parser, quote_currency=EXCLUDED.quote_currency, target_quote_currency=EXCLUDED.target_quote_currency, websocket_subscribe_message=EXCLUDED.websocket_subscribe_message, websocket_parser=EXCLUDED.websocket_parser;
 
@@ -504,7 +504,7 @@ INSERT INTO instrument_index_sources (
     conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
     websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
 ) VALUES
-('BTC-USDT-SWAP', 'LINEAR_PERPETUAL', 'OKX', TRUE, 'https://www.okx.com', '/api/v5/market/index-ticker?instId=BTC-USDT', 'BTC-USDT', 'OKX_INDEX_TICKER',
+('BTC-USDT-SWAP', 'LINEAR_PERPETUAL', 'OKX', TRUE, 'https://www.okx.com', '/api/v5/market/index-tickers?instId=BTC-USDT', 'BTC-USDT', 'OKX_INDEX_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  TRUE, 'wss://ws.okx.com:8443/ws/v5/public', '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"BTC-USDT"}]}', 'OKX_INDEX_TICKER', 1000000),
 ('BTC-USDT-SWAP', 'LINEAR_PERPETUAL', 'BINANCE', TRUE, 'https://api.binance.com', '/api/v3/ticker/bookTicker?symbol=BTCUSDT', 'BTCUSDT', 'BINANCE_BOOK_TICKER',

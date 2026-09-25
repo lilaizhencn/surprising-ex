@@ -44,7 +44,11 @@ public class FundingController {
 
     @GetMapping("/settlements/latest")
     public FundingSettlementResponse latestSettlement(@RequestParam String symbol) {
-        return fundingService.latestSettlement(symbol);
+        try {
+            return fundingService.latestSettlement(symbol);
+        } catch (java.util.NoSuchElementException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping("/payments")

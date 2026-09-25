@@ -7,6 +7,7 @@
 
 `TradeExportService`（独立线程）→ 产品成交 Kafka topic → `CandlestickStreamConfiguration` →
 RocksDB 聚合/去重/水位线 → PostgreSQL 历史与 K 线 Kafka 事件。
+`CandlestickStreamConfiguration` 启动时用当前产品线的 Kafka bootstrap 创建 32 分区的 K 线事件 topic，确保 Kafka Streams 的 sink/source topology 可以正常进入 RUNNING。成交导出只读取 Core 已提交状态；批量撮合预派发必须按实际结果数遍历，否则 Core 回放被未完成撮合阻断，K 线也会停在旧成交。
 K 线更新同时以本地方法进入 `RealtimeRouter.offer` 的有界队列，由路由线程按订阅推送。
 不再创建本进程的 `RealtimeJsonPublisher` 或通过 Aeron 将 K 线回送给自己。
 

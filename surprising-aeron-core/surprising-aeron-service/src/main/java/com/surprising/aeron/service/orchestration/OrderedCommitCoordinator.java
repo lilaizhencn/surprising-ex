@@ -1288,7 +1288,11 @@ final class OrderedCommitCoordinator {
                     if (matching == null) return;
                     // Rejections release provisional funds on the owner. Keep those mutations
                     // in the ordered commit context instead of speculative batch dispatch.
-                    for (var result : batch.pipelinedMatchingResults) if (!result.accepted()) return;
+                    if (batch.pipelinedMatchingResultCount != batch.items.size()) return;
+                    for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
+                        var result = batch.pipelinedMatchingResults[index];
+                        if (result == null || !result.accepted()) return;
+                    }
                     matching = context.takeMatchingCompletion();
                     pending.establishCommitFence(clusterTimestamp, clusterPosition);
                     if (matchingResultNeedsRecovery(pending, matching)) {

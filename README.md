@@ -148,6 +148,8 @@ flowchart TB
 
 测试服务器单节点永续部署见 [deployment/test-single-node/README.md](deployment/test-single-node/README.md)。该入口只启用 `LINEAR_PERPETUAL`，不启动 wallet；生产高可用仍需三节点切主和资金链路验收。
 
+本机六 JAR 联调记录见 [2026-09-25 验证报告](docs/validation/local-six-jar-aeron-single-node-20260925.md)。单节点脚本默认交易对为 `BTC-USDT-SWAP`，成交在 Core 有序提交后由 realtime 可靠导出至当前产品线 Kafka 成交 topic，再生成 K 线；WebSocket 的公共逐笔与私有执行报告由 gateway 解码并按订阅发送。该联调仅覆盖 U 本位永续单产品线。
+
 用户前端项目为 `surprising-ex-web`、`surprising-client`，后台管理前端项目为 `surprising-admin-web`，与本仓库分别维护。
 
 

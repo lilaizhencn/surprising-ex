@@ -33,7 +33,9 @@ PRICE_HTTP_PROXY_PORT="${PRICE_HTTP_PROXY_PORT:-7897}"
 PRICE_CONSUMER_CONCURRENCY="${PRICE_CONSUMER_CONCURRENCY:-8}"
 PRICE_CONSUMER_REQUIRED_SYMBOLS="${PRICE_CONSUMER_REQUIRED_SYMBOLS:-BTC-USDT}"
 PRICE_INDEX_REQUIRED_SYMBOLS="${PRICE_INDEX_REQUIRED_SYMBOLS:-}"
+PRICE_INDEX_REST_FALLBACK_ENABLED="${PRICE_INDEX_REST_FALLBACK_ENABLED:-false}"
 MM_SYMBOL="${MM_SYMBOL:-BTC-USDT}"
+MM_CYCLE_DELAY_MS="${MM_CYCLE_DELAY_MS:-100}"
 MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-20}"
 MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-20}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
@@ -164,15 +166,16 @@ service_port() {
 }
 
 jar_path() {
+  local artifact_root="${ARTIFACT_ROOT:-$ROOT_DIR}"
   case "$1" in
-    core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$ROOT_DIR" ;;
-    tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
-    benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$ROOT_DIR" ;;
-    realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
-    maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
+    core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$artifact_root" ;;
+    tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$artifact_root" ;;
+    benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$artifact_root" ;;
+    realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
+    price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
+    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
+    gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
+    maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
     *) fail "unknown service=$1" ;;
   esac
 }
@@ -376,6 +379,7 @@ COMMON_ENV=(
     SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_PRICE_CONSUMER_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     PRICE_INDEX_REQUIRED_SYMBOLS="$PRICE_INDEX_REQUIRED_SYMBOLS" \
+    PRICE_INDEX_REST_FALLBACK_ENABLED="$PRICE_INDEX_REST_FALLBACK_ENABLED" \
     SURPRISING_PRICE_INDEX_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
@@ -388,12 +392,15 @@ COMMON_ENV=(
     DATABASE_URL="jdbc:postgresql://$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
     DATABASE_USER="$POSTGRES_USER" DATABASE_PASSWORD="$POSTGRES_PASSWORD" \
     REDIS_HOST="$VALKEY_HOST" REDIS_PORT="$VALKEY_PORT" \
+    SPRING_DATA_REDIS_HOST="$VALKEY_HOST" SPRING_DATA_REDIS_PORT="$VALKEY_PORT" \
+    VALKEY_HOST="$VALKEY_HOST" VALKEY_PORT="$VALKEY_PORT" \
     SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED="$PRICE_HTTP_PROXY_ENABLED" \
     SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST="$PRICE_HTTP_PROXY_HOST" \
     SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT="$PRICE_HTTP_PROXY_PORT" \
     PRICE_CONSUMER_CONCURRENCY="$PRICE_CONSUMER_CONCURRENCY" \
     PRICE_CONSUMER_REQUIRED_SYMBOLS="$PRICE_CONSUMER_REQUIRED_SYMBOLS" \
     MM_SYMBOL="$MM_SYMBOL" \
+    MM_CYCLE_DELAY_MS="$MM_CYCLE_DELAY_MS" \
     MM_BASE_QUANTITY_STEPS="$MM_BASE_QUANTITY_STEPS" \
     MM_ORDER_LEVELS="$MM_ORDER_LEVELS"
 )
@@ -432,6 +439,9 @@ start_core() {
   member_count="$(cluster_member_count)"
   if [[ "$mode" == fresh && -d "$RUN_DIR/aeron" ]]; then
     mv "$RUN_DIR/aeron" "$RUN_DIR/aeron.previous.$(date +%s)"
+  fi
+  if [[ "$mode" == fresh && -f "$TRADE_EXPORT_CHECKPOINT" ]]; then
+    mv "$TRADE_EXPORT_CHECKPOINT" "$TRADE_EXPORT_CHECKPOINT.previous.$(date +%s)"
   fi
   mkdir -p "$RUN_DIR/aeron"
   for ((node = 0; node < member_count; node++)); do

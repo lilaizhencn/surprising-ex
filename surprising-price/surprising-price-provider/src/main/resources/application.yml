@@ -62,7 +62,7 @@ surprising:
         proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
       web-socket:
         enabled: true
-        rest-fallback-enabled: false
+        rest-fallback-enabled: ${PRICE_INDEX_REST_FALLBACK_ENABLED:false}
         refresh-delay-ms: 30000
         idle-timeout: ${PRICE_INDEX_WS_IDLE_TIMEOUT:20s}
         reconnect-initial-delay: ${PRICE_INDEX_WS_RECONNECT_INITIAL_DELAY:1s}

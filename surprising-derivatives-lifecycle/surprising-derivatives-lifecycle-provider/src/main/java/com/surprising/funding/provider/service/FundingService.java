@@ -208,7 +208,7 @@ public class FundingService {
 
     public FundingSettlementResponse latestSettlement(String symbol) {
         return settlementRepository.latestCore(normalizeSymbol(symbol))
-                .orElseThrow(() -> new IllegalStateException("funding settlement not found for symbol: " + symbol));
+                .orElseThrow(() -> new java.util.NoSuchElementException("funding settlement not found for symbol: " + symbol));
     }
 
     public FundingPaymentQueryResponse payments(long userId, String symbol, int limit) {

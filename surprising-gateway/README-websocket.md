@@ -66,6 +66,8 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 ## 持仓推送链路
 
+本机六 JAR 联调中，gateway 的 `RealtimeWebSocketBridge` 按 EXECUTION 和 TRADE 实际二进制帧长度解码；这两类帧不携带 `instrumentChangeId`，不能在解码头部多读 8 字节。修复后 `/ws/v1` 的 `trades`、`executionReports` 与 `accountState` 均随真实撮合更新。客户端订阅后仍应先拉相应 REST 快照，WS 用于后续增量。
+
 持仓只能在账户结算后推送：
 
 ```text

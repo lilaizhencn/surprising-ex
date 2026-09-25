@@ -59,7 +59,10 @@ final class CoreRuntimeLifecycle {
         assertHealthy();
         if (owner.directCommand.active() || !owner.pendingMatching.isEmpty()
                 || !owner.bookQueries.queryIds.isEmpty()) {
-            throw new IllegalStateException("unfinished business work outside cluster log callback");
+            throw new IllegalStateException("unfinished business work outside cluster log callback"
+                    + " direct=" + owner.directCommand.active()
+                    + " matching=" + !owner.pendingMatching.isEmpty()
+                    + " book=" + !owner.bookQueries.queryIds.isEmpty());
         }
     }
 
