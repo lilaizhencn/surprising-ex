@@ -43,6 +43,7 @@
 3. `CandlestickStreamConfiguration` 用当前产品线 Kafka 连接创建 32 分区 K 线事件 topic，使 Kafka Streams 正常运行；gateway `RealtimeWebSocketBridge` 按实际 EXECUTION/TRADE 帧解码，使公共逐笔和私有执行报告恢复推送。
 4. 资金费尚未产生结算时，`FundingController` 返回 404。前端 API 保留 64 位订单号的十进制文本，接受网关实际的嵌套订单结果和成交终态；页面交易周期默认 1m，单根真实 K 线可显示。
 5. 单节点脚本默认 `BTC-USDT-SWAP`，把本机 Redis、价格兜底和做市周期配置传到对应服务。只运行 `LINEAR_PERPETUAL`，不启动 wallet。
+6. 最终巡检发现做市合约快照消费者仍连接默认 `localhost:9092`。脚本已将隔离 Kafka 地址传入 `MarketMakerProperties.kafka`，并将消费者组按产品线区分；重启复测后该消费者已连接本轮 Kafka。
 
 ### 实测证据
 

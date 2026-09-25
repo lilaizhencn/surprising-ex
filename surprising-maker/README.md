@@ -1,5 +1,7 @@
 # surprising-maker
 
+本机单节点脚本通过 `SURPRISING_MARKET_MAKER_KAFKA_BOOTSTRAP_SERVERS` 指向本轮 Kafka，并给每条产品线的合约快照消费者设置独立 consumer group。做市启动时从 gateway 拉取合约快照，运行中继续消费 `surprising.instrument.events.v1` 更新本地合约规则；只看到策略 `RUNNING` 不代表该增量消费者已连通，需同时检查消费者分区分配和连接告警。
+
 
 内网做市商服务，用于控制盘口流动性、稳定报价中心、长期运行压测和完整交易链路验证。
 
