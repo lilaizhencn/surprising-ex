@@ -52,7 +52,7 @@
 | 真实价格和做市 | BTC 指数/标记价与资金费率最新接口均为 200；策略 `btc-usdt-mm-a` 为 `RUNNING`，盘口持续有买卖档。策略有少量撮合拒绝，风险校验未放宽。 |
 | 交易与账户 | 通过前端 Vite 代理、真实登录 JWT 执行买入成交、只减仓卖出成交、GTX 挂单与撤单；用户最终签名持仓 0、冻结 0。超过 JavaScript 安全整数的订单号以字符串提交撤单，接口返回 `CANCELED`。 |
 | Kafka、K 线与 WS | 成交导出修复后 PostgreSQL 有 2 根 1m K 线、共 4 笔成交；K 线 REST 200。一次交易 WS 连接收到 `trades=3`、`depth=42`、`bookTicker=42`、`candles=5`、`positions=4`、`executionReports=4`、`accountState=2`。 |
-| 前端 | Chrome 页面截图位于本轮日志 `trade-page-final.png`，可见真实 1m K 线、指数价、标记价和做市盘口；前端 lint、build 与两个 API 测试文件 8 项通过。登录接口 200。 |
+| 前端 | Chrome 桌面与移动截图分别位于本轮日志 `trade-page-final.png`、`trade-page-mobile-fixed.png`，可见真实 1m K 线、指数价、标记价和做市盘口；前端 lint、build 与两个 API 测试文件 8 项通过。登录接口 200。移动端曾因 WS 事件先于 REST 返回而丢失历史 K 线，合并历史与实时结果后复拍正常。 |
 | 资金守恒 | Core 三账户余额（含冻结）分别为 1,000,000,361,745,000、999,994,267,476,000、999,998,325,222,000 units；Treasury 手续费 23,475,557,000、清算盈亏 −16,430,000,000。总和为 3,000,000,000,000,000，与三笔初始入金一致。 |
 
 后端受影响的 `FundingServiceTest`、`CandlestickPropertiesTest`、`CommittedTradeExportIntegrationTest`、`CoreOrderedOrderBatchTest` 已在 HotSpot JDK 27 下通过，相关六 JAR 打包通过。UI 仅验证 U 本位永续 BTC；现货、币本位永续、两种交割、期权，以及实际资金费扣付、强平、ADL、保险基金和长期稳定性未在本轮覆盖。首次运行因 macOS 系统休眠发生 Aeron keepalive 超时；本次由本轮 `caffeinate` 维持运行，长期无休眠环境仍需另行验证。`Recent trade` 卡片只显示连接后的真实 WS 成交，刷新后等待下一笔，不再请求不存在的历史最新成交接口。
