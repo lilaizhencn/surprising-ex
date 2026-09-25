@@ -150,6 +150,8 @@ flowchart TB
 
 本机六 JAR 联调记录见 [2026-09-25 验证报告](docs/validation/local-six-jar-aeron-single-node-20260925.md)。单节点脚本默认交易对为 `BTC-USDT-SWAP`，成交在 Core 有序提交后由 realtime 可靠导出至当前产品线 Kafka 成交 topic，再生成 K 线；WebSocket 的公共逐笔与私有执行报告由 gateway 解码并按订阅发送。该联调仅覆盖 U 本位永续单产品线。
 
+行情查询边界：`CandleQueryService` 对首次真实成交之后的无成交周期返回沿用上根收盘价、成交量和笔数为零的 K 线，当前未结束周期标记为 `PARTIAL`；成交聚合状态仍只由真实成交改变。`CandlestickController` 的 `/trades/recent` 经 `RecentTradeQueryService` 从当前产品线已提交 Kafka 成交 topic 有界读取最近逐笔，供页面初次加载，后续增量继续走 WebSocket。做市 `QuotePlanner` 支持最多 50 档，并在库存偏斜后保留正的最小数量；单节点脚本可通过 `MM_REFERENCE_MARKET_ENABLED` 和 `MM_REFERENCE_MARKET_WEBSOCKET_ENABLED` 显式启用外部参考盘口。
+
 用户前端项目为 `surprising-ex-web`、`surprising-client`，后台管理前端项目为 `surprising-admin-web`，与本仓库分别维护。
 
 

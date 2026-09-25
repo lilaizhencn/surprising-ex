@@ -30,7 +30,12 @@ class CandleQueryServiceTest {
 
         var response = service.query(" btc-usdt ", "M5", start, end, 100);
 
-        assertThat(response.candles()).containsExactly(candle);
+        assertThat(response.candles()).hasSize(12);
+        assertThat(response.candles().getFirst()).isEqualTo(candle);
+        assertThat(response.candles().get(1).openTime()).isEqualTo(start.plusSeconds(300));
+        assertThat(response.candles().get(1).openPrice()).isEqualTo(BigDecimal.TWO);
+        assertThat(response.candles().get(1).baseVolume()).isEqualTo(BigDecimal.ZERO);
+        assertThat(response.candles().get(1).tradeCount()).isZero();
         verify(repository).findRange("BTC-USDT", "5m", start, end, 100);
     }
 }

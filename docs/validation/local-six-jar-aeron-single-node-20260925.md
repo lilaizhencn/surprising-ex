@@ -59,3 +59,11 @@
 后端受影响的 `FundingServiceTest`、`CandlestickPropertiesTest`、`CommittedTradeExportIntegrationTest`、`CoreOrderedOrderBatchTest` 已在 HotSpot JDK 27 下通过，相关六 JAR 打包通过。UI 仅验证 U 本位永续 BTC；现货、币本位永续、两种交割、期权，以及实际资金费扣付、强平、ADL、保险基金和长期稳定性未在本轮覆盖。首次运行因 macOS 系统休眠发生 Aeron keepalive 超时；本次由本轮 `caffeinate` 维持运行，长期无休眠环境仍需另行验证。`Recent trade` 卡片只显示连接后的真实 WS 成交，刷新后等待下一笔，不再请求不存在的历史最新成交接口。
 
 本节环境按用户要求保留在线以便查看。验证结束后应先执行 `scripts/linear-perpetual-single-node.sh down`，再停止本轮独立基础设施并删除仅属于本轮的临时数据；当前未执行清理。
+
+## 2026-09-26 续测：行情页面与做市深度
+
+- 前端改用 TradingView Lightweight Charts 绘制真实 OHLC 与成交量；时间周期切换为 1m、15m、1h、4h、1d。顶部 Last Price 只跟随成交/K 线收盘价，标记价单列；开高低收、资金费与下一结算时间位置固定。左侧合约列表使用真实合约、选中合约真实价格，滚动条隐藏。盘口买卖双列、可选 10/20/50 档，盘口和逐笔区域固定 440px 高度；账户四区标签页固定 360px 高度。
+- `CandleQueryServiceTest`、`QuotePlannerTest`、`MarketMakerServiceTest` 在 HotSpot JDK 27 通过，前端 lint 与 build 通过。`CandleQueryService` 在查询边界补齐真实成交之后的无成交周期，价格沿上根真实收盘价，量与笔数为零。REST 查询 BTC 1m 从 14:37 到 16:01 UTC 连续 85 根，其中 83 根零成交量；新两笔成交后连续 88 根、累计 6 笔，最新 16:04 蜡烛收盘 83949.9、成交量 2e-8。
+- 新增当前产品线 Kafka 已提交逐笔的只读 REST 查询。`/api/v1/gateway/candlestick/trades/recent?symbol=BTC-USDT-SWAP&limit=20` 返回 6 笔真实成交；页面初次加载与刷新后能显示，后续 WS 接续。模拟用户市价买入和只减仓卖出各 1 step，独立 WS 订阅期间收到 `trades=2`、`candles=3`。用户签名持仓归零、锁定余额为零；最终资金守恒全账户核对仍待完成。
+- 做市周期 250ms、目标档数 50、外部参考市场开关已传入本机六 JAR，健康探针通过。实际盘口约每侧 2–4 档，做市运行事件的拒单原因为 `OPEN_INTEREST_LIMIT_EXCEEDED`；未擅自放宽合约持仓上限，50 档实际深度尚未达成。为避免高频拒单刷屏，本机通过 `MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL` 限制每账户同时挂单数，策略仍保留 50 档目标和 250ms 周期。外部参考盘口已启用；外部逐笔尚未接入报价策略。
+- 本轮继续只覆盖 U 本位永续 BTC。现货、币本位永续、交割、期权、实际资金费支付、强平、ADL、保险基金和长期稳定性未复测。环境按用户要求继续运行，新增截图位于本轮 `/tmp/surprising-ex-local-live-20260925/logs/`，结束后需清理本轮进程与生成文件。
