@@ -156,6 +156,13 @@ public class MarketMakerProperties {
     }
 
     public static class Trade {
+        /** Normal core batch size for simulated users; not a per-cycle operation quota. */
+        @Getter
+        @Setter
+        @Min(1)
+        @Max(20)
+        private int ordersPerBatch = 1;
+
         @Getter
         @Setter
         private boolean enabled;

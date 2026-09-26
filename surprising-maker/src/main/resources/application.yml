@@ -79,6 +79,7 @@ surprising:
       max-inventory-steps: 10000
       max-inventory-skew-ppm: 800000
     trade:
+      orders-per-batch: ${MM_TRADE_ORDERS_PER_BATCH:8}
       enabled: false
       account-ids: [900001, 900002, 910001]
       min-quantity-steps: 1

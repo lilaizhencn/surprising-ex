@@ -127,6 +127,55 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void successfulBatchWithoutTerminalOrderDetailsIsNotRejectedOrAssumedUnfilled() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeEnabled = true;
+        fixtures.tradeBatchSize = 8;
+        fixtures.orderRpc.omitMarketBatchDetails = true;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(fixtures.runEventRepository.events)
+                .filteredOn(event -> event.eventType().equals("TRADE_SUBMITTED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.submittedOrders()).isEqualTo(8L);
+                    assertThat(event.rejectedOrders()).isZero();
+                    assertThat(event.skippedReason()).isNull();
+                });
+        assertThat(fixtures.runEventRepository.events).noneMatch(event ->
+                event.eventType().equals("TRADE_REJECTED") || event.eventType().equals("TRADE_NO_FILL")
+                        || event.eventType().equals("TRADE_EXECUTED"));
+    }
+
+    @Test
+    void rejectedSimulatedBatchRetainsCoreReasonAndDoesNotCountFills() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeEnabled = true;
+        fixtures.tradeBatchSize = 8;
+        fixtures.orderRpc.rejectMarketBatch = true;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(fixtures.runEventRepository.events)
+                .filteredOn(event -> event.eventType().equals("TRADE_REJECTED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.errorMessage()).isEqualTo("INSUFFICIENT_BALANCE");
+                    assertThat(event.rejectedOrders()).isEqualTo(8L);
+                    assertThat(event.submittedOrders()).isZero();
+                });
+        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("TRADE_EXECUTED"));
+    }
+
+    @Test
+    void simulatedUsersSubmitDistinctMarketOrdersThroughCoreBatchApi() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeEnabled = true;
+        fixtures.tradeBatchSize = 8;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var trades = fixtures.orderRpc.placeRequests.stream().filter(r -> r.orderType() == OrderType.MARKET).toList();
+        assertThat(trades).hasSize(8);
+        assertThat(trades).extracting(PlaceOrderRequest::clientOrderId).doesNotHaveDuplicates();
+        assertThat(trades).allSatisfy(r -> assertThat(r.timeInForce()).isEqualTo(TimeInForce.IOC));
+        assertThat(fixtures.runEventRepository.events).noneMatch(e -> e.eventType().equals("TRADE_EXECUTED"));
+    }
+
+    @Test
     void runOncePlacesPostOnlyQuotesThroughOrderRpc() {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
@@ -582,6 +631,7 @@ class MarketMakerServiceTest {
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
         private boolean tradeEnabled;
+        private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
         private long priceTickUnits = 100L;
@@ -635,6 +685,7 @@ class MarketMakerServiceTest {
         private MarketMakerProperties properties() {
             MarketMakerProperties properties = new MarketMakerProperties();
             properties.getTrade().setEnabled(tradeEnabled);
+            properties.getTrade().setOrdersPerBatch(tradeBatchSize);
             properties.getTrade().setAccountIds(List.of(900002L));
             properties.getEngine().setNodeId("mm-test");
             properties.getCoordination().setEnabled(false);
@@ -763,6 +814,8 @@ class MarketMakerServiceTest {
         private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
         private final List<Long> failedCancelOrderIds = new ArrayList<>();
         private boolean batchSupported = true;
+        private boolean rejectMarketBatch;
+        private boolean omitMarketBatchDetails;
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
         private int cancelBatchCalls;
@@ -791,6 +844,10 @@ class MarketMakerServiceTest {
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {
                 PlaceOrderRequest placeRequest = request.orders().get(i);
+                if (rejectMarketBatch && placeRequest.orderType() == OrderType.MARKET) {
+                    results.add(new OrderBatchItemResponse(i, false, "INSUFFICIENT_BALANCE", null));
+                    continue;
+                }
                 productLinesDuringPlace.add(MarketMakerProductLineContext.current());
                 placeRequests.add(placeRequest);
                 OrderResponse placed = orderAt(2_000L + batchPlaceRequests.size() * 100L + i,
@@ -798,7 +855,7 @@ class MarketMakerServiceTest {
                         placeRequest.priceTicks(), placeRequest.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
                 openOrders.add(placed);
                 results.add(new OrderBatchItemResponse(i, true, "completed",
-                        placed));
+                        omitMarketBatchDetails && placeRequest.orderType() == OrderType.MARKET ? null : placed));
             }
             return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
         }

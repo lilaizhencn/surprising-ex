@@ -996,6 +996,9 @@ public class MarketMakerService {
         }
 
         if (!instrument.marketOrderEnabled()) return false;
+        int batchSize = (int) Math.min(trade.getOrdersPerBatch(), target.availableQuantitySteps() / quantitySteps);
+        if (batchSize > 1) return tradeBatch(strategy, symbol, accountId, cycleSequence, side, quantitySteps,
+                batchSize, tradeKey, state, traceId, now);
         // Simulated takers use the current matching book. A limit copied before the position RPC
         // often expires unfilled while the external-price maker has already moved its quotes.
         PlaceOrderRequest request = new PlaceOrderRequest(accountId,
@@ -1020,6 +1023,43 @@ public class MarketMakerService {
         recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_EXECUTED",
                 1, 0, 0, null, null, traceId, now);
         return true;
+    }
+
+    /** Submit ordinary simulated-user orders together; the core validates and settles every order. */
+    private boolean tradeBatch(MarketMakerProperties.Strategy strategy, String symbol, long accountId,
+                               long cycleSequence, OrderSide side, long quantity, int count, String tradeKey,
+                               StrategyRuntimeState state, String traceId, Instant now) {
+        List<PlaceOrderRequest> requests = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) requests.add(new PlaceOrderRequest(accountId,
+                takerClientOrderId(strategy, symbol, accountId, cycleSequence), symbol, side,
+                OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(), PositionSide.NET,
+                false, false));
+        OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
+        OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
+        if (response == null) throw new IllegalStateException(receiptMessage(receipt));
+        int accepted = 0;
+        int executed = 0;
+        int missingOrderDetails = 0;
+        String rejectionReason = null;
+        for (var result : response.results()) {
+            if (result.success() && (result.order() == null || result.order().status() != OrderStatus.REJECTED)) {
+                accepted++;
+                // Completed batch commands may omit terminal orders. Missing details cannot prove no fill.
+                if (result.order() == null) missingOrderDetails++;
+                else if (result.order().executedQuantitySteps() > 0) executed++;
+            } else if (rejectionReason == null) {
+                rejectionReason = result.order() != null && result.order().rejectReason() != null
+                        ? result.order().rejectReason() : result.message();
+            }
+        }
+        state.addSubmitted(accepted);
+        state.addRejected(count - accepted);
+        recordRunEvent(strategy, symbol, accountId, cycleSequence,
+                executed > 0 ? "TRADE_EXECUTED" : missingOrderDetails > 0 ? "TRADE_SUBMITTED"
+                        : accepted > 0 ? "TRADE_NO_FILL" : "TRADE_REJECTED", accepted, 0, count - accepted,
+                executed > 0 || missingOrderDetails > 0 ? null : "NO_EXECUTION", rejectionReason, traceId, now);
+        if (executed > 0 || missingOrderDetails > 0) lastTradeSides.put(tradeKey, side);
+        return executed > 0 || missingOrderDetails > 0;
     }
 
     private long activeTradeAccount(MarketMakerProperties.Strategy strategy, long cycleSequence) {

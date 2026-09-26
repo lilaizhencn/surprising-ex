@@ -1952,7 +1952,7 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
     CONSTRAINT market_maker_run_events_node_present CHECK (length(node_id) > 0),
     CONSTRAINT market_maker_run_events_cycle_non_negative CHECK (cycle_sequence >= 0),
     CONSTRAINT market_maker_run_events_type_check CHECK (
-        event_type IN ('CYCLE_SUCCESS', 'CYCLE_FAILED', 'QUOTE_RECONCILED', 'TRADE_SUBMITTED', 'TRADE_REJECTED', 'SKIPPED')
+        event_type IN ('CYCLE_SUCCESS', 'CYCLE_FAILED', 'QUOTE_RECONCILED', 'TRADE_SUBMITTED', 'TRADE_EXECUTED', 'TRADE_NO_FILL', 'TRADE_REJECTED', 'SKIPPED')
     ),
     CONSTRAINT market_maker_run_events_counts_non_negative CHECK (
         submitted_orders >= 0 AND canceled_orders >= 0 AND rejected_orders >= 0
