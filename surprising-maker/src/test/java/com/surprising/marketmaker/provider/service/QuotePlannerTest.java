@@ -26,6 +26,30 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void movingReferenceKeepsFiftyDistinctLevelsWhileOldOppositeQuotesRemain() {
+        var strategy = strategy();
+        strategy.setOrderLevels(50);
+        var quoting = quoting();
+        quoting.setMaxPriceDeviationPpm(100_000);
+        for (long markUnits : new long[] {5_100_000L, 4_900_000L}) {
+            var plan = quotePlanner.plan(strategy, quoting, risk(), instrument(),
+                    orderBook(49_990L, 50_010L), mark(markUnits), 0L);
+            var bids = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY).toList();
+            var asks = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL).toList();
+            assertThat(bids).hasSize(50);
+            assertThat(asks).hasSize(50);
+            assertThat(bids).extracting(q -> q.priceTicks()).doesNotHaveDuplicates();
+            assertThat(asks).extracting(q -> q.priceTicks()).doesNotHaveDuplicates();
+            assertThat(bids).allSatisfy(q -> assertThat(q.priceTicks()).isLessThan(50_010L));
+            assertThat(asks).allSatisfy(q -> assertThat(q.priceTicks()).isGreaterThan(49_990L));
+            for (int i = 1; i < 50; i++) {
+                assertThat(bids.get(i - 1).priceTicks() - bids.get(i).priceTicks()).isGreaterThanOrEqualTo(10);
+                assertThat(asks.get(i).priceTicks() - asks.get(i - 1).priceTicks()).isGreaterThanOrEqualTo(10);
+            }
+        }
+    }
+
+    @Test
     void plansSymmetricLevelsAroundFreshMarkPrice() {
         MarketMakerProperties.Strategy strategy = strategy();
         MarketMakerProperties.Quoting quoting = quoting();

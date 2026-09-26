@@ -69,6 +69,8 @@ public class QuotePlanner {
         long riskPositionSteps = strategy.getProductLine() == ProductLine.SPOT ? 0L : signedPositionSteps;
         long previousBidDistance = 0L;
         long previousAskDistance = 0L;
+        long previousBidPrice = Long.MAX_VALUE;
+        long previousAskPrice = 0L;
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
@@ -78,12 +80,18 @@ public class QuotePlanner {
                 bidDistance = Math.max(bidDistance, previousBidDistance + spacing);
                 askDistance = Math.max(askDistance, previousAskDistance + spacing);
             }
+            long bidGap = level == 0 ? 0 : bidDistance - previousBidDistance;
+            long askGap = level == 0 ? 0 : askDistance - previousAskDistance;
             previousBidDistance = bidDistance;
             previousAskDistance = askDistance;
             long bidPrice = Math.max(minPrice, anchor - bidDistance);
             if (bestAsk > 0) {
                 bidPrice = Math.min(bidPrice, bestAsk - 1L);
             }
+            // When old opposite quotes cap the best price, move the whole ladder with it.
+            // Clamping every level to the same top price collapses fifty levels into one.
+            if (level > 0) bidPrice = Math.max(minPrice, Math.min(bidPrice, previousBidPrice - bidGap));
+            previousBidPrice = bidPrice;
             suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
                     riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
 
@@ -91,6 +99,8 @@ public class QuotePlanner {
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }
+            if (level > 0) askPrice = Math.min(maxPrice, Math.max(askPrice, previousAskPrice + askGap));
+            previousAskPrice = askPrice;
             suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice,
                     riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
         }
