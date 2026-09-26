@@ -66,7 +66,7 @@ public class RecentTradeQueryService {
                     PublicTradeEvent event = mapper.readValue(record.value(), PublicTradeEvent.class);
                     var trade = tradeMapper.toTradeEvent(event);
                     found.add(new RecentTrade(trade.tradeId(), trade.sequence(), normalized,
-                            trade.side().name(), trade.price(), trade.quantity(), trade.tradeTime()));
+                            trade.side().name(), trade.price(), trade.quantity(), event.quantitySteps(), trade.tradeTime()));
                 }
             }
             return found.stream().sorted(Comparator.comparingLong(RecentTrade::sequence).reversed())
@@ -75,5 +75,5 @@ public class RecentTradeQueryService {
     }
 
     public record RecentTrade(String tradeId, long sequence, String symbol, String side,
-                              BigDecimal price, BigDecimal quantity, Instant eventTime) {}
+                              BigDecimal price, BigDecimal quantity, long quantitySteps, Instant eventTime) {}
 }
