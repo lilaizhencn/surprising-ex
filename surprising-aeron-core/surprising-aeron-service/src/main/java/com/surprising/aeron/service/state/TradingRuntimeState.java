@@ -264,12 +264,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     final RuntimeAccountRollback accountRollback;
     /** 是否处于批量变更范围，限制不支持的交叉全局修改。 */
     boolean orderBatchMutationScope;
-    /**
-     * Batch admission before-images are captured just before the provisional Lane publication.
-     * They are allowed to cross the batch-scope cleanliness gate once, then the normal guard
-     * remains strict for every other mutation.
-     */
-    boolean admissionCapturePrelude;
     /** 全局命令 before-image：首次变更时捕获，失败恢复，成功后清理。 */
     final RuntimeGlobalRollback globalRollback = new RuntimeGlobalRollback(this);
     /** 当前 Lane 的线程局部上下文，防止越界读取可变状态。 */
@@ -1397,19 +1391,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return event;
     }
 
-    public void stagePlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
+    public void registerPlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete() || event.rejection() != null) {
             throw new IllegalStateException("place batch admission is not collectable");
         }
         long userId = event.userId();
-        int laneId = topology.accountLaneId(userId);
-        // Capture the owner-visible state before exposing any irreversible Matcher observation.
-        // A fatal pipelined batch must roll back to the pre-admission null order/reservation,
-        // rather than treating the Lane-owned admission as its own before-image.
-        accountRollback.captureBatchAdmissionBefore(userId, event.admittedOrders(), event.itemCount(), laneId);
-        event.copyBalanceBeforeTo(accountRollback.patchBalancesBeforeByLane[laneId]);
-        admissionCapturePrelude = true;
         pendingReservations.registerBatch(event.coreSequence(), userId, event.admittedOrders(), event.itemCount());
         revision = Math.addExact(revision, event.itemCount());
     }
@@ -1421,6 +1408,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("place batch admission is not collectable");
         }
         int laneId = topology.accountLaneId(event.userId());
+        // Only this batch's ordered commit may populate the shared rollback buffers.
+        // Earlier commits must never publish or clear a future admission's before-images.
+        accountRollback.captureBatchAdmissionBefore(event.userId(), event.admittedOrders(), event.itemCount(), laneId);
+        event.copyBalanceBeforeTo(accountRollback.patchBalancesBeforeByLane[laneId]);
         MatcherSettlementChanges changes = event.takeChanges();
         try {
             // Admission values remain Lane-owned until terminal settlement.  This boundary only
@@ -2168,12 +2159,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void beginOrderBatchMutationScope() {
         assertOwner();
         if (orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
-        if ((snapshotProjectionStateDirty() && !admissionCapturePrelude) || !treasury.changedAssets().isEmpty()
+        if (snapshotProjectionStateDirty() || !treasury.changedAssets().isEmpty()
                 || !treasury.changedFundingSymbols().isEmpty()
                 || !treasury.changedLifecycleSymbols().isEmpty()) {
             throw new IllegalStateException("order batch requires a clean command mutation set");
         }
-        admissionCapturePrelude = false;
         orderBatchMutationScope = true;
         treasury.beginOrderBatchMutationScope();
     }
@@ -4229,7 +4219,6 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void clearChangedKeys() {
         assertOwner();
-        admissionCapturePrelude = false;
         balancesChanged = false;
         accountRollback.clearNonBalanceImages();
         clearChanged(changedUsers);

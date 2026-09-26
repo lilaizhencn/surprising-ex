@@ -25,6 +25,35 @@ import org.junit.jupiter.api.Test;
 
 class TradingRuntimeStateTest {
 
+    @Test
+    void futureBatchAdmissionDoesNotEnterEarlierCommandsRollbackBuffers() throws Exception {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.clearChangedKeys();
+            int lane = state.topology().accountLaneId(7);
+            var changes = new MatcherSettlementChanges(state.topology().accountLaneCount());
+            changes.ensureActiveLanes(1L << lane);
+            changes.balancePatches[lane].add(7, 3, new BalanceRuntime(7, 3, 1000, 0), 0);
+            changes.balancePatches[lane].after(7, 3, new BalanceRuntime(7, 3, 800, 200), 200);
+            var admission = new PlaceBatchAdmissionEvent().prepare(2, 7, java.util.UUID.randomUUID(),
+                    new ResolvedPlaceOrder[1], new long[1], new boolean[1], new boolean[1],
+                    new long[1], new int[1], new int[1],
+                    new OrderRuntime[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
+                    1, lane, 0, state, changes, null, null, 0, 0);
+            var complete = PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
+            complete.setAccessible(true);
+            complete.setBoolean(admission, true);
+            state.registerPlaceBatchAdmission(admission);
+            assertThat(state.accountRollback.patchOrdersBeforeByLane[lane].isEmpty()).isTrue();
+            assertThat(state.accountRollback.patchBalancesBeforeByLane[lane].size()).isZero();
+            // Completing an earlier commit must not require the future batch's after-image.
+            state.clearChangedKeys();
+            assertThat(state.pendingReservationCount()).isEqualTo(1);
+            assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1000);
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void rollbackPublishesRestoredBalanceEvenWhenMutationFailedBeforeWriting(boolean wroteBalance) {

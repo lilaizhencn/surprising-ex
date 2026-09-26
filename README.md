@@ -20,6 +20,11 @@ Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。�
 `ControlLaneDispatcher.poll` 观察完成并发布后，`PendingReservationTracker.collectControlReservation`
 才登记待结算索引和变更键，避免 Owner 挂起提交上下文时与账户线程并发清空同一缓冲。
 
+流水批量准入完成时，`registerPlaceBatchAdmission` 仅登记待结算索引和版本；该批次原有
+`PlaceBatchAdmissionEvent` 继续持有余额前后值。只有 `beginPipelinedOrderBatchCommit`
+进入有序提交、调用 `collectPlaceBatchAdmission` 时，才把其 before-image 交给当前回滚范围。
+顺序批量准入必须等到提交队首再启动，避免前一条命令发布或清空后一批次的资金记录。
+
 ## 项目介绍
 
 Surprising 是一个正在开发和验证中的多产品线交易系统。本仓库承载交易后端，围绕交易撮合、账户结算、风险处理、行情分发和运营管理组织服务，并通过 Aeron Cluster 构建交易核心的高可用运行环境。

@@ -151,7 +151,7 @@ final class MatchingPipelineProgress {
                         break;
                     }
                     if (!orderBatch.admissionCollected()) {
-                        owner.runtimeState.stagePlaceBatchAdmission(batchAdmission);
+                        owner.runtimeState.registerPlaceBatchAdmission(batchAdmission);
                         orderBatch.admissionCollected(true);
                     }
                     if (!pending.isMatchingSubmitted()) {
@@ -196,6 +196,9 @@ final class MatchingPipelineProgress {
             }
             if (batch != null && !batch.activated()) {
                 if (owner.batches.tryActivatePipelinedOrderBatch(batch, pending)) continue;
+                // Sequential admission shares the active rollback/commit boundary.
+                // It cannot start while an earlier command can still publish that boundary.
+                if (owner.pendingMatching.firstSequence() != batch.sequence) return;
                 owner.batches.activateOrderBatch(batch, pending, true);
                 return;
             }
