@@ -182,3 +182,10 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 网关 `OrderService` 支持限价委托 `bboPriceMode`：`OPPONENT_1`、`OPPONENT_5`、`SAME_SIDE_1`、`SAME_SIDE_5`。请求的 `priceTicks` 必须为 0；服务端读取所属产品线真实盘口，按方向、有效价格档解析一次委托价格，然后进入原有校验、冻结、撮合流程。深度不足明确拒绝，不替换为其他档位；BBO 不是持续跟随价格的挂单。
 
 `trading-trigger/batch` 的 `atomic=true` 支持同用户、同合约、同方向、同数量且同 `ocoGroupId` 的一对止盈/止损。`TriggerOrderService` 将两条腿转换为一条 `PLACE_TRIGGER_OCO_PAIR` 核心命令；`RuntimeTriggerOrderStateTransitions.placeOcoPair` 在同一账户 Lane 完成两条腿校验后统一落地。任一腿触发时沿用现有 OCO 互斥执行，另一腿取消。当前触发来源为标记价；衍生品保护单必须减少已有持仓。此处“单向/双向保护”与账户的“单向/双向持仓模式”是不同概念。
+
+### 本地止盈止损联调修复（2026-09-26）
+
+已有仓位的单向/双向保护继续强制只减仓。生命周期 `LiquidationService` 先提交 Core 风险/触发续扫，
+再查询强平工作，避免只有触发任务时不再推进。`TriggerOrderCommands` 为完整正 long 范围的触发单 ID
+生成正奇数子订单 ID，并确定性检查碰撞，修复真实 UUID 派生 ID 乘二溢出。
+详见 [联调记录](docs/validation/owner-context-bbo-20260926.md)。

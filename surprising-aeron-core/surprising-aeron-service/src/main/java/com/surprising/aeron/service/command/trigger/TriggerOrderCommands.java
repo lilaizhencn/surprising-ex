@@ -490,9 +490,13 @@ public final class TriggerOrderCommands {
     }
 
     static long triggerChildOrderId(long triggerOrderId, TradingRuntimeState state) {
-        long candidate = Math.addExact(Math.multiplyExact(triggerOrderId, 2), 1);
+        // Trigger IDs span the full positive long range (gateway IDs are UUID-derived).
+        // Keep child orders in the positive odd namespace without signed multiplication overflow.
+        long candidate = ((triggerOrderId << 1) | 1L) & Long.MAX_VALUE;
+        long first = candidate;
         while (state.order(candidate) != null) {
-            candidate = Math.addExact(candidate, 2);
+            candidate = candidate == Long.MAX_VALUE ? 1 : candidate + 2;
+            if (candidate == first) throw new CoreStateRejectedException("INVALID_COMMAND", "trigger child order IDs exhausted");
         }
         return candidate;
     }

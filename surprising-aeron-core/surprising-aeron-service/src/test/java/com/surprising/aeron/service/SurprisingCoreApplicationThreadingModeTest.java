@@ -99,7 +99,8 @@ class SurprisingCoreApplicationThreadingModeTest {
                     .redirectOutput(childOutput.toFile())
                     .start();
 
-            boolean exited = process.waitFor(5, TimeUnit.SECONDS);
+            // Includes cold JVM/Spring startup while local integration services may be running.
+            boolean exited = process.waitFor(30, TimeUnit.SECONDS);
             if (!exited) {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);

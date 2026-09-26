@@ -36,16 +36,16 @@ class ClusterCommandPipelineTest {
                 live.apply(live.place(maker, "BTC-USDT", 101, 100, 10, CoreOrderSide.SELL));
                 live.apply(live.place(user, "BTC-USDT", 102, 100, 10, CoreOrderSide.BUY));
                 live.apply(live.place(maker, "BTC-USDT", 103, 100, 1, CoreOrderSide.BUY));
-                var tp = pairLeg(product, user, 9001, "pair-tp", CoreTriggerOrderType.TAKE_PROFIT,
+                var tp = pairLeg(product, user, 6174311206148487272L, "pair-tp", CoreTriggerOrderType.TAKE_PROFIT,
                         takeProfitWins ? 100 : 120);
-                var sl = pairLeg(product, user, 9002, "pair-sl", CoreTriggerOrderType.STOP_LOSS,
+                var sl = pairLeg(product, user, 9014874673242113703L, "pair-sl", CoreTriggerOrderType.STOP_LOSS,
                         takeProfitWins ? 80 : 100);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
                         CoreTriggerOrderCodec.encodeList(List.of(tp,
-                                pairLeg(product, user, 9002, " ", CoreTriggerOrderType.STOP_LOSS, sl.triggerPriceTicks())))));
+                                pairLeg(product, user, 9014874673242113703L, " ", CoreTriggerOrderType.STOP_LOSS, sl.triggerPriceTicks())))));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-                assertThat(live.service.state().runtimeState.triggerOrder(9001)).isNull();
-                assertThat(live.service.state().runtimeState.triggerOrder(9002)).isNull();
+                assertThat(live.service.state().runtimeState.triggerOrder(6174311206148487272L)).isNull();
+                assertThat(live.service.state().runtimeState.triggerOrder(9014874673242113703L)).isNull();
                 var pair = live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
                         CoreTriggerOrderCodec.encodeList(List.of(tp, sl)));
                 live.apply(pair);
@@ -54,8 +54,8 @@ class ClusterCommandPipelineTest {
                 assertThat(CoreTriggerOrderCodec.decodeList(placed.data())).hasSize(2);
                 live.apply(pair);
                 assertThat(live.responses.getLast().data()).isEqualTo(placed.data());
-                long winner = takeProfitWins ? 9001 : 9002;
-                long canceled = takeProfitWins ? 9002 : 9001;
+                long winner = takeProfitWins ? 6174311206148487272L : 9014874673242113703L;
+                long canceled = takeProfitWins ? 9014874673242113703L : 6174311206148487272L;
                 live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(winner, 1, 100, TIME)));
                 assertThat(live.service.state().runtimeState.triggerOrder(winner).status())
@@ -676,7 +676,7 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void newAdmissionCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) {
+    void newAdmissionCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
             String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
@@ -685,8 +685,26 @@ class ClusterCommandPipelineTest {
             live.apply(withdraw); serial.apply(withdraw);
             live.responses.clear();
             var first = live.placeBatch(11, "BTC-USDT", 1000);
-            live.send(first);
             var state = live.service.state();
+            var workersField = state.runtimeState.getClass().getDeclaredField("laneWorkers");
+            workersField.setAccessible(true);
+            Object[] workers = (Object[]) workersField.get(state.runtimeState);
+            Object worker = workers[state.runtimeState.topology().accountLaneId(11)];
+            var entered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
+            var submit = worker.getClass().getDeclaredMethod("submit", task);
+            submit.setAccessible(true);
+            submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},
+                    (proxy, method, args) -> {
+                        entered.countDown();
+                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
+                        return null;
+                    }));
+            try {
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                live.send(first);
+            } finally { release.countDown(); }
             long sequence = state.matchingSequence(first.header().commandId());
             var batch = state.batches.batch(sequence);
             var pending = state.pendingMatching.get(sequence);
@@ -1613,8 +1631,21 @@ class ClusterCommandPipelineTest {
             assertThat(live.service.commandWindowHighWaterMark()).isEqualTo(2);
             var cancelA = live.cancel(userA, 101);
             var cancelB = live.cancel(userB, TradingCommandCodec.decodePlaceOrder(second.payloadUnsafe()).orderId());
-            live.send(cancelA); live.send(cancelB);
-            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            var cancelEntered = new CountDownLatch(1);
+            var cancelRelease = new CountDownLatch(1);
+            var cancelGate = matcher.readAtSubmissionFence(0, () -> {
+                cancelEntered.countDown();
+                try {
+                    if (!cancelRelease.await(5, TimeUnit.SECONDS)) throw new AssertionError("cancel gate timeout");
+                } catch (InterruptedException e) { throw new AssertionError(e); }
+                return true;
+            });
+            try {
+                assertThat(cancelEntered.await(5, TimeUnit.SECONDS)).isTrue();
+                live.send(cancelA); live.send(cancelB);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            } finally { cancelRelease.countDown(); }
+            assertThat(cancelGate.join()).isTrue();
             // A snapshot is itself a deterministic fence and includes both cancellations.
             byte[] snapshot = live.service.captureSnapshot(100);
             serial.send(cancelA); serial.tick(); serial.send(cancelB); serial.tick();
@@ -1781,8 +1812,20 @@ class ClusterCommandPipelineTest {
                     : live.place(11, "BTC-USDT", 301, 100, 2, CoreOrderSide.BUY);
             var second = batch ? live.placeBatch(disjointUser(11), secondSymbol, 2000)
                     : live.place(disjointUser(11), secondSymbol, disjointOrder(301), 100, 2, CoreOrderSide.BUY);
-            live.send(first); live.send(second);
-            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            var entered = new java.util.concurrent.CompletableFuture<Void>();
+            var release = new java.util.concurrent.CompletableFuture<Void>();
+            var gate = live.service.state().matcherPipeline.readAtSubmissionFence(
+                    live.service.state().matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                        entered.complete(null);
+                        release.orTimeout(5, TimeUnit.SECONDS).join();
+                        return true;
+                    });
+            try {
+                entered.orTimeout(5, TimeUnit.SECONDS).join();
+                live.send(first); live.send(second);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            } finally { release.complete(null); }
+            gate.join();
             live.tick(); serial.applyAll(List.of(first, second));
             assertThat(live.responses).hasSize(2).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
             int publicTrades = 0, executions = 0, begin = 0, end = 0;
