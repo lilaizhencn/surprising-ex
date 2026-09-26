@@ -84,9 +84,6 @@ public class MarketMakerProperties {
     @Setter
     public static class Engine {
         private boolean enabled;
-        @Min(50)
-        @Max(1000)
-        private long cycleDelayMs = 250L;
         private String nodeId;
 
     }

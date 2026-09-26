@@ -16,8 +16,8 @@
 - `surprising.market-maker.engine.enabled` 默认是 `false`，显式开启前不会定时真实下单。已启用策略仍可以通过私有 `run-once` API 手动执行一轮报价。
 - 所有报价单都是 `LIMIT + GTX + postOnly=true`。
 - 默认只做被动报价，不主动发起 IOC 扫单；主动交易模式仅可在测试配置中显式开启。
-- 报价循环按 100ms 级别运行，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
-- 定时入口 `MarketMakerTask.runCycle` 调用 `MarketMakerService.scheduledRun`，各独立策略并行报价，避免单个合约的网络等待拖慢其他合约；同一策略合约仍由 `runStrategySymbol` 的周期锁串行处理。实际刷新频率取决于网关与撮合响应时间。
+- 每个策略完成一轮后立即继续，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
+- 应用就绪后 `MarketMakerTask.start` 为每个配置策略启动独立报价虚拟线程，显式启用模拟交易时另启动一个吃单虚拟线程，分别调用 `MarketMakerService.runScheduledStrategy` / `runScheduledTrades` 连续执行，完成本轮立即开始下一轮，不设置 cycle-delay，也不等待其他策略完成。暂停、租约失败或本轮异常时退让 100ms，避免空转重试；关闭时中断本服务工作线程。报价和模拟吃单各自保留策略合约周期锁与租约，手动执行也受相应锁保护。模拟吃单每次读取真实盘口、持仓和标记价后经普通订单入口提交 IOC；不会把无成交撤单算作成交。实际频率仍取决于网络和交易核心耗时。
 - 报价价差会根据 mark/order-book 锚点的 EWMA 绝对变动自动扩大，并受最大波动价差限制；没有复杂的策略版本传播或跨服务状态编排。
 - `MarketMakerService.reconcile` 每轮按目标盘口撤销过期挂单并补齐报价，不设置订单操作总量上限；`placeBatch` 按接口每批 20 单、换单按当前挂单数的 10%（至少 1 单、最多 20 单）逐批撤销，确认后立即补齐再处理下一批，不会先撤完整个梯子。撤单结果不确定或补单拒绝时停止后续撤单，保留剩余挂单；风控主动缩减目标报价仍可撤掉不再允许的方向。状态不确定时保留原订单槽位，不重复补单。
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
@@ -94,7 +94,6 @@ surprising:
   market-maker:
     engine:
       enabled: false
-      cycle-delay-ms: 250
       node-id: mm-node-a
     coordination:
       enabled: true

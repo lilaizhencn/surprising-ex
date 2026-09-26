@@ -40,8 +40,8 @@ public class SurprisingMarketMakerApplication {
         int accountCount = properties.getStrategies().isEmpty()
                 ? 0
                 : properties.getStrategies().getFirst().getAccountIds().size();
-        log.info("Effective maker matrix configuration cycleDelayMs={} orderLevels={} accountCount={} referenceMarketEnabled={} marketTakingEnabled={}",
-                properties.getEngine().getCycleDelayMs(), properties.getQuoting().getOrderLevels(),
+        log.info("Effective maker matrix configuration orderLevels={} accountCount={} referenceMarketEnabled={} marketTakingEnabled={}",
+                properties.getQuoting().getOrderLevels(),
                 accountCount,
                 properties.getReferenceMarket().isEnabled(), properties.getTrade().isEnabled());
     }

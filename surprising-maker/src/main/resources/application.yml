@@ -57,7 +57,6 @@ surprising:
   market-maker:
     engine:
       enabled: true
-      cycle-delay-ms: ${MM_CYCLE_DELAY_MS:100}
       node-id:
     coordination:
       enabled: true

@@ -28,7 +28,6 @@ class MarketMakerApplicationYamlTest {
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.engine.enabled"))
                 .contains(true);
-        assertThat(properties.getEngine().getCycleDelayMs()).isEqualTo(100L);
         assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(20);
         assertThat(properties.getStrategies().getFirst().getAccountIds()).hasSize(2);
         assertThat(sources)
@@ -57,12 +56,10 @@ class MarketMakerApplicationYamlTest {
     @ParameterizedTest
     @MethodSource("makerMatrixOverrides")
     void makerMatrixOverridesBindToEffectiveValues(Map<String, Object> overrides,
-                                                   long cycleDelayMs,
                                                    int orderLevels,
                                                    int accountCount) throws IOException {
         MarketMakerProperties properties = bind(overrides);
 
-        assertThat(properties.getEngine().getCycleDelayMs()).isEqualTo(cycleDelayMs);
         assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(orderLevels);
         assertThat(properties.getStrategies().getFirst().getAccountIds()).hasSize(accountCount);
         assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(properties)).isEmpty();
@@ -70,12 +67,12 @@ class MarketMakerApplicationYamlTest {
 
     private static List<Object[]> makerMatrixOverrides() {
         return List.of(
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_CYCLE_DELAY_MS", "1000", "MM_ORDER_LEVELS", "5",
+                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_ORDER_LEVELS", "5",
                         "MM_ACCOUNT_IDS", "900001,900002"),
-                        1000L, 5, 2},
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_CYCLE_DELAY_MS", "50", "MM_ORDER_LEVELS", "50",
+                        5, 2},
+                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_ORDER_LEVELS", "50",
                         "MM_ACCOUNT_IDS", "900001,900002,900003,900004,900005,900006,900007,900008"),
-                        50L, 50, 8});
+                        50, 8});
     }
 
     private MarketMakerProperties bind(Map<String, Object> overrides) throws IOException {
