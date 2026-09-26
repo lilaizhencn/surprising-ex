@@ -25,6 +25,22 @@ import org.junit.jupiter.api.Test;
 
 class TradingRuntimeStateTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void rollbackPublishesRestoredBalanceEvenWhenMutationFailedBeforeWriting(boolean wroteBalance) {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.clearChangedKeys();
+            if (wroteBalance) state.replaceBalance(7, 3, 800, 0);
+            else state.accountRollback.captureBalanceBefore(7, 3);
+            state.rollbackActiveCommand(0, 1);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
+            assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1000);
+            state.clearChangedKeys();
+        }
+    }
+
     @Test
     void leverageProbeReadsConfiguredValueWithoutChangingTheStoredKeyMap() {
         try (var state = new TradingRuntimeState()) {

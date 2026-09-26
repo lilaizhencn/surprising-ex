@@ -137,6 +137,10 @@ final class RuntimeAccountRollback {
                 userBalances.put(assetId, new BalanceRuntime(userId, assetId,
                         before.availableUnits(), before.lockedUnits()));
             }
+            // Rollback is itself the final Lane after-state, including failures before any write.
+            // Publishing the attempted value (or an uncaptured value) would corrupt the read view.
+            balances.after(userId, assetId, userBalances == null ? null : userBalances.get(assetId),
+                    lane.pendingReservedUnits(userId, assetId));
         }
         LaneLongCaptures<UserRuntime> users = patchUsersBeforeByLane[laneId];
         for (int index = 0; index < users.size(); index++) {

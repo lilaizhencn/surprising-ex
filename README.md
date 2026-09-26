@@ -189,3 +189,6 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 再查询强平工作，避免只有触发任务时不再推进。`TriggerOrderCommands` 为完整正 long 范围的触发单 ID
 生成正奇数子订单 ID，并确定性检查碰撞，修复真实 UUID 派生 ID 乘二溢出。
 详见 [联调记录](docs/validation/owner-context-bbo-20260926.md)。
+
+账户回滚后由 `RuntimeAccountRollback.restoreLane` 重新记录实际恢复的余额 after-state，
+避免写入前失败导致发布缺值、或写入后回滚仍发布尝试值。写前/写后失败与异步冻结回滚均有回归覆盖。
