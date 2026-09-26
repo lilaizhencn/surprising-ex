@@ -31,6 +31,14 @@ public class LeverageRequestService {
         }
     }
 
+    public LeverageSettingResponse adminSet(String adminUserId, LeverageSettingRequest request,
+                                            String productLineHeader, String productLineValue) {
+        if (adminUserId == null || adminUserId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin identity is required");
+        }
+        return set(request, productLineHeader, productLineValue);
+    }
+
     public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode, String productLineHeader, String productLineValue) {
         try {
             return leverageService.get(userId, symbol, marginMode, productLine(productLineValue, productLineHeader));

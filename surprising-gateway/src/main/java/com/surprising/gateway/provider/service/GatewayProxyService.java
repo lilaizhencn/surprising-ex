@@ -657,7 +657,7 @@ public class GatewayProxyService {
         }
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
         String path = request.getRequestURI() == null ? "" : request.getRequestURI().toLowerCase(Locale.ROOT);
-        if (List.of("account", "instrument-admin", "insurance-admin", "trading-fees",
+        if (List.of("account", "instrument-admin", "insurance-admin", "trading-fees", "trading-leverage",
                 "trading-orders", "market-maker", "risk-admin", "liquidation-admin", "wallet-admin").contains(normalizedService)) {
             return true;
         }

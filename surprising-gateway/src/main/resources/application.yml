@@ -397,6 +397,10 @@ surprising:
         base-url: "local:"
         target-prefix: /api/v1/admin/trading/orders
         private-route: true
+      trading-leverage:
+        base-url: "local:"
+        target-prefix: /api/v1/admin/trading/leverage
+        private-route: true
       trading-fees:
         base-url: "local:"
         target-prefix: /api/v1/admin/trading/fees

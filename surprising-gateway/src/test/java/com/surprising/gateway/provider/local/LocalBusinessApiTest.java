@@ -21,6 +21,8 @@ class LocalBusinessApiTest {
 
     private final com.surprising.trading.order.service.OrderRequestService orders = mock(com.surprising.trading.order.service.OrderRequestService.class);
 
+    private final com.surprising.trading.order.service.LeverageRequestService leverage = mock(com.surprising.trading.order.service.LeverageRequestService.class);
+
     private final com.surprising.trading.matching.service.MatchingMarketDataService market = mock(com.surprising.trading.matching.service.MatchingMarketDataService.class);
 
     private final com.surprising.account.provider.service.AccountRequestService accounts = mock(com.surprising.account.provider.service.AccountRequestService.class);
@@ -41,7 +43,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class), mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), mock(com.surprising.trading.order.service.LeverageRequestService.class), mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, mock(com.surprising.trading.order.service.AdminOrderRequestService.class), mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class), mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, mock(com.surprising.trading.order.service.AdminOrderRequestService.class), mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {
@@ -80,6 +82,21 @@ class LocalBusinessApiTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
         verifyNoInteractions(proxy);
 
+    }
+
+    @Test
+    void adminLeverageRequiresTrustedIdentityAndUsesTheExistingLeverageService() {
+        String path = "/api/v1/admin/trading/leverage/settings";
+        String body = "{\"userId\":900001,\"productLine\":\"LINEAR_PERPETUAL\",\"symbol\":\"BTC-USDT-SWAP\",\"marginMode\":\"CROSS\",\"leveragePpm\":10000000}";
+        assertThat(invoke("trading-leverage", path, HttpMethod.POST, userHeaders(), body).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(leverage);
+
+        var headers = userHeaders();
+        headers.set("X-Admin-User-Id", "7");
+        assertThat(invoke("trading-leverage", path, HttpMethod.POST, headers, body).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        verify(leverage).adminSet(eq("7"), any(), eq("LINEAR_PERPETUAL"), isNull());
     }
 
     @Test

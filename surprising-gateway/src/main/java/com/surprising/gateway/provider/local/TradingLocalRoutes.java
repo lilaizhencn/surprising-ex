@@ -64,6 +64,7 @@ public final class TradingLocalRoutes {
     private static final PathPattern ADMIN_TRIGGER_ORDER_CONTROLLER_ORDER = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/trigger-orders/{triggerOrderId}");
     private static final PathPattern ADMIN_TRIGGER_ORDER_CONTROLLER_TIMELINE = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/trigger-orders/{triggerOrderId}/timeline");
     private static final PathPattern LEVERAGE_CONTROLLER_SET = PathPatternParser.defaultInstance.parse("/api/v1/trading/leverage/settings");
+    private static final PathPattern ADMIN_LEVERAGE_CONTROLLER_SET = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/leverage/settings");
     private static final PathPattern LEVERAGE_CONTROLLER_GET = PathPatternParser.defaultInstance.parse("/api/v1/trading/leverage/settings");
     private static final PathPattern TRADING_FEE_CONTROLLER_UPSERT = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/fees/schedules");
     private static final PathPattern TRADING_FEE_CONTROLLER_DISABLE = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable");
@@ -246,6 +247,12 @@ public final class TradingLocalRoutes {
         }
         if (r.matches(HttpMethod.POST, ORDER_CONTROLLER_CANCELALGO)) {
             return orderRequests.cancelAlgo(r.body(CancelAlgoOrderRequest.class, true, false));
+        }
+        if (r.matches(HttpMethod.POST, ADMIN_LEVERAGE_CONTROLLER_SET)) {
+            return leverageRequests.adminSet(r.header("X-Admin-User-Id", String.class, null, true),
+                    r.body(LeverageSettingRequest.class, true, false),
+                    r.header("X-Product-Line", String.class, null, false),
+                    r.query("productLine", String.class, null, false));
         }
         if (r.matches(HttpMethod.POST, LEVERAGE_CONTROLLER_SET)) {
             return leverageRequests.set(r.body(LeverageSettingRequest.class, true, false),

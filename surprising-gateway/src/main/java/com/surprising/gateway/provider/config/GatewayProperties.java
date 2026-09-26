@@ -302,6 +302,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("price-mark", new BackendRoute("http://localhost:9082", "/api/v1/price/mark", true));
         routes.put("trading", new BackendRoute("local:", "/api/v1/admin/trading/orders", true));
         routes.put("trading-orders", new BackendRoute("local:", "/api/v1/admin/trading/orders", true));
+        routes.put("trading-leverage", new BackendRoute("local:", "/api/v1/admin/trading/leverage", true));
         routes.put("trading-fees", new BackendRoute("local:", "/api/v1/admin/trading/fees", true));
         routes.put("trading-market", new BackendRoute("local:", "/api/v1/trading/market", true));
         routes.put("trading-trigger", new BackendRoute("local:", "/api/v1/admin/trading/trigger-orders", true));
