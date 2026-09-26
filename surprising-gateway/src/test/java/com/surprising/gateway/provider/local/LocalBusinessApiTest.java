@@ -76,7 +76,7 @@ class LocalBusinessApiTest {
         verifyNoInteractions(websocket);
         var proxy = mock(com.surprising.gateway.provider.service.GatewayProxyService.class);
         var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
-                new com.surprising.gateway.provider.controller.GatewayProxyController(proxy)).build();
+                new com.surprising.gateway.provider.controller.GatewayProxyController(proxy, api())).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/admin/websocket/metrics")
                 .header("X-Admin-User-Id", "7"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());

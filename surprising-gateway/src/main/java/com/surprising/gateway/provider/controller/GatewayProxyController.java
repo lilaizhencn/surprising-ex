@@ -1,6 +1,11 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.service.GatewayProxyService;
+import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.product.api.ProductLine;
+import java.util.List;
+import java.util.Map;
+import org.springframework.web.bind.annotation.GetMapping;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
@@ -17,8 +22,17 @@ public class GatewayProxyController {
 
     private final GatewayProxyService gatewayProxyService;
 
-    public GatewayProxyController(GatewayProxyService gatewayProxyService) {
+    private final LocalBusinessApi localBusinessApi;
+
+    public GatewayProxyController(GatewayProxyService gatewayProxyService, LocalBusinessApi localBusinessApi) {
         this.gatewayProxyService = gatewayProxyService;
+        this.localBusinessApi = localBusinessApi;
+    }
+
+    /** The bundled gateway serves exactly its configured account/trading product line. */
+    @GetMapping("/api/v1/runtime")
+    public Map<String, List<ProductLine>> runtime() {
+        return Map.of("productLines", List.of(localBusinessApi.productLine()));
     }
 
     @RequestMapping(path = {

@@ -236,3 +236,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 `SubscriptionRegistry` 的 `*` 仅用于选择订阅全部合约的连接。普通与带时间批量推送均保留事件本身的 `symbol`、`productLine` 和 `userId`，尤其成交回报不能把真实合约替换为 `*`，否则客户端无法选择数量单位或核对成交资金。
 
 `LocalBusinessApi` 对 `CoreCommandOutcome.NotAcceptedException` 返回 503，明确请求未被交易核心接收；同步和异步入口一致处理，不自动重复下单。结果未知、业务拒绝和已接单的状态仍按各自契约返回。
+
+## 前端运行能力
+
+公开只读接口 `GET /api/v1/runtime` 返回当前整合网关实际服务的 `productLines`，来源为 `LocalBusinessApi.productLine()`，与账户和交易配置校验一致。前端据此订阅私有账户状态，避免等待未启用产品线的快照。该接口不包含账户数据或连接配置。
