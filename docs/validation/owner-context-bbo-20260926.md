@@ -125,3 +125,10 @@ BBO 不改变 Core 下单协议、账户类型、资金模型或 Kafka topic。
 - 23:17 前后无 Maven 编译并发的 30 秒公共 WS 采样：20 币对各 195～224 笔真实成交，总体明显增加，但逐秒存在空窗；末次盘口各边 33～50 档。未达到持续每秒 >=3 笔且双边 50 档要求。原始 /tmp/pmm-batch-frequency.log 与 /tmp/all-pairs-frequency.json 留作本轮证据。
 - 影响面：maker 普通订单请求、审计 SQL；没有更改撮合/结算算法、资金协议和其他产品线。JDK 27 maker 57 项测试及依赖测试通过；未重跑其他五产品线完整端到端，未对外宣称生产高频能力。磁盘剩余约 418 GiB。
 - 按用户要求保留六服务、前端和做市运行，保留持久化 Archive；不因诊断清理删除运行状态。失败测试报告保留用于后续排障。
+
+### 23:21 部署后复查
+
+- maker PID 38970，health UP；审计最近 20 秒 225 个 TRADE_SUBMITTED 批次/1800 张接受订单，未再将缺失终态详情误计为拒绝。maker 最终 package 含 57 项测试全通过，日志 /tmp/pmm-maker-verified-package.log。
+- 最终 30 秒 WS：每币对 163～176 笔真实成交，最少逐秒仍为 0，末次深度各边 34～50，20 币对增量序号 gap 合计 0。证据 /tmp/pmm-final-frequency.log 与 /tmp/all-pairs-frequency.json；未达逐秒稳定与连续 50 档验收。
+- BTC 1m 页面截图 /tmp/chart-one-minute.png 已目视确认蜡烛、成交量、价格标记；5m 为 102 根蜡烛/102 根成交量，时间戳 mismatch=[]，日志 /tmp/pmm-final-chart-five-minute.log。
+- 六服务进程与前端均保留运行供查看。本次没有新增线程、框架或持仓副本；批次只在请求内持有订单列表，资金状态仍由核心唯一维护。
