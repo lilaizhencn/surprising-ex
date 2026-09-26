@@ -703,7 +703,7 @@ public class MarketMakerService {
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         List<OrderResponse> owned = openOrders.stream()
                 .filter(order -> ownsOrder(accountPrefix, order))
-                // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用本周期撤单/挂单额度。
+                // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用目标报价档位。
                 // 会导致所有报价都被跳过，做市策略进入“运行但无盘口”的假健康状态。
                 .filter(this::isLive)
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
@@ -755,35 +755,35 @@ public class MarketMakerService {
                         throw new IllegalStateException(receiptMessage(receipt));
                     }
                     for (int i = 0; i < batchRequests.size(); i++) {
-                    int resultIndex = i;
-                    var item = batch.results().stream()
-                            .filter(result -> result.index() == resultIndex)
-                            .findFirst()
-                            .orElse(null);
-                    OrderResponse response = item == null ? null : item.order();
-                    if (item == null || !item.success() || response == null
-                            || response.status() == OrderStatus.REJECTED) {
-                        rejected++;
-                        rejectionReason = firstReason(rejectionReason,
-                                item == null ? "批量下单缺少结果" : firstReason(item.message(),
-                                        response == null ? null : response.rejectReason()));
-                        continue;
+                        int resultIndex = i;
+                        var item = batch.results().stream()
+                                .filter(result -> result.index() == resultIndex)
+                                .findFirst()
+                                .orElse(null);
+                        OrderResponse response = item == null ? null : item.order();
+                        if (item == null || !item.success() || response == null
+                                || response.status() == OrderStatus.REJECTED) {
+                            rejected++;
+                            rejectionReason = firstReason(rejectionReason,
+                                    item == null ? "批量下单缺少结果" : firstReason(item.message(),
+                                            response == null ? null : response.rejectReason()));
+                            continue;
+                        }
+                        rememberOrder(strategy.getProductLine(), accountId, symbol, response);
+                        submitted++;
+                        // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
+                        int placeholder = kept.indexOf(null);
+                        if (placeholder >= 0) {
+                            kept.set(placeholder, response);
+                        } else {
+                            kept.add(response);
+                        }
                     }
-                    rememberOrder(strategy.getProductLine(), accountId, symbol, response);
-                    submitted++;
-                    // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
-                    int placeholder = kept.indexOf(null);
-                    if (placeholder >= 0) {
-                        kept.set(placeholder, response);
-                    } else {
-                        kept.add(response);
-                    }
-                }
                 } catch (RuntimeException ex) {
-                // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
-                // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
+                    // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
+                    // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
                     rejected += batchRequests.size();
-                rejectionReason = firstReason(rejectionReason, ex.getMessage());
+                    rejectionReason = firstReason(rejectionReason, ex.getMessage());
                 }
             }
         }
