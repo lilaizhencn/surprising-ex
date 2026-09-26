@@ -9,6 +9,27 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.*;
 
 class AeronRealtimeTransportTest {
+    @Test void transportErrorReopensSubscriptionEvenWhenDriverRemainsAlive() throws Exception {
+        String directory = System.getProperty("java.io.tmpdir") + "/realtime-error-" + java.util.UUID.randomUUID();
+        var received = new LinkedBlockingQueue<RealtimeFrame>();
+        var outbox = new RealtimeOutbox(64, 1_048_576);
+        try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                     .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+             var receiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 74, received::add);
+             var sender = new AeronRealtimeSender(outbox, directory, "aeron:ipc", 74)) {
+            var frame = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 123, 0, 456, 0,
+                    "BTC-USDT", "789", new byte[0]);
+            assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
+            receiver.transportFailed(new IllegalStateException("injected transport error"));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!receiver.ready() && System.nanoTime() < deadline) Thread.sleep(10);
+            assertThat(receiver.ready()).isTrue();
+            assertThat(receiver.failures()).isPositive();
+            received.clear();
+            assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
+        }
+    }
+
     @Test void driverLossDoesNotExitProcessAndBothIdleEndpointsReconnect() throws Exception {
         String directory = System.getProperty("java.io.tmpdir") + "/realtime-restart-" + java.util.UUID.randomUUID();
         var received = new LinkedBlockingQueue<RealtimeFrame>();

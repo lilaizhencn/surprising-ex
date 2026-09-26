@@ -19,3 +19,9 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 测试覆盖协议截断/越界、全部产品线和消息类型、完整回调发布、撤销、总内存额度、
 跨线程可见性，以及真实 Media Driver 上的大消息分片重组和目标 stream 隔离。
 当前测试不构成完整交易主链路性能验收。
+
+### 行情订阅异常恢复
+
+`AeronRealtimeReceiver` 收到传输错误后标记不可用，当前轮询必须退出并关闭旧订阅，再重新连接。
+即使 Driver 尚未关闭，也不能继续轮询一个已被错误处理器标记失效的订阅。错误原因会记录到日志。
+`AeronRealtimeTransportTest` 使用真实 Driver 覆盖传输错误后的重连、Driver 重启恢复和分片消息交付。

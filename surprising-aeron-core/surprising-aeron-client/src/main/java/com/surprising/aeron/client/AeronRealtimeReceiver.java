@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 
 /** Owns the subscription; fragment buffers are released when their source image disappears. */
 public final class AeronRealtimeReceiver implements AutoCloseable {
+    private static final System.Logger LOG = System.getLogger(AeronRealtimeReceiver.class.getName());
     private final Thread worker;
     private volatile boolean running = true;
     private volatile boolean ready;
@@ -19,7 +20,7 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
         worker = Thread.ofPlatform().name("realtime-aeron-receiver").unstarted(() -> {
             while (running) {
                 try (var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory).driverTimeoutMs(1000)
-                        .errorHandler(failure -> { ready = false; failures.increment(); }))) {
+                        .errorHandler(this::transportFailed))) {
                     var assembler = new FragmentAssembler((buffer, offset, length, header) -> {
                         try {
                             if (length > RealtimeFrameCodec.MAX_FRAME_BYTES) {
@@ -35,7 +36,7 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
                     try (var subscription = aeron.addSubscription(channel, streamId, null,
                             unavailable -> { synchronized (assembler) { assembler.freeSessionBuffer(unavailable.sessionId()); } })) {
                         ready = true;
-                        while (running && !subscription.isClosed() && !aeron.isClosed()) {
+                        while (running && ready && !subscription.isClosed() && !aeron.isClosed()) {
                             int fragments;
                             synchronized (assembler) { fragments = subscription.poll(assembler, 64); }
                             if (fragments == 0) LockSupport.parkNanos(100_000);
@@ -55,6 +56,12 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
 
     public boolean ready() { return ready; }
     public long failures() { return failures.sum(); }
+
+    void transportFailed(Throwable failure) {
+        ready = false;
+        failures.increment();
+        LOG.log(System.Logger.Level.WARNING, "Realtime subscription transport failed; reconnecting", failure);
+    }
 
     @Override
     public void close() {
