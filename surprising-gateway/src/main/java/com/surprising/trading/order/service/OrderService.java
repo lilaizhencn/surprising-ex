@@ -57,16 +57,24 @@ public class OrderService {
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
+    private final OrderAeronGateway bboOrderBook;
     private final OrderPlacementStateService placementStateService;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
 
-    @Autowired
     public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
                         OrderPlacementStateService placementStateService,
                         AeronOrderCommandService aeronOrders,
                         AeronOrderProjectionRepository aeronOrderProjection) {
+        this(properties, orderValidator, placementStateService, aeronOrders, aeronOrderProjection, null);
+    }
+
+    @Autowired
+    public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
+                        OrderPlacementStateService placementStateService, AeronOrderCommandService aeronOrders,
+                        AeronOrderProjectionRepository aeronOrderProjection, OrderAeronGateway bboOrderBook) {
+        this.bboOrderBook = bboOrderBook;
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.placementStateService = placementStateService;
@@ -749,20 +757,45 @@ public class OrderService {
             throw new IllegalArgumentException("priceTicks must be non-negative and quantitySteps must be positive");
         }
         String clientOrderId = normalizeClientOrderId(request.clientOrderId());
+        String symbol = normalizeSymbol(request.symbol());
+        long priceTicks = resolveLimitPrice(request, symbol);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         return new PlaceOrderRequest(
                 request.userId(),
                 clientOrderId,
-                normalizeSymbol(request.symbol()),
+                symbol,
                 request.side(),
                 request.orderType(),
                 request.timeInForce(),
-                request.priceTicks(),
+                priceTicks,
                 request.quantitySteps(),
                 MarginMode.defaultIfNull(request.marginMode()),
                 positionSide,
                 request.reduceOnly(),
                 request.postOnly());
+    }
+
+    private long resolveLimitPrice(PlaceOrderRequest request, String symbol) {
+        var mode = request.bboPriceMode();
+        if (mode == null) return request.priceTicks();
+        if (request.orderType() != OrderType.LIMIT || request.priceTicks() != 0) {
+            throw new IllegalArgumentException("BBO requires a LIMIT order with priceTicks=0");
+        }
+        if (bboOrderBook == null) throw new IllegalStateException("BBO order book is unavailable");
+        boolean buyBook = (request.side() == OrderSide.BUY) == mode.sameSide();
+        var bookSide = buyBook ? com.surprising.aeron.protocol.CoreOrderSide.BUY
+                : com.surprising.aeron.protocol.CoreOrderSide.SELL;
+        var book = bboOrderBook.orderBook(new com.surprising.aeron.protocol.CoreOrderBookQuery(symbol, mode.depth()));
+        // Core book views do not promise iteration order: rank distinct live price levels explicitly.
+        var prices = book.levels().stream()
+                .filter(level -> level.side() == bookSide && level.quantitySteps() > 0 && level.priceTicks() > 0)
+                .map(com.surprising.aeron.protocol.CoreBookLevelView::priceTicks).distinct()
+                .sorted(buyBook ? Comparator.reverseOrder() : Comparator.naturalOrder()).toList();
+        if (prices.size() < mode.depth()) {
+            throw new IllegalArgumentException("BBO_DEPTH_UNAVAILABLE: requested " + mode.depth()
+                    + " levels on " + bookSide + ", available " + prices.size());
+        }
+        return prices.get(mode.depth() - 1);
     }
 
     private AmendOrderRequest normalizeAmend(AmendOrderRequest request) {

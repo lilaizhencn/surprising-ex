@@ -18,11 +18,20 @@ public record PlaceOrderRequest(
         MarginMode marginMode,
         PositionSide positionSide,
         boolean reduceOnly,
-        boolean postOnly) {
+        boolean postOnly,
+        BboPriceMode bboPriceMode) {
 
     public PlaceOrderRequest {
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public PlaceOrderRequest(long userId, String clientOrderId, String symbol, OrderSide side,
+                             OrderType orderType, TimeInForce timeInForce, long priceTicks,
+                             long quantitySteps, MarginMode marginMode, PositionSide positionSide,
+                             boolean reduceOnly, boolean postOnly) {
+        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+                marginMode, positionSide, reduceOnly, postOnly, null);
     }
 
     public PlaceOrderRequest(long userId,
