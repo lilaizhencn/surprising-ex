@@ -67,6 +67,8 @@ surprising:
       min-spread-ticks: 20
       level-spacing-ticks: 8
       refresh-threshold-ticks: 1
+      refresh-tolerance-ppm: ${MM_REFRESH_TOLERANCE_PPM:1}
+      half-spread-ppm: ${MM_HALF_SPREAD_PPM:1}
       max-open-orders-per-account-symbol: ${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:60}
       stale-order-max-age: 2s
       max-price-deviation-ppm: 5000

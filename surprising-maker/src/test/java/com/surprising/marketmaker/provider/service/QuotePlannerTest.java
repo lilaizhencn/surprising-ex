@@ -1,6 +1,7 @@
 package com.surprising.marketmaker.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -111,23 +112,38 @@ class QuotePlannerTest {
     }
 
     @Test
-    void fallsBackToOrderBookMidWhenMarkPriceIsUnavailable() {
-        QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
-                orderBook(49_900L, 50_100L), null, 0L);
-
-        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+    void linearQuotesRequireMarkPriceEvenWithAnExplicitInitialAnchor() {
+        var strategy = strategy();
+        strategy.setInitialAnchorPriceTicks(50_000L);
+        assertThatThrownBy(() -> quotePlanner.plan(strategy, quoting(), risk(), instrument(),
+                orderBook(49_900L, 50_100L), null, 0L))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("mark price required");
     }
 
     @Test
-    void usesExplicitInitialAnchorOnlyWhenAllMarketDataIsEmpty() {
-        MarketMakerProperties.Strategy strategy = strategy();
-        strategy.setInitialAnchorPriceTicks(50_000L);
+    void relativeSpreadScalesWithPrice() {
+        var quoting = quoting();
+        quoting.setHalfSpreadPpm(1_000L);
+        var plan = quotePlanner.plan(strategy(), quoting, risk(), instrument(),
+                orderBook(49_000L, 51_000L), mark(5_000_000L), 0L);
+        assertThat(plan.quotes().getFirst().priceTicks()).isEqualTo(49_950L);
+        assertThat(plan.quotes().get(1).priceTicks()).isEqualTo(50_050L);
+    }
 
-        QuotePlan plan = quotePlanner.plan(strategy, quoting(), risk(), instrument(),
-                new OrderBookSnapshotResponse("BTC-USDT", 1L, 50,
-                        List.of(), List.of(), Instant.now()), null, 0L);
-
-        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+    @Test
+    void sizesWholeLadderWithinConservativeOpenInterestBudget() {
+        var strategy = strategy();
+        strategy.setOrderLevels(50);
+        strategy.setBaseQuantitySteps(1_000_000L);
+        var spec = instrument();
+        var plan = quotePlanner.plan(strategy, quoting(), risk(), spec,
+                orderBook(49_000L, 51_000L), mark(5_000_000L), 0L);
+        for (var side : OrderSide.values()) {
+            long steps = plan.quotes().stream().filter(q -> q.side() == side)
+                    .mapToLong(q -> q.quantitySteps()).sum();
+            assertThat(Math.multiplyExact(steps, 50_000L * spec.notionalMultiplierUnits()))
+                    .isLessThanOrEqualTo(spec.userOpenInterestLimitFloorUnits());
+        }
     }
 
     @Test
@@ -142,17 +158,17 @@ class QuotePlannerTest {
         QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
                 orderBook(49_900L, 50_100L), mark(5_000_000L), 0L, reference);
 
-        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+        assertThat(plan.anchorPriceTicks()).isEqualTo(50_005L);
         assertThat(plan.quotes()).hasSize(4);
         assertThat(plan.quotes().get(0).side()).isEqualTo(OrderSide.BUY);
-        assertThat(plan.quotes().get(0).priceTicks()).isEqualTo(49_985L);
+        assertThat(plan.quotes().get(0).priceTicks()).isEqualTo(49_990L);
         assertThat(plan.quotes().get(0).quantitySteps()).isEqualTo(3L);
         assertThat(plan.quotes().get(1).side()).isEqualTo(OrderSide.SELL);
-        assertThat(plan.quotes().get(1).priceTicks()).isEqualTo(50_015L);
+        assertThat(plan.quotes().get(1).priceTicks()).isEqualTo(50_020L);
         assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(7L);
-        assertThat(plan.quotes().get(2).priceTicks()).isEqualTo(49_965L);
+        assertThat(plan.quotes().get(2).priceTicks()).isEqualTo(49_970L);
         assertThat(plan.quotes().get(2).quantitySteps()).isEqualTo(4L);
-        assertThat(plan.quotes().get(3).priceTicks()).isEqualTo(50_035L);
+        assertThat(plan.quotes().get(3).priceTicks()).isEqualTo(50_040L);
         assertThat(plan.quotes().get(3).quantitySteps()).isEqualTo(8L);
     }
 

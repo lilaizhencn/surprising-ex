@@ -120,6 +120,14 @@ public class MarketMakerProperties {
         private long levelSpacingTicks = 10L;
         @PositiveOrZero
         private long refreshThresholdTicks = 2L;
+        /** PMM relative refresh tolerance; combines with the minimum tick threshold. */
+        @Min(0)
+        @Max(100_000)
+        private long refreshTolerancePpm = 0L;
+        /** PMM minimum distance from the external reference on each side. */
+        @Min(0)
+        @Max(100_000)
+        private long halfSpreadPpm = 0L;
         @Min(2)
         @Max(1000)
         private int maxOpenOrdersPerAccountSymbol = 30;

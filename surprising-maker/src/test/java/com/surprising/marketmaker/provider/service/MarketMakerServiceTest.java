@@ -233,6 +233,29 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void ownOldAskDoesNotPinRisingReferencePrice() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        Fixtures fixtures = new Fixtures(List.of(order(77L, 900001L, prefix + "s0-1", OrderSide.SELL,
+                50_010L, 100L, OrderStatus.ACCEPTED)));
+        fixtures.markPriceUnits = 5_100_000L;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId).contains(77L);
+        assertThat(fixtures.orderRpc.placeRequests).filteredOn(q -> q.side() == OrderSide.BUY)
+                .allSatisfy(q -> assertThat(q.priceTicks()).isGreaterThan(50_010L));
+    }
+
+    @Test
+    void otherParticipantsAtTheSamePriceStillProtectPostOnlyQuotes() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        Fixtures fixtures = new Fixtures(List.of(order(77L, 900001L, prefix + "s0-1", OrderSide.SELL,
+                50_010L, 99L, OrderStatus.ACCEPTED)));
+        fixtures.markPriceUnits = 5_100_000L;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(fixtures.orderRpc.placeRequests).filteredOn(q -> q.side() == OrderSide.BUY)
+                .isEmpty();
+    }
+
+    @Test
     void placesEntireDesiredLadderInOneCycle() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderLevels = 20;
@@ -267,7 +290,7 @@ class MarketMakerServiceTest {
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(60);
         assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(10);
-        assertThat(fixtures.orderRpc.placeRequests).hasSize(52);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(50);
     }
 
     @Test

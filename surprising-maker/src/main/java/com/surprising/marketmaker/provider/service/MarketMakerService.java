@@ -731,15 +731,33 @@ public class MarketMakerService {
                               Instant now,
                               String traceId) {
         PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
-        QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                orderBook, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, symbol, now);
+        OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
+        QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
+                otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
         ReconcileResult result = reconcile(strategy, accountId, symbol, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());
         state.addRejected(result.rejected());
         recordRunEvent(strategy, symbol, accountId, cycleSequence, "QUOTE_RECONCILED",
                 result.submitted(), result.canceled(), result.rejected(), null, result.rejectionReason(), traceId, now);
+    }
+
+    /** 报价只避让其他参与者的盘口；自己的旧报价交由分批撤补处理，不能反向锁住参考价。 */
+    private OrderBookSnapshotResponse excludeOwnQuotes(OrderBookSnapshotResponse book, List<OrderResponse> orders) {
+        return new OrderBookSnapshotResponse(book.symbol(), book.sequence(), book.depth(),
+                excludeOwnSide(book.bids(), orders, OrderSide.BUY),
+                excludeOwnSide(book.asks(), orders, OrderSide.SELL), book.eventTime());
+    }
+
+    private List<OrderBookLevel> excludeOwnSide(List<OrderBookLevel> levels, List<OrderResponse> orders,
+                                               OrderSide side) {
+        return levels.stream().filter(level -> {
+            long ownQuantity = orders.stream().filter(this::isLive)
+                    .filter(order -> order.side() == side && order.priceTicks() == level.priceTicks())
+                    .mapToLong(OrderResponse::remainingQuantitySteps).sum();
+            return level.quantitySteps() > ownQuantity;
+        }).toList();
     }
 
     private ReconcileResult reconcile(MarketMakerProperties.Strategy strategy,
@@ -813,7 +831,11 @@ public class MarketMakerService {
             if (kept.size() >= maxOpenOrders) {
                 break;
             }
-            if (hasOwnedQuoteSlot(kept, quote, accountPrefix)) {
+            // Waiting opposite quotes must be canceled before submitting a crossing post-only replacement.
+            boolean blockedByOwnQuote = kept.stream().filter(this::isLive).anyMatch(order ->
+                    order.side() != quote.side() && (quote.side() == OrderSide.BUY
+                            ? quote.priceTicks() >= order.priceTicks() : quote.priceTicks() <= order.priceTicks()));
+            if (blockedByOwnQuote || hasOwnedQuoteSlot(kept, quote, accountPrefix)) {
                 continue;
             }
             missingQuotes.add(quote);
@@ -908,7 +930,10 @@ public class MarketMakerService {
                 && order.clientOrderId().startsWith(expectedPrefix)
                 && order.side() == quote.side()
                 && Math.abs(order.priceTicks() - quote.priceTicks())
-                <= properties.getQuoting().getRefreshThresholdTicks()
+                <= Math.max(properties.getQuoting().getRefreshThresholdTicks(),
+                        java.math.BigInteger.valueOf(quote.priceTicks())
+                                .multiply(java.math.BigInteger.valueOf(properties.getQuoting().getRefreshTolerancePpm()))
+                                .divide(java.math.BigInteger.valueOf(1_000_000L)).longValueExact())
                 && order.remainingQuantitySteps() == quote.quantitySteps();
     }
 
@@ -919,8 +944,8 @@ public class MarketMakerService {
     private boolean isStale(OrderResponse order, Instant now) {
         Duration maxAge = properties.getQuoting().getStaleOrderMaxAge();
         return maxAge != null
-                && order.updatedAt() != null
-                && order.updatedAt().plus(maxAge).isBefore(now);
+                && order.createdAt() != null
+                && order.createdAt().plus(maxAge).isBefore(now);
     }
 
     private PlaceOrderRequest quoteRequest(MarketMakerProperties.Strategy strategy,

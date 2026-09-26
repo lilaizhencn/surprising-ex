@@ -195,3 +195,20 @@ mvn -pl :surprising-maker -am spring-boot:run
 ## 模拟成交节奏
 
 `MarketMakerService.maybeTrade` 在每次成功铺单周期后尝试一次 IOC 成交，不再提供 `trade.min-interval-ms`，也不维护上次成交时间作为限频状态。实际频率仍受铺单、查询、下单耗时与可成交盘口影响；库存、数量和价格校验继续生效。
+
+## Hummingbot PMM 报价逻辑移植（2026-09-26）
+
+策略由本模块的 `QuotePlanner` 与 `MarketMakerService` 执行。依据 Hummingbot Pure Market Making 的外部价格源、分层报价、库存数量偏移、报价刷新容差与预算约束实现 Java 版本；没有引入 Python 常驻服务，也不宣称实现了 PMM Dynamic 的 MACD/NATR 或跨所对冲。策略参考版本为 Hummingbot `9af100d6822da7d2d0291a906c730ef172284ee2`，入口：
+- https://github.com/hummingbot/hummingbot/blob/9af100d6822da7d2d0291a906c730ef172284ee2/hummingbot/strategy/pure_market_making/pure_market_making.pyx
+- https://hummingbot.org/strategies/v1-strategies/strategy-configs/order-refresh-tolerance/
+
+业务步骤：
+1. 读取合约、有效标记价、外部盘口、当前仓位及内部活跃订单；外部盘口中价作为 PMM 参考价，数量保留各层外部深度比例，库存偏移控制双边数量。
+2. `half-spread-ppm` 给出相对价格的最小单边价差；`refresh-tolerance-ppm` 与 tick 容差共同控制保留订单，过期判断使用创建时间，部分成交不能无限延长旧单寿命。
+3. 计算避免吃单的价格时，扣除本账户已知报价占据的盘口数量；若同一价位仍有其他用户数量，继续避让。不会让自身旧卖单把新买价永久锁住。
+4. U 本位永续/交割按合约 OI 额度下限和最大持仓名义额度，对双边目标数量按比例缩放，预留 10% 价格变化空间；实际资金、杠杆、OI 及只减仓判断仍由核心逐笔校验。其他产品线不套用该线性公式。
+5. 优先分批撤掉阻挡目标价的旧报价，补单前检查尚未撤掉的相反方向自有报价，确认后继续补齐；撤单失败或补单拒绝停止继续减薄盘口。
+
+内部调用仍使用现有 `OrderRpcApi`、`AccountRpcApi`、`MarketDataRpcApi` 到内部 gateway，再由 Aeron 进入核心；所有成交来自正常撮合。测试吃单属于本地模拟负载，独立于被动 PMM 策略。未实现直接由 maker 发 Aeron 命令，不能把当前 HTTP 内部调用描述为已去掉网关。
+
+JDK 27：maker 54 项测试通过，新增自身旧盘口锁价、同价其他用户订单保护、相对价差、缺失标记价拒绝、整层报价额度约束回归。当前本机仍有 Aeron 建连/查询超时，尚未通过每币对每秒至少 3 笔成交及持续双边 50 档验收。

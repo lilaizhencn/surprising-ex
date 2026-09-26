@@ -55,6 +55,7 @@ public class QuotePlanner {
         int levels = orderLevels(strategy, quoting);
         long halfSpread = Math.max(Math.max(1L, spreadTicks(strategy, quoting) / 2L),
                 volatilitySpreadTicks(quoting, volatilityTicks));
+        halfSpread = Math.max(halfSpread, multiplyDiv(anchor, quoting.getHalfSpreadPpm(), ONE_PPM));
         long spacing = levelSpacingTicks(strategy, quoting);
         long maxDeviationTicks = Math.max(1L, multiplyDiv(anchor, quoting.getMaxPriceDeviationPpm(), ONE_PPM));
         long minPrice = Math.max(1L, anchor - maxDeviationTicks);
@@ -74,8 +75,8 @@ public class QuotePlanner {
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
-            bidDistance = bidDistance > 0 ? bidDistance : halfSpread + spacing * level;
-            askDistance = askDistance > 0 ? askDistance : halfSpread + spacing * level;
+            bidDistance = bidDistance > 0 ? Math.max(halfSpread, bidDistance) : halfSpread + spacing * level;
+            askDistance = askDistance > 0 ? Math.max(halfSpread, askDistance) : halfSpread + spacing * level;
             if (level > 0) {
                 bidDistance = Math.max(bidDistance, previousBidDistance + spacing);
                 askDistance = Math.max(askDistance, previousAskDistance + spacing);
@@ -90,21 +91,57 @@ public class QuotePlanner {
             }
             // When old opposite quotes cap the best price, move the whole ladder with it.
             // Clamping every level to the same top price collapses fifty levels into one.
-            if (level > 0) bidPrice = Math.max(minPrice, Math.min(bidPrice, previousBidPrice - bidGap));
+            if (level > 0) bidPrice = Math.min(bidPrice, previousBidPrice - bidGap);
             previousBidPrice = bidPrice;
-            suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
+            if (bidPrice >= minPrice) suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
                     riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
+            else suppressedDuplicateQuotes++;
 
             long askPrice = Math.min(maxPrice, anchor + askDistance);
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }
-            if (level > 0) askPrice = Math.min(maxPrice, Math.max(askPrice, previousAskPrice + askGap));
+            if (level > 0) askPrice = Math.max(askPrice, previousAskPrice + askGap);
             previousAskPrice = askPrice;
-            suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice,
+            if (askPrice <= maxPrice) suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice,
                     riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
+            else suppressedDuplicateQuotes++;
         }
-        return new QuotePlan(anchor, signedPositionSteps, List.copyOf(quotes), suppressedDuplicateQuotes);
+        return new QuotePlan(anchor, signedPositionSteps,
+                applyLinearQuoteBudget(instrument, markPrice, signedPositionSteps, quotes), suppressedDuplicateQuotes);
+    }
+
+    /** PMM budget sizing: scale each side proportionally; keep external depth proportions and core limits. */
+    private List<DesiredQuote> applyLinearQuoteBudget(InstrumentResponse instrument, MarkPriceResponse mark,
+                                                     long position, List<DesiredQuote> quotes) {
+        if (instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                && instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY)
+            return List.copyOf(quotes);
+        long markTicks = markToTicks(instrument, mark);
+        if (markTicks <= 0) throw new IllegalStateException("mark price required for linear quote budget");
+        long perStep = Math.multiplyExact(markTicks, instrument.notionalMultiplierUnits());
+        // The floor is a conservative guaranteed ceiling; the core also checks current OI and account funds.
+        long limit = Math.min(instrument.maxPositionNotionalUnits(), instrument.userOpenInterestLimitFloorUnits());
+        long maxSteps = limit / perStep;
+        // Leave 10% headroom for price movement and fills while a ladder is being refreshed.
+        maxSteps = maxSteps / 10 * 9;
+        List<DesiredQuote> sized = new ArrayList<>(quotes.size());
+        for (OrderSide side : OrderSide.values()) {
+            long capacity = side == OrderSide.BUY ? Math.max(0, maxSteps - position)
+                    : Math.max(0, maxSteps + position);
+            long total = quotes.stream().filter(q -> q.side() == side).mapToLong(DesiredQuote::quantitySteps).sum();
+            for (DesiredQuote quote : quotes) {
+                if (quote.side() != side) continue;
+                long quantity = total <= capacity ? quote.quantitySteps()
+                        : java.math.BigInteger.valueOf(quote.quantitySteps()).multiply(java.math.BigInteger.valueOf(capacity))
+                                .divide(java.math.BigInteger.valueOf(total)).longValueExact();
+                if (quantity >= instrument.minQuantitySteps())
+                    sized.add(new DesiredQuote(side, quote.level(), quote.priceTicks(), quantity));
+            }
+        }
+        // Preserve the interleaved bid/ask submission order used by reconciliation.
+        sized.sort(java.util.Comparator.comparingInt(DesiredQuote::level).thenComparing(DesiredQuote::side));
+        return List.copyOf(sized);
     }
 
     private int addQuoteIfAllowed(MarketMakerProperties.Strategy strategy,
@@ -166,13 +203,12 @@ public class QuotePlanner {
                                   OrderBookSnapshotResponse orderBook,
                                   MarkPriceResponse markPrice,
                                   ReferenceOrderBookSnapshot referenceOrderBook) {
+        // Hummingbot PMM external price source: quote around the source market rather than our own fills.
+        long fromReference = referenceMid(referenceOrderBook);
+        if (fromReference > 0) return fromReference;
         long fromMark = markToTicks(instrument, markPrice);
         if (fromMark > 0) {
             return fromMark;
-        }
-        long fromReference = referenceMid(referenceOrderBook);
-        if (fromReference > 0) {
-            return fromReference;
         }
         long bestBid = bestBid(orderBook);
         long bestAsk = bestAsk(orderBook);
