@@ -715,24 +715,53 @@ public class MarketMakerService {
                 .filter(this::isLive)
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
-        List<OrderResponse> kept = new ArrayList<>();
-        List<CancelOrderRequest> cancelRequests = new ArrayList<>();
-        for (OrderResponse order : owned) {
-            if (shouldKeep(order, plan.quotes(), accountPrefix, now)) {
-                kept.add(order);
-            } else {
-                cancelRequests.add(new CancelOrderRequest(accountId, order.orderId()));
+        // Keep the remaining ladder live while each small replacement batch is confirmed.
+        List<OrderResponse> kept = new ArrayList<>(owned);
+        long highestBid = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY)
+                .mapToLong(DesiredQuote::priceTicks).max().orElse(0L);
+        long lowestAsk = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL)
+                .mapToLong(DesiredQuote::priceTicks).min().orElse(Long.MAX_VALUE);
+        List<CancelOrderRequest> cancelRequests = owned.stream()
+                .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now))
+                // Move quotes that would cross the new opposite side first, preserving post-only semantics.
+                .sorted(Comparator.comparingInt(order ->
+                        order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
+                                || order.side() == OrderSide.BUY && order.priceTicks() >= lowestAsk ? 0 : 1))
+                .map(order -> new CancelOrderRequest(accountId, order.orderId()))
+                .toList();
+        int replacementBatchSize = Math.max(1, Math.min(MAX_BATCH_PLACE_ORDERS, owned.size() / 10));
+        long canceled = 0L;
+        long submitted = 0L;
+        long rejected = 0L;
+        String rejectionReason = null;
+        for (int start = 0; start < Math.max(1, cancelRequests.size()); start += replacementBatchSize) {
+            List<CancelOrderRequest> batch = cancelRequests.subList(start,
+                    Math.min(start + replacementBatchSize, cancelRequests.size()));
+            CancelResult result = cancelOrders(strategy.getProductLine(), accountId, symbol, batch);
+            canceled += result.completed();
+            for (CancelOrderRequest request : batch) {
+                if (!result.failed().contains(request)) {
+                    kept.removeIf(order -> order.orderId() == request.orderId());
+                }
             }
+            ReconcileResult replacement = placeMissingQuotes(strategy, accountId, symbol, plan,
+                    kept, accountPrefix, cycleSequence);
+            submitted += replacement.submitted();
+            rejected += replacement.rejected();
+            if (replacement.rejectionReason() != null) rejectionReason = replacement.rejectionReason();
+            // Do not thin the rest of the book when replacement or cancellation is uncertain.
+            if (replacement.rejected() > 0 || !result.failed().isEmpty()) break;
         }
-        CancelResult cancelResult = cancelOrders(strategy.getProductLine(), accountId, symbol, cancelRequests);
-        long canceled = cancelResult.completed();
-        for (CancelOrderRequest failedRequest : cancelResult.failed()) {
-            owned.stream()
-                    .filter(order -> order.orderId() == failedRequest.orderId())
-                    .findFirst()
-                    .ifPresent(kept::add);
-        }
+        return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+    }
 
+    private ReconcileResult placeMissingQuotes(MarketMakerProperties.Strategy strategy,
+                                               long accountId,
+                                               String symbol,
+                                               QuotePlan plan,
+                                               List<OrderResponse> kept,
+                                               String accountPrefix,
+                                               long cycleSequence) {
         long submitted = 0L;
         long rejected = 0L;
         String rejectionReason = null;
@@ -794,7 +823,7 @@ public class MarketMakerService {
                 }
             }
         }
-        return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+        return new ReconcileResult(submitted, 0L, rejected, rejectionReason);
     }
 
     /** 只保留第一条拒单原因，避免一次批量报价把运行事件写得不可读。 */

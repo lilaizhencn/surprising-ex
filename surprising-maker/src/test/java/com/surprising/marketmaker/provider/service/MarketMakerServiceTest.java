@@ -232,7 +232,7 @@ class MarketMakerServiceTest {
     }
 
     @Test
-    void cancelsAndReplacesEntireStaleLadderInOneCycle() {
+    void replacesStaleLadderWithoutDrainingTheBook() {
         Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
@@ -241,6 +241,8 @@ class MarketMakerServiceTest {
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
+        assertThat(fixtures.orderRpc.liveCountsAfterCancel).allSatisfy(count -> assertThat(count).isGreaterThanOrEqualTo(36));
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
     }
 
     @Test
@@ -252,7 +254,7 @@ class MarketMakerServiceTest {
         fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(60);
-        assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(2);
+        assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(10);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(52);
     }
 
@@ -266,8 +268,23 @@ class MarketMakerServiceTest {
 
         fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
-        assertThat(fixtures.orderRpc.placeRequests).hasSize(39);
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(4);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(3);
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+    }
+
+    @Test
+    void replacementFailureStopsFurtherCancellation() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.orderRpc.batchSupported = false;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(4);
+        assertThat(fixtures.orderRpc.openOrders).hasSize(36);
+        assertThat(fixtures.orderRpc.liveCountsAfterCancel).containsExactly(36);
     }
 
     @Test
@@ -704,6 +721,7 @@ class MarketMakerServiceTest {
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
         private int cancelBatchCalls;
+        private final List<Integer> liveCountsAfterCancel = new ArrayList<>();
 
         private FakeOrderRpc(List<OrderResponse> openOrders) {
             this.openOrders = new ArrayList<>(openOrders);
@@ -787,6 +805,7 @@ class MarketMakerServiceTest {
                         : null));
             }
             int succeeded = (int) results.stream().filter(OrderBatchItemResponse::success).count();
+            liveCountsAfterCancel.add(openOrders.size());
             return terminal(new OrderBatchResponse(results.size(), succeeded, results.size() - succeeded, results));
         }
 
