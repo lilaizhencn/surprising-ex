@@ -116,7 +116,14 @@ class MarketMakerServiceTest {
             service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
         }
         assertThat(fixtures.orderRpc.placeRequests.stream()
-                .filter(request -> request.timeInForce() == TimeInForce.IOC).toList()).hasSize(3);
+                .filter(request -> request.timeInForce() == TimeInForce.IOC).toList()).hasSize(3)
+                .allSatisfy(request -> {
+                    assertThat(request.orderType()).isEqualTo(OrderType.MARKET);
+                    assertThat(request.priceTicks()).isZero();
+                });
+        assertThat(fixtures.runEventRepository.events).filteredOn(event -> event.eventType().equals("TRADE_NO_FILL"))
+                .hasSize(3);
+        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("TRADE_EXECUTED"));
     }
 
     @Test

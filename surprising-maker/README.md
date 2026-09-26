@@ -212,3 +212,5 @@ mvn -pl :surprising-maker -am spring-boot:run
 内部调用仍使用现有 `OrderRpcApi`、`AccountRpcApi`、`MarketDataRpcApi` 到内部 gateway，再由 Aeron 进入核心；所有成交来自正常撮合。测试吃单属于本地模拟负载，独立于被动 PMM 策略。未实现直接由 maker 发 Aeron 命令，不能把当前 HTTP 内部调用描述为已去掉网关。
 
 JDK 27：maker 54 项测试通过，新增自身旧盘口锁价、同价其他用户订单保护、相对价差、缺失标记价拒绝、整层报价额度约束回归。当前本机仍有 Aeron 建连/查询超时，尚未通过每币对每秒至少 3 笔成交及持续双边 50 档验收。
+
+测试吃单补充：本地模拟使用普通 `MARKET/IOC`（要求合约启用市价单），避免引用查询时旧价格的限价 IOC 在移动盘口中频繁零成交。事件区分 `TRADE_EXECUTED` 与 `TRADE_NO_FILL`；提交计数不等于成交计数，频率验收仍读取公共真实成交事件。54 项 maker 测试通过，覆盖市价请求类型与零成交不能计为执行。

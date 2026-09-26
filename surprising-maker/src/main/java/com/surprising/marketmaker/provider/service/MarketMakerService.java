@@ -995,9 +995,12 @@ public class MarketMakerService {
             return false;
         }
 
+        if (!instrument.marketOrderEnabled()) return false;
+        // Simulated takers use the current matching book. A limit copied before the position RPC
+        // often expires unfilled while the external-price maker has already moved its quotes.
         PlaceOrderRequest request = new PlaceOrderRequest(accountId,
                 takerClientOrderId(strategy, symbol, accountId, cycleSequence),
-                symbol, side, OrderType.LIMIT, TimeInForce.IOC, priceTicks, quantitySteps,
+                symbol, side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps,
                 strategy.getMarginMode(), PositionSide.NET, false, false);
         OrderCommandReceipt receipt = orderRpcApi.place(request);
         OrderResponse response = receiptResult(receipt, OrderResponse.class);
@@ -1005,13 +1008,18 @@ public class MarketMakerService {
             state.addRejected(1L);
             recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_REJECTED",
                     0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), traceId, now);
-        } else {
-            state.addSubmitted(1L);
-            lastTradeSides.put(tradeKey, side);
-            recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_SUBMITTED",
-                    1, 0, 0, null, null, traceId, now);
+            return false;
         }
-        return response != null && response.status() != OrderStatus.REJECTED;
+        state.addSubmitted(1L);
+        if (response.executedQuantitySteps() <= 0) {
+            recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_NO_FILL",
+                    1, 0, 0, "NO_EXECUTION", null, traceId, now);
+            return false;
+        }
+        lastTradeSides.put(tradeKey, side);
+        recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_EXECUTED",
+                1, 0, 0, null, null, traceId, now);
+        return true;
     }
 
     private long activeTradeAccount(MarketMakerProperties.Strategy strategy, long cycleSequence) {
