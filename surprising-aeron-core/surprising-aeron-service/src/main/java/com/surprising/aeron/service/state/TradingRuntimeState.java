@@ -4395,12 +4395,20 @@ public final class TradingRuntimeState implements AutoCloseable {
             accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
         });
-        publishedOrders.put(orderId, order);
-        publishedReservations.put(orderId, reservation);
-        changedOrder(orderId, order);
-        changedReservations.add(orderId);
-        changedUsers.add(userId);
-        markBalancesChanged();
+        // Control tasks run while Owner may suspend/drain its current commit context.
+        // Hand over through the Lane delta; collectControlReservation records changed keys
+        // after the task's completion has been observed by Owner.
+        if (laneCommandScope.get() == null) {
+            publishedOrders.put(orderId, order);
+            publishedReservations.put(orderId, reservation);
+            changedOrder(orderId, order);
+            changedReservations.add(orderId);
+            changedUsers.add(userId);
+            markBalancesChanged();
+        } else {
+            publishOrder(orderId, order);
+            publishReservation(orderId, reservation);
+        }
     }
 
     /**

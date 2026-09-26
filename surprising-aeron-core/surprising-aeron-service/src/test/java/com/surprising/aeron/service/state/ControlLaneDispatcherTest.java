@@ -10,6 +10,47 @@ import static org.assertj.core.api.Assertions.*;
 
 class ControlLaneDispatcherTest {
     @Test
+    void reservationPublishesOnlyAfterOwnerCollectsCompletedControlTask() throws Exception {
+        try (var runtime = new TradingRuntimeState()) {
+            runtime.putUser(new UserRuntime(7));
+            runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(7, 3, 1000, 0));
+            runtime.clearChangedKeys();
+            runtime.startAccountLanes();
+            var reserved = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            int laneId = runtime.topology().accountLaneId(7);
+            try {
+                runtime.dispatchControlLanes(1L << laneId, ignored -> {
+                    CoreStateTestFixtures.reserveOrder(runtime, 11, 7, 91, 5, 2, 3, 200);
+                    runtime.pendingReservations.markInCurrentLane(7, 11, 1);
+                    reserved.countDown();
+                    await(release);
+                    return null;
+                });
+                assertThat(reserved.await(3, TimeUnit.SECONDS)).isTrue();
+                assertThat(runtime.pollControlLanes()).isFalse();
+                assertThat(runtime.publishedOrders.get(11)).isNull();
+                assertThat(runtime.publishedReservations.get(11)).isNull();
+                assertThat(runtime.changedOrders.isEmpty()).isTrue();
+                assertThat(runtime.changedReservations.isEmpty()).isTrue();
+                assertThat(runtime.changedUsers.isEmpty()).isTrue();
+                release.countDown();
+                collect(runtime);
+                runtime.collectControlReservation(7, 11, 1);
+                assertThat(runtime.order(11)).isNotNull();
+                assertThat(runtime.changedOrders().contains(11)).isTrue();
+                assertThat(runtime.changedReservations().contains(11)).isTrue();
+                assertThat(runtime.changedUsers().contains(7)).isTrue();
+                assertThat(runtime.balance(7, 3).availableUnits()).isEqualTo(800);
+                runtime.completePendingReservation(7, 11, 1);
+                assertThat(runtime.reservation(11).reservedUnits()).isEqualTo(200);
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
     void accountTasksRunConcurrentlyOnTheirLanesWithoutBlockingOwner() throws Exception {
         var runtime = new TradingRuntimeState(LaneTopology.productionDefault());
         var entered = new CountDownLatch(2);

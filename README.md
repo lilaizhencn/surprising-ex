@@ -15,6 +15,11 @@ Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。�
 集群命令使用异步 Lane 路径；独立回放和工具仍使用同步调用契约，不能直接删除其完成分支。
 撮合和账户 Lane 的完成条件、资金结算、终态去重及快照恢复顺序不变。
 
+批量订单和触发子单的控制任务在账户 Lane 预冻结时，`TradingRuntimeState.reserveOrder`
+只向既有 `LaneCommitDelta` 交接订单与预留；账户线程不能写 Owner 的变更集合。
+`ControlLaneDispatcher.poll` 观察完成并发布后，`PendingReservationTracker.collectControlReservation`
+才登记待结算索引和变更键，避免 Owner 挂起提交上下文时与账户线程并发清空同一缓冲。
+
 ## 项目介绍
 
 Surprising 是一个正在开发和验证中的多产品线交易系统。本仓库承载交易后端，围绕交易撮合、账户结算、风险处理、行情分发和运营管理组织服务，并通过 Aeron Cluster 构建交易核心的高可用运行环境。

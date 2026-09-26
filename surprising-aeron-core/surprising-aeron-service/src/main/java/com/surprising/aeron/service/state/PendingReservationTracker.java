@@ -147,6 +147,10 @@ final class PendingReservationTracker {
         if (coreSequence <= 0 || reservation == null || reservation.userId() != userId)
             throw new IllegalStateException("control reservation has not been published");
         indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
+        owner.changedOrder(orderId);
+        owner.changedReservations.add(orderId);
+        owner.changedUsers.add(userId);
+        owner.markBalancesChanged();
     }
 
     void indexPendingReservation(long userId, long orderId, long coreSequence,
