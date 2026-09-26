@@ -42,6 +42,7 @@ Kafka `MARK_PRICE` 分支；事件直接携带产品线、instrument 版本、qu
 快照未就绪时拒绝启动行情流量。
 
 标记价格编码遵循同一边界：当前版本、合约正文和报价资产精度统一由本地不可变快照读取。
+`MarkPriceService.publishSymbol` 每次发布使用本轮 `MarkPriceCoordinationService.currentEncoding` 返回的编码，合约价格步长或版本调整后不会继续沿用第一次发布时的旧编码；编码不可用时本轮不发布标记价。
 指数审计保留任务也由 Service 编排：先锁定一批
 `price_index_ticks`，再删除对应的 `price_index_components`，最后删除主记录，全部处于同一事务。
 Service 不包含 SQL，也不直接依赖 JDBC。

@@ -52,7 +52,6 @@ public class MarkPriceService {
     private final ConcurrentHashMap<String, PerpTradeEvent> trades = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PerpFundingRateEvent> fundingRates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, MarkPriceEncoding> encodings = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public MarkPriceService(ObjectMapper objectMapper,
@@ -173,8 +172,6 @@ public class MarkPriceService {
                 properties.getCalculation().getScale());
 
         long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
-        encodings.putIfAbsent(symbol, encoding);
-        encoding = encodings.get(symbol);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, encoding, now);
         latestMarkPriceCache.update(event);

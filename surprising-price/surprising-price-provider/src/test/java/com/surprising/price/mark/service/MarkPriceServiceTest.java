@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -133,6 +134,30 @@ class MarkPriceServiceTest {
         assertThat(event.sequence()).isEqualTo(11L);
         assertThat(event.markPrice()).isEqualByComparingTo("100.000000000000000000");
         verify(cache).update(any(MarkPriceEvent.class));
+    }
+
+    @Test
+    void usesCurrentInstrumentEncodingAfterPriceTickChanges() {
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
+        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+        when(coordinationService.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L, 12L);
+        MarkPriceService service = service(coordinationService, kafkaTemplate);
+        when(coordinationService.currentEncoding("BTC-USDT")).thenReturn(encoding(),
+                new MarkPriceEncoding(2L, 100_000_000L, 10_000L, 100_000_000L, 1L));
+        Instant now = Instant.now();
+        service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2,
+                PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
+
+        service.publishMarkPrices();
+        service.publishMarkPrices();
+
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate, times(2)).send(eq(properties().priceEventsTopic()), eq("BTC-USDT"), events.capture());
+        MarkPriceEvent first = ((PricePublishedEvent) events.getAllValues().get(0)).markPrice().result();
+        MarkPriceEvent second = ((PricePublishedEvent) events.getAllValues().get(1)).markPrice().result();
+        assertThat(first.instrumentChangeId()).isEqualTo(1L);
+        assertThat(second.instrumentChangeId()).isEqualTo(2L);
+        assertThat(second.markPriceTicks()).isGreaterThan(first.markPriceTicks());
     }
 
     @Test
