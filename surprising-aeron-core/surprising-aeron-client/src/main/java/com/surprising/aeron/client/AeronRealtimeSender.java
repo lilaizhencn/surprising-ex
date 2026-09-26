@@ -19,7 +19,7 @@ public final class AeronRealtimeSender implements AutoCloseable {
     }
     private void run(String directory, String channel, int streamId) {
         while (running) {
-            try (Aeron aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory).driverTimeoutMs(1000)
+            try (Aeron aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory)
                     .errorHandler(failure -> failures.increment()));
                  ExclusivePublication publication = aeron.addExclusivePublication(new io.aeron.ChannelUriStringBuilder(channel).termLength(8*1024*1024).build(), streamId)) {
                 UnsafeBuffer buffer = new UnsafeBuffer(new byte[0]);

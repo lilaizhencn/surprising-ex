@@ -15,7 +15,7 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 接收端必须验证连续 ordinal，不能把部分批次当作完整状态。
 价格等独立生产者的 sequence 属于自身来源，不能与 Core log position 混合比较。
 
-验证：HotSpot JDK 25，`mvn -pl surprising-aeron-core/surprising-aeron-client -am test`。
+验证：HotSpot JDK 27，`mvn -pl surprising-aeron-core/surprising-aeron-client -am test`。
 测试覆盖协议截断/越界、全部产品线和消息类型、完整回调发布、撤销、总内存额度、
 跨线程可见性，以及真实 Media Driver 上的大消息分片重组和目标 stream 隔离。
 当前测试不构成完整交易主链路性能验收。
@@ -25,3 +25,7 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 `AeronRealtimeReceiver` 收到传输错误后标记不可用，当前轮询必须退出并关闭旧订阅，再重新连接。
 即使 Driver 尚未关闭，也不能继续轮询一个已被错误处理器标记失效的订阅。错误原因会记录到日志。
 `AeronRealtimeTransportTest` 使用真实 Driver 覆盖传输错误后的重连、Driver 重启恢复和分片消息交付。
+
+发送端和接收端沿用 Aeron 的 `aeron.driver.timeout`（默认 10 秒），不再写死 1 秒。
+本地 100 用户测试捕获 `keepalive age=1003ms > timeout=1000ms` 的误断连；真实 Driver
+测试使用 1.5 秒定时间隔检查健康传输不被误判，同时保留 Driver 丢失后的恢复断言。

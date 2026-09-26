@@ -9,6 +9,27 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.*;
 
 class AeronRealtimeTransportTest {
+    @Test void heartbeatLongerThanOneSecondDoesNotDisconnectHealthyTransport() throws Exception {
+        String directory = System.getProperty("java.io.tmpdir") + "/realtime-heartbeat-" + java.util.UUID.randomUUID();
+        var received = new LinkedBlockingQueue<RealtimeFrame>();
+        var outbox = new RealtimeOutbox(64, 1_048_576);
+        try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                     .timerIntervalNs(TimeUnit.MILLISECONDS.toNanos(1500))
+                     .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+             var receiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 75, received::add);
+             var sender = new AeronRealtimeSender(outbox, directory, "aeron:ipc", 75)) {
+            var frame = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 123, 0, 456, 0,
+                    "BTC-USDT", "789", new byte[0]);
+            assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
+            Thread.sleep(4000);
+            received.clear();
+            assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
+            assertThat(receiver.ready()).isTrue();
+            assertThat(receiver.failures()).isZero();
+            assertThat(sender.failures()).isZero();
+        }
+    }
+
     @Test void transportErrorReopensSubscriptionEvenWhenDriverRemainsAlive() throws Exception {
         String directory = System.getProperty("java.io.tmpdir") + "/realtime-error-" + java.util.UUID.randomUUID();
         var received = new LinkedBlockingQueue<RealtimeFrame>();
@@ -42,7 +63,7 @@ class AeronRealtimeTransportTest {
                     "BTC-USDT", "789", new byte[0]);
             assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
             driver.close();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
             while ((sender.failures() == 0 || receiver.failures() == 0) && System.nanoTime() < deadline)
                 Thread.sleep(10);
             assertThat(sender.failures()).isPositive();
