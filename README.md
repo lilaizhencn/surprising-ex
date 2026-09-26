@@ -25,6 +25,10 @@ Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。�
 进入有序提交、调用 `collectPlaceBatchAdmission` 时，才把其 before-image 交给当前回滚范围。
 顺序批量准入必须等到提交队首再启动，避免前一条命令发布或清空后一批次的资金记录。
 
+## Aeron 运行版本
+
+`surprising-parent/pom.xml` 统一管理 `aeron-all` **1.53.3**；核心的 Media Driver、Archive、Cluster 以及网关、行情、定价、生命周期服务的客户端使用同一版本。做市服务通过既有内部接口下单，不额外引入 Aeron 依赖。升级验证使用 HotSpot JDK 27，保留已有 Archive 和账户状态，通过快照恢复后检查交易与行情。
+
 ## 项目介绍
 
 Surprising 是一个正在开发和验证中的多产品线交易系统。本仓库承载交易后端，围绕交易撮合、账户结算、风险处理、行情分发和运营管理组织服务，并通过 Aeron Cluster 构建交易核心的高可用运行环境。
