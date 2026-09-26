@@ -1433,22 +1433,30 @@ class ClusterCommandPipelineTest {
             var a = live.place(11, "BTC-USDT", 1000, 80, 1, CoreOrderSide.BUY);
             var b = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 2000, 80, 1, CoreOrderSide.BUY);
             var c = live.place(11, "BTC-USDT", 3000, 79, 1, CoreOrderSide.BUY);
-            live.send(a);
-            var pending = live.service.state().pendingMatching(live.service.state().matchingSequence(a.header().commandId()));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
-                live.service.state().drainMatchingCompletions();
-            assertThat(pending.isMatchingSubmitted()).isTrue();
-            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
-            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
+            var matcher = live.service.state().matcherPipeline;
             var entered = new CountDownLatch(1);
             var release = new CountDownLatch(1);
-            var blocked = matcher.readAtSubmissionFence(0, () -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("suffix matcher timeout"); }
-                catch (InterruptedException failure) { throw new IllegalStateException(failure); }
+            var firstRelease = new java.util.concurrent.CompletableFuture<Void>();
+            var firstFence = matcher.readAtSubmissionFence(0, () -> {
+                firstRelease.join();
                 return 1;
             });
+            java.util.concurrent.CompletableFuture<Integer> blocked;
+            try {
+                live.send(a);
+                var pending = live.service.state().pendingMatching(live.service.state().matchingSequence(a.header().commandId()));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
+                    live.service.state().drainMatchingCompletions();
+                assertThat(pending.isMatchingSubmitted()).isTrue();
+                blocked = matcher.readAtSubmissionFence(0, () -> {
+                    entered.countDown();
+                    try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("suffix matcher timeout"); }
+                    catch (InterruptedException failure) { throw new IllegalStateException(failure); }
+                    return 1;
+                });
+            } finally { firstRelease.complete(null); }
+            firstFence.join();
             try {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(b); live.send(c);
