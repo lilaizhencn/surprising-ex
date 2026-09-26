@@ -72,7 +72,6 @@ surprising:
       stale-order-max-age: 2s
       max-price-deviation-ppm: 5000
       order-reconciliation-interval: 500ms
-      max-order-operations-per-cycle: ${MM_MAX_ORDER_OPERATIONS_PER_CYCLE:40}
       volatility-spread-multiplier-ppm: 500000
       max-volatility-spread-ticks: 100
     risk:

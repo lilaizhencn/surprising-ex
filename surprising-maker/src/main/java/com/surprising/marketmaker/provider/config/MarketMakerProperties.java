@@ -131,9 +131,6 @@ public class MarketMakerProperties {
         @Max(100000)
         private long maxPriceDeviationPpm = 5000L;
         private Duration orderReconciliationInterval = Duration.ofMillis(500);
-        @Min(1)
-        @Max(160)
-        private int maxOrderOperationsPerCycle = 40;
         @Min(0)
         @Max(5_000_000)
         private long volatilitySpreadMultiplierPpm = 500_000L;

@@ -73,6 +73,7 @@ import org.springframework.stereotype.Service;
 public class MarketMakerService {
 
     private static final int MAX_BATCH_PLACE_ORDERS = 20;
+    private static final int MAX_BATCH_CANCEL_ORDERS = 50;
     // 预占结果通过账户 Kafka 异步返回。预占中的报价仍然占用一个报价槽位，
     // 若在下一轮被当成非活动订单撤掉，会形成“永远预占不成功”的并发活锁。
     private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(
@@ -709,20 +710,11 @@ public class MarketMakerService {
                 .toList();
         List<OrderResponse> kept = new ArrayList<>();
         List<CancelOrderRequest> cancelRequests = new ArrayList<>();
-        int operationBudget = properties.getQuoting().getMaxOrderOperationsPerCycle();
-        long freshDesiredQuotes = plan.quotes().stream()
-                .filter(quote -> owned.stream().anyMatch(order -> isFreshQuote(order, quote, accountPrefix, now)))
-                .count();
-        int missingDesiredQuotes = Math.toIntExact(plan.quotes().size() - freshDesiredQuotes);
-        int replacementReserve = Math.min(missingDesiredQuotes, operationBudget / 2);
-        int cancellationBudget = operationBudget - replacementReserve;
         for (OrderResponse order : owned) {
             if (shouldKeep(order, plan.quotes(), accountPrefix, now)) {
                 kept.add(order);
-            } else if (cancelRequests.size() < cancellationBudget) {
-                cancelRequests.add(new CancelOrderRequest(accountId, order.orderId()));
             } else {
-                kept.add(order);
+                cancelRequests.add(new CancelOrderRequest(accountId, order.orderId()));
             }
         }
         CancelResult cancelResult = cancelOrders(strategy.getProductLine(), accountId, symbol, cancelRequests);
@@ -739,15 +731,11 @@ public class MarketMakerService {
         String rejectionReason = null;
         int maxOpenOrders = properties.getQuoting().getMaxOpenOrdersPerAccountSymbol();
         List<DesiredQuote> missingQuotes = new ArrayList<>();
-        int remainingOperationBudget = Math.max(0, operationBudget - cancelRequests.size());
         for (DesiredQuote quote : plan.quotes()) {
             if (kept.size() >= maxOpenOrders) {
                 break;
             }
-            if (missingQuotes.size() >= remainingOperationBudget) {
-                break;
-            }
-            if (hasLiveQuote(kept, quote, accountPrefix)) {
+            if (hasOwnedQuoteSlot(kept, quote, accountPrefix)) {
                 continue;
             }
             missingQuotes.add(quote);
@@ -828,6 +816,12 @@ public class MarketMakerService {
         return orders.stream()
                 .filter(this::isLive)
                 .anyMatch(order -> matchesQuote(order, quote, accountPrefix));
+    }
+
+    private boolean hasOwnedQuoteSlot(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
+        String prefix = quotePrefix(accountPrefix, quote.side(), quote.level());
+        return orders.stream().anyMatch(order -> order != null && order.clientOrderId() != null
+                && order.clientOrderId().startsWith(prefix));
     }
 
     private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix) {
@@ -1098,33 +1092,38 @@ public class MarketMakerService {
         if (requests.isEmpty()) {
             return new CancelResult(0L, List.of());
         }
-        try {
-            OrderCommandReceipt receipt = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(requests));
-            OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
-            if (response != null) {
-                long canceled = response.results().stream()
-                        .filter(item -> item != null && item.success())
-                        .count();
-                List<CancelOrderRequest> failed = new ArrayList<>();
-                for (int i = 0; i < requests.size(); i++) {
+        long canceled = 0L;
+        List<CancelOrderRequest> failed = new ArrayList<>();
+        for (int start = 0; start < requests.size(); start += MAX_BATCH_CANCEL_ORDERS) {
+            List<CancelOrderRequest> batchRequests = requests.subList(start,
+                    Math.min(start + MAX_BATCH_CANCEL_ORDERS, requests.size()));
+            try {
+                OrderCommandReceipt receipt = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(batchRequests));
+                OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
+                if (response == null) {
+                    log.warn("做市批量撤单未返回终态结果 accountId={} symbol={} receipt={}", accountId, symbol,
+                            receiptMessage(receipt));
+                    failed.addAll(batchRequests);
+                    continue;
+                }
+                for (int i = 0; i < batchRequests.size(); i++) {
                     int requestIndex = i;
                     boolean success = response.results().stream()
                             .anyMatch(item -> item != null && item.index() == requestIndex && item.success());
+                    CancelOrderRequest request = batchRequests.get(i);
                     if (success) {
-                        forgetOrder(productLine, accountId, symbol, requests.get(i).orderId());
+                        canceled++;
+                        forgetOrder(productLine, accountId, symbol, request.orderId());
                     } else {
-                        failed.add(requests.get(i));
+                        failed.add(request);
                     }
                 }
-                return new CancelResult(canceled, List.copyOf(failed));
+            } catch (RuntimeException ex) {
+                log.warn("做市批量撤单状态不确定 accountId={} symbol={} error={}", accountId, symbol, ex.getMessage());
+                failed.addAll(batchRequests);
             }
-            log.warn("做市批量撤单未返回终态结果 accountId={} symbol={} receipt={}", accountId, symbol,
-                    receiptMessage(receipt));
-            return new CancelResult(0L, List.copyOf(requests));
-        } catch (RuntimeException ex) {
-            log.warn("做市批量撤单状态不确定 accountId={} symbol={} error={}", accountId, symbol, ex.getMessage());
-            return new CancelResult(0L, List.copyOf(requests));
         }
+        return new CancelResult(canceled, List.copyOf(failed));
     }
 
     private <T> T receiptResult(OrderCommandReceipt receipt, Class<T> type) {

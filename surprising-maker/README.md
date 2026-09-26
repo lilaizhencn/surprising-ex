@@ -18,7 +18,7 @@
 - 默认只做被动报价，不主动发起 IOC 扫单；主动交易模式仅可在测试配置中显式开启。
 - 报价循环按 100ms 级别运行，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
 - 报价价差会根据 mark/order-book 锚点的 EWMA 绝对变动自动扩大，并受最大波动价差限制；没有复杂的策略版本传播或跨服务状态编排。
-- 每轮的撤单和补单总量受 `max-order-operations-per-cycle` 限制；撤单优先使用批量接口，状态不确定时保留原订单槽位，不重复补单。
+- `MarketMakerService.reconcile` 每轮按目标盘口撤销过期挂单并补齐报价，不设置订单操作总量上限；`placeBatch` 按接口每批 20 单、`cancelBatch` 按接口每批 50 单分批提交。状态不确定时保留原订单槽位，不重复补单。
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
 - 当前净仓位达到 `maxInventorySteps` 后，会停止继续增加该方向风险的报价。
 - 自己的做市订单通过 `clientOrderId` 前缀识别；过期、偏离目标价格或不再需要的订单会撤掉。
@@ -108,7 +108,6 @@ surprising:
       stale-order-max-age: 30s
       max-price-deviation-ppm: 5000
       order-reconciliation-interval: 500ms
-      max-order-operations-per-cycle: 40
       volatility-spread-multiplier-ppm: 500000
       max-volatility-spread-ticks: 100
     risk:

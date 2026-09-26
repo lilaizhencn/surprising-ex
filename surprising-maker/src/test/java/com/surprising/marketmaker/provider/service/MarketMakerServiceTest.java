@@ -151,7 +151,7 @@ class MarketMakerServiceTest {
 
     @Test
     void runOnceSplitsQuoteBatchesAtTheOrderServiceLimit() {
-        Fixtures fixtures = new Fixtures(List.of(), 40);
+        Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderRpc.batchSupported = true;
         fixtures.orderLevels = 20;
         MarketMakerService service = fixtures.service();
@@ -221,89 +221,58 @@ class MarketMakerServiceTest {
     }
 
     @Test
-    void limitsCombinedCancelAndPlaceOperationsPerCycle() {
-        Fixtures fixtures = new Fixtures(List.of(), 2);
-        MarketMakerService service = fixtures.service();
-
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
-
-        assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
-    }
-
-    @Test
-    void staleTwentyLevelLadderReservesBudgetForImmediateReplacements() {
-        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), 40);
+    void placesEntireDesiredLadderInOneCycle() {
+        Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
 
         fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
-        assertThat(fixtures.orderRpc.placeRequests).hasSize(20);
-        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size()).isEqualTo(40);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
     }
 
     @Test
-    void reconciliationHonorsOperationBudgetBoundariesAndEventuallyDrainsStaleOrders() {
-        for (int budget : List.of(0, 1, 20, 39, 40)) {
-            Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), budget);
-            fixtures.orderLevels = 20;
-            fixtures.maxOpenOrders = 60;
-            MarketMakerService service = fixtures.service();
-            int cycles = budget == 0 ? 3 : 90;
+    void cancelsAndReplacesEntireStaleLadderInOneCycle() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
 
-            for (int cycle = 0; cycle < cycles; cycle++) {
-                int operationsBefore = fixtures.orderRpc.cancelRequests.size()
-                        + fixtures.orderRpc.placeRequests.size();
-                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
-                int operationsAfter = fixtures.orderRpc.cancelRequests.size()
-                        + fixtures.orderRpc.placeRequests.size();
-                assertThat(operationsAfter - operationsBefore)
-                        .as("budget=%s cycle=%s", budget, cycle)
-                        .isLessThanOrEqualTo(budget);
-                if (fixtures.orderRpc.cancelRequests.size() == 40
-                        && fixtures.orderRpc.placeRequests.size() == 40) {
-                    break;
-                }
-            }
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-            if (budget == 0) {
-                assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
-                assertThat(fixtures.orderRpc.placeRequests).isEmpty();
-            } else {
-                assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
-                assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
-                int cancels = fixtures.orderRpc.cancelRequests.size();
-                int places = fixtures.orderRpc.placeRequests.size();
-                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
-                assertThat(fixtures.orderRpc.cancelRequests).hasSize(cancels);
-                assertThat(fixtures.orderRpc.placeRequests).hasSize(places);
-            }
-        }
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
     }
 
     @Test
-    void failedStaleCancellationConsumesBudgetWithoutUnnecessaryReplacement() {
+    void splitsCancellationAtTheOrderServiceBatchLimit() {
+        Fixtures fixtures = new Fixtures(staleOrders(30));
+        fixtures.orderLevels = 30;
+        fixtures.maxOpenOrders = 100;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(60);
+        assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(2);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(52);
+    }
+
+    @Test
+    void failedCancellationKeepsItsQuoteSlotUntilTheNextCycle() {
         List<OrderResponse> staleOrders = staleTwentyLevelOrders();
-        Fixtures fixtures = new Fixtures(staleOrders, 40);
+        Fixtures fixtures = new Fixtures(staleOrders);
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
         fixtures.orderRpc.failedCancelOrderIds.add(staleOrders.get(0).orderId());
 
         fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
-        assertThat(fixtures.orderRpc.placeRequests).hasSize(19);
-        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size())
-                .isLessThanOrEqualTo(40);
-        assertThat(fixtures.orderRpc.placeRequests)
-                .noneMatch(request -> request.side() == staleOrders.get(0).side()
-                        && request.priceTicks() == staleOrders.get(0).priceTicks());
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(39);
     }
 
     @Test
     void correctedTwentyByTwoLifecycleIsVisibleInAdminMetrics() {
-        Fixtures fixtures = new Fixtures(List.of(), 40);
+        Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
         fixtures.priceTickUnits = 10_000_000L;
@@ -349,7 +318,7 @@ class MarketMakerServiceTest {
 
     @Test
     void tinyAnchorDepthReductionIsVisibleInAdminMetrics() {
-        Fixtures fixtures = new Fixtures(List.of(), 40);
+        Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
         fixtures.priceTickUnits = 100_000_000_000L;
@@ -520,9 +489,13 @@ class MarketMakerServiceTest {
     }
 
     private static List<OrderResponse> staleTwentyLevelOrders() {
+        return staleOrders(20);
+    }
+
+    private static List<OrderResponse> staleOrders(int levels) {
         String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
         List<OrderResponse> orders = new ArrayList<>();
-        for (int level = 0; level < 20; level++) {
+        for (int level = 0; level < levels; level++) {
             orders.add(order(1_000L + level, 900001L, prefix + "b" + level + "-1", OrderSide.BUY,
                     49_995L - 10L * level, 10L, OrderStatus.ACCEPTED));
             orders.add(order(2_000L + level, 900001L, prefix + "s" + level + "-1", OrderSide.SELL,
@@ -549,7 +522,6 @@ class MarketMakerServiceTest {
         private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
-        private final int maxOrderOperationsPerCycle;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
         private long priceTickUnits = 100L;
@@ -560,12 +532,7 @@ class MarketMakerServiceTest {
         private String symbol = "BTC-USDT";
 
         private Fixtures(List<OrderResponse> openOrders) {
-            this(openOrders, 40);
-        }
-
-        private Fixtures(List<OrderResponse> openOrders, int maxOrderOperationsPerCycle) {
             this.orderRpc = new FakeOrderRpc(openOrders);
-            this.maxOrderOperationsPerCycle = maxOrderOperationsPerCycle;
         }
 
         private MarketMakerService service() {
@@ -613,7 +580,6 @@ class MarketMakerServiceTest {
             properties.getQuoting().setMinSpreadTicks(10L);
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
-            properties.getQuoting().setMaxOrderOperationsPerCycle(maxOrderOperationsPerCycle);
             properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();

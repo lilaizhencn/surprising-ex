@@ -17,7 +17,6 @@ class SurprisingMarketMakerApplicationTest {
         MarketMakerProperties properties = new MarketMakerProperties();
         properties.getEngine().setCycleDelayMs(50L);
         properties.getQuoting().setOrderLevels(50);
-        properties.getQuoting().setMaxOrderOperationsPerCycle(160);
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
         strategy.setAccountIds(List.of(900001L, 900002L, 900003L, 900004L));
         properties.setStrategies(List.of(strategy));
@@ -27,7 +26,6 @@ class SurprisingMarketMakerApplicationTest {
         assertThat(output).contains(
                 "cycleDelayMs=50",
                 "orderLevels=50",
-                "maxOperationsPerCycle=160",
                 "accountCount=4",
                 "referenceMarketEnabled=false",
                 "marketTakingEnabled=false");
