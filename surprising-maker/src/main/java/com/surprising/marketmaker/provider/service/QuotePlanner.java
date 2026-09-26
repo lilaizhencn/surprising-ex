@@ -130,13 +130,24 @@ public class QuotePlanner {
             long capacity = side == OrderSide.BUY ? Math.max(0, maxSteps - position)
                     : Math.max(0, maxSteps + position);
             long total = quotes.stream().filter(q -> q.side() == side).mapToLong(DesiredQuote::quantitySteps).sum();
+            long minimum = instrument.minQuantitySteps();
+            long count = quotes.stream().filter(q -> q.side() == side).count();
+            long minimumLadder = Math.multiplyExact(count, minimum);
+            long availableExtra = Math.max(0, capacity - minimumLadder);
+            long requestedExtra = Math.max(0, total - minimumLadder);
             for (DesiredQuote quote : quotes) {
                 if (quote.side() != side) continue;
-                long quantity = total <= capacity ? quote.quantitySteps()
-                        : java.math.BigInteger.valueOf(quote.quantitySteps()).multiply(java.math.BigInteger.valueOf(capacity))
-                                .divide(java.math.BigInteger.valueOf(total)).longValueExact();
-                if (quantity >= instrument.minQuantitySteps())
+                long quantity;
+                if (total <= capacity) quantity = quote.quantitySteps();
+                else if (capacity < minimumLadder) quantity = Math.min(minimum, capacity);
+                else quantity = minimum + (requestedExtra == 0 ? 0
+                        : java.math.BigInteger.valueOf(Math.max(0, quote.quantitySteps() - minimum))
+                                .multiply(java.math.BigInteger.valueOf(availableExtra))
+                                .divide(java.math.BigInteger.valueOf(requestedExtra)).longValueExact());
+                if (quantity >= minimum) {
                     sized.add(new DesiredQuote(side, quote.level(), quote.priceTicks(), quantity));
+                    if (capacity < minimumLadder) capacity -= quantity;
+                }
             }
         }
         // Preserve the interleaved bid/ask submission order used by reconciliation.
