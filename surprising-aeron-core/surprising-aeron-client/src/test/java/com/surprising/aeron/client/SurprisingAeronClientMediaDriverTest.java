@@ -8,6 +8,23 @@ import org.junit.jupiter.api.Test;
 class SurprisingAeronClientMediaDriverTest {
 
     @Test
+    void poolHandshakeTimeoutIsIndependentFromBusinessResponseDeadline() {
+        String key = "surprising.aeron.client.connect-timeout-ms";
+        String before = System.getProperty(key);
+        try {
+            System.clearProperty(key);
+            assertThat(SurprisingAeronClient.pooledConnectionTimeout()).isEqualTo(java.time.Duration.ofSeconds(30));
+            System.setProperty(key, "12000");
+            assertThat(SurprisingAeronClient.pooledConnectionTimeout()).isEqualTo(java.time.Duration.ofSeconds(12));
+            System.setProperty(key, "0");
+            org.assertj.core.api.Assertions.assertThatThrownBy(SurprisingAeronClient::pooledConnectionTimeout)
+                    .isInstanceOf(IllegalArgumentException.class);
+        } finally {
+            if (before == null) System.clearProperty(key); else System.setProperty(key, before);
+        }
+    }
+
+    @Test
     void standaloneClientsUseIndependentMediaDriverDirectories() {
         try (var first = SurprisingAeronClient.newMediaDriver();
              var second = SurprisingAeronClient.newMediaDriver()) {

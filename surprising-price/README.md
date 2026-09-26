@@ -316,6 +316,6 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&t
 
 ### 本地五源接入验证（2026-09-26）
 
-通过网关 `instrument-admin/upsert` 与双人审批更新当前 20 个 U 本位永续合约，保留 `minValidIndexSources=3`。Kraken WebSocket v2 使用 `ticker`、`event_trigger=bbo`，覆盖 20 个 USD 交易对；Coinbase Exchange 使用 `ticker`，覆盖 19 个 USD 交易对，TRX 无对应上线交易对，不生成虚假配置。两者通过各自 USDT/USD 实时报价做除法换算，换算不可用时禁用该源（`conversionMode=DISABLE`）。
+通过网关 `instrument-admin/upsert` 与双人审批更新当前 20 个 U 本位永续合约，保留各合约原有最少有效源配置（BTC 为 3，其他合约原值为 1）。Kraken WebSocket v2 使用 `ticker`、`event_trigger=bbo`，覆盖 20 个 USD 交易对；Coinbase Exchange 使用 `ticker`，覆盖 19 个 USD 交易对，TRX 无对应上线交易对，不生成虚假配置。两者通过各自 USDT/USD 实时报价做除法换算，换算不可用时禁用该源（`conversionMode=DISABLE`）。
 
 BTC 实际指数响应已观测到 5/5 `HEALTHY`，Coinbase、Kraken 的 transport 均为 `PUBLIC_WEBSOCKET`，包含源时间与 USD/USDT 换算原因；这是一次采样结果，不代表所有交易对始终五源在线。JDK 27 下 price-provider 88 项测试通过，覆盖真实 ticker 消息格式、交易对匹配、Kraken 时间戳和旧报价触发重连。

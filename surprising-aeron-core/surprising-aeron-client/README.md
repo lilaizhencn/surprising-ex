@@ -29,3 +29,7 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 发送端和接收端沿用 Aeron 的 `aeron.driver.timeout`（默认 10 秒），不再写死 1 秒。
 本地 100 用户测试捕获 `keepalive age=1003ms > timeout=1000ms` 的误断连；真实 Driver
 测试使用 1.5 秒定时间隔检查健康传输不被误判，同时保留 Driver 丢失后的恢复断言。
+
+### 连接池建连期限与业务请求期限
+
+`SurprisingAeronClient.AsyncConnection` 的握手期限默认 30 秒，可用 `surprising.aeron.client.connect-timeout-ms` 设置；业务命令/查询继续使用原来的 responseTimeout。连接建立涉及 Driver 分配日志缓冲区和 Cluster 握手，不能因为一次 5 秒业务请求超时就不断重建连接资源。本地抓到连接池连续 NOT_CONNECTED、核心 Driver 忙于预触碰新缓冲区；此项只延长握手期限，不重试未知结果的资金命令、不放宽业务请求成功标准。

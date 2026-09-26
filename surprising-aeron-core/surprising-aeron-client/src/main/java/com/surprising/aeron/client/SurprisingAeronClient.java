@@ -196,6 +196,13 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         return MediaDriver.launchEmbedded(context);
     }
 
+    static Duration pooledConnectionTimeout() {
+        Duration timeout = Duration.ofMillis(Long.getLong("surprising.aeron.client.connect-timeout-ms", 30_000L));
+        if (timeout.isZero() || timeout.isNegative())
+            throw new IllegalArgumentException("Aeron connect timeout must be positive");
+        return timeout;
+    }
+
     static ThreadingMode clientThreadingMode() {
         String configured = System.getProperty("surprising.aeron.client.threading-mode");
         if (configured == null || configured.isBlank()) {
@@ -458,8 +465,10 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
             this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
             this.closeMediaDriver = closeMediaDriver;
+            // Pool connection setup includes driver buffer allocation and the cluster handshake.
+            // Do not recreate those resources at every short business-response deadline.
             this.connection = AeronCluster.asyncConnect(clusterContext(productLine, hostnames, egressHostname,
-                    responseTimeout, mediaDriver, this));
+                    pooledConnectionTimeout(), mediaDriver, this));
         }
 
         SurprisingAeronClient poll() {
