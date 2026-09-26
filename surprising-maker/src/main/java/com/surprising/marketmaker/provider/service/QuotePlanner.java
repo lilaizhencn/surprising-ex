@@ -67,17 +67,27 @@ public class QuotePlanner {
         // maxInventorySteps 比较。现货是否有足够资产由账户预占原子校验，
         // 做市报价只负责生成双边价格；衍生品仍使用持仓库存风控。
         long riskPositionSteps = strategy.getProductLine() == ProductLine.SPOT ? 0L : signedPositionSteps;
+        long previousBidDistance = 0L;
+        long previousAskDistance = 0L;
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
-            long bidPrice = Math.max(minPrice, anchor - (bidDistance > 0 ? bidDistance : halfSpread + spacing * level));
+            bidDistance = bidDistance > 0 ? bidDistance : halfSpread + spacing * level;
+            askDistance = askDistance > 0 ? askDistance : halfSpread + spacing * level;
+            if (level > 0) {
+                bidDistance = Math.max(bidDistance, previousBidDistance + spacing);
+                askDistance = Math.max(askDistance, previousAskDistance + spacing);
+            }
+            previousBidDistance = bidDistance;
+            previousAskDistance = askDistance;
+            long bidPrice = Math.max(minPrice, anchor - bidDistance);
             if (bestAsk > 0) {
                 bidPrice = Math.min(bidPrice, bestAsk - 1L);
             }
             suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
                     riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
 
-            long askPrice = Math.min(maxPrice, anchor + (askDistance > 0 ? askDistance : halfSpread + spacing * level));
+            long askPrice = Math.min(maxPrice, anchor + askDistance);
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }

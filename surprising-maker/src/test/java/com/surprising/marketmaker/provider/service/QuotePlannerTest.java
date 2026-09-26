@@ -161,6 +161,27 @@ class QuotePlannerTest {
     }
 
     @Test
+    void extendsShortReferenceBookToFiftyDistinctLevelsPerSide() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setOrderLevels(50);
+        MarketMakerProperties.Quoting quoting = quoting();
+        quoting.setLevelSpacingTicks(1L);
+        quoting.setMaxPriceDeviationPpm(50_000L);
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_995L, 1L), new ReferenceOrderBookLevel(49_990L, 1L)),
+                List.of(new ReferenceOrderBookLevel(50_005L, 1L), new ReferenceOrderBookLevel(50_010L, 1L)),
+                Instant.parse("2026-01-01T00:00:00Z"));
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting, risk(), instrument(),
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference);
+
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)
+                .map(quote -> quote.priceTicks()).distinct()).hasSize(50);
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL)
+                .map(quote -> quote.priceTicks()).distinct()).hasSize(50);
+    }
+
+    @Test
     void plansTwentyDistinctExecutableLevelsWithinDeviationForLinearPerpetual() {
         MarketMakerProperties.Strategy strategy = strategy();
         strategy.setOrderLevels(20);
