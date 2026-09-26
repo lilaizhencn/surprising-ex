@@ -315,7 +315,7 @@ class TradingCoreOwnerTest {
             assertThat(blocked.join()).isEqualTo(1);
             assertThat(responses).hasSize(1);
             service.state().assertClusterCallbackComplete();
-            drainRealtime(outbox);
+            var snapshotFrames = drainRealtime(outbox);
             // Read dispatch is now allowed at the completed window boundary, but never
             // during the reentrant idle callbacks above while settlement is pending.
             assertThat(requests.isEmpty()).isTrue();
@@ -329,7 +329,8 @@ class TradingCoreOwnerTest {
             // fenced state only after that read has completed, not merely the trade response.
             assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
                     .isEqualTo(2_000);
-            assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
+            snapshotFrames.addAll(drainRealtime(outbox));
+            assertThat(snapshotFrames).anySatisfy(frame -> {
                 assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.USER);
                 var user = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(frame.payload());
                 assertThat(user.balances().getFirst().lockedUnits()).isEqualTo(2_000);

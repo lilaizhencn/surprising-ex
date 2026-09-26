@@ -2042,10 +2042,21 @@ class ClusterCommandPipelineTest {
     void normalizedSymbolsCompleteWithoutSchedulingTimers() {
         try (Fixture f = new Fixture(ProductLine.SPOT)) {
             f.setup();
-            f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
-            f.send(f.place(disjointUser(11), "btc-usdt", disjointOrder(101), 80, 1, CoreOrderSide.BUY));
-            assertThat(f.service.commandWindowSize()).isEqualTo(2);
-            assertThat(f.responses).isEmpty();
+            var releaseMatcher = new java.util.concurrent.CompletableFuture<Void>();
+            var fence = f.service.state().matcherPipeline.readAtSubmissionFence(
+                    f.service.state().matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                        releaseMatcher.join();
+                        return true;
+                    });
+            try {
+                f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
+                f.send(f.place(disjointUser(11), "btc-usdt", disjointOrder(101), 80, 1, CoreOrderSide.BUY));
+                assertThat(f.service.commandWindowSize()).isEqualTo(2);
+                assertThat(f.responses).isEmpty();
+            } finally {
+                releaseMatcher.complete(null);
+            }
+            fence.join();
             int scheduled = f.scheduledTimers;
             assertThat(scheduled).isZero();
             f.tick();
