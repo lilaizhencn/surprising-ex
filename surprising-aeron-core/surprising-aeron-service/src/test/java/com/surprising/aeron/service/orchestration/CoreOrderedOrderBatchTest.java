@@ -368,6 +368,34 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 1_000_000);
+            for (int cycle = 0; cycle < 30; cycle++) {
+                long id = 190_000 + cycle * 3L;
+                var single = command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2 + cycle * 3L,
+                        TradingCommandCodec.encodePlaceOrder(place(id, "context-" + id, 1_000)));
+                var batch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3 + cycle * 3L,
+                        TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                place(id + 1, "context-" + (id + 1), 1_000),
+                                place(id + 2, "context-" + (id + 2), 1_000)))));
+                state.apply(single);
+                state.apply(batch);
+                long deadline = System.nanoTime() + 5_000_000_000L;
+                while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline)
+                    state.commits.commitReadyMatching(256, 2_000, 6, false, (sequence, response) -> {});
+                assertThat(state.pendingMatchingCount()).isZero();
+                drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 4 + cycle * 3L,
+                        TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                                new CancelOrderCommand(id), new CancelOrderCommand(id + 1), new CancelOrderCommand(id + 2))))));
+                assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+                assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(1_000_000);
+            }
+        }
+    }
+
+    @Test
     void deferredCommandsAndRejectedBatchAdvanceBySequenceAcrossBothQueueHeads() {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);

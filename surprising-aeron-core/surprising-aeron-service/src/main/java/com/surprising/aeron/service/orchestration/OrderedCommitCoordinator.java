@@ -514,11 +514,12 @@ final class OrderedCommitCoordinator {
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.matchingFlow.removePendingMatching(sequence);
+        owner.finishFactContext(response);
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
             owner.matchingProgress.submitDeferredMatchingAfterBatch();
         }
         CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
-        return owner.finishFactContext(response);
+        return response;
     }
 
     CoreResponse completeDispatchedMatcherSettlement(
@@ -615,8 +616,10 @@ final class OrderedCommitCoordinator {
         }
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.matchingFlow.removePendingMatching(pending.sequence());
+        // Finish this command before restoring the next batch's suspended commit context.
+        owner.finishFactContext(response);
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        return owner.finishFactContext(response);
+        return response;
     }
 
     CoreResponse completeDispatchedCancel(
@@ -656,8 +659,10 @@ final class OrderedCommitCoordinator {
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseCancel(pending.takeCancelEvent());
         owner.matchingFlow.removePendingMatching(pending.sequence());
+        // Finish this command before restoring the next batch's suspended commit context.
+        owner.finishFactContext(response);
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        return owner.finishFactContext(response);
+        return response;
     }
 
     /** Owner-only statistics shared by normal settlement and cancellation completion. */

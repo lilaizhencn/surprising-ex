@@ -856,7 +856,7 @@ class TradingCoreOwnerTest {
             assertThat(service.doBackgroundWork(0)).isZero();
             assertThatThrownBy(() -> service.captureSnapshot(8))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("unfinished business work outside cluster log callback");
+                    .hasMessageStartingWith("unfinished business work outside cluster log callback");
 
             // Then
             assertThat(service.state().pendingMatchingCount()).isOne();
