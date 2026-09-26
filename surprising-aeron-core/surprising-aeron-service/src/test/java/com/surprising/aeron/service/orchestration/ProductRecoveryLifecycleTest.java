@@ -90,35 +90,46 @@ class ProductRecoveryLifecycleTest {
                     assertThat(recovered.tradingState().user(11).totalUnits(asset)
                             + recovered.tradingState().user(22).totalUnits(asset)).isEqualTo(40_000);
                 }
-                var takeProfit = new CoreTriggerOrderStateView(502, product, 22, "recovery-take-profit", "", "BTC-USDT",
+                var takeProfit = new CoreTriggerOrderStateView(502, product, 22, "recovery-take-profit", "recovery-oco", "BTC-USDT",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         120, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 120, 2,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", "qa", 0, 0, 0, 0, 1, 0, 0);
-                CoreMessage placeTrigger = command(product, 12, 22, CoreMessageType.PLACE_TRIGGER_ORDER,
-                        CoreTriggerOrderCodec.encodeState(takeProfit));
-                apply(live, placeTrigger);
+                var stopLoss = ocoStopLoss(product, "recovery-stop-loss");
+                var invalidPair = command(product, 12, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
+                        CoreTriggerOrderCodec.encodeList(List.of(takeProfit, ocoStopLoss(product, " "))));
+                assertThat(live.apply(invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                assertThat(live.tradingState().triggerOrders()).doesNotContainKeys(502L, 503L);
+                CoreMessage placeTrigger = command(product, 13, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
+                        CoreTriggerOrderCodec.encodeList(List.of(takeProfit, stopLoss)));
+                // Apply the same rejected command to keep recovery sequence/state parity.
+                assertThat(recovered.apply(invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                var placed = apply(live, placeTrigger);
+                assertThat(CoreTriggerOrderCodec.decodeList(placed.data())).hasSize(2);
+                assertThat(apply(live, placeTrigger).data()).isEqualTo(placed.data());
                 apply(recovered, placeTrigger);
                 try (TradingCoreRuntime afterPendingTrigger = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(300))) {
-                    CoreMessage price = command(product, 13, 1, CoreMessageType.APPLY_MARK_PRICE,
+                    CoreMessage price = command(product, 14, 1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                     ? new ApplyMarkPriceCommand("BTC-USDT", 120, 120, 120, 2, 1_700_000_000_013L)
                                     : new ApplyMarkPriceCommand("BTC-USDT", 120, 2, 1_700_000_000_013L)));
                     apply(live, price);
                     apply(afterPendingTrigger, price);
-                    CoreMessage execute = command(product, 14, 22, CoreMessageType.EXECUTE_TRIGGER_ORDER,
+                    CoreMessage execute = command(product, 15, 22, CoreMessageType.EXECUTE_TRIGGER_ORDER,
                             CoreTriggerOrderCodec.encodeExecute(502, 2, 120, 1_700_000_000_014L));
                     apply(live, execute);
                     apply(afterPendingTrigger, execute);
                     parity(live, afterPendingTrigger);
                     assertThat(afterPendingTrigger.tradingState().triggerOrders().get(502L).status())
                             .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+                    assertThat(afterPendingTrigger.tradingState().triggerOrders().get(503L).status())
+                            .isEqualTo(CoreTriggerOrderStatus.CANCELED);
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
                     apply(afterPendingTrigger, price);
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
                     try (TradingCoreRuntime afterTriggered = TradingCoreRuntime.fromSnapshot(product, afterPendingTrigger.snapshot(301))) {
                         parity(live, afterTriggered);
-                        CoreMessage close = command(product, 15, 11, CoreMessageType.PLACE_ORDER,
+                        CoreMessage close = command(product, 16, 11, CoreMessageType.PLACE_ORDER,
                                 TradingCommandCodec.encodePlaceOrder(order(104, CoreOrderSide.BUY, 120, 2)));
                         apply(live, close);
                         apply(afterTriggered, close);
@@ -130,6 +141,14 @@ class ProductRecoveryLifecycleTest {
                 }
             }
         }
+    }
+
+    private static CoreTriggerOrderStateView ocoStopLoss(ProductLine product, String clientId) {
+        return new CoreTriggerOrderStateView(503, product, 22, clientId, "recovery-oco", "BTC-USDT",
+                CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.LESS_OR_EQUAL,
+                80, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 80, 2,
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                0, 0, 0, "", "qa", 0, 0, 0, 0, 1, 0, 0);
     }
 
     private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {

@@ -176,3 +176,9 @@ derivatives-lifecycle（含 funding）、maker，共 6 个 Java 进程。应用�
 所有业务和 Core 子模块从 `surprising-parent` 继承 `spring-boot-starter-logging`，统一使用 SLF4J / Logback；有日志的类使用 Lombok `@Slf4j`，不再手写 Logger 字段或使用 `System.out` / `System.err` 输出。正常事件使用 INFO，告警使用 WARN，失败使用 ERROR 并保留异常堆栈；Core 阶段统计和风险扫描诊断保持 DEBUG。
 
 Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-tools` 和 `surprising-aeron-benchmarks` 的 `src/main/resources/logback.xml` 将工具结果以 `%msg%n` 输出到 stdout，运行诊断输出到 stderr，保持 JSON、Prometheus、压测指标和 QA 协议的可解析格式；格式化指标仍保留原来的精度。直方图报告文件属于数据导出，继续写入指定文件。两个 shaded jar 合并服务发现元数据，benchmarks 打包时排除 tools 的重复日志配置。
+
+### 限价 BBO 与双向止盈止损
+
+网关 `OrderService` 支持限价委托 `bboPriceMode`：`OPPONENT_1`、`OPPONENT_5`、`SAME_SIDE_1`、`SAME_SIDE_5`。请求的 `priceTicks` 必须为 0；服务端读取所属产品线真实盘口，按方向、有效价格档解析一次委托价格，然后进入原有校验、冻结、撮合流程。深度不足明确拒绝，不替换为其他档位；BBO 不是持续跟随价格的挂单。
+
+`trading-trigger/batch` 的 `atomic=true` 支持同用户、同合约、同方向、同数量且同 `ocoGroupId` 的一对止盈/止损。`TriggerOrderService` 将两条腿转换为一条 `PLACE_TRIGGER_OCO_PAIR` 核心命令；`RuntimeTriggerOrderStateTransitions.placeOcoPair` 在同一账户 Lane 完成两条腿校验后统一落地。任一腿触发时沿用现有 OCO 互斥执行，另一腿取消。当前触发来源为标记价；衍生品保护单必须减少已有持仓。此处“单向/双向保护”与账户的“单向/双向持仓模式”是不同概念。

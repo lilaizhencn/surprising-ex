@@ -72,7 +72,7 @@ final class CommandResultBuilder {
         commandLiquidationBatchResult = null;
         commandSettlementProgress = null;
         commandRiskScanControl = null;
-        commandTriggerOrderView = null;
+        commandTriggerOrderViews = null;
         resetChangeAccumulators();
     }
 
@@ -114,7 +114,7 @@ final class CommandResultBuilder {
     CoreRiskScanControlView commandRiskScanControl;
 
     /** 当前触发单命令返回的终态视图。 */
-    com.surprising.aeron.protocol.CoreTriggerOrderStateView commandTriggerOrderView;
+    java.util.List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> commandTriggerOrderViews;
 
     void markUserChanged(long userId) {
         owner.seedChangeAccumulators();
@@ -332,8 +332,8 @@ final class CommandResultBuilder {
         if (commandSettlementProgress != null) {
             return setResponse(CoreSettlementProgressCodec.encode(commandSettlementProgress));
         }
-        if (commandTriggerOrderView != null) {
-            return setResponse(com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeSingle(commandTriggerOrderView));
+        if (commandTriggerOrderViews != null) {
+            return setResponse(com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(commandTriggerOrderViews));
         }
         if (pending != null) {
             byte[] prepared = pending.lanePreparedResponse();

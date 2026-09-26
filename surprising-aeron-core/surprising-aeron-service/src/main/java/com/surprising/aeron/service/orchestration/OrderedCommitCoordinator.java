@@ -500,6 +500,9 @@ final class OrderedCommitCoordinator {
                 throw owner.failMatching(pending, "account lane mask differs from immutable matcher result", null);
             }
             requireCompleteAccountLanes(laneContext);
+            // A settlement that finishes in this poll seeded primitive Lane changes, but
+            // never took the deferred completion path that publishes these result views.
+            owner.resultBuilder.materializeChangeAccumulators();
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
                 owner.resultBuilder.materializeCommandOrderViews(pending);
             }

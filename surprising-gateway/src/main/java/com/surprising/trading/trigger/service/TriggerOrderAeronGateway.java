@@ -65,6 +65,11 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                         .orElseThrow(() -> new IllegalStateException(
                                 "Aeron trigger placement returned no state")));
     }
+    public List<CoreTriggerOrderStateView> placeOcoPair(UUID id, long userId, List<CoreTriggerOrderStateView> legs) {
+        return CoreTriggerOrderCodec.decodeList(command(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, id,
+                userId, CoreTriggerOrderCodec.encodeList(legs)).data());
+    }
+
     public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit) {
         return openOrders(userId, symbol, before, limit, null);
     }

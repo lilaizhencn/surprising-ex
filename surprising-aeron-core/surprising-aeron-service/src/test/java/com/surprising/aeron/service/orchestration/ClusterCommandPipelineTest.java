@@ -26,6 +26,61 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void atomicOcoPairPublishesTogetherAndEitherLegCancelsItsSibling(ProductLine product) throws Exception {
+        for (boolean takeProfitWins : new boolean[]{true, false}) {
+            try (Fixture live = new Fixture(product)) {
+                live.setup();
+                long maker = 11, user = disjointUser(maker);
+                if (product == ProductLine.SPOT) live.apply(live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100))));
+                live.apply(live.place(maker, "BTC-USDT", 101, 100, 10, CoreOrderSide.SELL));
+                live.apply(live.place(user, "BTC-USDT", 102, 100, 10, CoreOrderSide.BUY));
+                live.apply(live.place(maker, "BTC-USDT", 103, 100, 1, CoreOrderSide.BUY));
+                var tp = pairLeg(product, user, 9001, "pair-tp", CoreTriggerOrderType.TAKE_PROFIT,
+                        takeProfitWins ? 100 : 120);
+                var sl = pairLeg(product, user, 9002, "pair-sl", CoreTriggerOrderType.STOP_LOSS,
+                        takeProfitWins ? 80 : 100);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
+                        CoreTriggerOrderCodec.encodeList(List.of(tp,
+                                pairLeg(product, user, 9002, " ", CoreTriggerOrderType.STOP_LOSS, sl.triggerPriceTicks())))));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                assertThat(live.service.state().runtimeState.triggerOrder(9001)).isNull();
+                assertThat(live.service.state().runtimeState.triggerOrder(9002)).isNull();
+                var pair = live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
+                        CoreTriggerOrderCodec.encodeList(List.of(tp, sl)));
+                live.apply(pair);
+                var placed = live.responses.getLast();
+                assertThat(placed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(CoreTriggerOrderCodec.decodeList(placed.data())).hasSize(2);
+                live.apply(pair);
+                assertThat(live.responses.getLast().data()).isEqualTo(placed.data());
+                long winner = takeProfitWins ? 9001 : 9002;
+                long canceled = takeProfitWins ? 9002 : 9001;
+                live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                        CoreTriggerOrderCodec.encodeExecute(winner, 1, 100, TIME)));
+                assertThat(live.service.state().runtimeState.triggerOrder(winner).status())
+                        .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+                assertThat(live.service.state().runtimeState.triggerOrder(canceled).status())
+                        .isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+            }
+        }
+    }
+
+    private static CoreTriggerOrderStateView pairLeg(ProductLine product, long user, long id,
+                                                     String client, CoreTriggerOrderType type, long threshold) {
+        return new CoreTriggerOrderStateView(id, product, user, client, "atomic-pair", "BTC-USDT",
+                CoreOrderSide.SELL, type, type == CoreTriggerOrderType.TAKE_PROFIT
+                ? CoreTriggerCondition.GREATER_OR_EQUAL : CoreTriggerCondition.LESS_OR_EQUAL,
+                threshold, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries(ProductLine product) throws Exception {
         var release = new CountDownLatch(1);
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
@@ -636,8 +691,8 @@ class ClusterCommandPipelineTest {
             var batch = state.batches.batch(sequence);
             var pending = state.pendingMatching.get(sequence);
             // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
-            state.batches.beginOrderBatchCommitContext(batch, pending);
-            state.suspendMatchingCommitContext(pending);
+            if (!batch.commitStarted()) state.batches.beginOrderBatchCommitContext(batch, pending);
+            if (!pending.hasCommitContext()) state.suspendMatchingCommitContext(pending);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             while (!batch.placeBatchAdmissionEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
             assertThat(batch.placeBatchAdmissionEvent.complete()).isTrue();
@@ -865,7 +920,13 @@ class ClusterCommandPipelineTest {
                                 break;
                             }
                             assertThat(state.commits.commitPublicationDeferred()).isFalse();
-                            assertThat(state.laneCommandContexts.required(sequence).hasCommitContext()).isTrue();
+                            var waiting = state.laneCommandContexts.required(sequence);
+                            var waitingEvent = waiting.orderBatch != null
+                                    ? waiting.orderBatch.itemSettlementEvent : waiting.settlementEvent();
+                            // Matcher-owned direct publication has no Owner commit context until
+                            // every Lane completes; a suspended Owner route must retain its context.
+                            assertThat(waiting.hasCommitContext()
+                                    || waitingEvent != null && waitingEvent.direct()).isTrue();
                         }
                     } else {
                         assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -1171,9 +1232,20 @@ class ClusterCommandPipelineTest {
                     : live.place(11, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
             var second = batch ? live.placeBatch(disjointUser(11), "BTC-USDT", 200)
                     : live.place(disjointUser(11), "BTC-USDT", 200, 81, 1, CoreOrderSide.BUY);
-            live.send(first); live.send(second);
-            assertThat(live.service.commandWindowSize()).isEqualTo(2);
-            assertThat(live.responses).isEmpty();
+            var releaseMatcher = new java.util.concurrent.CompletableFuture<Void>();
+            var matcherFence = live.service.state().matcherPipeline.readAtSubmissionFence(
+                    live.service.state().matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                        releaseMatcher.join();
+                        return true;
+                    });
+            try {
+                live.send(first); live.send(second);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+                assertThat(live.responses).isEmpty();
+            } finally {
+                releaseMatcher.complete(null);
+            }
+            matcherFence.join();
             live.tick(); serial.apply(first); serial.apply(second);
             replay.send(first); replay.send(second); replay.tick();
             assertThat(live.responses).hasSize(2).allSatisfy(r ->

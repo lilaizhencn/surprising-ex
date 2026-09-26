@@ -134,12 +134,33 @@ public class TriggerOrderService {
     }
 
     private TriggerOrderBatchResponse placeAtomicBatch(List<PlaceTriggerOrderRequest> orders) {
-        List<TriggerOrderBatchItemResponse> rejected = new ArrayList<>();
-        String message = "atomic trigger batches are not supported by the Aeron Core command protocol";
-        for (int i = 0; i < orders.size(); i++) {
-            rejected.add(new TriggerOrderBatchItemResponse(i, false, message, null));
+        if (orders.size() != 2) throw new IllegalArgumentException("atomic TP/SL requires exactly two orders");
+        var first = prepareTriggerOrder(orders.get(0));
+        var second = prepareTriggerOrder(orders.get(1));
+        var takeProfit = first.view().triggerType() == CoreTriggerOrderType.TAKE_PROFIT ? first : second;
+        var stopLoss = takeProfit == first ? second : first;
+        var a = takeProfit.view();
+        var b = stopLoss.view();
+        if (a.triggerType() != CoreTriggerOrderType.TAKE_PROFIT || b.triggerType() != CoreTriggerOrderType.STOP_LOSS
+                || a.ocoGroupId().isBlank() || !a.ocoGroupId().equals(b.ocoGroupId())
+                || a.userId() != b.userId() || !a.symbol().equals(b.symbol())
+                || a.side() != b.side() || a.marginMode() != b.marginMode() || a.positionSide() != b.positionSide()
+                || a.quantitySteps() != b.quantitySteps() || a.triggerOrderId() == b.triggerOrderId()
+                || (a.side() == CoreOrderSide.SELL ? a.triggerPriceTicks() <= b.triggerPriceTicks()
+                    : a.triggerPriceTicks() >= b.triggerPriceTicks())) {
+            throw new IllegalArgumentException("invalid take-profit / stop-loss OCO pair");
         }
-        return triggerBatchResponse(rejected);
+        UUID id = UUID.nameUUIDFromBytes((currentProductLine().name() + ":OCO:" + a.userId()
+                + ":" + a.clientTriggerOrderId() + ":" + b.clientTriggerOrderId()).getBytes(StandardCharsets.UTF_8));
+        var placed = aeronGateway.placeOcoPair(id, a.userId(), List.of(a, b));
+        var results = new ArrayList<TriggerOrderBatchItemResponse>();
+        for (int i = 0; i < orders.size(); i++) {
+            String clientId = orders.get(i).clientTriggerOrderId().trim();
+            var view = placed.stream().filter(v -> v.clientTriggerOrderId().equals(clientId)).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("OCO placement returned incomplete state"));
+            results.add(new TriggerOrderBatchItemResponse(i, true, "completed", TriggerOrderAeronGateway.response(view)));
+        }
+        return triggerBatchResponse(results);
     }
 
     public TriggerOrderResponse get(long triggerOrderId) {

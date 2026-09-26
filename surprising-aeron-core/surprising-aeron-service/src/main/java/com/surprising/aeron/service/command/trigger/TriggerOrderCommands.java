@@ -525,6 +525,39 @@ public final class TriggerOrderCommands {
         owner.requestCommitPublication();
     }
 
+    public void executePlaceTriggerOcoPair(CoreMessage message, long clusterTimestamp) {
+        var views = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(message.payloadUnsafe());
+        if (views.size() != 2) throw new CoreStateRejectedException("INVALID_COMMAND", "OCO requires two legs");
+        var first = views.get(0).materializeCreation(clusterTimestamp);
+        var second = views.get(1).materializeCreation(clusterTimestamp);
+        RuntimeTriggerOrderStateTransitions.validateOcoPair(first, second);
+        var instrument = owner.runtimeState().instrument(first.symbol());
+        if (instrument != null) {
+            instrument.requireOrderEnabled(first.orderType(), first.timeInForce(), false, false);
+            instrument.requireOrderEnabled(second.orderType(), second.timeInForce(), false, false);
+        }
+        for (var leg : java.util.List.of(first, second)) {
+            if (owner.terminalTriggerRetained(leg.triggerOrderId(), message.header().userId(), leg.clientTriggerOrderId()))
+                throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID", "terminal trigger identity is retained");
+        }
+        int symbolId = owner.identities().symbolId(first.symbol());
+        long positionKey = preparedTriggerPositionKey(message.header().userId(), first);
+        boolean settled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
+        if (owner.runtimeState().asynchronousCommands()) {
+            owner.deferTriggerOcoPair(message.header().userId(), first, second, symbolId, positionKey, settled);
+            return;
+        }
+        owner.runtimeState().executeUserSettlement(message.header().userId(), () -> {
+            RuntimeTriggerOrderStateTransitions.placeOcoPair(owner.runtimeState(), message.header().userId(),
+                    first, second, symbolId, positionKey, settled);
+            return null;
+        });
+        owner.requestCommitPublication();
+        owner.setCommandTriggerOrderViews(java.util.List.of(
+                owner.runtimeState().triggerOrder(first.triggerOrderId()).view(),
+                owner.runtimeState().triggerOrder(second.triggerOrderId()).view()));
+    }
+
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);

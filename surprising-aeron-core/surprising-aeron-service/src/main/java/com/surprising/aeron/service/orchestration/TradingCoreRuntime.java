@@ -389,7 +389,17 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
     @Override public void setCommandTriggerOrderView(
             com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
-        resultBuilder.commandTriggerOrderView = trigger;
+        resultBuilder.commandTriggerOrderViews = List.of(trigger);
+    }
+    @Override public void setCommandTriggerOrderViews(List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers) {
+        resultBuilder.commandTriggerOrderViews = List.copyOf(triggers);
+    }
+    @Override public void deferTriggerOcoPair(long userId,
+            com.surprising.aeron.protocol.CoreTriggerOrderStateView takeProfit,
+            com.surprising.aeron.protocol.CoreTriggerOrderStateView stopLoss,
+            int symbolId, long positionKey, boolean instrumentSettled) {
+        directCommand.deferTriggerOcoPairControl(this, userId, takeProfit, stopLoss,
+                symbolId, positionKey, instrumentSettled);
     }
     @Override public PositionUserIndex positionUserIndex() { return positionUserIndex; }
     @Override public OpenInterestIndex openInterestIndex() { return openInterestIndex; }

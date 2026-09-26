@@ -31,6 +31,45 @@ public final class RuntimeTriggerOrderStateTransitions {
     public static void upsert(TradingRuntimeState runtime, long userId,
                        CoreTriggerOrderStateView view, int symbolId,
                        long positionKey, boolean instrumentSettled) {
+        CoreTriggerOrderState trigger = preparePlacement(runtime, userId, view, symbolId, positionKey, instrumentSettled);
+        runtime.putTriggerOrder(trigger);
+        runtime.incrementCommandRevision();
+    }
+
+    /** Both legs are validated on their single account Lane before either becomes visible. */
+    public static void placeOcoPair(TradingRuntimeState runtime, long userId,
+                                   CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
+                                   int symbolId, long positionKey, boolean instrumentSettled) {
+        validateOcoPair(takeProfit, stopLoss);
+        var first = preparePlacement(runtime, userId, takeProfit, symbolId, positionKey, instrumentSettled);
+        var second = preparePlacement(runtime, userId, stopLoss, symbolId, positionKey, instrumentSettled);
+        Math.addExact(runtime.revision(), 2);
+        runtime.putTriggerOrder(first);
+        runtime.putTriggerOrder(second);
+        runtime.incrementCommandRevision();
+        runtime.incrementCommandRevision();
+    }
+
+    public static void validateOcoPair(CoreTriggerOrderStateView first, CoreTriggerOrderStateView second) {
+        if (first == null || second == null || first.ocoGroupId().isBlank()
+                || !first.ocoGroupId().equals(second.ocoGroupId()) || first.userId() != second.userId()
+                || first.productLine() != second.productLine() || !first.symbol().equals(second.symbol())
+                || first.side() != second.side() || first.marginMode() != second.marginMode()
+                || first.positionSide() != second.positionSide() || first.quantitySteps() != second.quantitySteps()
+                || first.triggerOrderId() == second.triggerOrderId()
+                || first.clientTriggerOrderId().equals(second.clientTriggerOrderId())
+                || first.triggerType() != CoreTriggerOrderType.TAKE_PROFIT
+                || second.triggerType() != CoreTriggerOrderType.STOP_LOSS
+                || (first.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL
+                    ? first.triggerPriceTicks() <= second.triggerPriceTicks()
+                    : first.triggerPriceTicks() >= second.triggerPriceTicks())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "invalid take-profit / stop-loss OCO pair");
+        }
+    }
+
+    private static CoreTriggerOrderState preparePlacement(TradingRuntimeState runtime, long userId,
+                       CoreTriggerOrderStateView view, int symbolId,
+                       long positionKey, boolean instrumentSettled) {
         if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
             throw new IllegalArgumentException("invalid prepared runtime trigger order update");
         }
@@ -56,10 +95,8 @@ public final class RuntimeTriggerOrderStateTransitions {
                     "clientTriggerOrderId already exists");
         }
         validatePlacement(runtime, userId, symbolId, positionKey, view);
-        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument)
+        return CoreTriggerOrderState.from(view, instrument)
                 .withExecutionSnapshot(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
-        runtime.putTriggerOrder(trigger);
-        runtime.incrementCommandRevision();
     }
 
     public static boolean cancel(TradingRuntimeState runtime, long userId, long triggerOrderId) {

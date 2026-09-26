@@ -55,6 +55,12 @@ public interface TriggerCommandContext extends CommandResultContext {
 
     void setCommandTriggerOrderView(CoreTriggerOrderStateView trigger);
 
+    void setCommandTriggerOrderViews(java.util.List<CoreTriggerOrderStateView> triggers);
+
+    void deferTriggerOcoPair(long userId, CoreTriggerOrderStateView takeProfit,
+                            CoreTriggerOrderStateView stopLoss, int symbolId, long positionKey,
+                            boolean instrumentSettled);
+
     void deferTriggerMutation(long userId, Mutation mutation, long triggerOrderId,
                               long arg1, long arg2, long arg3, boolean flag, String text);
 

@@ -58,6 +58,41 @@ class TriggerOrderIdentityTest {
                 .hasMessageContaining("clientTriggerOrderId is required");
     }
 
+    @Test
+    void atomicPairUsesOneCoreCommandAndPreservesRequestedLegOrder() {
+        var gateway = mock(TriggerOrderAeronGateway.class);
+        when(gateway.placeOcoPair(any(UUID.class), eq(1001L), any()))
+                .thenAnswer(call -> call.<java.util.List<CoreTriggerOrderStateView>>getArgument(2).stream()
+                        .map(view -> view.materializeCreation(1_700_000_000_000L)).toList());
+        var service = new TriggerOrderService(properties(), gateway);
+        var result = service.placeBatch(new com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest(
+                java.util.List.of(leg("sl", TriggerOrderType.STOP_LOSS, 50_000),
+                        leg("tp", TriggerOrderType.TAKE_PROFIT, 70_000)), true));
+        assertThat(result.completed()).isEqualTo(2);
+        assertThat(result.failed()).isZero();
+        assertThat(result.results().get(0).order().clientTriggerOrderId()).isEqualTo("sl");
+        assertThat(result.results().get(1).order().clientTriggerOrderId()).isEqualTo("tp");
+        org.mockito.Mockito.verify(gateway).placeOcoPair(any(UUID.class), eq(1001L), any());
+        org.mockito.Mockito.verifyNoMoreInteractions(gateway);
+    }
+
+    @Test
+    void malformedAtomicPairIsRejectedBeforeSendingEitherLeg() {
+        var gateway = mock(TriggerOrderAeronGateway.class);
+        var service = new TriggerOrderService(properties(), gateway);
+        assertThatThrownBy(() -> service.placeBatch(new com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest(
+                java.util.List.of(leg("sl", TriggerOrderType.STOP_LOSS, 70_000),
+                        leg("tp", TriggerOrderType.TAKE_PROFIT, 50_000)), true)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("OCO pair");
+        org.mockito.Mockito.verifyNoInteractions(gateway);
+    }
+
+    private static PlaceTriggerOrderRequest leg(String client, TriggerOrderType type, long triggerPrice) {
+        return new PlaceTriggerOrderRequest(1001L, client, "pair", "BTC-USDT", OrderSide.SELL,
+                type, triggerPrice, OrderType.MARKET, TimeInForce.IOC, 0L, 10L,
+                MarginMode.CROSS, PositionSide.NET, null);
+    }
+
     private static TriggerProperties properties() {
         TriggerProperties properties = new TriggerProperties();
         properties.setProductLine(ProductLine.LINEAR_PERPETUAL);

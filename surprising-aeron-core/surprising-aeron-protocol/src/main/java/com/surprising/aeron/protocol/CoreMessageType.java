@@ -40,6 +40,7 @@ public enum CoreMessageType {
     TRANSFER_IN(50, WireMessageKind.COMMAND),
     COMPLETE_TRANSFER(51, WireMessageKind.COMMAND),
     UPDATE_INSTRUMENT_MAINTENANCE(52, WireMessageKind.COMMAND),
+    PLACE_TRIGGER_OCO_PAIR(53, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),

@@ -14,6 +14,7 @@ public final class TriggerCommandDispatcher {
         switch (message.header().messageType()) {
             case UPSERT_ALGO_ORDER -> commands.executeUpsertAlgoOrder(message, clusterTimestamp);
             case UPDATE_CANCEL_ALL_AFTER -> commands.executeUpdateCancelAllAfter(message, clusterTimestamp);
+            case PLACE_TRIGGER_OCO_PAIR -> commands.executePlaceTriggerOcoPair(message, clusterTimestamp);
             case PLACE_TRIGGER_ORDER -> commands.executePlaceTriggerOrder(message, clusterTimestamp);
             case CANCEL_TRIGGER_ORDER -> commands.executeCancelTriggerOrder(message, clusterTimestamp);
             case CLAIM_TRIGGER_ORDER -> commands.executeClaimTriggerOrder(message, clusterTimestamp);

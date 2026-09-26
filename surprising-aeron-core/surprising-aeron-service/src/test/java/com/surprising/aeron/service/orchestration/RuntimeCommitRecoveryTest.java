@@ -105,7 +105,7 @@ class RuntimeCommitRecoveryTest {
         }
     }
 
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(10)
     void replayAfterRestoreProducesIdenticalResponsesAndState() {
         List<CoreMessage> partialFill = List.of(
                 command(4, 22, CoreMessageType.PLACE_ORDER, place(202, CoreOrderSide.BUY, 100, 4, false)));

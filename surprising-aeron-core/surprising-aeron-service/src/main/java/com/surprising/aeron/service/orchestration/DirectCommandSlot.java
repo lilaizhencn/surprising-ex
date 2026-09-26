@@ -231,6 +231,17 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
+    void deferTriggerOcoPairControl(TriggerCommandContext owner, long userId,
+            CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
+            int symbolId, long positionKey, boolean instrumentSettled) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        triggerControl.prepareTriggerUpsert(owner, userId, first, symbolId, positionKey, instrumentSettled);
+        triggerControl.secondTrigger = second;
+        owner.runtimeState().dispatchControlLanes(
+                1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
+        controlWork = triggerControl;
+    }
+
     void deferAlgoUpsertControl(TriggerCommandContext owner, long userId, CoreAlgoOrderView algo,
             int symbolId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -480,7 +491,7 @@ final class DirectCommandSlot {
         private boolean flag;
         private String text;
         private TriggerCommandContext.Mutation mutation;
-        private CoreTriggerOrderStateView trigger;
+        private CoreTriggerOrderStateView trigger, secondTrigger;
         private CoreAlgoOrderView algo;
         private int symbolId;
         private long positionKey;
@@ -506,7 +517,7 @@ final class DirectCommandSlot {
             this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId;
         }
         void clear() {
-            kind = 0; owner = null; mutation = null; trigger = null; algo = null; text = null;
+            kind = 0; owner = null; mutation = null; trigger = null; secondTrigger = null; algo = null; text = null;
             userId = triggerOrderId = arg1 = arg2 = arg3 = positionKey = 0;
             flag = instrumentSettled = false; symbolId = 0;
         }
@@ -525,8 +536,10 @@ final class DirectCommandSlot {
                     case RETRY -> RuntimeTriggerOrderStateTransitions.retry(runtime, triggerOrderId, arg1, arg2);
                 };
                 case TRIGGER_UPSERT -> {
-                    RuntimeTriggerOrderStateTransitions.upsert(runtime, userId, trigger, symbolId,
+                    if (secondTrigger == null) RuntimeTriggerOrderStateTransitions.upsert(runtime, userId, trigger, symbolId,
                             positionKey, instrumentSettled);
+                    else RuntimeTriggerOrderStateTransitions.placeOcoPair(runtime, userId, trigger, secondTrigger,
+                            symbolId, positionKey, instrumentSettled);
                     yield null;
                 }
                 case ALGO_UPSERT -> {
@@ -545,7 +558,10 @@ final class DirectCommandSlot {
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
             } else if (kind == TRIGGER_UPSERT) {
                 owner.requestCommitPublication();
-                owner.setCommandTriggerOrderView(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
+                if (secondTrigger == null) owner.setCommandTriggerOrderView(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
+                else owner.setCommandTriggerOrderViews(java.util.List.of(
+                        owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view(),
+                        owner.runtimeState().triggerOrder(secondTrigger.triggerOrderId()).view()));
             } else {
                 owner.runtimeState().publishAlgoOrder(
                         (com.surprising.aeron.service.state.model.CoreAlgoOrderState) result);
