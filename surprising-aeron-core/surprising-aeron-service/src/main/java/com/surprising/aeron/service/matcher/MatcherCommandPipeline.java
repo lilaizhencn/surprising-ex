@@ -10,7 +10,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
-import java.util.concurrent.TimeUnit;
+import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 
 /**
  * Single-producer/single-consumer matcher stage. The Aeron owner publishes immutable work,
@@ -54,15 +54,19 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private long parkCount;
     private long idleStartedNanos;
     private long nextDiagnosticNanos;
-    private volatile BackgroundRead<?> backgroundRead;
+    /** Owner enqueues query requests; matcher consumes them at their submission fence.
+     * Bounded by the command window; requests own no copy of trading state. */
+    private final OneToOneConcurrentArrayQueue<BackgroundRead<?>> backgroundReads;
     private volatile Runnable completionSignal;
     public void completionSignal(Runnable signal) { completionSignal = signal; }
     public <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(Supplier<T> read) {
-        if (!accepting || backgroundRead != null) return java.util.concurrent.CompletableFuture.failedFuture(
-                new RejectedExecutionException("matcher read mailbox unavailable"));
-        var future=new java.util.concurrent.CompletableFuture<T>();
-        backgroundRead=new BackgroundRead<>(submittedPosition.value,read,future);
-        LockSupport.unpark(worker);return future;
+        var future = new java.util.concurrent.CompletableFuture<T>();
+        if (!accepting || !backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
+            future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
+        } else {
+            LockSupport.unpark(worker);
+        }
+        return future;
     }
     private record BackgroundRead<T>(long fence,Supplier<T> read,java.util.concurrent.CompletableFuture<T> future) {
         void execute() {try {future.complete(read.get());}catch(RuntimeException failure){future.completeExceptionally(failure);}}
@@ -83,6 +87,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         this.workerId = workerId;
         this.waitStrategy = configuredWaitStrategy();
+        backgroundReads = new OneToOneConcurrentArrayQueue<>(requestedCapacity);
         slots = new Slot[requestedCapacity];
         for (int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
         mask = requestedCapacity - 1;
@@ -323,16 +328,16 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             // Observe the submission cursor before the read mailbox. A later command publication
             // therefore cannot overtake a read published by the same owner at an earlier fence.
             long submitted=submittedPosition.value;
-            BackgroundRead<?> read=backgroundRead;
+            BackgroundRead<?> read=backgroundReads.peek();
             if(read!=null && position>=read.fence()) {
-                backgroundRead=null;read.execute();continue;
+                backgroundReads.poll();read.execute();continue;
             }
             if (position >= submitted) {
                 enterIdle();
                 if (waitStrategy == WaitStrategy.BUSY_SPIN) Thread.onSpinWait();
                 else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
                 else {
-                    if (accepting && position >= submittedPosition.value && backgroundRead == null) {
+                    if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
                         if (WAIT_DIAGNOSTICS) parkCount++;
                         LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
                     }
@@ -398,8 +403,10 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     workerId, idleWaitNanos, executeNanos, idleEntries, executeCount, parkCount,
                     submissionDepth(), completionDepth());
         }
-        BackgroundRead<?> unfinishedRead=backgroundRead;backgroundRead=null;
-        if(unfinishedRead!=null)unfinishedRead.future().completeExceptionally(new RejectedExecutionException("matcher stopped"));
+        BackgroundRead<?> unfinishedRead;
+        while ((unfinishedRead = backgroundReads.poll()) != null) {
+            unfinishedRead.future().completeExceptionally(new RejectedExecutionException("matcher stopped"));
+        }
         if (shutdownAction != null) {
             try {
                 shutdownAction.run();

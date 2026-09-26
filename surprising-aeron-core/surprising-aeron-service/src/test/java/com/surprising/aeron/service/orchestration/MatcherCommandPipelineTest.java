@@ -13,6 +13,35 @@ import org.junit.jupiter.api.Test;
 class MatcherCommandPipelineTest {
 
     @Test
+    void concurrentBookReadsKeepTheirIndividualFencesAndBoundedCapacity() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var value = new java.util.concurrent.atomic.AtomicInteger();
+        try (var pipeline = new MatcherCommandPipeline(4)) {
+            pipeline.submit(1, () -> {
+                entered.countDown(); await(release); value.set(1);
+                return new CoreMatchingResult(true, "ONE");
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            var first = pipeline.readAtSubmissionFence(value::get);
+            var sameFence = pipeline.readAtSubmissionFence(value::get);
+            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); });
+            var later = pipeline.readAtSubmissionFence(value::get);
+            var last = pipeline.readAtSubmissionFence(value::get);
+            var overflow = pipeline.readAtSubmissionFence(value::get);
+            assertThatThrownBy(() -> overflow.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(RejectedExecutionException.class);
+            release.countDown();
+            assertThat(first.get(5, TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(sameFence.get(5, TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(later.get(5, TimeUnit.SECONDS)).isEqualTo(2);
+            assertThat(last.get(5, TimeUnit.SECONDS)).isEqualTo(2);
+            assertThat(await(pipeline, 1, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+            assertThat(await(pipeline, 2, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+        } finally { release.countDown(); }
+    }
+
+    @Test
     void backgroundReadObservesItsSubmissionFenceAndFailureDoesNotPoisonTrading() throws Exception {
         var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
         var value=new java.util.concurrent.atomic.AtomicInteger();

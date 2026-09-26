@@ -202,3 +202,10 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 
 账户回滚后由 `RuntimeAccountRollback.restoreLane` 重新记录实际恢复的余额 after-state，
 避免写入前失败导致发布缺值、或写入后回滚仍发布尝试值。写前/写后失败与异步冻结回滚均有回归覆盖。
+
+### 盘口查询与撮合线程
+
+`MatcherCommandPipeline.readAtSubmissionFence` 由 Owner 提交只读请求，撮合线程在对应订单提交边界读取。
+待处理请求使用有界 SPSC 队列（容量与命令窗口一致），消费后移除，关闭时未完成请求明确失败；
+不复制订单或余额状态。并发盘口查询不再因单个待处理槽占用而立即失败。查询仍占用撮合线程时间，
+并非独立的行情读服务；有界排队不能替代吞吐量与延迟验证。测试入口为 `MatcherCommandPipelineTest`。
