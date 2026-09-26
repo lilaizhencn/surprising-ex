@@ -21,6 +21,27 @@ import tools.jackson.databind.ObjectMapper;
 
 class SubscriptionRegistryTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void wildcardExecutionBatchesKeepInstrumentAndProduct(ProductLine product) {
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        var subscriber = connection("execution-all");
+        registry.add(subscriber);
+        registry.subscribe(subscriber, new SubscriptionTopic(WsChannel.EXECUTION_REPORTS,
+                SubscriptionTopic.WILDCARD, null, 1001L, product));
+        when(subscriber.sendBatch(org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
+        var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "BTC-USDT", null, 1001L, product);
+        var time = Instant.parse("2026-09-26T00:00:00Z");
+        registry.publishTimedBatch(topic, java.util.List.of(new SubscriptionRegistry.TimedPayload("fill", time)));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.List<String>> messages = ArgumentCaptor.forClass(java.util.List.class);
+        verify(subscriber).sendBatch(messages.capture());
+        var event = new ObjectMapper().readTree(messages.getValue().getFirst());
+        assertThat(event.path("symbol").asText()).isEqualTo("BTC-USDT");
+        assertThat(event.path("productLine").asText()).isEqualTo(product.name());
+        assertThat(event.path("userId").asLong()).isEqualTo(1001);
+    }
+
     @Test
     void lifecycleIsBalancedAcrossDuplicatesDisconnectsAndFailedRegistration() {
         var registry=new SubscriptionRegistry(new ObjectMapper(),new WebSocketProperties());
@@ -65,7 +86,7 @@ class SubscriptionRegistryTest {
         verify(user1001Wildcard).send(wildcardPayload.capture());
         verify(user2002SameSymbol, never()).send(anyString());
         assertThat(symbolPayload.getValue()).contains("\"userId\":1001", "\"symbol\":\"BTC-USDT\"");
-        assertThat(wildcardPayload.getValue()).contains("\"userId\":1001", "\"symbol\":\"*\"");
+        assertThat(wildcardPayload.getValue()).isEqualTo(symbolPayload.getValue());
     }
 
     @Test

@@ -230,3 +230,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 内部认证清理：删除 `BusinessEndpointConfiguration`、业务 token 请求头、账户内部 HMAC/时间戳/audience 校验及发送端签名。`BUSINESS_INTERNAL_TOKEN`、`ACCOUNT_INTERNAL_SERVICE_SECRET`、`GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET` 不再需要。内部控制器仍执行 DTO 校验、产品线检查和原有业务拒绝处理；公共用户 JWT、管理员权限/审批及外部托管钱包签名保持原有行为。
 
 合并后仅本应用使用的账户、订单、条件单、费用和合约管理请求/响应类型已迁入本模块 `src/main/java/com/surprising/{account,trading,instrument}/api`。保留原包名和内容，HTTP/JSON 契约不变；跨进程共享类型仍来自对应 API 模块。
+
+### 私有消息通配订阅
+
+`SubscriptionRegistry` 的 `*` 仅用于选择订阅全部合约的连接。普通与带时间批量推送均保留事件本身的 `symbol`、`productLine` 和 `userId`，尤其成交回报不能把真实合约替换为 `*`，否则客户端无法选择数量单位或核对成交资金。

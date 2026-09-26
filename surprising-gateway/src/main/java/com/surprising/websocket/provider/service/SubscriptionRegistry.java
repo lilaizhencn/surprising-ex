@@ -156,9 +156,9 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(payloads.size());
-        sendBatch(topic, payloads, eventTime);
+        sendBatch(topic, topic, payloads, eventTime);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            sendBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), payloads, eventTime);
+            sendBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, payloads, eventTime);
         }
     }
 
@@ -169,9 +169,9 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(events.size());
-        sendTimedBatch(topic, events);
+        sendTimedBatch(topic, topic, events);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), events);
+            sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, events);
         }
     }
 
@@ -280,8 +280,8 @@ public class SubscriptionRegistry {
                 .register(meterRegistry);
     }
 
-    private void sendBatch(SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
-        Set<ClientConnection> connections = subscribers.get(topic);
+    private void sendBatch(SubscriptionTopic subscription, SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
+        Set<ClientConnection> connections = subscribers.get(subscription);
         if (connections == null || connections.isEmpty()) {
             return;
         }
@@ -299,8 +299,8 @@ public class SubscriptionRegistry {
         }
     }
 
-    private void sendTimedBatch(SubscriptionTopic topic, List<TimedPayload> events) {
-        Set<ClientConnection> connections = subscribers.get(topic);
+    private void sendTimedBatch(SubscriptionTopic subscription, SubscriptionTopic topic, List<TimedPayload> events) {
+        Set<ClientConnection> connections = subscribers.get(subscription);
         if (connections == null || connections.isEmpty()) {
             return;
         }

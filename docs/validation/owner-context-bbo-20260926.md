@@ -61,3 +61,7 @@ BBO 不改变 Core 下单协议、账户类型、资金模型或 Kafka topic。
 - 20:02 的持续做市暴露账户线程直接写 Owner 变更缓冲：`reserveOrder → changedOrder → OwnerIndexedChanges.consolidate` 与 Owner 清空并发，造成越界退出。改为复用 LaneCommitDelta 交接，在 collectControlReservation 登记变更键。
   完整核心 935 项（2 条件跳过）及 realtime provider 47 项均无失败；新增确定性栅栏测试在旧实现下失败（账户任务完成前就看到了订单），修复后通过。
   验证日志：`/tmp/control-reservation-full-tests.log`、`/tmp/control-reservation-counterfactual.log`。
+
+- 20:14–20:15 浏览器实测 15 分钟 K 线自动从 20:00 切到 20:15；新柱成交量依次 0、0.0001、0.0002、0.0003、0.0004，收盘价随逐笔成交变化。记录 `/tmp/chart-live-samples.json`。
+- 20:13 公共 WS 15 秒采样（计数含各 1 次订阅确认）：盘口 76、逐笔 5、mark 15、index 15。15 分钟 candle 通道该短窗口只有订阅确认；前端新柱动态由真实逐笔驱动，不能据此声称历史 K 线无缺口。
+- 第二次核心全量回归发现两处测试时序假设：normalizedSymbols 的窗口断言需显式 matcher 栅栏；Owner 快照测试需保留第一次 drain 已收到的快照帧。修正后 289 项定向通过（1 条件跳过），没有删除资金、快照恢复和零定时器断言。
