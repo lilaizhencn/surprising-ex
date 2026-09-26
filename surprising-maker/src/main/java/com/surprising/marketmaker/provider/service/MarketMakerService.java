@@ -136,7 +136,14 @@ public class MarketMakerService {
         if (!properties.getEngine().isEnabled()) {
             return;
         }
-        runOnce(new MarketMakerRunRequest(null, null));
+        String traceId = TraceContext.currentOrCreate();
+        try {
+            // Each configured strategy owns its account and symbol; the per-symbol cycle lock
+            // still prevents a second run from changing the same book at the same time.
+            strategiesSnapshot().parallelStream().forEach(strategy -> runStrategy(strategy, null, traceId));
+        } finally {
+            TraceContext.clear();
+        }
     }
 
     public MarketMakerStrategyQueryResponse strategies() {

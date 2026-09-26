@@ -17,6 +17,7 @@
 - 所有报价单都是 `LIMIT + GTX + postOnly=true`。
 - 默认只做被动报价，不主动发起 IOC 扫单；主动交易模式仅可在测试配置中显式开启。
 - 报价循环按 100ms 级别运行，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
+- 定时入口 `MarketMakerTask.runCycle` 调用 `MarketMakerService.scheduledRun`，各独立策略并行报价，避免单个合约的网络等待拖慢其他合约；同一策略合约仍由 `runStrategySymbol` 的周期锁串行处理。实际刷新频率取决于网关与撮合响应时间。
 - 报价价差会根据 mark/order-book 锚点的 EWMA 绝对变动自动扩大，并受最大波动价差限制；没有复杂的策略版本传播或跨服务状态编排。
 - `MarketMakerService.reconcile` 每轮按目标盘口撤销过期挂单并补齐报价，不设置订单操作总量上限；`placeBatch` 按接口每批 20 单、`cancelBatch` 按接口每批 50 单分批提交。状态不确定时保留原订单槽位，不重复补单。
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
