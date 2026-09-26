@@ -186,7 +186,7 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `surprising.price.index.calculation.poll-delay-ms` | `1000` | 指数价格计算周期。 |
+| `surprising.price.index.calculation.poll-delay-ms` | `1000` | `IndexPriceMaintenanceTask` 按固定频率启动指数价计算；单轮在下一次触发前完成时，每个已配置 symbol 约每秒发布一次。若单轮超过周期，实际间隔仍受计算耗时影响。 |
 | `surprising.price.index.calculation.max-source-age` | `5s` | 外部源 ticker 最大可接受年龄。 |
 | `surprising.price.index.calculation.outlier-threshold` | `0.01` | 指数成分偏离中位数超过 1% 时剔除。 |
 | `surprising.price.index.calculation.min-valid-sources` | `3` | 每个 symbol 最少有效外部源数量。 |

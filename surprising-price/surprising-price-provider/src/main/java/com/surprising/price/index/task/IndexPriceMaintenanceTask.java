@@ -52,7 +52,7 @@ public class IndexPriceMaintenanceTask {
         auditRetentionService.deleteExpiredAuditRows();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.calculation.poll-delay-ms:1000}")
+    @Scheduled(fixedRateString = "${surprising.price.index.calculation.poll-delay-ms:1000}")
     public void calculateAndPublish() {
         indexPriceService.pollAndPublish();
     }
