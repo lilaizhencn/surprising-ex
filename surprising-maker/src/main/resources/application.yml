@@ -80,7 +80,6 @@ surprising:
     trade:
       enabled: false
       account-ids: [900001, 900002, 910001]
-      min-interval-ms: 80
       min-quantity-steps: 1
       max-quantity-steps: 1000
       slippage-ticks: 20

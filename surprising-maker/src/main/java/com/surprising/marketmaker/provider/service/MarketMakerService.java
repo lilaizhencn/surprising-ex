@@ -95,7 +95,6 @@ public class MarketMakerService {
     private final Map<String, AtomicBoolean> cycleLocks = new ConcurrentHashMap<>();
     private final Map<String, CachedOpenOrders> openOrderSnapshots = new ConcurrentHashMap<>();
     private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
-    private final Map<String, Instant> lastTradeTimes = new ConcurrentHashMap<>();
     private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
     private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
     private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
@@ -908,10 +907,6 @@ public class MarketMakerService {
             return;
         }
         String tradeKey = strategy.getProductLine().name() + ":" + strategy.getStrategyId() + ":" + symbol;
-        Instant lastTradeTime = lastTradeTimes.get(tradeKey);
-        if (lastTradeTime != null && lastTradeTime.plusMillis(trade.getMinIntervalMs()).isAfter(now)) {
-            return;
-        }
         long accountId = activeTradeAccount(strategy, cycleSequence);
         if (accountId <= 0) {
             return;
@@ -944,7 +939,6 @@ public class MarketMakerService {
                     0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), traceId, now);
         } else {
             state.addSubmitted(1L);
-            lastTradeTimes.put(tradeKey, now);
             lastTradeSides.put(tradeKey, side);
             recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_SUBMITTED",
                     1, 0, 0, null, null, traceId, now);

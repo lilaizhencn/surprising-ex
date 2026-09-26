@@ -192,3 +192,7 @@ surprising:
 mvn -pl :surprising-maker -am test
 mvn -pl :surprising-maker -am spring-boot:run
 ```
+
+## 模拟成交节奏
+
+`MarketMakerService.maybeTrade` 在每次成功铺单周期后尝试一次 IOC 成交，不再提供 `trade.min-interval-ms`，也不维护上次成交时间作为限频状态。实际频率仍受铺单、查询、下单耗时与可成交盘口影响；库存、数量和价格校验继续生效。

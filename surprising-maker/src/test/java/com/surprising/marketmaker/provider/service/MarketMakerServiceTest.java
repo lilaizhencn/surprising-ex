@@ -108,6 +108,18 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void everyCompletedCycleAttemptsSimulatedTradingWithoutAnIntervalGate() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeEnabled = true;
+        MarketMakerService service = fixtures.service();
+        for (int cycle = 0; cycle < 3; cycle++) {
+            service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        }
+        assertThat(fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.timeInForce() == TimeInForce.IOC).toList()).hasSize(3);
+    }
+
+    @Test
     void runOncePlacesPostOnlyQuotesThroughOrderRpc() {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
@@ -539,6 +551,7 @@ class MarketMakerServiceTest {
         private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
+        private boolean tradeEnabled;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
         private long priceTickUnits = 100L;
@@ -591,6 +604,8 @@ class MarketMakerServiceTest {
 
         private MarketMakerProperties properties() {
             MarketMakerProperties properties = new MarketMakerProperties();
+            properties.getTrade().setEnabled(tradeEnabled);
+            properties.getTrade().setAccountIds(List.of(900002L));
             properties.getEngine().setNodeId("mm-test");
             properties.getCoordination().setEnabled(false);
             properties.getQuoting().setOrderLevels(orderLevels);

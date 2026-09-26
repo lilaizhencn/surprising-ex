@@ -158,10 +158,6 @@ public class MarketMakerProperties {
         private List<@Positive Long> accountIds = new ArrayList<>();
         @Getter
         @Setter
-        @Min(50)
-        private long minIntervalMs = 250L;
-        @Getter
-        @Setter
         @Positive
         private long minQuantitySteps = 1L;
         @Getter
