@@ -477,7 +477,7 @@ start_core() {
       -Dsurprising.aeron.core.threading-mode=DEDICATED \
       -jar "$(jar_path core)"
   done
-  local deadline=$((SECONDS + 90))
+  local deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT_SECONDS))
   java_args_for core-probe
   until "${COMMON_ENV[@]}" "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
     -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
