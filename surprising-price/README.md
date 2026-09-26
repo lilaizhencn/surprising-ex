@@ -309,3 +309,13 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&t
 行情 topic 由 `ProductLine` 和 `ProductTopicNames` 唯一推导。已删除从未参与收发的 `surprising.price.consumer.topic`、`surprising.price.index.kafka.price-events-topic` 和 `surprising.price.mark.topics.*`，并清理 price、maker 默认 YAML 中的旧值。实际 topic、消费组、重试、价格时效检查及合约快照初始化保持原有行为；部署配置只需指定正确的产品线，不应再设置这些无效覆盖项。
 
 删除未绑定任何属性或调用方的 `surprising.price.index.aeron` 默认配置块。实际向 Core 发布标记价的是 `MarkPriceCorePublisher`，读取 `surprising.price.mark.aeron`；其连接属性和默认值仍保留在 `MarkPriceProperties.Aeron`。
+
+### 外部行情连接健康
+
+`ExternalSpotWebSocketManager.checkIdleSessions` 同时检查收帧时间和缓存报价的来源时间。如果某连接的全部已配置来源都有报价但均已过期，即使仍收到帧也重连；共享连接尚有新鲜报价时不为单个滞后来源断开整条连接。旧帧不重置重连退避次数。指数计算的最小有效来源数量、过期剔除和异常价格校验不变。
+
+### 本地五源接入验证（2026-09-26）
+
+通过网关 `instrument-admin/upsert` 与双人审批更新当前 20 个 U 本位永续合约，保留 `minValidIndexSources=3`。Kraken WebSocket v2 使用 `ticker`、`event_trigger=bbo`，覆盖 20 个 USD 交易对；Coinbase Exchange 使用 `ticker`，覆盖 19 个 USD 交易对，TRX 无对应上线交易对，不生成虚假配置。两者通过各自 USDT/USD 实时报价做除法换算，换算不可用时禁用该源（`conversionMode=DISABLE`）。
+
+BTC 实际指数响应已观测到 5/5 `HEALTHY`，Coinbase、Kraken 的 transport 均为 `PUBLIC_WEBSOCKET`，包含源时间与 USD/USDT 换算原因；这是一次采样结果，不代表所有交易对始终五源在线。JDK 27 下 price-provider 88 项测试通过，覆盖真实 ticker 消息格式、交易对匹配、Kraken 时间戳和旧报价触发重连。

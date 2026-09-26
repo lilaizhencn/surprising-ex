@@ -181,6 +181,12 @@ public class ExternalSpotPriceClient {
                     throw new IgnoredPayloadException();
                 }
             }
+            case "COINBASE_TICKER" -> {
+                if (!"ticker".equals(root.path("type").asString())) throw new IgnoredPayloadException();
+            }
+            case "KRAKEN_TICKER" -> {
+                if (!"ticker".equals(root.path("channel").asString())) throw new IgnoredPayloadException();
+            }
             case "BYBIT_TICKER" -> {
                 String sourceSymbol = source.getSourceSymbol();
                 if (sourceSymbol == null || sourceSymbol.isBlank()
@@ -265,7 +271,8 @@ public class ExternalSpotPriceClient {
             BigDecimal bid = decimal(ticker, "bid");
             BigDecimal ask = decimal(ticker, "ask");
             BigDecimal last = decimal(ticker, "last");
-            return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, Instant.now(), firstText(ticker, "symbol"));
+            return new ParsedTicker(midOrLast(bid, ask, last), bid, ask,
+                    Instant.parse(ticker.path("timestamp").asString()), firstText(ticker, "symbol"));
         }
 
         JsonNode result = root.path("result");

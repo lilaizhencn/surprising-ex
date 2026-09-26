@@ -14,6 +14,34 @@ import tools.jackson.databind.ObjectMapper;
 class ExternalSpotPriceClientTest {
 
     @Test
+    void parsesCoinbaseAndKrakenPublicTickersWithoutReplacingSourceTime() {
+        ExternalSpotPriceClient client = new ExternalSpotPriceClient(new IndexPriceProperties(), new ObjectMapper());
+        try {
+            Instant received = Instant.parse("2026-09-26T14:16:32Z");
+            var coinbase = source("COINBASE", "BTC-USD", "COINBASE_TICKER");
+            var kraken = source("KRAKEN", "BTC/USD", "KRAKEN_TICKER");
+            String cb = """
+                    {"type":"ticker","product_id":"BTC-USD","price":"101", "best_bid":"100",
+                     "best_ask":"102","time":"2026-09-26T14:16:31.123456Z"}
+                    """;
+            String kr = """
+                    {"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD",
+                     "bid":100,"ask":102,"last":101,"timestamp":"2026-09-26T14:16:31.135029Z"}]}
+                    """;
+            var c = client.parseWebSocketPayload(coinbase, cb, received).orElseThrow();
+            var k = client.parseWebSocketPayload(kraken, kr, received).orElseThrow();
+            assertThat(c.price()).isEqualByComparingTo("101");
+            assertThat(k.price()).isEqualByComparingTo("101");
+            assertThat(c.sourceTime()).isEqualTo(Instant.parse("2026-09-26T14:16:31.123456Z"));
+            assertThat(k.sourceTime()).isEqualTo(Instant.parse("2026-09-26T14:16:31.135029Z"));
+            assertThat(client.parseWebSocketPayload(coinbase, cb.replace("BTC-USD", "ETH-USD"), received)).isEmpty();
+            assertThat(client.parseWebSocketPayload(kraken, kr.replace("BTC/USD", "ETH/USD"), received)).isEmpty();
+            assertThat(client.parseWebSocketPayload(coinbase, cb.replace("ticker", "heartbeat"), received)).isEmpty();
+            assertThat(client.parseWebSocketPayload(kraken, kr.replace("ticker", "book"), received)).isEmpty();
+        } finally { client.close(); }
+    }
+
+    @Test
     void parsesOfficialBinanceWebSocketTicker() {
         ExternalSpotPriceClient client = new ExternalSpotPriceClient(new IndexPriceProperties(), new ObjectMapper());
         try {

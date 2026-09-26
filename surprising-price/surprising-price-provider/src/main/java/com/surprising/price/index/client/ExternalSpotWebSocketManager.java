@@ -198,7 +198,7 @@ public class ExternalSpotWebSocketManager {
         return Math.min(max, delay + jitter);
     }
 
-    private void checkIdleSessions() {
+    void checkIdleSessions() {
         if (!running) {
             return;
         }
@@ -207,6 +207,11 @@ public class ExternalSpotWebSocketManager {
         sessions.values().forEach(session -> {
             if (now - session.lastFrameEpochMillis.get() > idleTimeoutMs) {
                 scheduleReconnect(session, "idle timeout");
+            } else if (!session.sources().isEmpty() && session.sources().stream().allMatch(source ->
+                    latestSourceQuoteStore.latest(source.symbol(), source.source())
+                            .map(quote -> !freshQuote(quote, Instant.ofEpochMilli(now))).orElse(false))) {
+                // 收到积压旧帧也会刷新 lastFrame，不能据此认为行情仍然有效。
+                scheduleReconnect(session, "source quotes stale despite incoming frames");
             }
         });
     }
@@ -219,12 +224,19 @@ public class ExternalSpotWebSocketManager {
                     trackedSource.source(), payload, receivedAt);
             if (quote.isPresent() && quote.get().healthy()) {
                 latestSourceQuoteStore.put(trackedSource.symbol(), trackedSource.source(), quote.get());
-                matched = true;
+                matched |= freshQuote(quote.get(), receivedAt);
             }
         }
         if (matched) {
             session.reconnectAttempts.set(0);
         }
+    }
+
+    private boolean freshQuote(SourceQuote quote, Instant now) {
+        Duration maxAge = properties.getCalculation().getMaxSourceAge();
+        return quote.receivedAt() != null
+                && Duration.between(quote.receivedAt(), now).compareTo(maxAge) <= 0
+                && (quote.sourceTime() == null || Duration.between(quote.sourceTime(), now).compareTo(maxAge) <= 0);
     }
 
     private void subscribeNewSources(WebSocket webSocket, WsSession session) {
