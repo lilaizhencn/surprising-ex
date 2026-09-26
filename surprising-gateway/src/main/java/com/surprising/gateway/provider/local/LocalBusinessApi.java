@@ -181,6 +181,10 @@ public final class LocalBusinessApi {
         if (exception instanceof AccountCommandRejectedException rejected) {
             return error(HttpStatus.CONFLICT, rejected.errorCode());
         }
+        if (exception instanceof com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException) {
+            return error(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Trading service is temporarily unavailable; request was not accepted");
+        }
         if (exception instanceof IllegalArgumentException) {
             return error(HttpStatus.BAD_REQUEST, exception.getMessage());
         }

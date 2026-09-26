@@ -164,6 +164,21 @@ class LocalBusinessApiTest {
         assertThat(invoke("trading", "/api/v1/trading/orders/cancel", HttpMethod.POST, userHeaders(), "{\"userId\":42,\"orderId\":1}").getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void unacceptedCommandReturnsUnavailableWithoutRetrying(boolean async) {
+        var failure = new com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException(
+                com.surprising.aeron.client.CoreCommandOutcome.notAccepted(io.aeron.Publication.CLOSED));
+        if (async) when(orders.cancel(any())).thenReturn(CompletableFuture.failedFuture(failure));
+        else when(orders.cancel(any())).thenThrow(failure);
+        var response = invoke("trading", "/api/v1/trading/orders/cancel", HttpMethod.POST,
+                userHeaders(), "{\"userId\":42,\"orderId\":1}");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(mapper.readTree(response.getBody()).path("message").asText())
+                .contains("request was not accepted");
+        verify(orders, times(1)).cancel(any());
+    }
+
     @Test
     void conflictingProductSelectorsFailClosedIncludingNestedCommands() {
         var request = new MockHttpServletRequest();
