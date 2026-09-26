@@ -64,7 +64,9 @@ public class PublicTradeEventMapper {
 
         InstrumentScale scale = scales.computeIfAbsent(symbol, this::loadScale);
         BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
-        BigDecimal quantity = toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
+        BigDecimal quantity = productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
+                ? toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L)
+                : toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
         return new TradeEvent(
                 symbol,
                 publicTrade.tradeId(),
@@ -88,7 +90,7 @@ public class PublicTradeEventMapper {
         long quoteScaleUnits = snapshotCache.scale(productLine, instrument.quoteAsset())
                 .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.quoteAsset()));
         return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
-                baseScaleUnits, quoteScaleUnits);
+                instrument.contractMultiplierPpm(), baseScaleUnits, quoteScaleUnits);
     }
 
     private BigDecimal toDecimal(long steps, long unitSize, long scaleUnits) {
@@ -114,6 +116,7 @@ public class PublicTradeEventMapper {
 
     private record InstrumentScale(long priceTickUnits,
                                    long quantityStepUnits,
+                                   long contractMultiplierPpm,
                                    long baseScaleUnits,
                                    long quoteScaleUnits) {
     }
