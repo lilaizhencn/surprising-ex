@@ -3,10 +3,10 @@
 
 面向前端的 WebSocket 推送服务。
 
-这个服务不是计算服务。它消费仍在使用的 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
+它接收 Realtime 经 Aeron 转发的 Core 状态、成交和盘口，以及价格、K 线等行情，在本节点维护订阅关系并推给当前节点的客户端。
 
 Product Core 的当前状态和恢复只由 Aeron Cluster 的 log、snapshot 与 runtime 负责。Core Export、历史投影、审计和公共
-成交/盘口历史数据暂不接入 WebSocket；gateway 不查询 PostgreSQL，也不在交易 owner 热路径增加 fanout。
+成交/盘口历史不通过 WebSocket 回放；实时成交与盘口由 RealtimeWebSocketBridge 转发，gateway 不在交易 owner 热路径增加 fanout。
 
 ## 模块
 
@@ -173,3 +173,19 @@ surprising:
 mvn -pl :surprising-gateway -am test
 mvn -pl :surprising-gateway -am spring-boot:run
 ```
+
+## 盘口快照与增量
+
+`RealtimeWebSocketBridge.receive` 接收 Core 的不可变盘口视图后，交给
+`SubscriptionRegistry.publishDepth` 在 WebSocket 边界按连接生成增量；Core 状态及内部传输不变。
+`depth` 必须指定 `productLine` 和 `symbol`。每次订阅第一条 `value` 是
+`{updateType:"SNAPSHOT",sequence:"...",previousSequence:null,depth:50,bids:[],asks:[]}`，
+覆盖本地买卖各最多 50 档；空快照也必须覆盖。
+后续 `DELTA` 只包含变化的价格档位，`quantitySteps` 是该档绝对数量，零表示删除，
+`orderCount` 是该档当前订单数。`previousSequence` 指向该连接上一次成功入队的盘口序号，
+不要求数值连续加一。无档位变化时也可以发送空增量推进序号。
+
+客户端必须按序应用所有增量，不能只保留同一渲染批次的最后一条。
+序号断档后重新获取全量基线，重连或重新订阅后重新接收首条快照。
+网关仅保留每个订阅连接最后成功入队的不可变盘口引用，退订和断线即删除；
+队列背压时断开连接，避免静默丢弃档位增量。不同产品线及交易对的基线独立。

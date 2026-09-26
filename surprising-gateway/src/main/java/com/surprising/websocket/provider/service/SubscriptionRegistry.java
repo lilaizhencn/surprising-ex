@@ -1,5 +1,6 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
@@ -9,6 +10,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +34,9 @@ public class SubscriptionRegistry {
     private final Map<String, ClientConnection> sessions = new ConcurrentHashMap<>();
     private final Map<String, Set<SubscriptionTopic>> sessionTopics = new ConcurrentHashMap<>();
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
+    // Last book accepted by each connection queue; immutable Core views are shared, never copied.
+    // Owned by this registry under its monitor and removed on unsubscribe/disconnect.
+    private final Map<SubscriptionTopic, Map<String, CoreOrderBookView>> depthBaselines = new HashMap<>();
     private final LongAdder fanoutBatches = new LongAdder();
     private final LongAdder fanoutMessages = new LongAdder();
     private final LongAdder backpressureRejections = new LongAdder();
@@ -65,6 +70,7 @@ public class SubscriptionRegistry {
         Set<SubscriptionTopic> topics = sessionTopics.remove(sessionId);
         if (topics != null && connection != null) {
             for (SubscriptionTopic topic : topics) {
+                removeDepthBaseline(topic, sessionId);
                 if (routeLifecycle != null) routeLifecycle.unsubscribed(topic);
                 Set<ClientConnection> connections = subscribers.get(topic);
                 if (connections != null) {
@@ -91,6 +97,7 @@ public class SubscriptionRegistry {
     }
 
     public synchronized void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
+        removeDepthBaseline(topic, connection.id());
         Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
         if (topics != null) {
             if (topics.remove(topic) && routeLifecycle != null) routeLifecycle.unsubscribed(topic);
@@ -106,6 +113,40 @@ public class SubscriptionRegistry {
 
     public void publish(SubscriptionTopic topic, Object payload, Instant eventTime) {
         publishBatch(topic, List.of(payload), eventTime);
+    }
+
+    private void removeDepthBaseline(SubscriptionTopic topic, String sessionId) {
+        var baselines = depthBaselines.get(topic);
+        if (baselines == null) return;
+        baselines.remove(sessionId);
+        if (baselines.isEmpty()) depthBaselines.remove(topic);
+    }
+
+    public synchronized void publishDepth(SubscriptionTopic topic,
+            CoreOrderBookView book,
+            String version, String entityId, Instant eventTime) {
+        if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
+            throw new IllegalArgumentException("depth requires an explicit product line");
+        var connections = subscribers.get(topic);
+        if (connections == null || connections.isEmpty()) return;
+        fanoutBatches.increment();
+        fanoutMessages.increment();
+        var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
+        for (ClientConnection connection : connections) {
+            var previous = baselines.get(connection.id());
+            if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
+            var update = DepthUpdate.between(previous, book);
+            String message = objectMapper.writeValueAsString(WsServerMessage.event(topic,
+                    new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
+            if (connection.send(message)) {
+                baselines.put(connection.id(), book);
+            } else {
+                backpressureRejections.increment();
+                remove(connection.id());
+            }
+        }
+        // Removing a failed first subscriber can detach the initially empty map.
+        if (!baselines.isEmpty()) depthBaselines.put(topic, baselines);
     }
 
     /** 将同一 Kafka 拉取批次的事件一次性投递到每个连接的有界环形队列。 */

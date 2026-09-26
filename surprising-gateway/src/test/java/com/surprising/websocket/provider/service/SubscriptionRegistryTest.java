@@ -132,6 +132,53 @@ class SubscriptionRegistryTest {
                 .containsExactly("INDEX_PRICE", "ORDERS");
     }
 
+    @Test
+    void depthBaselinesArePerSubscriberAndResetAfterUnsubscribe() {
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        var first = connection("first");
+        var second = connection("second");
+        var otherProduct = connection("other");
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.LINEAR_PERPETUAL);
+        registry.add(first); registry.add(second); registry.add(otherProduct);
+        registry.subscribe(first, topic);
+        registry.subscribe(otherProduct, new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.SPOT));
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(1, java.util.List.of()), "v1", "book", Instant.now());
+        registry.subscribe(second, topic);
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(2, java.util.List.of()), "v2", "book", Instant.now());
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(1, java.util.List.of()), "v1", "book", Instant.now());
+        registry.unsubscribe(first, topic);
+        registry.subscribe(first, topic);
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(3, java.util.List.of()), "v3", "book", Instant.now());
+        var messages = ArgumentCaptor.forClass(String.class);
+        verify(first, org.mockito.Mockito.times(3)).send(messages.capture());
+        assertThat(messages.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(messages.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"1\"");
+        assertThat(messages.getAllValues().get(2)).contains("\"updateType\":\"SNAPSHOT\"");
+        var joined = ArgumentCaptor.forClass(String.class);
+        verify(second, org.mockito.Mockito.times(2)).send(joined.capture());
+        assertThat(joined.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(joined.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"2\"");
+        verify(otherProduct, never()).send(anyString());
+    }
+
+    @Test
+    void depthBackpressureRemovesFailedConnectionAndKeepsHealthyBaseline() {
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        var failed = connection("failed-depth");
+        var healthy = connection("healthy-depth");
+        when(failed.send(anyString())).thenReturn(false);
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.SPOT);
+        registry.add(failed); registry.add(healthy);
+        registry.subscribe(failed, topic); registry.subscribe(healthy, topic);
+        for (int seq = 1; seq <= 2; seq++)
+            registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(seq, java.util.List.of()), "v" + seq, "book", Instant.now());
+        var messages = ArgumentCaptor.forClass(String.class);
+        verify(healthy, org.mockito.Mockito.times(2)).send(messages.capture());
+        assertThat(messages.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"");
+        assertThat(registry.subscriberCount(topic)).isEqualTo(1);
+        verify(failed).close();
+    }
+
     private ClientConnection connection(String id) {
         return connection(id, null);
     }

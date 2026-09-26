@@ -206,7 +206,11 @@ public final class RealtimeWebSocketBridge
                         channel == WsChannel.CANDLES ? f.entityId() : null,
                         f.userId() > 0 ? f.userId() : null,
                         f.productLine());
-        registry.publish(
+        if (f.kind() == RealtimeFrame.Kind.BOOK) {
+            registry.publishDepth(topic, (CoreOrderBookView) value,
+                    RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(),
+                    Instant.ofEpochMilli(f.timestamp()));
+        } else registry.publish(
                 topic,
                 new VersionedEvent(
                         RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value),
