@@ -82,7 +82,7 @@ public final class RealtimeReadCoordinator {
         realtimeBookTimestamp = timestamp;
         try {
             realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(symbol),
-                    () -> matchingAdapter.orderBookLevelsAsync(symbol, 20).join());
+                    () -> matchingAdapter.orderBookLevelsAsync(symbol, 50).join());
         } catch (RuntimeException failure) {
             realtimeCapture.failed();
         }

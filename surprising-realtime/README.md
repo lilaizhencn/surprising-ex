@@ -112,7 +112,7 @@ Valkey TLS/ACL/集群地址使用标准 Spring Data Redis 配置；生产务必�
 ## 状态与客户端协议
 
 - 所有订阅明确 `productLine`。私有订阅用户来自已认证连接，不能指定其他用户；公共频道按 symbol 路由。
-  新增 depth/bookTicker 使用具体 symbol，20档完整深度覆盖更新，不发送需要连续重放的差量 order book。
+  新增 depth/bookTicker 使用具体 symbol，50 档完整深度覆盖更新，不发送需要连续重放的差量 order book。
 - 实时实体以 `(productLine, userId, kind, entityId)` 为身份。`version` 是固定宽度字符串 `logPosition:ordinal`，不能转成 JavaScript Number。
   payload 是实体变更后的绝对值，余额不是加减差额；旧版本/重复版本直接忽略。订单终态删除未完成列表中的对应订单，仓位数量0删除当前仓位，终态触发单删除当前触发单。
 - 私有频道覆盖 orders、triggerOrders、positions、accountState、executionReports、positionRisk、accountRisk。
