@@ -279,3 +279,10 @@ Driver 仍使用 SHARED 模式，线程、共享内存与 term buffer 开销保�
 这是同机共享目录的部署方式；跨主机不能用目录字符串代替各主机本地的 Driver。
 
 K 线查询、周期和聚合输入类型已迁入本模块 `src/main/java/com/surprising/candlestick/api`；`surprising-market-data-api` 仅保留与 gateway WebSocket 共用的 K 线事件和状态。
+
+## 提交内订阅查询复用（2026-09-26）
+
+`RealtimeRouter.route` 收齐一次 Core 提交、应用用户查询视图后，按 `RealtimeRoute` 在本次提交内
+复用订阅节点查询结果。同一用户的订单、余额、持仓和成交回报共享 USER 路由，避免每个 frame 重复访问
+Valkey。临时 Map 由路由线程创建、只活到本次提交结束；下一次提交重新读取租约，不跨提交缓存订阅关系。
+无订阅目标时也不编码发送负载。Core 状态、资金记账、快照缺口修复和有界队列行为不变。

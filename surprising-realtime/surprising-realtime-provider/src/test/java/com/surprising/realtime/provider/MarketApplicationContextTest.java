@@ -90,6 +90,7 @@ class MarketApplicationContextTest {
                     @Override public Object postProcessBeforeInitialization(Object bean, String name) {
                         if (bean instanceof AbstractKafkaListenerContainerFactory<?, ?, ?> factory) factory.setAutoStartup(false);
                         if (bean instanceof StreamsBuilderFactoryBean factory) factory.setAutoStartup(false);
+                        if (bean instanceof org.springframework.kafka.core.KafkaAdmin admin) admin.setAutoCreate(false);
                         return bean;
                     }
                 });

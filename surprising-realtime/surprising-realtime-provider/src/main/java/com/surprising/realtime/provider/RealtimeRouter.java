@@ -178,15 +178,27 @@ public final class RealtimeRouter implements AutoCloseable {
                     users.computeIfAbsent(event.userId(), u -> new ArrayList<>()).add(event);
             for (var events : users.values())
                 views.applyBatch(events, ValkeyReadViewStore.exportSequence(batch.getLast()));
-            for (var event : batch)
-                if (event.kind() != RealtimeFrame.Kind.COMMIT_BEGIN
-                        && event.kind() != RealtimeFrame.Kind.COMMIT_END) send(aeron, event, now);
+            // A committed user update contains several frames on the same USER route.
+            // Resolve membership once for this commit; the next commit always reads fresh leases.
+            var batchTargets = new HashMap<RealtimeRoute, Map<String, String>>();
+            for (var event : batch) {
+                if (event.kind() == RealtimeFrame.Kind.COMMIT_BEGIN
+                        || event.kind() == RealtimeFrame.Kind.COMMIT_END) continue;
+                var targets = batchTargets.computeIfAbsent(RealtimeRoute.of(event),
+                        route -> routes.targets(route, now));
+                send(aeron, event, now, targets);
+            }
         } else send(aeron, f, now);
     }
 
     private void send(Aeron aeron, RealtimeFrame f, long now) {
+        send(aeron, f, now, routes.targets(RealtimeRoute.of(f), now));
+    }
+
+    private void send(Aeron aeron, RealtimeFrame f, long now, Map<String, String> targets) {
+        if (targets.isEmpty()) return;
         byte[] bytes = RealtimeFrameCodec.encode(f);
-        for (var entry : routes.targets(RealtimeRoute.of(f), now).entrySet()) {
+        for (var entry : targets.entrySet()) {
             Node node = nodes.get(entry.getKey());
             if (node == null) {
                 if (nodes.size() >= 64) {
