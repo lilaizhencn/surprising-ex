@@ -94,3 +94,15 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 完整外部数据库/Kafka/Core 重启和吞吐未测。详见 [清理验证摘要](../docs/validation/merged-config-cleanup-20260922.json)。
 
 资金费 API 类型已直接归入本模块 `src/main/java/com/surprising/funding/api`；旧 funding 聚合 POM、API 模块及无调用的 `FundingRpcApi` 已删除。网关继续按原 HTTP 路径转发资金费查询，不依赖资金费 DTO JAR。
+
+## 风险续扫与止盈止损调度（2026-09-26）
+
+`LiquidationService.processWorkInternal` 按 Core 的扫描开关、间隔和工作预算，先提交
+`CONTINUE_RISK_SCAN`，由 Core 在执行时选择当前游标并推进风险及止盈止损；完成后再查询强平任务，
+通过原有批量命令执行强平，不携带查询时的风险游标。只有触发扫描未完成、没有强平候选时也会继续推进。
+原先强平批次只续扫风险，不能执行触发扫描；查询后的价格变化也会使其风险游标失效。
+续扫失败向上传递，下轮仍可重试，不提前更新时间限制。已有仓位保护、只减仓、OCO 单腿触发取消另一腿
+均由 Core 保持。没有新增账户状态、资金副本或执行框架。
+
+定向测试覆盖仅有触发工作、先扫描后强平、扫描关闭与失败后重试；HotSpot JDK 27 下 provider 及依赖
+`mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am package` 通过。

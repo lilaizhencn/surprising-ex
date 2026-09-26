@@ -39,34 +39,28 @@ public class LiquidationService {
         long feeRatePpm = properties.getExecution().getLiquidationFeeRatePpm();
         long cursor = 0;
         boolean riskScanContinued = false;
+        long scanStartedAtNanos = System.nanoTime();
+        if (scanStartedAtNanos >= nextRiskScanAtNanos) {
+            var control = aeron.riskScanControl();
+            if (control.enabled()) {
+                // Core selects its current cursor and advances both risk and TP/SL work.
+                // A liquidation work query exposes risk work only and cannot drive trigger-only scans.
+                aeron.continueRiskScan(control.scanBatchSize());
+                riskScanContinued = true;
+            }
+            nextRiskScanAtNanos = deadline(scanStartedAtNanos, control.scanDelayMs());
+        }
         int offered = 0;
         int applied = 0;
         int pending = 0;
         int obsolete = 0;
         int processedOrders = 0;
-        boolean riskScanDecisionMade = false;
         for (int page = 0; page < properties.getCoordinator().getMaxPagesPerRun(); page++) {
             var work = aeron.work(cursor, properties.getCoordinator().getWorkBatchSize(),
                     properties.getCoordinator().getMaxWorkBytes());
             validateWork(work, cursor);
-            int riskScanBatchSize = 0;
-            long scanStartedAtNanos = 0;
-            long scanDelayMs = 0;
-            if (work.riskScanPending() && !riskScanDecisionMade) {
-                riskScanDecisionMade = true;
-                var control = aeron.riskScanControl();
-                scanStartedAtNanos = System.nanoTime();
-                if (control.enabled() && scanStartedAtNanos >= nextRiskScanAtNanos) {
-                    riskScanBatchSize = control.scanBatchSize();
-                    scanDelayMs = control.scanDelayMs();
-                }
-            }
-            if (work.actions().isEmpty() && riskScanBatchSize == 0) break;
-            var result = aeron.executeBatch(work, feeRatePpm, riskScanBatchSize);
-            if (riskScanBatchSize > 0) {
-                nextRiskScanAtNanos = deadline(scanStartedAtNanos, scanDelayMs);
-            }
-            riskScanContinued |= result.riskScanContinuedUsers() > 0;
+            if (work.actions().isEmpty()) break;
+            var result = aeron.executeBatch(work, feeRatePpm, 0);
             offered = Math.addExact(offered, result.offeredActions());
             applied = Math.addExact(applied, result.appliedActions());
             pending = Math.addExact(pending, result.pendingActions());
