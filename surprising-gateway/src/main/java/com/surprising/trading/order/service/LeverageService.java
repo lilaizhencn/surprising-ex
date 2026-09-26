@@ -8,7 +8,6 @@ import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.repository.OrderLeverageMath;
 import java.time.Instant;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -49,8 +48,8 @@ public class LeverageService {
             throw new IllegalArgumentException("leveragePpm exceeds instrument max leverage");
         }
         Instant updatedAt = Instant.now();
-        UUID commandId = UUID.nameUUIDFromBytes(("LEVERAGE:" + productLine + ':' + request.userId() + ':'
-                + symbol + ':' + marginMode + ':' + request.leveragePpm()).getBytes(StandardCharsets.UTF_8));
+        // A rejected attempt must not poison a later retry after open exposure has been cleared.
+        UUID commandId = UUID.randomUUID();
         aeron.command(CoreMessageType.UPDATE_LEVERAGE, commandId, request.userId(),
                 TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(symbol,
                         CoreMarginMode.valueOf(marginMode.name()), request.leveragePpm())));

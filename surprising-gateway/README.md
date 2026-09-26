@@ -81,7 +81,7 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 
 做市后台代理服务名 `market-maker` 转发到 `/api/v1/admin/market-maker`，覆盖策略状态、报价质量指标、策略参数覆盖、做市收益归因和策略运行日志。`/strategy-logs` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
-内部做市账户的杠杆由管理员通过 `POST /api/v1/admin/gateway/trading-leverage/settings` 设置。网关校验管理员身份和高风险写审批，并由 `TradingLocalRoutes -> LeverageRequestService -> LeverageService` 沿用合约、产品线及杠杆范围校验，最终交给 Core 的 `UPDATE_LEVERAGE` 命令；普通用户路由仍只允许修改自己的杠杆。
+内部做市账户的杠杆由管理员通过 `POST /api/v1/admin/gateway/trading-leverage/settings` 设置。网关校验管理员身份和高风险写审批，并由 `TradingLocalRoutes -> LeverageRequestService -> LeverageService` 沿用合约、产品线及杠杆范围校验，最终交给 Core 的 `UPDATE_LEVERAGE` 命令；普通用户路由仍只允许修改自己的杠杆。Core 有挂单或持仓时会拒绝改杠杆，清理敞口后可重试；每次尝试使用新的命令 ID，避免旧拒绝结果阻止重试。
 
 权限点 RBAC 由 `gateway_permissions` 和 `gateway_role_permissions` 驱动。gateway 会对本地 admin 路径校验 `admin.support.read`、`admin.users.read/write`、`admin.audit.read`、`admin.compliance.read/write`、`admin.permissions.write` 等权限，对后台代理路径校验 `admin.gateway.{service}.read/write`。角色和权限点接口位于 `/api/v1/admin/roles` 与 `/api/v1/admin/permissions`。`SUPER_ADMIN` 默认拥有 `admin.*`，`ADMIN` 默认拥有当前运营权限但不能修改权限点，`SUPPORT` 默认只拥有 `admin.support.read` 和 `admin.security.mfa`。
 

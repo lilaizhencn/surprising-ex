@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.aeron.protocol.CoreLeverageView;
@@ -19,6 +20,7 @@ import com.surprising.trading.order.model.InstrumentRuleLookup;
 import org.mockito.ArgumentCaptor;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class LeverageServiceTest {
@@ -52,6 +54,28 @@ class LeverageServiceTest {
                 ProductLine.LINEAR_PERPETUAL, "BTC-USDT", MarginMode.CROSS, 125_000_000L, "too high")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("max leverage");
+    }
+
+    @Test
+    void retryAfterRejectedAttemptUsesNewCommandId() {
+        OrderAeronGateway aeron = mock(OrderAeronGateway.class);
+        LeverageService service = new LeverageService(symbol -> Optional.of(rule(symbol)), aeron);
+        LeverageSettingRequest request = new LeverageSettingRequest(1001L,
+                ProductLine.LINEAR_PERPETUAL, "BTC-USDT", MarginMode.CROSS, 10_000_000L,
+                "retry after canceling orders");
+        org.mockito.Mockito.doThrow(new IllegalStateException("open orders exist")).doReturn(null)
+                .when(aeron).command(org.mockito.ArgumentMatchers.eq(CoreMessageType.UPDATE_LEVERAGE),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(1001L),
+                        org.mockito.ArgumentMatchers.any());
+
+        assertThatThrownBy(() -> service.set(request)).hasMessageContaining("open orders");
+        service.set(request);
+
+        ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
+        verify(aeron, times(2)).command(org.mockito.ArgumentMatchers.eq(CoreMessageType.UPDATE_LEVERAGE),
+                commandIds.capture(), org.mockito.ArgumentMatchers.eq(1001L),
+                org.mockito.ArgumentMatchers.any());
+        assertThat(commandIds.getAllValues()).doesNotHaveDuplicates();
     }
 
     @Test
