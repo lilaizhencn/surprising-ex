@@ -115,6 +115,7 @@ surprising:
           parser: COINBASE_TICKER
           fallback-rate: 1
     mark:
+      market-channel: ${PRICE_MARK_MARKET_CHANNEL:aeron:udp?endpoint=127.0.0.1:21407}
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}

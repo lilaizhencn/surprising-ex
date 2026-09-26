@@ -84,17 +84,19 @@ public class MarkPriceService {
                 (ignored, current) -> current == null || newer(event, current) ? event : current);
     }
 
-    @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
+    @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}",
+            autoStartup = "#{!${surprising.realtime.enabled:false}}")
     public void onBookTicker(ConsumerRecord<String, String> record) {
         requireCurrentProductTopic(record.topic(), bookTickerTopic(), "book ticker");
         onBookTicker(record.value());
     }
 
     void onBookTicker(String payload) {
-        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> bookTickers.put(event.symbol(), event));
+        parse(payload, PerpBookTickerEvent.class, "book ticker", this::acceptBookTicker);
     }
 
-    @KafkaListener(topics = "#{__listener.matchTradesTopic()}", groupId = "#{__listener.groupId()}")
+    @KafkaListener(topics = "#{__listener.matchTradesTopic()}", groupId = "#{__listener.groupId()}",
+            autoStartup = "#{!${surprising.realtime.enabled:false}}")
     public void onTrade(ConsumerRecord<String, String> record) {
         requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
         try {
@@ -106,11 +108,23 @@ public class MarkPriceService {
         }
     }
 
+    Set<String> indexSymbols() {
+        return Set.copyOf(indexPrices.keySet());
+    }
+
+    void acceptBookTicker(PerpBookTickerEvent event) {
+        bookTickers.compute(event.symbol(), (symbol, current) -> current == null
+                || event.sequence() > current.sequence()
+                || event.sequence() == current.sequence() && !event.eventTime().isBefore(current.eventTime())
+                ? event : current);
+    }
+
     void acceptTrade(PerpTradeEvent event) {
         if (event == null || event.symbol() == null || event.symbol().isBlank()) {
             throw new IllegalArgumentException("trade event is required");
         }
-        trades.compute(event.symbol(),(symbol,current)->current==null || event.sequence()>current.sequence()?event:current);
+        trades.compute(event.symbol(),(symbol,current)->current==null || event.sequence()>current.sequence()
+                || event.sequence()==current.sequence() && !event.tradeTime().isBefore(current.tradeTime())?event:current);
     }
 
     @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
@@ -156,20 +170,22 @@ public class MarkPriceService {
         }
         PerpBookTickerEvent book = bookTickers.get(symbol);
         if (!fresh(book, now)) {
-            book = syntheticBookTicker(index, now);
+            basisWindows.remove(symbol);
+            book = null;
         }
         PerpTradeEvent trade = trades.get(symbol);
-        if (!fresh(trade, now)) {
-            trade = syntheticTrade(index, now);
-        }
+        if (!usableLastTrade(trade, now)) trade = null;
         if (!ownsSymbol(symbol)) {
             return false;
         }
 
-        BasisWindow window = basisWindows.computeIfAbsent(symbol, ignored -> new BasisWindow());
-        window.add(now, markPriceCalculator.basis(index, book), properties.getCalculation().getBasisWindow());
-        BigDecimal basisAverage = window.average(now, properties.getCalculation().getBasisWindow(),
-                properties.getCalculation().getScale());
+        BigDecimal basisAverage = null;
+        if (book != null) {
+            BasisWindow window = basisWindows.computeIfAbsent(symbol, ignored -> new BasisWindow());
+            window.add(now, markPriceCalculator.basis(index, book), properties.getCalculation().getBasisWindow());
+            basisAverage = window.average(now, properties.getCalculation().getBasisWindow(),
+                    properties.getCalculation().getScale());
+        }
 
         long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
@@ -186,6 +202,18 @@ public class MarkPriceService {
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK,symbol,symbol,event.sequence(),event.eventTime(),event);
         return true;
     }
+
+    /** 查询诊断读取既有权威输入，不维护另一份状态。 */
+    public MarketInputs inputs(String symbol) {
+        Instant now = Instant.now();
+        var index = indexPrices.get(symbol);
+        var book = bookTickers.get(symbol);
+        var trade = trades.get(symbol);
+        return new MarketInputs(index, book, trade, fresh(index, now), fresh(book, now), usableLastTrade(trade, now));
+    }
+
+    public record MarketInputs(IndexPriceEvent index, PerpBookTickerEvent book, PerpTradeEvent lastTrade,
+                               boolean indexUsable, boolean bookUsable, boolean tradeUsable) {}
 
     public String bookTickerTopic() {
         return properties.bookTickerTopic();
@@ -205,15 +233,6 @@ public class MarkPriceService {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
-    }
-
-    private PerpBookTickerEvent syntheticBookTicker(IndexPriceEvent index, Instant now) {
-        return new PerpBookTickerEvent(index.symbol(), index.indexPrice(), index.indexPrice(), index.sequence(), now);
-    }
-
-    private PerpTradeEvent syntheticTrade(IndexPriceEvent index, Instant now) {
-        return new PerpTradeEvent(index.symbol(), "index-bootstrap-" + index.sequence(), index.sequence(), now,
-                index.indexPrice(), BigDecimal.ONE, "BUY");
     }
 
     private Set<String> symbols() {
@@ -251,15 +270,19 @@ public class MarkPriceService {
     }
 
     private boolean fresh(PerpBookTickerEvent event, Instant now) {
-        return event != null && event.bestBidPrice().compareTo(event.bestAskPrice()) <= 0 && fresh(event.eventTime(), now);
+        return event != null && event.bestBidPrice() != null && event.bestAskPrice() != null
+                && event.bestBidPrice().signum() > 0 && event.bestAskPrice().signum() > 0
+                && event.bestBidPrice().compareTo(event.bestAskPrice()) < 0 && fresh(event.eventTime(), now);
     }
 
-    private boolean fresh(PerpTradeEvent event, Instant now) {
-        return event != null && fresh(event.tradeTime(), now);
+    private boolean usableLastTrade(PerpTradeEvent event, Instant now) {
+        // 最后一笔真实成交是事件状态，不是心跳；无新成交不能伪造一笔，也不能阻止市场恢复。
+        return event != null && event.price() != null && event.price().signum() > 0
+                && event.tradeTime() != null && !event.tradeTime().isAfter(now.plusSeconds(1));
     }
 
     private boolean fresh(Instant eventTime, Instant now) {
-        return eventTime != null && Duration.between(eventTime, now).compareTo(properties.getCalculation().getMaxInputAge()) <= 0;
+        return eventTime != null && !eventTime.isAfter(now.plusSeconds(1)) && Duration.between(eventTime, now).compareTo(properties.getCalculation().getMaxInputAge()) <= 0;
     }
 
     private boolean newer(IndexPriceEvent candidate, IndexPriceEvent current) {

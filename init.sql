@@ -681,14 +681,14 @@ CREATE TABLE IF NOT EXISTS price_mark_ticks (
     mark_price_ticks            BIGINT NOT NULL,
     index_price                 NUMERIC(38, 18) NOT NULL,
     price1                      NUMERIC(38, 18) NOT NULL,
-    price2                      NUMERIC(38, 18) NOT NULL,
-    last_trade_price            NUMERIC(38, 18) NOT NULL,
-    best_bid_price              NUMERIC(38, 18) NOT NULL,
-    best_ask_price              NUMERIC(38, 18) NOT NULL,
+    price2                      NUMERIC(38, 18),
+    last_trade_price            NUMERIC(38, 18),
+    best_bid_price              NUMERIC(38, 18),
+    best_ask_price              NUMERIC(38, 18),
     funding_rate                NUMERIC(38, 18) NOT NULL,
     next_funding_time           TIMESTAMPTZ NOT NULL,
     time_until_funding_seconds  BIGINT NOT NULL,
-    basis_average               NUMERIC(38, 18) NOT NULL,
+    basis_average               NUMERIC(38, 18),
     basis_window_seconds        BIGINT NOT NULL,
     clamp_low                   NUMERIC(38, 18) NOT NULL,
     clamp_high                  NUMERIC(38, 18) NOT NULL,
@@ -702,6 +702,10 @@ CREATE TABLE IF NOT EXISTS price_mark_ticks (
     CONSTRAINT price_mark_ticks_status CHECK (status IN ('HEALTHY', 'DEGRADED', 'STALE', 'INSUFFICIENT_SOURCES', 'CLAMPED')),
     CONSTRAINT price_mark_ticks_positive_units CHECK (mark_price_units > 0),
     CONSTRAINT price_mark_ticks_positive_ticks CHECK (mark_price_ticks > 0),
+    CONSTRAINT price_mark_ticks_complete_inputs CHECK (
+        status = 'DEGRADED' OR (price2 IS NOT NULL AND last_trade_price IS NOT NULL
+        AND best_bid_price IS NOT NULL AND best_ask_price IS NOT NULL AND basis_average IS NOT NULL)
+    ),
     CONSTRAINT price_mark_ticks_valid_book CHECK (best_bid_price <= best_ask_price),
     CONSTRAINT price_mark_ticks_valid_clamp CHECK (clamp_low <= mark_price AND mark_price <= clamp_high)
 );

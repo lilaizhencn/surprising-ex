@@ -50,6 +50,7 @@ class MarkPriceServiceTest {
                 new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
         service.acceptTrade(new PerpTradeEvent("BTC-USDT", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", null, 1, PriceStatus.INSUFFICIENT_SOURCES, 3, 1,
                 BigDecimal.valueOf(3), now, List.of()));
         service.publishMarkPrices();
@@ -69,6 +70,7 @@ class MarkPriceServiceTest {
                 new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
         service.acceptTrade(new PerpTradeEvent("BTC-USDT", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1,
                 PriceStatus.INSUFFICIENT_SOURCES, 3, 1, BigDecimal.valueOf(3), now, List.of()));
         service.publishMarkPrices();
@@ -89,6 +91,7 @@ class MarkPriceServiceTest {
                 new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
         service.acceptTrade(new PerpTradeEvent("BTC-USDT", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
         verify(kafkaTemplate, never()).send(any(), any(), any());
@@ -97,6 +100,7 @@ class MarkPriceServiceTest {
                 any(PricePublishedEvent.class));
 
         reset(coordinationService, kafkaTemplate);
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", null, 2, PriceStatus.INSUFFICIENT_SOURCES, 3, 1,
                 BigDecimal.valueOf(3), now, List.of()));
         service.publishMarkPrices();
@@ -118,6 +122,7 @@ class MarkPriceServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
         verify(kafkaTemplate, never()).send(any(), any(), any());
@@ -145,6 +150,7 @@ class MarkPriceServiceTest {
         when(coordinationService.currentEncoding("BTC-USDT")).thenReturn(encoding(),
                 new MarkPriceEncoding(2L, 100_000_000L, 10_000L, 100_000_000L, 1L));
         Instant now = Instant.now();
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
 
@@ -173,6 +179,7 @@ class MarkPriceServiceTest {
                 mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class));
         Instant now = Instant.now();
 
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
         verify(kafkaTemplate, never()).send(any(), any(), any());
@@ -242,6 +249,7 @@ class MarkPriceServiceTest {
                 mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class));
         Instant now = Instant.now();
 
+        supplyMarket(service, now);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
         service.publishMarkPrices();
@@ -268,6 +276,96 @@ class MarkPriceServiceTest {
                 .hasMessageContaining("surprising.inverse-perp.funding.rate.v1");
 
         verify(kafkaTemplate, never()).send(any(), any(), any());
+    }
+
+    @Test
+    void startsFromValidIndexWithoutInventingMarketInputs() {
+        var coordination = mock(MarkPriceCoordinationService.class);
+        when(coordination.nextSequence("price-mark", "BTC-USDT")).thenReturn(1L);
+        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        var service = service(coordination, kafka);
+        Instant now = Instant.now();
+        service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 1,
+                PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
+        service.publishMarkPrices();
+        var capture = ArgumentCaptor.forClass(Object.class);
+        verify(kafka).send(any(), any(), capture.capture());
+        var publication = ((PricePublishedEvent) capture.getValue()).markPrice();
+        var result = publication.result();
+        assertThat(result.status()).isEqualTo(PriceStatus.DEGRADED);
+        assertThat(result.markPrice()).isEqualByComparingTo(result.price1());
+        assertThat(result.bestBidPrice()).isNull();
+        assertThat(result.bestAskPrice()).isNull();
+        assertThat(result.price2()).isNull();
+        assertThat(result.basisAverage()).isNull();
+        assertThat(result.lastTradePrice()).isNull();
+        assertThat(publication.bookInput()).isNull();
+        assertThat(publication.tradeInput()).isNull();
+    }
+
+    @Test
+    void realBasisChangesMarkAndEmptyBookReturnsToExplicitStartingRule() {
+        var coordination = mock(MarkPriceCoordinationService.class);
+        when(coordination.nextSequence("price-mark", "BTC-USDT")).thenReturn(1L);
+        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        var service = service(coordination, kafka);
+        Instant now = Instant.now();
+        service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 1,
+                PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
+        service.acceptBookTicker(new PerpBookTickerEvent("BTC-USDT", new BigDecimal("101"),
+                new BigDecimal("103"), 2, now));
+        service.acceptBookTicker(new PerpBookTickerEvent("BTC-USDT", null, null, 1, now));
+        service.acceptTrade(new PerpTradeEvent("BTC-USDT", "t1", 2, now,
+                new BigDecimal("101"), BigDecimal.ONE, "BUY"));
+        service.acceptTrade(new PerpTradeEvent("BTC-USDT", "t2", 2, now,
+                new BigDecimal("102"), BigDecimal.ONE, "BUY"));
+        service.acceptTrade(new PerpTradeEvent("BTC-USDT", "older", 1, now,
+                new BigDecimal("100"), BigDecimal.ONE, "BUY"));
+        service.publishMarkPrices();
+        var capture = ArgumentCaptor.forClass(Object.class);
+        verify(kafka).send(any(), any(), capture.capture());
+        var result = ((PricePublishedEvent) capture.getValue()).markPrice().result();
+        assertThat(result.markPrice()).isEqualByComparingTo("102");
+        assertThat(result.basisAverage()).isEqualByComparingTo("2");
+        service.acceptBookTicker(new PerpBookTickerEvent("BTC-USDT", null, null, 3, now));
+        reset(kafka);
+        service.publishMarkPrices();
+        var restart = ArgumentCaptor.forClass(Object.class);
+        verify(kafka).send(any(), any(), restart.capture());
+        var restarted = ((PricePublishedEvent) restart.getValue()).markPrice().result();
+        assertThat(restarted.status()).isEqualTo(PriceStatus.DEGRADED);
+        assertThat(restarted.markPrice()).isEqualByComparingTo(restarted.price1());
+        assertThat(restarted.bestBidPrice()).isNull();
+        assertThat(restarted.basisAverage()).isNull();
+    }
+
+    @Test
+    void retainsOldRealTradeAsDegradedWithItsOriginalTimestamp() {
+        var coordination = mock(MarkPriceCoordinationService.class);
+        when(coordination.nextSequence("price-mark", "BTC-USDT")).thenReturn(1L);
+        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        var service = service(coordination, kafka);
+        Instant now = Instant.now();
+        service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 1,
+                PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
+        service.acceptBookTicker(new PerpBookTickerEvent("BTC-USDT", new BigDecimal("101"),
+                new BigDecimal("103"), 1, now));
+        service.acceptTrade(new PerpTradeEvent("BTC-USDT", "actual", 5, now.minusSeconds(60),
+                new BigDecimal("102"), BigDecimal.ONE, "BUY"));
+        service.publishMarkPrices();
+        var capture = ArgumentCaptor.forClass(Object.class);
+        verify(kafka).send(any(), any(), capture.capture());
+        var publication = ((PricePublishedEvent) capture.getValue()).markPrice();
+        assertThat(publication.result().status()).isEqualTo(PriceStatus.DEGRADED);
+        assertThat(publication.result().lastTradePrice()).isEqualByComparingTo("102");
+        assertThat(publication.tradeInput().tradeTime()).isEqualTo(now.minusSeconds(60));
+    }
+
+    private static void supplyMarket(MarkPriceService service, Instant now) {
+        service.acceptBookTicker(new PerpBookTickerEvent("BTC-USDT", new BigDecimal("99.99"),
+                new BigDecimal("100.01"), 1, now));
+        service.acceptTrade(new PerpTradeEvent("BTC-USDT", "real", 1, now,
+                new BigDecimal("100"), BigDecimal.ONE, "BUY"));
     }
 
     private MarkPriceService service(MarkPriceCoordinationService coordinationService,

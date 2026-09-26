@@ -47,9 +47,11 @@ public class MarkPriceCalculator {
 
         BigDecimal price1 = indexPrice.multiply(BigDecimal.ONE.add(fundingRate.multiply(fundingFraction)))
                 .setScale(scale, RoundingMode.HALF_UP);
-        BigDecimal price2 = indexPrice.add(basisAverage).setScale(scale, RoundingMode.HALF_UP);
-        BigDecimal lastTradePrice = trade.price();
-        BigDecimal rawMark = median(List.of(price1, price2, lastTradePrice));
+        BigDecimal price2 = book == null ? null : indexPrice.add(basisAverage).setScale(scale, RoundingMode.HALF_UP);
+        BigDecimal lastTradePrice = trade == null ? null : trade.price();
+        // 启动/恢复规则：输入不足时直接使用资金费收敛价，不伪造盘口、基差或成交。
+        boolean startingMarket = book == null || trade == null;
+        BigDecimal rawMark = startingMarket ? price1 : median(List.of(price1, price2, lastTradePrice));
 
         BigDecimal clampLow = indexPrice.multiply(BigDecimal.ONE.subtract(properties.getCalculation().getClampRatio()))
                 .setScale(scale, RoundingMode.HALF_UP);
@@ -57,8 +59,11 @@ public class MarkPriceCalculator {
                 .setScale(scale, RoundingMode.HALF_UP);
         BigDecimal markPrice = rawMark.max(clampLow).min(clampHigh).setScale(scale, RoundingMode.HALF_UP);
 
-        PriceStatus status = markPrice.compareTo(rawMark) == 0 ? PriceStatus.HEALTHY : PriceStatus.CLAMPED;
-        if (funding == null && properties.isFundingRateExpected() && status == PriceStatus.HEALTHY) {
+        PriceStatus status = startingMarket ? PriceStatus.DEGRADED
+                : markPrice.compareTo(rawMark) == 0 ? PriceStatus.HEALTHY : PriceStatus.CLAMPED;
+        if (status == PriceStatus.HEALTHY && (funding == null && properties.isFundingRateExpected()
+                || index.status() == PriceStatus.DEGRADED
+                || Duration.between(trade.tradeTime(), now).compareTo(properties.getCalculation().getMaxInputAge()) > 0)) {
             status = PriceStatus.DEGRADED;
         }
 
@@ -69,7 +74,7 @@ public class MarkPriceCalculator {
                 Math.addExact(markPriceUnits, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
         return new MarkPriceEvent(properties.getKafka().getProductLine(), symbol, encoding.instrumentChangeId(),
                 markPriceUnits, markPriceTicks, markPrice, indexPrice, null, price1, price2, lastTradePrice,
-                book.bestBidPrice(), book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
+                book == null ? null : book.bestBidPrice(), book == null ? null : book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
                 basisAverage, properties.getCalculation().getBasisWindow().toSeconds(), clampLow, clampHigh,
                 sequence, status, now, now);
     }

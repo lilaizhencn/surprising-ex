@@ -200,7 +200,7 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.mark.kafka.max-poll-records` | `500` | 标记价格输入 consumer 每次 poll 拉取的 Kafka 记录数。 |
 | `surprising.price.mark.calculation.publish-interval-ms` | `1000` | 标记价格固定频率发布周期。 |
 | `surprising.price.mark.calculation.basis-window` | `60s` | basis 移动平均窗口。 |
-| `surprising.price.mark.calculation.max-input-age` | `5s` | 标记价格输入最大可接受年龄。 |
+| `surprising.price.mark.calculation.max-input-age` | `5s` | 指数和盘口的最大可接受年龄；真实最后成交超过该年龄会降级，不刷新其成交时间。 |
 | `surprising.price.mark.calculation.clamp-ratio` | `0.03` | 标记价格相对指数价格的保护带。 |
 | `surprising.price.mark.coordination.lease-duration` | `15s` | 标记价格 symbol 租约时长。 |
 
@@ -319,3 +319,16 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&t
 通过网关 `instrument-admin/upsert` 与双人审批更新当前 20 个 U 本位永续合约，保留各合约原有最少有效源配置（BTC 为 3，其他合约原值为 1）。Kraken WebSocket v2 使用 `ticker`、`event_trigger=bbo`，覆盖 20 个 USD 交易对；Coinbase Exchange 使用 `ticker`，覆盖 19 个 USD 交易对，TRX 无对应上线交易对，不生成虚假配置。两者通过各自 USDT/USD 实时报价做除法换算，换算不可用时禁用该源（`conversionMode=DISABLE`）。
 
 BTC 实际指数响应已观测到 5/5 `HEALTHY`，Coinbase、Kraken 的 transport 均为 `PUBLIC_WEBSOCKET`，包含源时间与 USD/USDT 换算原因；这是一次采样结果，不代表所有交易对始终五源在线。JDK 27 下 price-provider 88 项测试通过，覆盖真实 ticker 消息格式、交易对匹配、Kraken 时间戳和旧报价触发重连。
+
+## 真实标记价输入修复（2026-09-27）
+
+入口 `MarkPriceMarketSubscription` 通过既有 Aeron 实时路由订阅当前 ProductLine 的 BOOK/TRADE，注册盘口查询租约，不依赖浏览器订阅。BOOK 为核心查询侧快照，只提取真实买一/卖一；TRADE 为已提交成交。协议中的 ticks/steps 通过当前合约精度换算。最新输入由 `MarkPriceService` 原有 Map 唯一持有，新增类仅承担传输订阅、解码和启动恢复边界。
+
+- 开启 `surprising.realtime.enabled=true` 时，盘口和成交 Kafka listener 不启动，避免两套不同序号域互相覆盖；资金费率与价格审计 Kafka 链路保留。
+- `surprising.price.mark.market-channel` / `PRICE_MARK_MARKET_CHANNEL` 是独立接收地址，默认本机 `aeron:udp?endpoint=127.0.0.1:21407`。多实例必须配置各自可达地址，stream 与 router 的 WS fanout stream 一致。
+- 用户确认的启动规则：有效且新鲜的外部指数存在，但真实双边盘口或成交不足时，使用 price1 = index × (1 + fundingRate × 剩余资金周期比例) 并施加原指数保护带，明确标为 DEGRADED。盘口、基差、成交等缺失字段为 null；不再创建 syntheticBookTicker/syntheticTrade。
+- 真实盘口与成交齐全后恢复三价格中位数。最后成交保留原时间，较旧成交或降级指数会降级状态；空盘/过期盘口清除旧基差窗口后进入启动规则。指数无效或过期则停止发布，latest 在缓存过期后返回 503。
+- 已有数据库先执行 [审计字段迁移](../docs/validation/mark-starting-inputs-20260927.sql)。仅 DEGRADED 允许缺失输入字段；正常状态必须有完整输入，原资金、仓位数据不变。
+- GET /api/v1/price/mark/inputs?symbol=... 提供实际输入与可用性诊断，直接读取原输入状态，便于区别缺少指数、盘口还是成交。
+- 仍由 `MarkPriceCalculator` 计算 funding 收敛价、指数加平均基差价及最后成交价的中位数；两价在市场均衡时可以相等，不人为制造价差。
+- 前端 latest 请求失败时清空对应 mark/index 展示，不继续把过期值作为当前值。核心资金/持仓/风控公式及账本没有改动。

@@ -16,9 +16,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class MarkPriceController {
 
     private final MarkPriceQueryService queryService;
+    private final com.surprising.price.mark.service.MarkPriceService prices;
 
-    public MarkPriceController(MarkPriceQueryService queryService) {
+    public MarkPriceController(MarkPriceQueryService queryService, com.surprising.price.mark.service.MarkPriceService prices) {
         this.queryService = queryService;
+        this.prices = prices;
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/latest")
@@ -30,6 +32,13 @@ public class MarkPriceController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
+    }
+
+    @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/inputs")
+    public com.surprising.price.mark.service.MarkPriceService.MarketInputs inputs(@RequestParam("symbol") String symbol) {
+        if (!symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid symbol");
+        return prices.inputs(symbol);
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/history")
