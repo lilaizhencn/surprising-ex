@@ -70,6 +70,7 @@ class RealtimeRouterIntegrationTest {
                             MediaDriver.launch(
                                     new MediaDriver.Context()
                                             .aeronDirectoryName(directory)
+                                            .timerIntervalNs(TimeUnit.MILLISECONDS.toNanos(1500))
                                             .dirDeleteOnStart(true)
                                             .dirDeleteOnShutdown(true));
                     var a = new AeronRealtimeReceiver(directory, endpointA, 2103, receivedA::add);

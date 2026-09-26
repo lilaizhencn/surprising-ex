@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.LongAdder;
 @Component
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "surprising.realtime.router.enabled", havingValue = "true", matchIfMissing = true)
 public final class RealtimeRouter implements AutoCloseable {
+    private static final System.Logger LOG = System.getLogger(RealtimeRouter.class.getName());
     private final ArrayBlockingQueue<RealtimeFrame> inbound = new ArrayBlockingQueue<>(8192);
     private final RealtimeRouterProperties config;
     private final ValkeyRouteDirectory routes;
@@ -89,8 +90,10 @@ public final class RealtimeRouter implements AutoCloseable {
                     Aeron.connect(
                             new Aeron.Context()
                                     .aeronDirectoryName(config.directory())
-                                    .driverTimeoutMs(1000)
-                                    .errorHandler(failure -> failures.increment()))) {
+                                    .errorHandler(failure -> {
+                                        failures.increment();
+                                        LOG.log(System.Logger.Level.WARNING, "Realtime router Aeron transport error", failure);
+                                    }))) {
                 config.controlChannels()
                         .forEach(
                                 (p, c) -> {
