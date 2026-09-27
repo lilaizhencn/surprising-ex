@@ -213,3 +213,11 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 待处理请求使用有界 SPSC 队列（容量与命令窗口一致），消费后移除，关闭时未完成请求明确失败；
 不复制订单或余额状态。并发盘口查询不再因单个待处理槽占用而立即失败。查询仍占用撮合线程时间，
 并非独立的行情读服务；有界排队不能替代吞吐量与延迟验证。测试入口为 `MatcherCommandPipelineTest`。
+
+## 本机一键启动 20 币对永续
+
+运行 `./scripts/local-perpetual.sh up`，页面为 <http://127.0.0.1:5174/trade/usd-perpetual>。
+统一入口管理六个 JAR、PostgreSQL/Kafka/Redis 和前端，配置只维护一份，重启保留交易状态。
+`status` 检查服务，`down` 统一停止；`python3 scripts/check-local-perpetual.py` 检查 20 币对
+真实三源指数、标记价和双边盘口。依赖、测试资金及初始合约单位边界见
+[本机部署说明](deployment/local-perpetual/README.md)。

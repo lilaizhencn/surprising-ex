@@ -137,20 +137,20 @@ detect_jvm_campaign_support() {
   [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 27 unavailable JAVA_HOME=$JAVA_HOME"
   version_output="$("$JAVA_HOME/bin/java" -version 2>&1)" || fail "unable to inspect JVM JAVA_HOME=$JAVA_HOME"
   if grep -Eqi 'OpenJ9|IBM Semeru' <<<"$version_output"; then
-    fail "unsupported JVM implementation=OPENJ9; requested collector=$JVM_GC telemetry=GC_SAFEPOINT jfr=$JFR_ENABLED require HotSpot 25+"
+    fail "unsupported JVM implementation=OPENJ9; requested collector=$JVM_GC telemetry=GC_SAFEPOINT jfr=$JFR_ENABLED require HotSpot 27"
   fi
   if grep -Eqi 'HotSpot|OpenJDK[[:space:]].*Server VM' <<<"$version_output"; then
     JVM_IMPLEMENTATION=HOTSPOT
   else
-    fail 'unsupported JVM implementation; require HotSpot 25+ for GC/safepoint/JFR campaign telemetry'
+    fail 'unsupported JVM implementation; require HotSpot 27 for GC/safepoint/JFR campaign telemetry'
   fi
   if [[ "$version_output" =~ version[[:space:]]\"([0-9]+) ]]; then
     JVM_FEATURE_VERSION="${BASH_REMATCH[1]}"
   else
-    fail 'unable to determine JVM feature version; require HotSpot 25+'
+    fail 'unable to determine JVM feature version; require HotSpot 27'
   fi
-  (( JVM_FEATURE_VERSION >= 25 )) || \
-    fail "unsupported JVM feature version=$JVM_FEATURE_VERSION; require HotSpot feature version 25 or newer"
+  (( JVM_FEATURE_VERSION == 27 )) || \
+    fail "unsupported JVM feature version=$JVM_FEATURE_VERSION; require HotSpot feature version 27"
   JVM_TELEMETRY_MODE=UNIFIED_LOGGING
 }
 
@@ -371,6 +371,8 @@ start_owned_process() {
 COMMON_ENV=(
     env \
     PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false \
+    GATEWAY_JWT_SECRET="${GATEWAY_JWT_SECRET:-local-dev-change-me-surprising-ex-gateway-secret-2026}" \
+    GATEWAY_PRODUCT_TRANSFER_ENABLED="${GATEWAY_PRODUCT_TRANSFER_ENABLED:-false}" \
     AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
     AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" AERON_CLIENT_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
     SURPRISING_CLIENTS_INSTRUMENT_BASE_URL="http://127.0.0.1:9094" \
@@ -412,6 +414,10 @@ COMMON_ENV=(
     MM_REFERENCE_MARKET_ENABLED="$MM_REFERENCE_MARKET_ENABLED"
     MM_REFERENCE_MARKET_WEBSOCKET_ENABLED="$MM_REFERENCE_MARKET_WEBSOCKET_ENABLED"
 )
+
+if [[ -n "${LOGGING_CONFIG:-}" ]]; then
+  COMMON_ENV+=(LOGGING_CONFIG="$LOGGING_CONFIG")
+fi
 
 if [[ -n "${SPRING_CONFIG_ADDITIONAL_LOCATION:-}" ]]; then
   COMMON_ENV+=(SPRING_CONFIG_ADDITIONAL_LOCATION="$SPRING_CONFIG_ADDITIONAL_LOCATION")
@@ -571,7 +577,8 @@ stop_stack() {
 
 cleanup_failed_start() {
   local status=$?
-  trap - ERR INT TERM
+  trap - EXIT ERR INT TERM
+  (( status != 0 )) || status=1
   printf 'START_FAILED productLine=%s cleanup=begin\n' "$PRODUCT_LINE" >&2
   stop_stack || true
   exit "$status"

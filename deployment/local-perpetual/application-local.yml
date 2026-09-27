@@ -1,0 +1,35 @@
+surprising:
+  market-maker:
+    strategies:
+      - strategy-id: local-perpetual-20
+        product-line: LINEAR_PERPETUAL
+        enabled: true
+        account-ids: [900001, 900002]
+        base-quantity-steps: 1
+        order-levels: 2
+        margin-mode: CROSS
+        symbols:
+          - BTC-USDT-SWAP
+          - ETH-USDT-SWAP
+          - SOL-USDT-SWAP
+          - XRP-USDT-SWAP
+          - DOGE-USDT-SWAP
+          - ADA-USDT-SWAP
+          - BNB-USDT-SWAP
+          - AVAX-USDT-SWAP
+          - LINK-USDT-SWAP
+          - DOT-USDT-SWAP
+          - LTC-USDT-SWAP
+          - BCH-USDT-SWAP
+          - UNI-USDT-SWAP
+          - AAVE-USDT-SWAP
+          - NEAR-USDT-SWAP
+          - SUI-USDT-SWAP
+          - TRX-USDT-SWAP
+          - OP-USDT-SWAP
+          - ETC-USDT-SWAP
+          - FIL-USDT-SWAP
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
