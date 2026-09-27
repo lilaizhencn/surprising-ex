@@ -26,6 +26,29 @@ import org.junit.jupiter.api.Test;
 class TradingStateSnapshotCodecTest {
 
     @Test
+    void executionTotalSurvivesCheckpointAndCommitMetadata() {
+        var reducer = new RuntimeTestStateTransitions();
+        var empty = reducer.adjustBalance(reducer.registerInstrument(TradingCoreState.empty(ProductLine.SPOT),
+                CoreStateTestFixtures.instrument(ProductLine.SPOT, "BTC-USDT", "BTC", "USDT", "USDT")),
+                7, new BalanceAdjustmentCommand("USDT", 50_000));
+        var runtimeOrder = CoreStateTestFixtures.order(11, 7, 5, 10)
+                .withFill(3, 7, 4, com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN, 2)
+                .withExecutionValue(1, -1).snapshot().withCommitMetadata(100, 200);
+        var order = new com.surprising.aeron.service.state.model.CoreOrderState(11, ProductLine.SPOT, 7,
+                "BTC-USDT", CoreOrderSide.BUY, 5, 5, 10, 3, 7, false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", new java.util.UUID(0, 11),
+                0, 0, 4, runtimeOrder.executedValueHigh(), runtimeOrder.executedValueLow(),
+                100, 100, 200, com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN, 2);
+        var state = new TradingCoreState(empty.productLine(), 2, empty.users(), Map.of(11L, order),
+                empty.instruments(), empty.riskState(), empty.treasuryState());
+        var restored = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
+        assertThat(restored.order(11).executedValueHigh()).isEqualTo(1);
+        assertThat(restored.order(11).executedValueLow()).isEqualTo(-1);
+        assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
+    }
+
+    @Test
     void roundTripPreservesBusinessAndEntityHashes() {
         RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
         TradingCoreState state = reducer.adjustBalance(

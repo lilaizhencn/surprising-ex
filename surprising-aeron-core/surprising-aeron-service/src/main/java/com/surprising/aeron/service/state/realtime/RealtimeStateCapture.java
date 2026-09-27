@@ -364,7 +364,7 @@ public final class RealtimeStateCapture {
                             o.commandId(),
                             o.makerFeeRatePpm(),
                             o.takerFeeRatePpm(),
-                            o.cumulativeFeeUnits(),
+                            o.cumulativeFeeUnits(), o.executedValueHigh(), o.executedValueLow(),
                             o.createdAtEpochMillis(),
                             o.updatedAtEpochMillis(),
                             o.clusterPosition(),

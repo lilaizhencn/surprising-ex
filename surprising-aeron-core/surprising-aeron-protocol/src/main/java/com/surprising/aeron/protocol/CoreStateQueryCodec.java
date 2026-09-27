@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public final class CoreStateQueryCodec {
 
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreStateQueryCodec() {
@@ -268,7 +268,7 @@ public final class CoreStateQueryCodec {
         length = Math.addExact(length, Byte.BYTES + Integer.BYTES * 4L + Byte.BYTES);
         length = Math.addExact(length, optionalTextLength(state.clientOrderId()));
         length = Math.addExact(length, Long.BYTES * 2L);
-        length = Math.addExact(length, Long.BYTES * 6L);
+        length = Math.addExact(length, Long.BYTES * 8L);
         length = Math.addExact(length, textLength(state.status()) + Long.BYTES);
         return Math.toIntExact(length);
     }
@@ -286,7 +286,7 @@ public final class CoreStateQueryCodec {
         putText(output, state.clientOrderId(), true);
         output.putLong(state.commandId().getMostSignificantBits()).putLong(state.commandId().getLeastSignificantBits())
                 .putLong(state.makerFeeRatePpm()).putLong(state.takerFeeRatePpm())
-                .putLong(state.cumulativeFeeUnits()).putLong(state.createdAtEpochMillis())
+                .putLong(state.cumulativeFeeUnits()).putLong(state.executedValueHigh()).putLong(state.executedValueLow()).putLong(state.createdAtEpochMillis())
                 .putLong(state.updatedAtEpochMillis()).putLong(state.clusterPosition());
         putText(output, state.status(), false);
         output.putLong(state.revision());
@@ -386,6 +386,8 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.makerFeeRatePpm());
         writer.longValue(state.takerFeeRatePpm());
         writer.longValue(state.cumulativeFeeUnits());
+        writer.longValue(state.executedValueHigh());
+        writer.longValue(state.executedValueLow());
         writer.longValue(state.createdAtEpochMillis());
         writer.longValue(state.updatedAtEpochMillis());
         writer.longValue(state.clusterPosition());
@@ -426,13 +428,15 @@ public final class CoreStateQueryCodec {
         long makerFee = reader.longValue();
         long takerFee = reader.longValue();
         long cumulativeFee = reader.longValue();
+        long valueHigh = reader.longValue();
+        long valueLow = reader.longValue();
         long createdAt = reader.nonNegativeLong("createdAt");
         long updatedAt = reader.nonNegativeLong("updatedAt");
         long clusterPosition = reader.nonNegativeLong("clusterPosition");
         return new CoreOrderStateView(orderId, productLine, userId, symbol,
                 side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFee, takerFee, cumulativeFee, createdAt, updatedAt, clusterPosition,
+                makerFee, takerFee, cumulativeFee, valueHigh, valueLow, createdAt, updatedAt, clusterPosition,
                 reader.text(), reader.positiveLong("revision"));
     }
 

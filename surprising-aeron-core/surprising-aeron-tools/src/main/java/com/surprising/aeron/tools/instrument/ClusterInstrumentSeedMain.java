@@ -30,6 +30,13 @@ public final class ClusterInstrumentSeedMain {
         List<String> hosts = Arrays.stream(value("AERON_HOSTNAMES", "localhost,localhost,localhost").split(","))
                 .map(String::trim).filter(host -> !host.isEmpty()).toList();
         String egressHost = value("AERON_EGRESS_HOSTNAME", "localhost");
+        if (args.length == 1 && "--risk-scan-only".equals(args[0])) {
+            try (var clients = new AeronClientPool("local-risk-scan", productLine, hosts, egressHost,
+                    Duration.ofSeconds(10), 1)) {
+                configureRiskBudget(clients, Integer.parseInt(required("RISK_SCAN_BATCH_SIZE")));
+            }
+            return;
+        }
         String databaseUrl = value("DATABASE_URL", "jdbc:postgresql://localhost:5432/postgres");
         String databaseUser = value("DATABASE_USER", "postgres");
         String databasePassword = value("DATABASE_PASSWORD", "postgres");
@@ -39,6 +46,11 @@ public final class ClusterInstrumentSeedMain {
         }
         try (var clients = new AeronClientPool("instrument-seed", productLine, hosts, egressHost,
                 Duration.ofSeconds(10), Math.min(8, instruments.size()))) {
+            String riskBudget = System.getenv("RISK_SCAN_BATCH_SIZE");
+            if (riskBudget != null && !riskBudget.isBlank()) {
+                int batchSize = Integer.parseInt(riskBudget);
+                configureRiskBudget(clients, batchSize);
+            }
             int applied = 0;
             for (InstrumentSeed instrument : instruments) {
                 UUID commandId = UUID.nameUUIDFromBytes((productLine + ":instrument:"
@@ -54,6 +66,21 @@ public final class ClusterInstrumentSeedMain {
             }
             log.info("instrumentSeed=PASS productLine={} count={} applied={}", productLine, instruments.size(), applied);
         }
+    }
+
+    /** Explicit startup setting; preserve the enabled flag and the scan interval. */
+    static void configureRiskBudget(AeronClientPool clients, int batchSize) {
+        if (batchSize < 1 || batchSize > 4096) throw new IllegalArgumentException("RISK_SCAN_BATCH_SIZE must be in [1,4096]");
+        var query = clients.query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, UUID.randomUUID(), 0, new byte[0]);
+        if (query.status() != ResponseStatus.OK) throw new IllegalStateException("cannot read risk scan control");
+        var control = com.surprising.aeron.protocol.CoreRiskScanControlCodec.decodeView(query.data());
+        if (control.scanBatchSize() == batchSize) return;
+        var update = new com.surprising.aeron.protocol.UpdateRiskScanControlCommand(control.version(),
+                control.ruleName(), control.enabled(), control.scanDelayMs(), batchSize,
+                "instrument-seed", "Configured bounded risk scan work for this product line");
+        var result = clients.command(CoreMessageType.UPDATE_RISK_SCAN_CONTROL, UUID.randomUUID(), 0,
+                com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeCommand(update));
+        if (result.commandStatus() != ResponseStatus.APPLIED) throw new IllegalStateException("risk scan configuration rejected: " + result.resultCode());
     }
 
     private static List<InstrumentSeed> load(

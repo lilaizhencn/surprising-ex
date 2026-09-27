@@ -24,11 +24,42 @@ public record CoreOrderStateView(
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         long cumulativeFeeUnits,
+        long executedValueHigh,
+        long executedValueLow,
         long createdAtEpochMillis,
         long updatedAtEpochMillis,
         long clusterPosition,
         String status,
         long revision) implements CoreOrderStateSource {
+    public CoreOrderStateView(
+        long orderId,
+        ProductLine productLine,
+        long userId,
+        String symbol,
+        CoreOrderSide side,
+        long priceTicks,
+        long quantitySteps,
+        long executedQuantitySteps,
+        long remainingQuantitySteps,
+        boolean reduceOnly,
+        CoreMarginMode marginMode,
+        CorePositionSide positionSide,
+        CoreOrderType orderType,
+        CoreTimeInForce timeInForce,
+        boolean postOnly,
+        String clientOrderId,
+        UUID commandId,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long cumulativeFeeUnits,
+        long createdAtEpochMillis,
+        long updatedAtEpochMillis,
+        long clusterPosition,
+        String status,
+        long revision) {
+        this(orderId, productLine, userId, symbol, side, priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+
 
     public CoreOrderStateView(long orderId, ProductLine productLine, long userId, String symbol,
                               CoreOrderSide side, long priceTicks, long quantitySteps,
@@ -51,5 +82,12 @@ public record CoreOrderStateView(
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType,
                 timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, 0,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+    public String getExecutedValueTicks() {
+        var value = OrderExecutionValue.value(executedValueHigh, executedValueLow);
+        return value == null ? null : value.toString();
+    }
+    public String getAveragePriceTicks() {
+        return OrderExecutionValue.average(executedValueHigh, executedValueLow, executedQuantitySteps);
     }
 }

@@ -7,6 +7,8 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
     private long[] executed = new long[8];
     private long[] remaining = new long[8];
     private long[] cumulativeFee = new long[8];
+    private long[] executedValueHigh = new long[8];
+    private long[] executedValueLow = new long[8];
     private long[] createdAt = new long[8];
     private long[] updatedAt = new long[8];
     private long[] clusterPosition = new long[8];
@@ -21,6 +23,8 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
             executed[index] = value.executedQuantitySteps();
             remaining[index] = value.remainingQuantitySteps();
             cumulativeFee[index] = value.cumulativeFeeUnits();
+            executedValueHigh[index] = value.executedValueHigh();
+            executedValueLow[index] = value.executedValueLow();
             createdAt[index] = value.createdAtEpochMillis();
             updatedAt[index] = value.updatedAtEpochMillis();
             clusterPosition[index] = value.clusterPosition();
@@ -46,7 +50,7 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
         } else if (ownerValue != source) {
             // Recovery/control paths can still start from an independent published value.
             ownerValue.applyPublishedStateInPlace(source, executed[index], remaining[index],
-                    cumulativeFee[index], createdAt[index], updatedAt[index], clusterPosition[index],
+                    cumulativeFee[index], executedValueHigh[index], executedValueLow[index], createdAt[index], updatedAt[index], clusterPosition[index],
                     status[index], revision[index]);
         }
         setValueAt(index, ownerValue);
@@ -60,6 +64,8 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
         executed = java.util.Arrays.copyOf(executed, capacity);
         remaining = java.util.Arrays.copyOf(remaining, capacity);
         cumulativeFee = java.util.Arrays.copyOf(cumulativeFee, capacity);
+        executedValueHigh = java.util.Arrays.copyOf(executedValueHigh, capacity);
+        executedValueLow = java.util.Arrays.copyOf(executedValueLow, capacity);
         createdAt = java.util.Arrays.copyOf(createdAt, capacity);
         updatedAt = java.util.Arrays.copyOf(updatedAt, capacity);
         clusterPosition = java.util.Arrays.copyOf(clusterPosition, capacity);

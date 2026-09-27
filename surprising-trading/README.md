@@ -577,3 +577,17 @@ Core 仅保留启动时注册并封存的 canonical instrument；启动器一次
 纯维护状态使用独立 maintenance 命令更新同一对象，不替换订单、持仓及结算路径持有的引用。
 
 API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。
+
+### 订单成交均价与累计成交值
+
+`RuntimeDerivativeFillCalculator` / `RuntimeSpotMatchProcessor` 在每笔成交应用时，按实际成交价累计
+`sum(priceTicks × quantitySteps)`，由订单所属 Account Lane 保存 `executedValueHigh/Low` 两个原始字段。
+`OrderChangeBuffer` 随成交数量、费用、状态一起发布，查询、实时 ORDER 和恢复快照共享这一来源；
+不会从委托价推算成交均价，也不依赖尚未写入的 SQL 成交明细投影。
+`OrderExecutionValue` 仅在查询/JSON 边界转换为十进制字符串：`executedValueTicks` 和
+`averagePriceTicks`（除以累计成交数量，最多 18 位小数）。无成交时均价为空。
+线性合约成交金额 = `executedValueTicks × notionalMultiplierUnits`，按结算币种 scale 展示；
+该金额换算不能套用于反向合约。成交或撤单只修改更新时间，保留首次创建时间。
+
+订单查询 wire version 为 6，交易状态 snapshot version 为 35。此变更不读取旧格式，所有依赖
+Core 协议的服务需一起更新。本地测试环境已授权重建测试数据，生产环境不能直接删除状态。

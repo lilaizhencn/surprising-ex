@@ -95,7 +95,7 @@ public final class RuntimeStateQueryService {
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
+                order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),
                 order.updatedAtEpochMillis(), order.clusterPosition(), order.status().name(), order.revision());
         return OrderQueryResult.found(view, orderStateHash(order, identities.symbol(order.symbolId())));
     }
@@ -176,6 +176,8 @@ public final class RuntimeStateQueryService {
         hash = CoreStateHash.mix(hash, order.makerFeeRatePpm());
         hash = CoreStateHash.mix(hash, order.takerFeeRatePpm());
         hash = CoreStateHash.mix(hash, order.cumulativeFeeUnits());
+        hash = CoreStateHash.mix(hash, order.executedValueHigh());
+        hash = CoreStateHash.mix(hash, order.executedValueLow());
         hash = CoreStateHash.mix(hash, order.createdAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.updatedAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.clusterPosition());

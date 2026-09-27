@@ -42,7 +42,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 34;
+    private static final int VERSION = 35;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -112,6 +112,8 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.makerFeeRatePpm());
             writer.longValue(order.takerFeeRatePpm());
             writer.longValue(order.cumulativeFeeUnits());
+            writer.longValue(order.executedValueHigh());
+            writer.longValue(order.executedValueLow());
             writer.longValue(order.createdAtEpochMillis());
             writer.longValue(order.updatedAtEpochMillis());
             writer.longValue(order.clusterPosition());
@@ -400,6 +402,8 @@ public final class TradingStateSnapshotCodec {
             long makerFeeRatePpm = reader.longValue();
             long takerFeeRatePpm = reader.longValue();
             long cumulativeFeeUnits = reader.longValue();
+            long valueHigh = reader.longValue();
+            long valueLow = reader.longValue();
             long createdAt = reader.nonNegativeLong("order created time");
             long updatedAt = reader.nonNegativeLong("order updated time");
             long clusterPosition = reader.nonNegativeLong("order cluster position");
@@ -412,7 +416,7 @@ public final class TradingStateSnapshotCodec {
                     priceTicks, matchingPriceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
                     orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
                     clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                    cumulativeFeeUnits, createdAt, updatedAt, clusterPosition,
+                    cumulativeFeeUnits, valueHigh, valueLow, createdAt, updatedAt, clusterPosition,
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }

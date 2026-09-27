@@ -30,4 +30,26 @@ class OrderRuntimeTest {
         assertThat(before.status()).isEqualTo(CoreOrderStatus.OPEN);
         assertThat(before.revision()).isEqualTo(1);
     }
+
+    @Test
+    void creationTimeSurvivesPartialFillCancellationAndLanePublication() {
+        OrderRuntime order = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
+        order.applyFillInPlace(3, 7, 4, CoreOrderStatus.OPEN, 2, 110, 210);
+        order.executionValue(1, -1);
+        assertThat(order.createdAtEpochMillis()).isEqualTo(100);
+        assertThat(order.updatedAtEpochMillis()).isEqualTo(110);
+        order.applyStatusInPlace(CoreOrderStatus.CANCELED, 3, 120, 220);
+        assertThat(order.createdAtEpochMillis()).isEqualTo(100);
+        assertThat(order.updatedAtEpochMillis()).isEqualTo(120);
+        assertThat(order.cumulativeFeeUnits()).isEqualTo(4);
+        assertThat(order.snapshot().createdAtEpochMillis()).isEqualTo(100);
+        OrderRuntime copied = order.withCommitMetadata(130, 230);
+        assertThat(copied.createdAtEpochMillis()).isEqualTo(100);
+        assertThat(copied.updatedAtEpochMillis()).isEqualTo(130);
+        assertThat(copied.executedValueHigh()).isEqualTo(1);
+        assertThat(copied.executedValueLow()).isEqualTo(-1);
+        var stamped = order.snapshot().withCommitMetadata(140, 240);
+        assertThat(stamped.executedValueHigh()).isEqualTo(1);
+        assertThat(stamped.executedValueLow()).isEqualTo(-1);
+    }
 }

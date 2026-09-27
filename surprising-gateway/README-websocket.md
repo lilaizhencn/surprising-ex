@@ -189,3 +189,8 @@ mvn -pl :surprising-gateway -am spring-boot:run
 序号断档后重新获取全量基线，重连或重新订阅后重新接收首条快照。
 网关仅保留每个订阅连接最后成功入队的不可变盘口引用，退订和断线即删除；
 队列背压时断开连接，避免静默丢弃档位增量。不同产品线及交易对的基线独立。
+
+ORDER 与 `/api/v1/realtime/{productLine}/state` 的 `openOrders` 使用同一个
+`CoreOrderStateView`。新增 `executedValueTicks`（累计实际成交价 ticks × 成交 steps，字符串）、
+`averagePriceTicks`（数量加权平均 ticks，允许小数、无成交为空）、`cumulativeFeeUnits`（累计手续费）。
+这些是绝对值；客户端按订单 ID 和版本覆盖旧值，不把多次推送累加。创建时间不会随成交或撤单变更。

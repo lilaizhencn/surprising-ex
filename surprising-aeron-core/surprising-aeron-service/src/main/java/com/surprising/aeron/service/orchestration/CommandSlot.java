@@ -1155,6 +1155,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                     public long makerFeeRatePpm() { return value().makerFeeRatePpm(); }
                     public long takerFeeRatePpm() { return value().takerFeeRatePpm(); }
                     public long cumulativeFeeUnits() { return value().cumulativeFeeUnits(); }
+        public long executedValueHigh() { return value().executedValueHigh(); }
+        public long executedValueLow() { return value().executedValueLow(); }
                     public long createdAtEpochMillis() { return value().createdAtEpochMillis(); }
                     public long updatedAtEpochMillis() { return value().updatedAtEpochMillis(); }
                     public long clusterPosition() { return value().clusterPosition(); }

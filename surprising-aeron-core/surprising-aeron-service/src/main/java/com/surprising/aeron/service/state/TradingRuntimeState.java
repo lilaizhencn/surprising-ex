@@ -3405,6 +3405,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Matcher/Lane hot path: mutate execution counters and publish one after-image. */
     OrderRuntime updateOrderInLane(long orderId, long executed, long remaining, long feeUnits,
+                                   long executedValueHigh, long executedValueLow,
                                    CoreOrderStatus status, long revision,
                                    long commitTimestamp, long commitPosition) {
         AccountLaneState lane = laneCommandScope.get();
@@ -3413,6 +3414,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         OrderRuntime order = lane.updateOrderInPlace(orderId, executed, remaining, feeUnits,
                 status, revision, commitTimestamp, commitPosition);
+        order.executionValue(executedValueHigh, executedValueLow);
         publishOrder(orderId, order);
         return order;
     }

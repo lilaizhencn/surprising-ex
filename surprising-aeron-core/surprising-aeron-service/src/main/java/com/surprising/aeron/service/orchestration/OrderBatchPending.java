@@ -140,6 +140,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public long makerFeeRatePpm() { return responseItem.resultOrder.makerFeeRatePpm(); }
     public long takerFeeRatePpm() { return responseItem.resultOrder.takerFeeRatePpm(); }
     public long cumulativeFeeUnits() { return responseItem.resultOrder.cumulativeFeeUnits(); }
+        public long executedValueHigh() { return responseItem.resultOrder.executedValueHigh(); }
+        public long executedValueLow() { return responseItem.resultOrder.executedValueLow(); }
     public long createdAtEpochMillis() { return responseItem.resultOrder.createdAtEpochMillis(); }
     public long updatedAtEpochMillis() { return responseItem.resultOrder.updatedAtEpochMillis(); }
     public long clusterPosition() { return responseItem.resultOrder.clusterPosition(); }

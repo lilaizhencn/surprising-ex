@@ -13,6 +13,20 @@ import org.junit.jupiter.api.Test;
 class CoreStateQueryCodecTest {
 
     @Test
+    void executionTotalsSurviveOrderAndOpenOrderEncoding() {
+        var order = new CoreOrderStateView(71, ProductLine.LINEAR_PERPETUAL, 7, "BTC-USDT-SWAP",
+                CoreOrderSide.BUY, 120, 4, 3, 1, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                "partial", new UUID(0, 71), 0, 20, 7, 0, 310, 100, 110, 99, "OPEN", 2);
+        var decoded = CoreStateQueryCodec.decodeOrderState(CoreStateQueryCodec.encodeOrderState(order));
+        assertThat(decoded).isEqualTo(order);
+        assertThat(decoded.getExecutedValueTicks()).isEqualTo("310");
+        assertThat(decoded.getAveragePriceTicks()).isEqualTo("103.333333333333333333");
+        assertThat(CoreStateQueryCodec.decodeOpenOrders(CoreStateQueryCodec.encodeOpenOrders(
+                new CoreOpenOrdersView(List.of(order)))).orders()).containsExactly(order);
+    }
+
+    @Test
     void roundTripsStateHashAsExplicitQueryPayload() {
         long stateHash = 0x8877665544332211L;
         assertThat(CoreStateQueryCodec.decodeStateHash(CoreStateQueryCodec.encodeStateHash(stateHash)))

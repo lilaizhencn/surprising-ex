@@ -479,6 +479,8 @@ final class CommandResultBuilder {
         public long makerFeeRatePpm() { return order.makerFeeRatePpm(); }
         public long takerFeeRatePpm() { return order.takerFeeRatePpm(); }
         public long cumulativeFeeUnits() { return order.cumulativeFeeUnits(); }
+        public long executedValueHigh() { return order.executedValueHigh(); }
+        public long executedValueLow() { return order.executedValueLow(); }
         public long createdAtEpochMillis() { return order.createdAtEpochMillis(); }
         public long updatedAtEpochMillis() { return order.updatedAtEpochMillis(); }
         public long clusterPosition() { return order.clusterPosition(); }

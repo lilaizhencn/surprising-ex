@@ -96,6 +96,7 @@ public final class RuntimeDerivativeFillCalculator {
         private boolean hasPosition;
         private long available, locked, quantity, entryPrice, entryValue, realizedPnl, margin;
         private long executed, remaining, cumulativeFee, orderRevision, consumed, fills;
+        private long executedValueHigh, executedValueLow;
         private long timestamp, clusterPosition;
         private long feeTreasuryUnits, clearingTreasuryUnits;
         private long positionKey, leveragePpm;
@@ -116,6 +117,7 @@ public final class RuntimeDerivativeFillCalculator {
             realizedPnl = current == null ? 0 : current.realizedPnlUnits();
             margin = current == null ? 0 : current.positionMarginUnits();
             executed = order.executedQuantitySteps(); remaining = order.remainingQuantitySteps();
+            executedValueHigh = order.executedValueHigh(); executedValueLow = order.executedValueLow();
             cumulativeFee = order.cumulativeFeeUnits(); orderRevision = order.revision();
             consumed = reservation.consumedUnits(); fills = 0;
         }
@@ -141,8 +143,8 @@ public final class RuntimeDerivativeFillCalculator {
             return new OrderRuntime(o.orderId(), o.productLine(), o.userId(), o.symbolId(), o.instrument(),
                     o.side(), o.priceTicks(), o.matchingPriceTicks(), o.quantitySteps(), executed, remaining,
                     o.reduceOnly(), o.marginMode(), o.positionSide(), o.orderType(), o.timeInForce(), o.postOnly(),
-                    o.clientOrderId(), o.commandId(), o.makerFeeRatePpm(), o.takerFeeRatePpm(), cumulativeFee,
-                    timestamp < 0 ? o.createdAtEpochMillis() : timestamp,
+                    o.clientOrderId(), o.commandId(), o.makerFeeRatePpm(), o.takerFeeRatePpm(), cumulativeFee, executedValueHigh, executedValueLow,
+                    o.createdAtEpochMillis() == 0 && timestamp >= 0 ? timestamp : o.createdAtEpochMillis(),
                     timestamp < 0 ? o.updatedAtEpochMillis() : timestamp,
                     timestamp < 0 ? o.clusterPosition() : clusterPosition,
                     remaining == 0 ? CoreOrderStatus.FILLED : o.status(), orderRevision);
@@ -171,7 +173,7 @@ public final class RuntimeDerivativeFillCalculator {
                         originalOrder.instrument(), quantity, entryPrice, entryValue,
                         realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
                 OrderRuntime nextOrder = runtime.updateOrderInLane(originalOrder.orderId(), executed, remaining,
-                        feeDelta, nextStatus, orderRevision, timestamp, clusterPosition);
+                        feeDelta, executedValueHigh, executedValueLow, nextStatus, orderRevision, timestamp, clusterPosition);
                 if (treasury != null) {
                     treasury.addFee(settleAssetId, feeTreasuryUnits);
                     treasury.addClearing(settleAssetId, clearingTreasuryUnits);
@@ -378,6 +380,10 @@ public final class RuntimeDerivativeFillCalculator {
         state.realizedPnl = nextRealizedPnl; state.margin = nextMargin; state.hasPosition = true;
         state.executed = nextExecuted; state.remaining = nextRemaining; state.cumulativeFee = nextFee;
         state.orderRevision = nextRevision; state.consumed = nextConsumed;
+        state.executedValueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(
+                state.executedValueHigh, state.executedValueLow, fillPriceTicks, fillQuantitySteps);
+        state.executedValueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(
+                state.executedValueLow, fillPriceTicks, fillQuantitySteps);
         state.fills = Math.incrementExact(state.fills);
         state.timestamp = commitTimestamp; state.clusterPosition = commitPosition;
         state.feeTreasuryUnits = Math.negateExact(feeDelta);

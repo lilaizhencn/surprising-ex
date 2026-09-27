@@ -216,7 +216,8 @@ public class AeronOrderProjectionRepository {
                 view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),
                 PositionSide.valueOf(view.positionSide().name()), view.makerFeeRatePpm(), view.takerFeeRatePpm(),
                 view.reduceOnly(), view.postOnly(), status, null,
-                Instant.ofEpochMilli(view.createdAtEpochMillis()), Instant.ofEpochMilli(view.updatedAtEpochMillis()));
+                Instant.ofEpochMilli(view.createdAtEpochMillis()), Instant.ofEpochMilli(view.updatedAtEpochMillis()),
+                view.cumulativeFeeUnits(), view.getExecutedValueTicks(), view.getAveragePriceTicks());
     }
 
     private static String emptyToNull(String value) {

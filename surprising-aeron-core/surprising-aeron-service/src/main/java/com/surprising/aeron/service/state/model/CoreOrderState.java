@@ -32,11 +32,43 @@ public record CoreOrderState(
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         long cumulativeFeeUnits,
+        long executedValueHigh,
+        long executedValueLow,
         long createdAtEpochMillis,
         long updatedAtEpochMillis,
         long clusterPosition,
         CoreOrderStatus status,
         long revision) {
+    public CoreOrderState(
+        long orderId,
+        ProductLine productLine,
+        long userId,
+        String symbol,
+        CoreOrderSide side,
+        long priceTicks,
+        long matchingPriceTicks,
+        long quantitySteps,
+        long executedQuantitySteps,
+        long remainingQuantitySteps,
+        boolean reduceOnly,
+        CoreMarginMode marginMode,
+        CorePositionSide positionSide,
+        CoreOrderType orderType,
+        CoreTimeInForce timeInForce,
+        boolean postOnly,
+        String clientOrderId,
+        UUID commandId,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long cumulativeFeeUnits,
+        long createdAtEpochMillis,
+        long updatedAtEpochMillis,
+        long clusterPosition,
+        CoreOrderStatus status,
+        long revision) {
+        this(orderId, productLine, userId, symbol, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+
 
     public CoreOrderState {
         if (orderId <= 0 || productLine == null || userId <= 0
@@ -137,7 +169,7 @@ public record CoreOrderState(
                 side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
+                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 CoreOrderStatus.CANCELED,
                 Math.incrementExact(revision));
     }
@@ -150,7 +182,7 @@ public record CoreOrderState(
                 side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
+                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 CoreOrderStatus.REJECTED,
                 Math.incrementExact(revision));
     }
@@ -184,7 +216,7 @@ public record CoreOrderState(
                 side, newPriceTicks, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
                 clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
+                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 status, Math.incrementExact(revision));
     }
 
@@ -193,7 +225,8 @@ public record CoreOrderState(
                 matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
+                cumulativeFeeUnits, executedValueHigh, executedValueLow,
+                createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
                 timestamp, position, status, revision);
     }
 }

@@ -127,3 +127,14 @@ Binance 现货指数流使用官方 `wss://stream.binance.com:443/ws`。本机�
 ### 本地前端运行模式
 
 启动器将前端复制到运行目录，先 `npm run build`，成功后启动 Vite preview 提供生产资源及本地 API/WS 代理。生产构建避免高频行情下 React 开发模式逐组件调试记录占满浏览器主线程；构建失败直接停止启动流程，日志为 `logs/frontend-build.log`。前端源代码修改后需重新构建发布，现有标签页刷新后加载新版本。六个 Java 服务不受此模式调整影响。
+
+### 20 个持续报价市场的风险扫描预算
+
+`local-perpetual.sh` 默认设置 `RISK_SCAN_BATCH_SIZE=4096`，启动后由
+`ClusterInstrumentSeedMain --risk-scan-only` 读取现有控制版本并更新有界扫描预算，保留开关和扫描间隔。
+可在统一 `local.env` 中显式设置 1–4096。实测默认 64 时，持续订单/标记价更新可能使分段用户扫描
+反复失效，风险价格序列长时间不前进；4096 下本地 20 市场的价格序列和浮盈亏持续更新。
+这属于本地工作负载配置，不修改各产品线资金计算和默认生产风险控制。
+
+更新 jar 前先 `scripts/local-perpetual.sh down`，构建成功后再 `up`；不要覆盖运行中 JVM 正在读取的 jar。
+订单状态格式升级必须同时更新六个服务，不能单独替换 Gateway 或 Core。

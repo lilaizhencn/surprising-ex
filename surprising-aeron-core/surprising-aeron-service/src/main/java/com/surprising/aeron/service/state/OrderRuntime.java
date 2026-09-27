@@ -42,6 +42,8 @@ public final class OrderRuntime {
     private final long makerFeeRatePpm;
     private final long takerFeeRatePpm;
     private long cumulativeFeeUnits;
+    private long executedValueHigh;
+    private long executedValueLow;
     private long createdAtEpochMillis;
     private long updatedAtEpochMillis;
     private long clusterPosition;
@@ -57,6 +59,18 @@ public final class OrderRuntime {
                         CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId,
                         UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                         long cumulativeFeeUnits, long createdAtEpochMillis, long updatedAtEpochMillis,
+                        long clusterPosition, CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+
+    public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
+                        CoreInstrument instrument, CoreOrderSide side, long priceTicks,
+                        long matchingPriceTicks, long quantitySteps, long executedQuantitySteps,
+                        long remainingQuantitySteps, boolean reduceOnly, CoreMarginMode marginMode,
+                        CorePositionSide positionSide, CoreOrderType orderType,
+                        CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId,
+                        UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
+                        long cumulativeFeeUnits, long executedValueHigh, long executedValueLow, long createdAtEpochMillis, long updatedAtEpochMillis,
                         long clusterPosition, CoreOrderStatus status, long revision) {
         if (orderId <= 0 || productLine == null || userId <= 0 || symbolId < 0 || instrument == null
                 || side == null || priceTicks < 0 || matchingPriceTicks < 0
@@ -92,6 +106,8 @@ public final class OrderRuntime {
         this.makerFeeRatePpm = makerFeeRatePpm;
         this.takerFeeRatePpm = takerFeeRatePpm;
         this.cumulativeFeeUnits = cumulativeFeeUnits;
+        this.executedValueHigh = executedValueHigh;
+        this.executedValueLow = executedValueLow;
         this.createdAtEpochMillis = createdAtEpochMillis;
         this.updatedAtEpochMillis = updatedAtEpochMillis;
         this.clusterPosition = clusterPosition;
@@ -107,12 +123,12 @@ public final class OrderRuntime {
                          CorePositionSide positionSide, CoreOrderType orderType,
                          CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId,
                          UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
-                         long cumulativeFeeUnits, long createdAtEpochMillis, long updatedAtEpochMillis,
+                         long cumulativeFeeUnits, long executedValueHigh, long executedValueLow, long createdAtEpochMillis, long updatedAtEpochMillis,
                          long clusterPosition, CoreOrderStatus status, long revision, boolean mutable) {
         this(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
-                commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, createdAtEpochMillis,
+                commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis,
                 updatedAtEpochMillis, clusterPosition, status, revision);
         // The delegating constructor initializes all value fields and defaults to a mutable
         // Lane value.  Only snapshot() uses false; this flag is publication metadata.
@@ -196,6 +212,8 @@ public final class OrderRuntime {
     public long makerFeeRatePpm() { return makerFeeRatePpm; }
     public long takerFeeRatePpm() { return takerFeeRatePpm; }
     public long cumulativeFeeUnits() { return cumulativeFeeUnits; }
+    public long executedValueHigh() { return executedValueHigh; }
+    public long executedValueLow() { return executedValueLow; }
     public long createdAtEpochMillis() { return createdAtEpochMillis; }
     public long updatedAtEpochMillis() { return updatedAtEpochMillis; }
     public long clusterPosition() { return clusterPosition; }
@@ -210,7 +228,7 @@ public final class OrderRuntime {
                 priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
                 remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
+                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 status, revision, false);
     }
 
@@ -222,14 +240,14 @@ public final class OrderRuntime {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
                 priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis,
+                makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
                 clusterPosition, status, revision);
     }
 
     OrderRuntime publicationValue() { return mutable ? snapshot() : this; }
 
     void applyPublishedStateInPlace(OrderRuntime source, long executed, long remaining,
-                                    long cumulativeFee, long createdAt, long updatedAt,
+                                    long cumulativeFee, long valueHigh, long valueLow, long createdAt, long updatedAt,
                                     long position, CoreOrderStatus publishedStatus,
                                     long publishedRevision) {
         if (source == null || orderId != source.orderId || instrument != source.instrument
@@ -241,6 +259,8 @@ public final class OrderRuntime {
         executedQuantitySteps = executed;
         remainingQuantitySteps = remaining;
         cumulativeFeeUnits = cumulativeFee;
+        executedValueHigh = valueHigh;
+        executedValueLow = valueLow;
         createdAtEpochMillis = createdAt;
         updatedAtEpochMillis = updatedAt;
         clusterPosition = position;
@@ -261,7 +281,7 @@ public final class OrderRuntime {
         remainingQuantitySteps = remaining;
         cumulativeFeeUnits = Math.addExact(cumulativeFeeUnits, feeUnits);
         if (commitTimestamp >= 0) {
-            createdAtEpochMillis = commitTimestamp;
+            if (createdAtEpochMillis == 0) createdAtEpochMillis = commitTimestamp;
             updatedAtEpochMillis = commitTimestamp;
             clusterPosition = commitPosition;
         }
@@ -277,16 +297,28 @@ public final class OrderRuntime {
 
     void applyCommitMetadataInPlace(long timestamp, long position) {
         if (timestamp < 0 || position < 0) throw new IllegalArgumentException("invalid runtime order metadata");
-        createdAtEpochMillis = timestamp;
+        if (createdAtEpochMillis == 0) createdAtEpochMillis = timestamp;
         updatedAtEpochMillis = timestamp;
         clusterPosition = position;
+    }
+
+    void executionValue(long high, long low) {
+        if (high < -1) throw new IllegalArgumentException("invalid execution value");
+        executedValueHigh = high;
+        executedValueLow = low;
+    }
+
+    OrderRuntime withExecutionValue(long high, long low) {
+        OrderRuntime copy = mutableCopy();
+        copy.executionValue(high, low);
+        return copy;
     }
 
     public OrderRuntime withExecution(long executed, long remaining, CoreOrderStatus nextStatus, long nextRevision) {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
-                takerFeeRatePpm, cumulativeFeeUnits, createdAtEpochMillis, updatedAtEpochMillis,
+                takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
                 clusterPosition, nextStatus, nextRevision);
     }
 
@@ -301,8 +333,8 @@ public final class OrderRuntime {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
                 priceTicks, matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, Math.addExact(cumulativeFeeUnits, feeUnits),
-                commitTimestamp < 0 ? createdAtEpochMillis : commitTimestamp,
+                makerFeeRatePpm, takerFeeRatePpm, Math.addExact(cumulativeFeeUnits, feeUnits), executedValueHigh, executedValueLow,
+                createdAtEpochMillis == 0 && commitTimestamp >= 0 ? commitTimestamp : createdAtEpochMillis,
                 commitTimestamp < 0 ? updatedAtEpochMillis : commitTimestamp,
                 commitTimestamp < 0 ? clusterPosition : commitPosition, nextStatus, nextRevision);
     }
@@ -322,7 +354,8 @@ public final class OrderRuntime {
                 priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
                 remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, timestamp, timestamp, position, status, revision);
+                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
+                timestamp, position, status, revision);
     }
 
     @Override
@@ -336,6 +369,7 @@ public final class OrderRuntime {
                 && remainingQuantitySteps == value.remainingQuantitySteps && reduceOnly == value.reduceOnly
                 && postOnly == value.postOnly && makerFeeRatePpm == value.makerFeeRatePpm
                 && takerFeeRatePpm == value.takerFeeRatePpm && cumulativeFeeUnits == value.cumulativeFeeUnits
+                && executedValueHigh == value.executedValueHigh && executedValueLow == value.executedValueLow
                 && createdAtEpochMillis == value.createdAtEpochMillis && updatedAtEpochMillis == value.updatedAtEpochMillis
                 && clusterPosition == value.clusterPosition && revision == value.revision
                 && productLine == value.productLine && side == value.side && marginMode == value.marginMode
@@ -349,7 +383,7 @@ public final class OrderRuntime {
         return Objects.hash(orderId, productLine, userId, symbolId, System.identityHashCode(instrument), side, priceTicks,
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
-                commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, createdAtEpochMillis,
+                commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis,
                 updatedAtEpochMillis, clusterPosition, status, revision);
     }
 

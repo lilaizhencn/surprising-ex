@@ -25,6 +25,8 @@ public interface CoreOrderStateSource {
     long makerFeeRatePpm();
     long takerFeeRatePpm();
     long cumulativeFeeUnits();
+    long executedValueHigh();
+    long executedValueLow();
     long createdAtEpochMillis();
     long updatedAtEpochMillis();
     long clusterPosition();

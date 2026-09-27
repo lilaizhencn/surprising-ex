@@ -36,6 +36,9 @@ fi
 set -a
 source "$CONFIG"
 set +a
+# Twenty continuously quoted markets need enough bounded work to finish a user scan
+# before the next mark/order revision invalidates its partial calculation.
+export RISK_SCAN_BATCH_SIZE="${RISK_SCAN_BATCH_SIZE:-4096}"
 export JAVA_HOME="${JAVA_HOME:-$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^    java.home = /{print $2; exit}')}"
 export PATH="$JAVA_HOME/bin:$PATH"
 # Homebrew keeps PostgreSQL keg-only. Other installations can supply PATH.
@@ -249,6 +252,12 @@ KAFKA
     cp "$jar" "$ARTIFACT_ROOT/$relative"
   done < <(find "$ROOT" -path '*/target/*.jar' -not -path '*/target/*/*' -type f)
   backend up
+  PRODUCT_LINE=LINEAR_PERPETUAL AERON_HOSTNAMES=127.0.0.1 AERON_EGRESS_HOSTNAME=127.0.0.1 \
+    "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+    --add-opens java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
+    -cp "$ARTIFACT_ROOT/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar" \
+    com.surprising.aeron.tools.instrument.ClusterInstrumentSeedMain --risk-scan-only \
+    > "$LOCAL_DIR/logs/risk-scan-configuration.log" 2>&1
 fi
 # Test funds are limited to this launcher-owned database and use idempotent references.
 if [[ "${MANAGE_POSTGRES:-false}" == true && ! -f "$LOCAL_DIR/maker-funded" ]]; then

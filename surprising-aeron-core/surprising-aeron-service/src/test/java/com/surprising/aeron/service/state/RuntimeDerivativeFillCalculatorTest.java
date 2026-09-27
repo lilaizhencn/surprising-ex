@@ -51,6 +51,10 @@ class RuntimeDerivativeFillCalculatorTest {
             assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).isEqualTo(RuntimeSnapshotBuilder.capture(sequential, 1));
             assertThat(batched.position(key).signedQuantitySteps()).isEqualTo(-2);
             assertThat(batched.order(11).revision()).isEqualTo(5);
+            assertThat(batched.order(11).executedValueHigh()).isZero();
+            assertThat(batched.order(11).executedValueLow()).isEqualTo(440);
+            assertThat(com.surprising.aeron.protocol.OrderExecutionValue.average(
+                    batched.order(11).executedValueHigh(), batched.order(11).executedValueLow(), 4)).isEqualTo("110");
             assertThat(batched.user(7).revision()).isEqualTo(4);
         }
     }

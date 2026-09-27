@@ -252,16 +252,18 @@ public final class RuntimeSpotMatchProcessor {
         long nextRevision = Math.incrementExact(order.revision());
         replaceBalance(runtime, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
         replaceBalance(runtime, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
+        long valueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(order.executedValueHigh(), order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
+        long valueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
         OrderRuntime nextOrder;
         if (runtime.laneCommandScope.get() != null && runtime.matcherSettlementChangesScope.get() != null) {
             runtime.updateReservationInLane(order.orderId(),
                     Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
             nextOrder = runtime.updateOrderInLane(order.orderId(), nextExecuted, nextRemaining,
-                    Math.negateExact(feeDelta), nextStatus, nextRevision, commitTimestamp, commitPosition);
+                    Math.negateExact(feeDelta), valueHigh, valueLow, nextStatus, nextRevision, commitTimestamp, commitPosition);
         } else {
             ReservationRuntime nextReservation = reservation.consume(reservationDebit);
             nextOrder = order.withFill(nextExecuted, nextRemaining, Math.negateExact(feeDelta), nextStatus,
-                    nextRevision, commitTimestamp, commitPosition);
+                    nextRevision, commitTimestamp, commitPosition).withExecutionValue(valueHigh, valueLow);
             runtime.replaceReservation(nextReservation);
             runtime.replaceOrder(nextOrder);
         }
@@ -379,6 +381,7 @@ public final class RuntimeSpotMatchProcessor {
             private long executed;
             private long remaining;
             private long cumulativeFee;
+            private long executedValueHigh, executedValueLow;
             private long consumed;
             private long fills;
 
@@ -391,6 +394,7 @@ public final class RuntimeSpotMatchProcessor {
                 executed = order.executedQuantitySteps();
                 remaining = order.remainingQuantitySteps();
                 cumulativeFee = order.cumulativeFeeUnits();
+                executedValueHigh = order.executedValueHigh(); executedValueLow = order.executedValueLow();
                 consumed = reservation.consumedUnits();
                 fills = 0;
             }
@@ -429,6 +433,8 @@ public final class RuntimeSpotMatchProcessor {
                 executed = Math.addExact(executed, quantity);
                 remaining = Math.subtractExact(remaining, quantity);
                 cumulativeFee = Math.addExact(cumulativeFee, Math.negateExact(feeDelta));
+                executedValueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(executedValueHigh, executedValueLow, price, quantity);
+                executedValueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(executedValueLow, price, quantity);
                 fills = Math.incrementExact(fills);
                 treasury.addFee(quoteAssetId, Math.negateExact(feeDelta));
             }
@@ -440,7 +446,7 @@ public final class RuntimeSpotMatchProcessor {
                 if (state.laneCommandScope.get() != null && state.matcherSettlementChangesScope.get() != null) {
                     state.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
                     OrderRuntime nextOrder = state.updateOrderInLane(originalOrder.orderId(), executed, remaining,
-                            feeDelta, status, Math.addExact(originalOrder.revision(), fills),
+                            feeDelta, executedValueHigh, executedValueLow, status, Math.addExact(originalOrder.revision(), fills),
                             commitTimestamp, commitPosition);
                     state.advanceUserRevision(originalOrder.userId(), fills);
                     if (nextOrder.canceled()) {
@@ -456,7 +462,7 @@ public final class RuntimeSpotMatchProcessor {
                         originalReservation.kind(), originalReservation.assetId(), originalReservation.totalReservedUnits(),
                         originalReservation.releasedUnits(), consumed, originalReservation.orderQuantitySteps());
                 OrderRuntime nextOrder = originalOrder.withFill(executed, remaining, feeDelta, status,
-                        Math.addExact(originalOrder.revision(), fills), commitTimestamp, commitPosition);
+                        Math.addExact(originalOrder.revision(), fills), commitTimestamp, commitPosition).withExecutionValue(executedValueHigh, executedValueLow);
                 state.replaceReservation(nextReservation);
                 state.replaceOrder(nextOrder);
                 state.advanceUserRevision(originalOrder.userId(), fills);

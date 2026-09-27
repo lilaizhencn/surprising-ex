@@ -23,7 +23,35 @@ public record OrderResponse(
         OrderStatus status,
         String rejectReason,
         Instant createdAt,
-        Instant updatedAt) implements OrderCommandResult {
+        Instant updatedAt,
+        long cumulativeFeeUnits,
+        String executedValueTicks,
+        String averagePriceTicks) implements OrderCommandResult {
+
+    public OrderResponse(
+        long orderId,
+        long userId,
+        String clientOrderId,
+        String symbol,
+        OrderSide side,
+        OrderType orderType,
+        TimeInForce timeInForce,
+        long priceTicks,
+        long quantitySteps,
+        long executedQuantitySteps,
+        long remainingQuantitySteps,
+        MarginMode marginMode,
+        PositionSide positionSide,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        boolean reduceOnly,
+        boolean postOnly,
+        OrderStatus status,
+        String rejectReason,
+        Instant createdAt,
+        Instant updatedAt) {
+        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, positionSide, makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt, 0, null, null);
+    }
 
     public OrderResponse {
         marginMode = MarginMode.defaultIfNull(marginMode);
