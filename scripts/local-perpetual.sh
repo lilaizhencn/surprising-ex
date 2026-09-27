@@ -250,6 +250,13 @@ if [[ "${MANAGE_POSTGRES:-false}" == true && ! -f "$LOCAL_DIR/maker-funded" ]]; 
   done
   touch "$LOCAL_DIR/maker-funded"
 fi
+# One-time simulated taker fee budget; never replenish based on trading losses.
+if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" == true && ! -f "$LOCAL_DIR/taker-fee-budget-funded" ]]; then
+  curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
+    -d '{"userId":910001,"asset":"USDT","amountUnits":90000000000000,"referenceId":"local-taker-fee-budget-910001","reason":"LOCAL DEMO simulated taker fee budget"}' \
+    http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/taker-fee-budget.json"
+  touch "$LOCAL_DIR/taker-fee-budget-funded"
+fi
 if ! alive frontend; then
   free_port "$FRONTEND_PORT"
   mkdir -p "$LOCAL_DIR/web"
