@@ -2,7 +2,7 @@
 # Persistent local U-margined perpetual environment; never deletes trading data.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCAL_DIR="${LOCAL_PERPETUAL_DIR:-$HOME/.local/share/surprising-ex/perpetual-20}"
+LOCAL_DIR="${LOCAL_PERPETUAL_DIR:-$HOME/.local/share/surprising-ex/perpetual-pmm-20}"
 CONFIG="${LOCAL_PERPETUAL_CONFIG:-$LOCAL_DIR/local.env}"
 ACTION="${1:-up}"
 fail() { echo "ERROR: $*" >&2; exit 1; }
@@ -46,10 +46,11 @@ export ARTIFACT_ROOT="$LOCAL_DIR/artifacts"
 export RUNTIME_ROOT="$LOCAL_DIR/runtime" RUN_ID=local-perpetual POSTGRES_MODE=native
 export CORE_AERON_BASE_DIR="$LOCAL_DIR/core-driver" APP_AERON_DIR="$LOCAL_DIR/app-driver"
 export GATEWAY_PRODUCT_TRANSFER_ENABLED=false
+export LOCAL_SIMULATED_TRADES_ENABLED="${LOCAL_SIMULATED_TRADES_ENABLED:-${MANAGE_POSTGRES:-false}}"
 export PRICE_CONSUMER_REQUIRED_SYMBOLS="${PRICE_CONSUMER_REQUIRED_SYMBOLS:-$(paste -sd, "$ROOT/deployment/local-perpetual/symbols.txt")}"
-export MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-1}"
-export MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-2}"
-export MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL="${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:-4}"
+export MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-1000}"
+export MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-50}"
+export MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL="${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:-100}"
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 backend() { "$ROOT/scripts/linear-perpetual-single-node.sh" "$@"; }
 label() { printf 'com.surprising.local-perpetual.%s' "$1"; }
@@ -242,7 +243,7 @@ KAFKA
 fi
 # Test funds are limited to this launcher-owned database and use idempotent references.
 if [[ "${MANAGE_POSTGRES:-false}" == true && ! -f "$LOCAL_DIR/maker-funded" ]]; then
-  for user_id in 900001 900002; do
+  for user_id in {900101..900120} 910001; do
     curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
       -d "{\"userId\":$user_id,\"asset\":\"USDT\",\"amountUnits\":10000000000000,\"referenceId\":\"local-maker-initial-$user_id\",\"reason\":\"LOCAL DEMO test funds\"}" \
       http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/maker-$user_id-initial.json"

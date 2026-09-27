@@ -23,6 +23,8 @@ def get(path):
 def check(symbol):
     try:
         query = urllib.parse.urlencode({"symbol": symbol})
+        instrument = get("/api/v1/gateway/instrument/latest?" + query)
+        assert int(instrument["priceTickUnits"]) * int(instrument["contractMultiplierPpm"]) == int(instrument["notionalMultiplierUnits"]) * 1000000, "contract quantity differs from Core notional math"
         index = get("/api/v1/gateway/price-index/latest?" + query)
         mark = get("/api/v1/gateway/price-mark/latest?" + query)
         book = get("/api/v1/gateway/trading-market/orderbook?depth=5&" + query)

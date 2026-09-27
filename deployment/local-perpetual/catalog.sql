@@ -7,6 +7,7 @@ DO $$ BEGIN
 IF (SELECT count(*) FROM instruments i JOIN local_symbols s USING(symbol) WHERE product_line='LINEAR_PERPETUAL') <> 20
 THEN RAISE EXCEPTION 'Local perpetual catalog must contain exactly 20 instruments'; END IF;
 END $$;
+UPDATE instruments SET status='PRE_TRADING' WHERE product_line='LINEAR_PERPETUAL' AND symbol NOT IN (SELECT symbol FROM local_symbols);
 UPDATE instrument_index_sources SET enabled=false WHERE product_line='LINEAR_PERPETUAL';
 UPDATE instrument_index_sources SET enabled=true WHERE product_line='LINEAR_PERPETUAL' AND symbol IN (SELECT symbol FROM local_symbols);
 INSERT INTO instrument_index_sources (
@@ -43,6 +44,7 @@ WITH subscription AS (
 UPDATE instrument_index_sources s SET websocket_subscribe_message=b.message FROM subscription b
 WHERE s.product_line='LINEAR_PERPETUAL' AND s.source='OKX' AND s.enabled;
 UPDATE instruments i SET
+ contract_multiplier_ppm=(1000000 / power(10::numeric,i.quantity_precision))::bigint,
  price_tick_units=(q.scale_units / power(10::numeric,i.price_precision))::bigint,
  quantity_step_units=(b.scale_units / power(10::numeric,i.quantity_precision))::bigint,
  notional_multiplier_units=(q.scale_units / power(10::numeric,i.price_precision+i.quantity_precision))::bigint,
@@ -50,6 +52,13 @@ UPDATE instruments i SET
 FROM account_asset_scales q,account_asset_scales b
 WHERE i.product_line='LINEAR_PERPETUAL' AND i.symbol IN (SELECT symbol FROM local_symbols)
 AND q.asset=i.quote_asset AND b.asset=i.base_asset;
+-- A linear contract's displayed base quantity must equal the quantity used by Core notional math.
+DO $$ BEGIN
+IF EXISTS (SELECT 1 FROM instruments i JOIN local_symbols s USING(symbol)
+ WHERE product_line='LINEAR_PERPETUAL' AND (contract_multiplier_ppm <= 0 OR
+ price_tick_units::numeric * contract_multiplier_ppm <> notional_multiplier_units::numeric * 1000000))
+THEN RAISE EXCEPTION 'Local linear contract size does not match Core notional multiplier'; END IF;
+END $$;
 -- This is an initial catalog, not an in-place migration of live trading state.
 UPDATE instrument_change_log l SET after_values=(to_jsonb(i)-'change_id'-'last_change_id') || jsonb_build_object(
  'priceTickUnits',i.price_tick_units,'quantityStepUnits',i.quantity_step_units,'baseAsset',i.base_asset,'quoteAsset',i.quote_asset,
