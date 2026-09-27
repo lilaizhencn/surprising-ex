@@ -289,3 +289,12 @@ Valkey。临时 Map 由路由线程创建、只活到本次提交结束；下一
 
 Router 的控制及转发 Aeron 客户端也沿用默认 10 秒驱动超时（可由 `aeron.driver.timeout` 配置），
 与 Sender/Receiver 一致。驱动错误记录原因；真实 Driver 集成测试使用 1.5 秒心跳覆盖正常路由不误断连。
+
+### 空 Kafka 首次启动
+
+`CandlestickStreamConfiguration` 使用当前 `ProductLine` 的 `ProductTopicNames`，在 Streams
+启动前声明成交输入和 K 线事件两个 32 分区 topic；不依赖第一笔成交触发自动建 topic。
+`candleStreamsHealthIndicator` 仅在 Streams 为 `RUNNING` 时报告 UP，未启动、重平衡、
+错误和关闭状态均报告 DOWN，避免 HTTP 已监听却不生成 K 线。启动器等待该健康状态后
+才启动后续服务。六产品线的 topic 隔离及全部 Streams 状态由
+`CandlestickStreamConfigurationTest` 验证；本机冷启动联调覆盖 U 本位永续。

@@ -62,6 +62,25 @@ public class CandlestickStreamConfiguration {
         return TopicBuilder.name(properties.getKafka().getCandleTopic()).partitions(32).build();
     }
 
+    // Streams must not depend on the first trade arriving to create its input topic.
+    @Bean
+    public NewTopic candleTradeSourceTopic(CandlestickProperties properties) {
+        return TopicBuilder.name(properties.getKafka().getTradeTopic()).partitions(32).build();
+    }
+
+    @Bean
+    public org.springframework.boot.health.contributor.HealthIndicator candleStreamsHealthIndicator(
+            org.springframework.kafka.config.StreamsBuilderFactoryBean factory) {
+        return () -> {
+            var streams = factory.getKafkaStreams();
+            var state = streams == null ? null : streams.state();
+            var health = state == org.apache.kafka.streams.KafkaStreams.State.RUNNING
+                    ? org.springframework.boot.health.contributor.Health.up()
+                    : org.springframework.boot.health.contributor.Health.down();
+            return health.withDetail("state", state == null ? "NOT_STARTED" : state.name()).build();
+        };
+    }
+
     /**
      * Shared Streams configuration for all nodes in the same deployment group.
      */
