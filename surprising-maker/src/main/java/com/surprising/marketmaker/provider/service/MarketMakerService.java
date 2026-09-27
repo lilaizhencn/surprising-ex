@@ -65,6 +65,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
+import java.util.random.RandomGenerator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -95,7 +96,6 @@ public class MarketMakerService {
     private final Map<String, AtomicBoolean> cycleLocks = new ConcurrentHashMap<>();
     private final Map<String, CachedOpenOrders> openOrderSnapshots = new ConcurrentHashMap<>();
     private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
-    private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
     private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
     private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
     private final String nodeId;
@@ -989,7 +989,6 @@ public class MarketMakerService {
         if (!trade.isEnabled()) {
             return false;
         }
-        String tradeKey = strategy.getProductLine().name() + ":" + strategy.getStrategyId() + ":" + symbol;
         long accountId = activeTradeAccount(strategy, cycleSequence);
         if (accountId <= 0) {
             return false;
@@ -998,28 +997,12 @@ public class MarketMakerService {
         OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                 properties.getQuoting().getOrderBookDepth());
         PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
-        OrderSide side = tradeSide(tradeKey, trade, instrument, orderBook, markPrice,
-                position.signedQuantitySteps());
-        if (side == null) {
-            return false;
-        }
-        TradeTarget target = tradeTarget(side, orderBook, trade.getSlippageTicks(), trade.getMaxSweepLevels());
-        long priceTicks = target.priceTicks();
-        long quantitySteps = tradeQuantity(instrument, trade, target.availableQuantitySteps());
-        if (priceTicks <= 0 || quantitySteps <= 0) {
-            return false;
-        }
-
-        if (!instrument.marketOrderEnabled()) return false;
-        int batchSize = (int) Math.min(trade.getOrdersPerBatch(), target.availableQuantitySteps() / quantitySteps);
-        if (batchSize > 1) return tradeBatch(strategy, symbol, accountId, cycleSequence, side, quantitySteps,
-                batchSize, tradeKey, state, traceId, now);
-        // Simulated takers use the current matching book. A limit copied before the position RPC
-        // often expires unfilled while the external-price maker has already moved its quotes.
-        PlaceOrderRequest request = new PlaceOrderRequest(accountId,
-                takerClientOrderId(strategy, symbol, accountId, cycleSequence),
-                symbol, side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps,
-                strategy.getMarginMode(), PositionSide.NET, false, false);
+        List<PlaceOrderRequest> requests = simulatedOrders(strategy, symbol, accountId, cycleSequence,
+                instrument, orderBook, markPrice, position.signedQuantitySteps(), ThreadLocalRandom.current());
+        if (requests.isEmpty()) return false;
+        if (requests.size() > 1) return tradeBatch(strategy, symbol, accountId, cycleSequence,
+                requests, state, traceId, now);
+        PlaceOrderRequest request = requests.getFirst();
         OrderCommandReceipt receipt = orderRpcApi.place(request);
         OrderResponse response = receiptResult(receipt, OrderResponse.class);
         if (response == null || response.status() == OrderStatus.REJECTED) {
@@ -1034,21 +1017,62 @@ public class MarketMakerService {
                     1, 0, 0, "NO_EXECUTION", null, traceId, now);
             return false;
         }
-        lastTradeSides.put(tradeKey, side);
         recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_EXECUTED",
                 1, 0, 0, null, null, traceId, now);
         return true;
     }
 
+    /** Build local simulated orders; each side reserves its own worst-case fill budget for this batch. */
+    List<PlaceOrderRequest> simulatedOrders(MarketMakerProperties.Strategy strategy, String symbol,
+                                           long accountId, long cycleSequence, InstrumentResponse instrument,
+                                           OrderBookSnapshotResponse book, MarkPriceResponse mark,
+                                           long position, RandomGenerator random) {
+        if (!instrument.marketOrderEnabled()) return List.of();
+        MarketMakerProperties.Trade trade = properties.getTrade();
+        long buyAvailable = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), random).availableQuantitySteps();
+        long sellAvailable = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), random).availableQuantitySteps();
+        long threshold = trade.getInventoryThresholdSteps();
+        if (threshold > 0) {
+            // Do not assume opposite-side orders fill: any subset of fills must respect the cap.
+            buyAvailable = Math.min(buyAvailable, position < -threshold ? Math.negateExact(position)
+                    : Math.max(0, Math.subtractExact(threshold, position)));
+            sellAvailable = Math.min(sellAvailable, position > threshold ? position
+                    : Math.max(0, Math.addExact(threshold, position)));
+        }
+        long minimum = Math.max(trade.getMinQuantitySteps(), instrument.minQuantitySteps());
+        long maximum = Math.min(trade.getMaxQuantitySteps(), instrument.maxQuantitySteps());
+        if (minimum <= 0 || maximum < minimum) return List.of();
+        List<PlaceOrderRequest> requests = new ArrayList<>(trade.getOrdersPerBatch());
+        for (int i = 0; i < trade.getOrdersPerBatch(); i++) {
+            boolean canBuy = buyAvailable >= minimum;
+            boolean canSell = sellAvailable >= minimum;
+            if (!canBuy && !canSell) break;
+            double buyProbability = 0.5;
+            if (threshold > 0) buyProbability -= 0.35 * Math.clamp((double) position / threshold, -1, 1);
+            long markTicks = markPriceTicks(instrument, mark);
+            long midTicks = midPriceTicks(book);
+            if (markTicks > 0 && midTicks > 0) buyProbability += 0.1 * Long.compare(markTicks, midTicks);
+            OrderSide side = !canSell || (canBuy && random.nextDouble() < buyProbability)
+                    ? OrderSide.BUY : OrderSide.SELL;
+            long available = side == OrderSide.BUY ? buyAvailable : sellAvailable;
+            long quantity = tradeQuantity(minimum, Math.min(maximum, available), random);
+            requests.add(new PlaceOrderRequest(accountId,
+                    takerClientOrderId(strategy, symbol, accountId, cycleSequence), symbol, side,
+                    OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(),
+                    PositionSide.NET, false, false));
+            if (side == OrderSide.BUY) buyAvailable -= quantity;
+            else sellAvailable -= quantity;
+        }
+        return requests;
+    }
+
     /** Submit ordinary simulated-user orders together; the core validates and settles every order. */
     private boolean tradeBatch(MarketMakerProperties.Strategy strategy, String symbol, long accountId,
-                               long cycleSequence, OrderSide side, long quantity, int count, String tradeKey,
+                               long cycleSequence, List<PlaceOrderRequest> requests,
                                StrategyRuntimeState state, String traceId, Instant now) {
-        List<PlaceOrderRequest> requests = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) requests.add(new PlaceOrderRequest(accountId,
-                takerClientOrderId(strategy, symbol, accountId, cycleSequence), symbol, side,
-                OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(), PositionSide.NET,
-                false, false));
+        int count = requests.size();
         OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
         OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
         if (response == null) throw new IllegalStateException(receiptMessage(receipt));
@@ -1073,7 +1097,6 @@ public class MarketMakerService {
                 executed > 0 ? "TRADE_EXECUTED" : missingOrderDetails > 0 ? "TRADE_SUBMITTED"
                         : accepted > 0 ? "TRADE_NO_FILL" : "TRADE_REJECTED", accepted, 0, count - accepted,
                 executed > 0 || missingOrderDetails > 0 ? null : "NO_EXECUTION", rejectionReason, traceId, now);
-        if (executed > 0 || missingOrderDetails > 0) lastTradeSides.put(tradeKey, side);
         return executed > 0 || missingOrderDetails > 0;
     }
 
@@ -1087,60 +1110,17 @@ public class MarketMakerService {
         return accountIds.get((int) Math.floorMod(cycleSequence, accountIds.size()));
     }
 
-    private OrderSide tradeSide(String tradeKey,
-                                MarketMakerProperties.Trade trade,
-                                InstrumentResponse instrument,
-                                OrderBookSnapshotResponse orderBook,
-                                MarkPriceResponse markPrice,
-                                long signedPositionSteps) {
-        boolean canBuy = bestAsk(orderBook) > 0;
-        boolean canSell = bestBid(orderBook) > 0;
-        if (!canBuy && !canSell) {
-            return null;
-        }
-        long inventoryThreshold = trade.getInventoryThresholdSteps();
-        if (inventoryThreshold > 0 && signedPositionSteps > inventoryThreshold && canSell) {
-            return OrderSide.SELL;
-        }
-        if (inventoryThreshold > 0 && signedPositionSteps < -inventoryThreshold && canBuy) {
-            return OrderSide.BUY;
-        }
-
-        long markTicks = markPriceTicks(instrument, markPrice);
-        long midTicks = midPriceTicks(orderBook);
-        if (markTicks > 0 && midTicks > 0) {
-            if (markTicks > midTicks && canBuy) {
-                return OrderSide.BUY;
-            }
-            if (markTicks < midTicks && canSell) {
-                return OrderSide.SELL;
-            }
-        }
-
-        OrderSide previous = lastTradeSides.get(tradeKey);
-        if (previous == OrderSide.BUY && canSell) {
-            return OrderSide.SELL;
-        }
-        if (previous == OrderSide.SELL && canBuy) {
-            return OrderSide.BUY;
-        }
-        if (canBuy && canSell) {
-            return ThreadLocalRandom.current().nextBoolean() ? OrderSide.BUY : OrderSide.SELL;
-        }
-        return canBuy ? OrderSide.BUY : OrderSide.SELL;
-    }
-
     private TradeTarget tradeTarget(OrderSide side,
                                     OrderBookSnapshotResponse orderBook,
                                     long slippageTicks,
-                                    int maxSweepLevels) {
+                                    int maxSweepLevels, RandomGenerator random) {
         List<OrderBookLevel> levels = side == OrderSide.BUY
                 ? orderBook == null ? List.of() : orderBook.asks()
                 : orderBook == null ? List.of() : orderBook.bids();
         if (levels == null || levels.isEmpty()) {
             return new TradeTarget(0L, 0L);
         }
-        int targetDistinctLevels = ThreadLocalRandom.current().nextInt(Math.max(1, maxSweepLevels)) + 1;
+        int targetDistinctLevels = random.nextInt(Math.max(1, maxSweepLevels)) + 1;
         long cumulativeQuantity = 0L;
         long targetPriceTicks = 0L;
         long previousPriceTicks = 0L;
@@ -1169,17 +1149,10 @@ public class MarketMakerService {
         return new TradeTarget(Math.max(1L, targetPriceTicks - slippage), cumulativeQuantity);
     }
 
-    private long tradeQuantity(InstrumentResponse instrument,
-                               MarketMakerProperties.Trade trade,
-                               long availableQuantity) {
-        long minQuantity = Math.max(trade.getMinQuantitySteps(),
-                instrument == null ? 1L : Math.max(1L, instrument.minQuantitySteps()));
-        long maxQuantity = Math.max(minQuantity, trade.getMaxQuantitySteps());
-        long upperBound = Math.min(maxQuantity, availableQuantity);
-        if (upperBound < minQuantity) {
-            return 0L;
-        }
-        return upperBound;
+    private long tradeQuantity(long minimum, long maximum, RandomGenerator random) {
+        // More small orders than large ones, always integer multiples of the instrument step.
+        long range = maximum - minimum + 1;
+        return minimum + Math.min(random.nextLong(range), random.nextLong(range));
     }
 
     private long markPriceTicks(InstrumentResponse instrument, MarkPriceResponse markPrice) {

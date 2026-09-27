@@ -60,6 +60,7 @@ public final class RealtimeWebSocketBridge
 
     @Override
     public synchronized void subscribed(SubscriptionTopic topic) {
+        if (topic.channel() == WsChannel.OPEN_INTEREST) return;
         if (!receiver.ready()) throw new IllegalStateException("realtime receiver unavailable");
         RealtimeRoute route = route(topic);
         long now = System.currentTimeMillis();
@@ -73,6 +74,7 @@ public final class RealtimeWebSocketBridge
 
     @Override
     public synchronized void unsubscribed(SubscriptionTopic topic) {
+        if (topic.channel() == WsChannel.OPEN_INTEREST) return;
         RealtimeRoute route = route(topic);
         Integer count = memberships.get(route);
         if (count == null) return;

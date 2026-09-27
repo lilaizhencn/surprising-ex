@@ -240,3 +240,13 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 ## 前端运行能力
 
 公开只读接口 `GET /api/v1/runtime` 返回当前整合网关实际服务的 `productLines`，来源为 `LocalBusinessApi.productLine()`，与账户和交易配置校验一致。前端据此订阅私有账户状态，避免等待未启用产品线的快照。该接口不包含账户数据或连接配置。
+
+## 公开未平仓量推送
+
+`OpenInterestPublisher` 服务当前 gateway 产品线的 `openInterest` WebSocket 频道。
+订阅必须指定衍生品产品线与 symbol；其他产品线和现货订阅被拒绝。
+存在订阅时每秒至多发起一轮已有 Core 未平仓量查询，多个币对/连接共享结果，前端无需 REST 轮询。
+公开数量为各分片多/空总量的较大值（单边口径），不是多空相加或当前用户持仓；
+`openInterestSteps`、`sequence` 以整数字符串输出。完整快照不存在该币对时为零，查询失败则
+status=UNAVAILABLE，不用零代替失败。注册表拥有订阅生命周期，发布器不维护第二份持仓缓存。
+该频道由 gateway 查询出口直接发布，不注册 Aeron 实时路由，不更改 Core 提交或 Kafka topic。

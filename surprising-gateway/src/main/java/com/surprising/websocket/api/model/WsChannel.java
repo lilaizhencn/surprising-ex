@@ -11,6 +11,7 @@ public enum WsChannel {
     INDEX_PRICE("index", true),
     MARK_PRICE("mark", true),
     FUNDING_RATE("funding", true),
+    OPEN_INTEREST("openInterest", true),
     ORDERS("orders", false),
     TRIGGER_ORDERS("triggerOrders", false),
     EXECUTION_REPORTS("executionReports", false),

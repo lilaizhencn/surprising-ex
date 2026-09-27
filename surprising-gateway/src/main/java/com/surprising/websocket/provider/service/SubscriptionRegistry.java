@@ -185,6 +185,10 @@ public class SubscriptionRegistry {
         });
     }
 
+    public List<SubscriptionTopic> topics(WsChannel channel) {
+        return subscribers.keySet().stream().filter(topic -> topic.channel() == channel).toList();
+    }
+
     public int subscriberCount(SubscriptionTopic topic) {
         return subscribers.getOrDefault(topic, Set.of()).size();
     }

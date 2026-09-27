@@ -108,6 +108,61 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void simulatedOrdersVaryIndividuallyWithoutForcingAlternatingSides() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeBatchSize = 8;
+        var service = fixtures.service();
+        var strategy = fixtures.properties().getStrategies().getFirst();
+        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
+        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("BTC-USDT", 50);
+        var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+                instrument, book, null, 0, new java.util.Random(42));
+        assertThat(requests).hasSize(8);
+        assertThat(requests).extracting(PlaceOrderRequest::side).contains(OrderSide.BUY, OrderSide.SELL);
+        assertThat(requests.stream().map(PlaceOrderRequest::quantitySteps).distinct().count()).isGreaterThan(1);
+        assertThat(requests).allSatisfy(r -> assertThat(r.quantitySteps()).isBetween(1L, 10L));
+        assertThat(java.util.stream.IntStream.range(1, requests.size())
+                .anyMatch(i -> requests.get(i).side() == requests.get(i - 1).side())).isTrue();
+    }
+
+    @Test
+    void simulatedBatchReservesInventoryForAnySubsetOfFills() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeBatchSize = 8;
+        var service = fixtures.service();
+        var strategy = fixtures.properties().getStrategies().getFirst();
+        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
+        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("BTC-USDT", 50);
+        for (long position : new long[] {4998, -4998, 5000, -5000, 5010, -5010}) {
+            var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+                    instrument, book, null, position, new java.util.Random(42));
+            long buys = requests.stream().filter(r -> r.side() == OrderSide.BUY)
+                    .mapToLong(PlaceOrderRequest::quantitySteps).sum();
+            long sells = requests.stream().filter(r -> r.side() == OrderSide.SELL)
+                    .mapToLong(PlaceOrderRequest::quantitySteps).sum();
+            assertThat(buys).isLessThanOrEqualTo(Math.max(0, 5000 - position));
+            assertThat(sells).isLessThanOrEqualTo(Math.max(0, 5000 + position));
+            if (Math.abs(position) > 5000) assertThat(requests).allSatisfy(r ->
+                    assertThat(r.side()).isEqualTo(position > 0 ? OrderSide.SELL : OrderSide.BUY));
+        }
+    }
+
+    @Test
+    void simulatedOrdersRespectLiquidityAndNeverInventTheMissingSide() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeBatchSize = 8;
+        var service = fixtures.service();
+        var strategy = fixtures.properties().getStrategies().getFirst();
+        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
+        var book = new OrderBookSnapshotResponse("BTC-USDT", 1, 50, List.of(),
+                List.of(new OrderBookLevel(50_010, 3, 1)), Instant.now());
+        var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+                instrument, book, null, 0, new java.util.Random(42));
+        assertThat(requests).isNotEmpty().allSatisfy(r -> assertThat(r.side()).isEqualTo(OrderSide.BUY));
+        assertThat(requests.stream().mapToLong(PlaceOrderRequest::quantitySteps).sum()).isLessThanOrEqualTo(3);
+    }
+
+    @Test
     void everyCompletedCycleAttemptsSimulatedTradingWithoutAnIntervalGate() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.tradeEnabled = true;

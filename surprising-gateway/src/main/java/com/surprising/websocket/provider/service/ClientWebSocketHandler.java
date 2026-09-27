@@ -66,6 +66,12 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
+        if (topic.channel() == com.surprising.websocket.api.model.WsChannel.OPEN_INTEREST) {
+            com.surprising.product.api.ProductLineConfiguration.requireSame(
+                    properties.getKafka().getProductLine(), topic.productLine(), "open interest subscription");
+            if (topic.productLine() == com.surprising.product.api.ProductLine.SPOT)
+                throw new IllegalArgumentException("open interest requires a derivatives product");
+        }
         registry.subscribe(connection, topic);
         connection.send(objectMapper.writeValueAsString(WsServerMessage.ack(command.id(), topic)));
         if(realtime!=null && topic.userId()!=null) {
