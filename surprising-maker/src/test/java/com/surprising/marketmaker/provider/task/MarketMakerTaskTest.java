@@ -52,6 +52,25 @@ class MarketMakerTaskTest {
         assertThat(slowStopped.await(5, TimeUnit.SECONDS)).isTrue();
     }
 
+    @Test
+    void successfulLocalWorkHonorsConfiguredIntervalAndStopsDuringWait() throws Exception {
+        var properties = new MarketMakerProperties();
+        properties.setStrategies(List.of(strategy("limited")));
+        properties.getEngine().setQuoteInterval(java.time.Duration.ofSeconds(1));
+        var service = mock(MarketMakerService.class);
+        var entered = new CountDownLatch(1);
+        when(service.runScheduledStrategy("limited", ProductLine.LINEAR_PERPETUAL)).thenAnswer(call -> {
+            entered.countDown(); return true;
+        });
+        var task = new MarketMakerTask(service, properties);
+        try {
+            task.start();
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(150);
+            verify(service, times(1)).runScheduledStrategy("limited", ProductLine.LINEAR_PERPETUAL);
+        } finally { task.stop(); }
+    }
+
     private MarketMakerProperties.Strategy strategy(String id) {
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
         strategy.setStrategyId(id);

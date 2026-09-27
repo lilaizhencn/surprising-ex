@@ -44,6 +44,9 @@ public class MarketMakerProperties {
     /** 启动时校验所有启用的行情源和策略都显式声明同一产品线。 */
     @PostConstruct
     void validateProductLineConfiguration() {
+        if (engine.quoteInterval == null || engine.tradeInterval == null
+                || engine.quoteInterval.isNegative() || engine.tradeInterval.isNegative())
+            throw new IllegalArgumentException("maker worker intervals must be non-negative");
         for (ReferenceMarket.Source source : referenceMarket.sources) {
             if (source.enabled) {
                 ProductLineConfiguration.require(source.productLine,
@@ -85,6 +88,8 @@ public class MarketMakerProperties {
     public static class Engine {
         private boolean enabled;
         private String nodeId;
+        private Duration quoteInterval = Duration.ZERO;
+        private Duration tradeInterval = Duration.ZERO;
 
     }
 

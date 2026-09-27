@@ -46,13 +46,13 @@ public class MarketMakerTask {
                 } catch (RuntimeException ex) {
                     log.warn("Market-maker worker failed strategyId={} taking={}", strategy.getStrategyId(), taking, ex);
                 }
-                // 正常报价/吃单不设间隔。暂停、无租约或失败时退让，防止空转和重试风暴。
-                if (!completed) {
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException ex) {
-                        Thread.currentThread().interrupt();
-                    }
+                // 本地模拟成交和报价按各自间隔推进，避免成功后无限循环挤占实时查询。
+                long delayMillis = (taking ? properties.getEngine().getTradeInterval()
+                        : properties.getEngine().getQuoteInterval()).toMillis();
+                if (!completed) delayMillis = Math.max(100, delayMillis);
+                if (delayMillis > 0) {
+                    try { Thread.sleep(delayMillis); }
+                    catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
                 }
             }
         });

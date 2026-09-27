@@ -236,6 +236,10 @@ class RealtimeRouterIntegrationTest {
                         .map(RealtimeFrame::symbol).distinct().count() == 20);
                 assertThat(control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST))
                         .allMatch(f -> f.productLine() == ProductLine.SPOT && f.userId() == 0);
+                // No duplicate query for a symbol while its first answer is outstanding.
+                Thread.sleep(400);
+                assertThat(control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST)
+                        .map(RealtimeFrame::symbol).toList()).hasSize(20).doesNotHaveDuplicates();
                 assertThat(router.failures()).isZero();
                 // The optional router control client must never invoke Aeron's process-exit
                 // handler when its MediaDriver disappears.

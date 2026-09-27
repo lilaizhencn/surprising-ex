@@ -1,5 +1,8 @@
 surprising:
   market-maker:
+    engine:
+      quote-interval: 100ms
+      trade-interval: 150ms
     quoting:
       order-levels: 50
       order-book-depth: 50
@@ -14,7 +17,7 @@ surprising:
     trade:
       enabled: ${LOCAL_SIMULATED_TRADES_ENABLED:false}
       account-ids: [910001]
-      orders-per-batch: 8
+      orders-per-batch: 2
       min-quantity-steps: 1
       max-quantity-steps: 10
       inventory-threshold-steps: 100

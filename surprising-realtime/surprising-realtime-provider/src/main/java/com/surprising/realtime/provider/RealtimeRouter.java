@@ -41,6 +41,8 @@ public final class RealtimeRouter implements AutoCloseable {
     private final Set<ProductLine> dirtySources = EnumSet.noneOf(ProductLine.class);
     private final Map<ProductLine, Long> prefixes = new EnumMap<>(ProductLine.class);
     private final Map<String, Request> outstanding = new HashMap<>();
+    // Router-thread-owned query leases, not another book: released by a reply or after transport loss.
+    private final Map<String, Long> pendingBooks = new HashMap<>();
     private final LongAdder inputDropped = new LongAdder(), transportDropped = new LongAdder(),
             failures = new LongAdder();
     private final AeronRealtimeReceiver receiver;
@@ -133,6 +135,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 nodes.clear();
                 controls.values().forEach(ExclusivePublication::close);
                 controls.clear();
+                pendingBooks.clear();
             }
         }
     }
@@ -169,6 +172,8 @@ public final class RealtimeRouter implements AutoCloseable {
 
     private void route(Aeron aeron, RealtimeFrame f, long now,
             Map<RealtimeRoute, Map<String, String>> targets, List<List<RealtimeFrame>> ready) {
+        if (f.kind() == RealtimeFrame.Kind.BOOK)
+            pendingBooks.remove(f.productLine() + ":" + f.symbol());
         if (dirtySources.remove(f.productLine())) {
             publishReady(aeron, ready, now, targets);
             resetSource(f.productLine());
@@ -291,6 +296,7 @@ public final class RealtimeRouter implements AutoCloseable {
                             return true;
                         });
         outstanding.values().removeIf(r -> now - r.at > 5000);
+        pendingBooks.values().removeIf(sentAt -> now - sentAt >= 2000);
         for (var entry : controls.entrySet()) {
             long bookOffset = bookOffsets.getOrDefault(entry.getKey(), 0L);
             // At most 80 book reads/sec, below Core's shared 100 snapshot reads/sec ceiling.
@@ -299,6 +305,9 @@ public final class RealtimeRouter implements AutoCloseable {
             var symbols = activeBooks.stream().limit(8).toList();
             bookOffsets.put(entry.getKey(), activeBooks.size() <= 8 ? 0L : bookOffset + 8);
             for (String symbol : symbols) {
+                String bookKey = entry.getKey() + ":" + symbol;
+                Long sentAt = pendingBooks.get(bookKey);
+                if (sentAt != null && now - sentAt < 2000) continue;
                 var book =
                         new RealtimeFrame(
                                 entry.getKey(),
@@ -312,7 +321,8 @@ public final class RealtimeRouter implements AutoCloseable {
                                 symbol,
                                 "",
                                 new byte[0]);
-                entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(book)));
+                if (entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(book))) > 0)
+                    pendingBooks.put(bookKey, now);
             }
             long offset = requestOffsets.getOrDefault(entry.getKey(), 0L);
             Set<String> users = requests.active(entry.getKey(), now, offset, 16);
