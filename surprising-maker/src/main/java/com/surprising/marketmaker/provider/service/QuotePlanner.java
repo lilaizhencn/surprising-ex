@@ -94,7 +94,7 @@ public class QuotePlanner {
             if (level > 0) bidPrice = Math.min(bidPrice, previousBidPrice - bidGap);
             previousBidPrice = bidPrice;
             if (bidPrice >= minPrice) suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
-                    riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
+                    riskPositionSteps, levelQuantity(strategy, quoting, referenceOrderBook, OrderSide.BUY, level));
             else suppressedDuplicateQuotes++;
 
             long askPrice = Math.min(maxPrice, anchor + askDistance);
@@ -104,7 +104,7 @@ public class QuotePlanner {
             if (level > 0) askPrice = Math.max(askPrice, previousAskPrice + askGap);
             previousAskPrice = askPrice;
             if (askPrice <= maxPrice) suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice,
-                    riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
+                    riskPositionSteps, levelQuantity(strategy, quoting, referenceOrderBook, OrderSide.SELL, level));
             else suppressedDuplicateQuotes++;
         }
         return new QuotePlan(anchor, signedPositionSteps,
@@ -119,7 +119,8 @@ public class QuotePlanner {
             return List.copyOf(quotes);
         long markTicks = markToTicks(instrument, mark);
         if (markTicks <= 0) throw new IllegalStateException("mark price required for linear quote budget");
-        long perStep = Math.multiplyExact(markTicks, instrument.notionalMultiplierUnits());
+        long budgetTicks = Math.max(markTicks, quotes.stream().mapToLong(DesiredQuote::priceTicks).max().orElse(markTicks));
+        long perStep = Math.multiplyExact(budgetTicks, instrument.notionalMultiplierUnits());
         // The floor is a conservative guaranteed ceiling; the core also checks current OI and account funds.
         long limit = Math.min(instrument.maxPositionNotionalUnits(), instrument.userOpenInterestLimitFloorUnits());
         long maxSteps = limit / perStep;
@@ -311,6 +312,28 @@ public class QuotePlanner {
                 ? mid - referenceLevel.priceTicks()
                 : referenceLevel.priceTicks() - mid;
         return Math.max(1L, distance);
+    }
+
+    /** Keep a stable size profile between refreshes; external liquidity and inventory still shape it. */
+    private long levelQuantity(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting,
+                               ReferenceOrderBookSnapshot reference, OrderSide side, int level) {
+        long external = referenceQuantity(reference, side, level);
+        long variation = quoting.getQuantityVariationPpm();
+        if (variation == 0) return external;
+        long base = Math.max(1L, strategy.getBaseQuantitySteps());
+        // Extend our own ladder using the source's distribution, not a fixed large outer quantity.
+        if (reference != null && reference.hasTwoSidedDepth()) {
+            var source = side == OrderSide.BUY ? reference.bids() : reference.asks();
+            external = source.get(level % source.size()).quantitySteps();
+        }
+        long seed = ((long) strategy.getStrategyId().hashCode() << 32)
+                ^ (side == OrderSide.BUY ? 0x1234abcdL : 0x5678ef01L) ^ level;
+        var random = new java.util.SplittableRandom(seed);
+        long scale = ONE_PPM - variation + random.nextLong(variation + 1);
+        long profile = Math.max(1L, multiplyDiv(base, scale, ONE_PPM));
+        // Half stable resting liquidity, half observed external liquidity; Core caps the total below.
+        long observed = external > 0 ? Math.min(base, external) : profile;
+        return Math.max(1L, profile / 2 + observed / 2);
     }
 
     private long referenceQuantity(ReferenceOrderBookSnapshot referenceOrderBook, OrderSide side, int level) {

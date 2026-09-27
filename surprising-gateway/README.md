@@ -250,3 +250,5 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 `openInterestSteps`、`sequence` 以整数字符串输出。完整快照不存在该币对时为零，查询失败则
 status=UNAVAILABLE，不用零代替失败。注册表拥有订阅生命周期，发布器不维护第二份持仓缓存。
 该频道由 gateway 查询出口直接发布，不注册 Aeron 实时路由，不更改 Core 提交或 Kafka topic。
+
+用户实际费率由私有路由 `GET /api/v1/gateway/trading-fees/effective?userId=...&symbol=...&productLine=...` 查询，映射到现有 `TradingFeeRequestService`。普通用户路由与管理员费率修改路由分离，沿用登录与账户归属校验。

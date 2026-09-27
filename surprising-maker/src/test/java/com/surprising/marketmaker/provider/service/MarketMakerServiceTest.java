@@ -406,6 +406,18 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void refillsConsumedSlotsBeforeReplacingTheRemainingLadder() {
+        var orders = staleTwentyLevelOrders();
+        Fixtures fixtures = new Fixtures(orders.subList(5, orders.size()));
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 40;
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+        assertThat(fixtures.orderRpc.liveCountsAfterCancel).isNotEmpty()
+                .allSatisfy(count -> assertThat(count).isGreaterThanOrEqualTo(37));
+    }
+
+    @Test
     void replacesStaleLadderWithoutDrainingTheBook() {
         Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
         fixtures.orderLevels = 20;

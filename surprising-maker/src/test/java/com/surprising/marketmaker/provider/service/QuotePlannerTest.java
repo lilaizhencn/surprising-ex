@@ -27,6 +27,33 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void variedFiftyLevelLadderKeepsDistinctSizesAndConservativeBudget() {
+        var strategy = strategy();
+        strategy.setOrderLevels(50);
+        strategy.setBaseQuantitySteps(1000L);
+        var quoting = quoting();
+        quoting.setQuantityVariationPpm(800_000L);
+        var reference = new ReferenceOrderBookSnapshot("source", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_990L, 1000L)),
+                List.of(new ReferenceOrderBookLevel(50_010L, 1000L)), Instant.now());
+        var spec = instrument();
+        var plan = quotePlanner.plan(strategy, quoting, risk(), spec,
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference);
+        assertThat(plan.quotes()).hasSize(100);
+        assertThat(quotePlanner.plan(strategy, quoting, risk(), spec,
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference)).isEqualTo(plan);
+        for (var side : OrderSide.values()) {
+            var quotes = plan.quotes().stream().filter(q -> q.side() == side).toList();
+            assertThat(quotes).hasSize(50);
+            assertThat(quotes.stream().map(q -> q.quantitySteps()).distinct().count()).isGreaterThan(5);
+            long worstPrice = plan.quotes().stream().mapToLong(q -> q.priceTicks()).max().orElseThrow();
+            long notional = quotes.stream().mapToLong(q -> q.quantitySteps()).sum()
+                    * worstPrice * spec.notionalMultiplierUnits();
+            assertThat(notional).isLessThanOrEqualTo(spec.userOpenInterestLimitFloorUnits());
+        }
+    }
+
+    @Test
     void movingReferenceKeepsFiftyDistinctLevelsWhileOldOppositeQuotesRemain() {
         var strategy = strategy();
         strategy.setOrderLevels(50);

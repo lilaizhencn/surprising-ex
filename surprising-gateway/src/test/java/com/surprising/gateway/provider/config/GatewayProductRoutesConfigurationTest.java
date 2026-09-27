@@ -21,6 +21,8 @@ class GatewayProductRoutesConfigurationTest {
 
         assertLocalRoute(properties.getRoutes().get("trading"));
         assertLocalRoute(properties.getRoutes().get("trading-leverage"));
+        assertLocalRoute(properties.getRoutes().get("trading-fees"));
+        assertThat(properties.getRoutes().get("trading-fees").getTargetPrefix()).isEqualTo("/api/v1/trading/fees");
         assertThat(properties.getRoutes().get("trading-market").getBaseUrl()).isEqualTo("local:");
         assertLocalRoute(properties.getRoutes().get("trading-trigger"));
         assertProductRouteMatrix(properties.getRoutes().get("account"));

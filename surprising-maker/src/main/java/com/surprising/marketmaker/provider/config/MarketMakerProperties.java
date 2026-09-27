@@ -124,6 +124,10 @@ public class MarketMakerProperties {
         @Min(0)
         @Max(100_000)
         private long refreshTolerancePpm = 0L;
+        /** Stable per-level size variation, blended with the external depth. Zero keeps direct sizing. */
+        @Min(0)
+        @Max(900_000)
+        private long quantityVariationPpm = 0L;
         /** PMM minimum distance from the external reference on each side. */
         @Min(0)
         @Max(100_000)

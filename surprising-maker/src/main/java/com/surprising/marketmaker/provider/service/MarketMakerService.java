@@ -809,6 +809,15 @@ public class MarketMakerService {
         long submitted = 0L;
         long rejected = 0L;
         String rejectionReason = null;
+        // Refill slots consumed by trades before withdrawing any still-live liquidity.
+        ReconcileResult refill = placeMissingQuotes(strategy, accountId, symbol, plan,
+                kept, accountPrefix, cycleSequence);
+        submitted += refill.submitted();
+        rejected += refill.rejected();
+        rejectionReason = refill.rejectionReason();
+        if (cancelRequests.isEmpty()) return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+        // If old oversized quotes occupy the budget, replace one small batch to release it.
+        // The existing rejection check below stops us from withdrawing the rest of the ladder.
         for (int start = 0; start < Math.max(1, cancelRequests.size()); start += replacementBatchSize) {
             List<CancelOrderRequest> batch = cancelRequests.subList(start,
                     Math.min(start + replacementBatchSize, cancelRequests.size()));
@@ -902,6 +911,7 @@ public class MarketMakerService {
                 }
             }
         }
+        kept.removeIf(java.util.Objects::isNull);
         return new ReconcileResult(submitted, 0L, rejected, rejectionReason);
     }
 
