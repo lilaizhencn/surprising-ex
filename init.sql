@@ -509,7 +509,7 @@ INSERT INTO instrument_index_sources (
  TRUE, 'wss://ws.okx.com:8443/ws/v5/public', '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"BTC-USDT"}]}', 'OKX_INDEX_TICKER', 1000000),
 ('BTC-USDT-SWAP', 'LINEAR_PERPETUAL', 'BINANCE', TRUE, 'https://api.binance.com', '/api/v3/ticker/bookTicker?symbol=BTCUSDT', 'BTCUSDT', 'BINANCE_BOOK_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
- TRUE, 'wss://stream.binance.com:9443/ws', '{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}', 'BINANCE_BOOK_TICKER', 1000000),
+ TRUE, 'wss://stream.binance.com:443/ws', '{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}', 'BINANCE_BOOK_TICKER', 1000000),
 ('BTC-USDT-SWAP', 'LINEAR_PERPETUAL', 'BYBIT', TRUE, 'https://api.bybit.com', '/v5/market/tickers?category=spot&symbol=BTCUSDT', 'BTCUSDT', 'BYBIT_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  TRUE, 'wss://stream.bybit.com/v5/public/spot', '{"op":"subscribe","args":["tickers.BTCUSDT"]}', 'BYBIT_TICKER', 1000000)

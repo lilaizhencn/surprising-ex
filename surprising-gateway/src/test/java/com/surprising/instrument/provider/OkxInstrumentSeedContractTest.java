@@ -23,7 +23,7 @@ class OkxInstrumentSeedContractTest {
                 .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT-SWAP'")
                 .contains("'OKX', TRUE", "'BINANCE', TRUE", "'BYBIT', TRUE")
                 .contains("'wss://ws.okx.com:8443/ws/v5/public'")
-                .contains("'wss://stream.binance.com:9443/ws'")
+                .contains("'wss://stream.binance.com:443/ws'")
                 .contains("'wss://stream.bybit.com/v5/public/spot'")
                 .contains("'{\"op\":\"subscribe\",\"args\":[{\"channel\":\"index-tickers\",\"instId\":\"BTC-USDT\"}]}'")
                 .contains("'{\"method\":\"SUBSCRIBE\",\"params\":[\"btcusdt@ticker\"],\"id\":1}'")
