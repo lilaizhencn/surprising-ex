@@ -123,3 +123,7 @@ macOS 守护进程自动重启后，`start-product-line-providers.sh` 从已验�
 Binance 现货指数流使用官方 `wss://stream.binance.com:443/ws`。本机观测到 9443 端口连接失败而 443 可持续收到行情，因此初始化 SQL 改为 443；三来源数量、权重和新鲜度校验不变。已有本地数据库只调整启用的 U 本位永续 BINANCE 行的 `websocket_url`，重启 price 服务重新加载，不重新运行初始 catalog，也不修改历史审计记录或交易编码。
 
 本轮盘口、下单区域和响应式页面验收见 [页面与盘口验证记录](UI-BOOK-VERIFICATION-20260927.md)。
+
+### 本地前端运行模式
+
+启动器将前端复制到运行目录，先 `npm run build`，成功后启动 Vite preview 提供生产资源及本地 API/WS 代理。生产构建避免高频行情下 React 开发模式逐组件调试记录占满浏览器主线程；构建失败直接停止启动流程，日志为 `logs/frontend-build.log`。前端源代码修改后需重新构建发布，现有标签页刷新后加载新版本。六个 Java 服务不受此模式调整影响。

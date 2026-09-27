@@ -287,7 +287,9 @@ if ! alive frontend; then
   free_port "$FRONTEND_PORT"
   mkdir -p "$LOCAL_DIR/web"
   rsync -a --delete --exclude .git --exclude .codegraph --exclude .wrangler --exclude /dist "$FRONTEND_DIR/" "$LOCAL_DIR/web/"
-  start frontend /bin/bash -c 'cd "$1"; "$2" node_modules/vite/bin/vite.js --host 127.0.0.1 --port "$3" --strictPort & wait' "$LOCAL_DIR" "$LOCAL_DIR/web" "$(command -v node)" "$FRONTEND_PORT" "$LOCAL_DIR"
+  # Live feeds must not pay React development instrumentation costs in the demo.
+  (cd "$LOCAL_DIR/web" && npm run build) > "$LOCAL_DIR/logs/frontend-build.log" 2>&1
+  start frontend /bin/bash -c 'cd "$1"; exec "$2" "$1/node_modules/vite/bin/vite.js" preview --host 127.0.0.1 --port "$3" --strictPort' "$LOCAL_DIR" "$LOCAL_DIR/web" "$(command -v node)" "$FRONTEND_PORT"
 fi
 wait_port 127.0.0.1 "$FRONTEND_PORT"
 ready_deadline=$((SECONDS + 180))
