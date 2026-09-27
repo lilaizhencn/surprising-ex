@@ -106,3 +106,6 @@ macOS 守护进程自动重启后，`start-product-line-providers.sh` 从已验�
 未就绪不触发、磁盘不足停止及请求后的完成确认；两个启动脚本 `bash -n` 与 diff 检查通过。
 运行环境已经验证 launchd 更换 PID 后能识别在运行进程，以及 HTTP health 正常但 Core 重放时
 状态检查返回失败。本次未改 Java 交易逻辑，不因脚本改动重跑其他产品线的 Java 测试。
+
+本次排查、用户授权清空测试数据后的重启、资金核对与延迟缺口见
+[黑屏恢复与本地重置验证](WAKE-RESET-VERIFICATION.md)。
