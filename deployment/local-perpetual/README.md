@@ -85,3 +85,24 @@ JFR 默认关闭，Kafka 数据保留 24 小时并限制每分区大小。启动
 预算仍会随持续交易消耗；余额不足时拒单是正常风控，不应通过放宽校验维持成交。
 
 盘口因本地预算耗尽而消失的修复及复验见 [盘口恢复验证](BOOK-RESTORE-VERIFICATION.md)。
+
+### 黑屏后恢复与定期快照
+
+macOS 守护进程自动重启后，`start-product-line-providers.sh` 从已验证的 launchd label 读取
+当前 PID，再核对 Java launcher identity，更新 PID 缓存。PID 变化不再被当作服务消失。
+`local-perpetual.sh status` 另检查实际 Core 盘口查询；HTTP health 通过而 Core 正在重放时，
+明确报查询不可用，不把进程存活当作交易已恢复。
+
+启动器通过 `checkpoint-local-perpetual.py` 为该本地单节点环境维护五分钟快照目标。
+每分钟检查已完成的快照时间，只有 Core 查询成功且本节点是 leader 时才调用现有
+`ClusterTool snapshot`；同一 term、时间、日志位置的 service 0 与 consensus 有效快照均存在，
+才记录 COMPLETED。请求成功不等于快照完成。恢复中、查询失败或磁盘不足 5 GiB 时不触发。
+快照工具沿用 JDK 27 和已构建 tools JAR，不修改交易规则、不清空或截断 Archive。
+它从运行目录 `bin/` 执行，避开 macOS 后台进程直接读取 Desktop 项目的访问限制。
+`down` 先停止快照任务再停止交易服务。日志位于运行目录 `logs/checkpoints.log`。
+定期快照缩短后续恢复窗口，不是修复异步命令超时本身；已有大段历史仍须完整重放。
+
+验证：快照调度 5 项 Python 测试覆盖完整配对、不同 term/位置拒绝配对、近期快照不重复、Core
+未就绪不触发、磁盘不足停止及请求后的完成确认；两个启动脚本 `bash -n` 与 diff 检查通过。
+运行环境已经验证 launchd 更换 PID 后能识别在运行进程，以及 HTTP health 正常但 Core 重放时
+状态检查返回失败。本次未改 Java 交易逻辑，不因脚本改动重跑其他产品线的 Java 测试。

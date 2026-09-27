@@ -58,13 +58,17 @@ alive() {
   local name="$1" pid
   [[ -f "$LOCAL_DIR/pids/$name.pid" ]] || return 1
   pid="$(cat "$LOCAL_DIR/pids/$name.pid")"
-  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
-  # A reused PID must never be accepted or signalled.
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  # launchd owns the current child; PID files are refreshed after KeepAlive restarts.
   if [[ "$(uname)" == Darwin ]]; then
     local details
     details="$(launchctl print "gui/$(id -u)/$(label "$name")" 2>/dev/null)" || return 1
-    grep -Fq "pid = $pid" <<< "$details" && grep -Fq "$LOCAL_DIR" <<< "$details"
+    grep -Fq "$LOCAL_DIR" <<< "$details" || return 1
+    pid="$(awk '/pid =/{print $3; exit}' <<< "$details")"
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
+    printf '%s\n' "$pid" > "$LOCAL_DIR/pids/$name.pid"
   else
+    kill -0 "$pid" 2>/dev/null || return 1
     ps -p "$pid" -o command= | grep -F -- "$LOCAL_DIR" >/dev/null ||
       [[ "$(readlink "/proc/$pid/cwd")" == "$LOCAL_DIR/redis" ]]
   fi
@@ -126,12 +130,17 @@ case "$ACTION" in
     for port in 9094 9082 9095 9087 9096; do
       curl --fail --silent --max-time 5 "http://127.0.0.1:$port/actuator/health" >/dev/null || fail "unhealthy service on port $port"
     done
-    for name in postgres redis kafka frontend; do
+    # HTTP health alone does not prove the restarted Core has finished replay.
+    curl --fail --silent --max-time 5 -H 'X-Product-Line: LINEAR_PERPETUAL' \
+      'http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT-SWAP&depth=1' \
+      >/dev/null || fail 'Core query unavailable: process may still be recovering; inspect core-node0.log'
+    for name in postgres redis kafka frontend checkpoints; do
       if alive "$name"; then echo "$name=RUNNING"; else echo "$name=STOPPED_OR_EXTERNAL"; fi
     done
     echo "PAGE=http://127.0.0.1:$FRONTEND_PORT/trade/usd-perpetual"
     exit ;;
   down)
+    stop checkpoints
     stop frontend
     backend down
     stop kafka
@@ -268,6 +277,12 @@ if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" =
   done
   touch "$LOCAL_DIR/extended-demo-budget-funded"
 fi
+# Completed snapshots bound recovery work after an unattended service restart.
+mkdir -p "$LOCAL_DIR/bin"
+cp "$ROOT/scripts/checkpoint-local-perpetual.py" "$LOCAL_DIR/bin/checkpoint-local-perpetual.py"
+start checkpoints "$(command -v python3)" "$LOCAL_DIR/bin/checkpoint-local-perpetual.py" \
+  --runtime "$LOCAL_DIR" --java "$JAVA_HOME/bin/java" \
+  --tools-jar "$ARTIFACT_ROOT/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar"
 if ! alive frontend; then
   free_port "$FRONTEND_PORT"
   mkdir -p "$LOCAL_DIR/web"

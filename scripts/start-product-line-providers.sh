@@ -639,7 +639,6 @@ verify_owned_process() {
   [[ -f "$pid_file" ]] || fail "process ownership missing service=$service"
   pid="$(<"$pid_file")"
   [[ "$pid" =~ ^[0-9]+$ ]] || fail "invalid process ownership service=$service"
-  kill -0 "$pid" 2>/dev/null || fail "process not running service=$service"
   if [[ -f "$label_file" ]]; then
     launchctl_bin="$(launchctl_path)" || fail "launchd ownership unavailable service=$service"
     label="$(<"$label_file")"
@@ -647,14 +646,19 @@ verify_owned_process() {
     [[ "$label" == "$expected_label" ]] || fail "launchd label mismatch service=$service"
     supervised_pid="$("$launchctl_bin" print "gui/$(id -u)/$expected_label" 2>/dev/null | \
       awk '/pid =/{print $3; exit}')"
-    [[ "$supervised_pid" == "$pid" ]] || fail "launchd pid mismatch service=$service"
+    [[ "$supervised_pid" =~ ^[0-9]+$ ]] || fail "launchd process not running service=$service"
+    # KeepAlive may replace the child; launchd owns the current PID, not our old cache.
+    pid="$supervised_pid"
   elif launchctl_path >/dev/null; then
     fail "launchd label missing service=$service"
-  else
-    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || \
-      fail "process identity unavailable service=$service"
-    [[ " $command_line " == *" -Dsurprising.launcher.identity=$RUN_ID/$service "* ]] || \
-      fail "process identity mismatch service=$service"
+  fi
+  kill -0 "$pid" 2>/dev/null || fail "process not running service=$service"
+  command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || \
+    fail "process identity unavailable service=$service"
+  [[ " $command_line " == *" -Dsurprising.launcher.identity=$RUN_ID/$service "* ]] || \
+    fail "process identity mismatch service=$service"
+  if [[ "$(<"$pid_file")" != "$pid" ]]; then
+    printf '%s\n' "$pid" > "$pid_file"
   fi
   printf '%s\n' "$pid"
 }
