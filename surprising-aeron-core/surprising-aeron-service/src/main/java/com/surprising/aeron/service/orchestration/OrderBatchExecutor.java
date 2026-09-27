@@ -467,7 +467,8 @@ final class OrderBatchExecutor {
                     batch.currentPreMatchingCancellationOrderIds = List.of();
                     CancelOrderCommand command = (CancelOrderCommand) item.command;
                     OrderRuntime order = owner.runtimeOrder(command.orderId());
-                    if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                    if (order == null || order.status().terminal())
+                        throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order does not exist");
                     if (order.userId() != userId) {
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
                     }

@@ -25,6 +25,13 @@ Owner 不再维护兼容的网络发送、编码缓冲和响应重试队列。�
 进入有序提交、调用 `collectPlaceBatchAdmission` 时，才把其 before-image 交给当前回滚范围。
 顺序批量准入必须等到提交队首再启动，避免前一条命令发布或清空后一批次的资金记录。
 
+普通下单的账户准入拒绝由 `OrderedCommitCoordinator.completeMatchingCommand` 在开启或恢复
+发布批次之前收取；Matcher/Lane 先完成时也不能遗留活动提交上下文。拒单继续按原有序边界
+保存结果，后续批量下单可正常推进。批量撤单入口 `OrderBatchExecutor.prepareOrderBatchItem`
+将已终态订单按 `ORDER_NOT_FOUND` 拒绝，不再把已移出活动盘口的订单送入撮合撤单分块。
+`ClusterCommandPipelineTest` 覆盖六产品线拒单后继续下单、业务哈希和快照恢复；
+`CoreOrderedOrderBatchTest` 覆盖 GTX 拒单后的批量撤单及冻结不变。
+
 ## Aeron 运行版本
 
 `surprising-parent/pom.xml` 统一管理 `aeron-all` **1.53.3**；核心的 Media Driver、Archive、Cluster 以及网关、行情、定价、生命周期服务的客户端使用同一版本。做市服务通过既有内部接口下单，不额外引入 Aeron 依赖。升级验证使用 HotSpot JDK 27，保留已有 Archive 和账户状态，通过快照恢复后检查交易与行情。

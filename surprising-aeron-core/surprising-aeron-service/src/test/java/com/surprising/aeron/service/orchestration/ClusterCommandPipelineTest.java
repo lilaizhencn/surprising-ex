@@ -1690,6 +1690,41 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void rejectedOrdinaryOrderThenBatchReleasePublicationContext(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
+            var withdraw = live.message(CoreMessageType.ADJUST_BALANCE, 11,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, -20_000)));
+            live.apply(withdraw); serial.apply(withdraw);
+            var first = live.place(11, "BTC-USDT", 10000, 80, 1, CoreOrderSide.BUY);
+            var state = live.service.state();
+            long timestamp = first.header().submittedAtEpochMillis();
+            state.applyClusterCommand(first, timestamp, 0);
+            long sequence = state.matchingSequence(first.header().commandId());
+            var pending = state.pendingMatching(sequence);
+            var event = pending.settlementEvent();
+            assertThat(event).isNotNull();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while ((!event.complete() || pending.submittedMatcherShard() != -1)
+                    && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(event.complete()).isTrue();
+            // Matcher/Lane 已完成，但 owner 尚未收取拒单；直接进入有序提交。
+            var response = state.completeMatching(sequence, event.directResult(), timestamp, 0);
+            assertThat(response.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(state.commits.commitPublicationDeferred()).isFalse();
+            serial.apply(first);
+            var next = live.placeBatch(disjointUser(11), disjointSymbol("BTC-USDT"), 20000);
+            live.apply(next); serial.apply(next);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds(ProductLine product) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());

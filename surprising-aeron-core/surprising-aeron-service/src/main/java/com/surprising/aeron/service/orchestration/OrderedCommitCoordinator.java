@@ -245,6 +245,13 @@ final class OrderedCommitCoordinator {
         }
         if (pending.settlementEvent() != null) {
             if (!pending.settlementEvent().complete()) return null;
+            // 先收取账户准入结果；拒单没有结算变更，不能开启或恢复发布批次。
+            // Matcher/Lane 可先于 owner 完成，拒单也必须走同一个有序终态边界。
+            if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
+                if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
+                if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
+                    return completeRejectedMatching(pending.sequence());
+            }
             if (pending.settlementEvent().direct() && !laneContext.hasCommitContext()) {
                 validateMatchingEvidence(pending, matchingResult);
                 applyMatcherProgress(matchingResult);
@@ -531,13 +538,6 @@ final class OrderedCommitCoordinator {
             CommandSlot laneContext) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null || !event.complete()) return null;
-        // Admission is consumed once, at the ordered terminal boundary. The Matcher has
-        // already consumed the primitive Lane receipt; no Owner-side admission poll is needed.
-        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
-            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
-            if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
-                return completeRejectedMatching(pending.sequence());
-        }
         owner.captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {

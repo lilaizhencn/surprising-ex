@@ -52,6 +52,32 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void cancelBatchRejectsTerminalOrderWithoutEnteringMatcherChunk() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            applyBalance(state, 1002, "BTC", 2, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(86_200, "cancel-rejected-maker", CoreOrderSide.SELL, 1_000, 1)))) ,1002));
+            var rejected = new PlaceOrderCommand(86_201, "BTC-USDT", CoreOrderSide.BUY, 1000, 1,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                    CoreTimeInForce.GTX, true, "cancel-rejected");
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(rejected)))));
+            var result = drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 5,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(86_201))))));
+            assertThat(TradingOrderBatchCodec.decodeResult(result.data()).items().getFirst().resultCode())
+                    .isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            state.assertClusterCallbackComplete();
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(10_000);
+            assertThat(state.snapshot()).isNotEmpty();
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.condition.EnabledIfSystemProperty(
             named = "surprising.aeron.matching-phase-log-interval", matches = "1")
     void singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds() {
