@@ -257,6 +257,17 @@ if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" =
     http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/taker-fee-budget.json"
   touch "$LOCAL_DIR/taker-fee-budget-funded"
 fi
+# Fixed extra capital for a longer local demonstration; never replenish losses automatically.
+if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" == true && ! -f "$LOCAL_DIR/extended-demo-budget-funded" ]]; then
+  for user_id in {900101..900120} 910001; do
+    amount_units=90000000000000
+    [[ "$user_id" == 910001 ]] && amount_units=900000000000000
+    curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
+      -d "{\"userId\":$user_id,\"asset\":\"USDT\",\"amountUnits\":$amount_units,\"referenceId\":\"local-extended-demo-budget-$user_id\",\"reason\":\"LOCAL DEMO extended quote and taker fee budget\"}" \
+      http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/extended-demo-budget-$user_id.json"
+  done
+  touch "$LOCAL_DIR/extended-demo-budget-funded"
+fi
 if ! alive frontend; then
   free_port "$FRONTEND_PORT"
   mkdir -p "$LOCAL_DIR/web"

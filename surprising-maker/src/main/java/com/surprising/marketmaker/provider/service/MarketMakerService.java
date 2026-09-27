@@ -695,9 +695,23 @@ public class MarketMakerService {
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, symbol, instrument, orderBook, markPrice);
                 recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
+                long rejectedQuotes = 0;
+                String quoteRejection = null;
                 for (long accountId : strategy.getAccountIds()) {
-                    quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
-                            referenceOrderBook, volatilityTicks, accountId, now, traceId);
+                    ReconcileResult result = quoteAccount(strategy, state, cycleSequence, symbol, instrument,
+                            orderBook, markPrice, referenceOrderBook, volatilityTicks, accountId, now, traceId);
+                    rejectedQuotes += result.rejected();
+                    if (result.rejected() > 0 && quoteRejection == null)
+                        quoteRejection = result.rejectionReason();
+                }
+                // A completed RPC is not a successful quote cycle when Core rejected replenishment.
+                // Retain successful orders and let the next normal cycle retry under the same risk checks.
+                if (rejectedQuotes > 0) {
+                    String reason = "Quote replenishment rejected: " + rejectedQuotes + " orders; " + quoteRejection;
+                    state.markFailure(traceId, reason, now);
+                    recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_FAILED",
+                            0, 0, rejectedQuotes, null, reason, traceId, now);
+                    return false;
                 }
                 if (tradeAfterQuote) tradeSymbol(strategy, symbol, traceId);
                 state.markSuccess(traceId, now);
@@ -718,7 +732,7 @@ public class MarketMakerService {
         }
     }
 
-    private void quoteAccount(MarketMakerProperties.Strategy strategy,
+    private ReconcileResult quoteAccount(MarketMakerProperties.Strategy strategy,
                               StrategyRuntimeState state,
                               long cycleSequence,
                               String symbol,
@@ -741,6 +755,7 @@ public class MarketMakerService {
         state.addRejected(result.rejected());
         recordRunEvent(strategy, symbol, accountId, cycleSequence, "QUOTE_RECONCILED",
                 result.submitted(), result.canceled(), result.rejected(), null, result.rejectionReason(), traceId, now);
+        return result;
     }
 
     /** 报价只避让其他参与者的盘口；自己的旧报价交由分批撤补处理，不能反向锁住参考价。 */

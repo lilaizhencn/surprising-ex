@@ -176,6 +176,34 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void rejectedQuotesDegradeTheCycleAndRecoverOnlyAfterSuccessfulReplenishment() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.orderRpc.rejectQuoteBatch = true;
+        MarketMakerService service = fixtures.service();
+
+        var rejected = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(rejected.strategies()).singleElement().satisfies(strategy -> {
+            assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED);
+            assertThat(strategy.lastError()).contains("INSUFFICIENT_AVAILABLE_BALANCE");
+        });
+        assertThat(fixtures.orderRpc.openOrders).isEmpty();
+        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("CYCLE_SUCCESS"));
+        assertThat(fixtures.runEventRepository.events).filteredOn(event -> event.eventType().equals("CYCLE_FAILED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.rejectedOrders()).isEqualTo(6);
+                    assertThat(event.errorMessage()).contains("INSUFFICIENT_AVAILABLE_BALANCE");
+                });
+
+        fixtures.orderRpc.rejectQuoteBatch = false;
+        var recovered = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        assertThat(recovered.strategies()).singleElement().satisfies(strategy -> {
+            assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.RUNNING);
+            assertThat(strategy.lastError()).isNull();
+        });
+        assertThat(fixtures.orderRpc.openOrders).hasSize(6);
+    }
+
+    @Test
     void runOncePlacesPostOnlyQuotesThroughOrderRpc() {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
@@ -815,6 +843,7 @@ class MarketMakerServiceTest {
         private final List<Long> failedCancelOrderIds = new ArrayList<>();
         private boolean batchSupported = true;
         private boolean rejectMarketBatch;
+        private boolean rejectQuoteBatch;
         private boolean omitMarketBatchDetails;
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
@@ -844,6 +873,10 @@ class MarketMakerServiceTest {
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {
                 PlaceOrderRequest placeRequest = request.orders().get(i);
+                if (rejectQuoteBatch && placeRequest.orderType() == OrderType.LIMIT) {
+                    results.add(new OrderBatchItemResponse(i, false, "INSUFFICIENT_AVAILABLE_BALANCE", null));
+                    continue;
+                }
                 if (rejectMarketBatch && placeRequest.orderType() == OrderType.MARKET) {
                     results.add(new OrderBatchItemResponse(i, false, "INSUFFICIENT_BALANCE", null));
                     continue;
