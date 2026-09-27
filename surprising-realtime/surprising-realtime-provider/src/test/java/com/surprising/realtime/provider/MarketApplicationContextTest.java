@@ -24,6 +24,18 @@ class MarketApplicationContextTest {
     @org.junit.jupiter.api.io.TempDir java.nio.file.Path temp;
 
     @org.junit.jupiter.api.Test
+    void routerPipelinesUseABoundedRedisConnectionPool() {
+        context(ProductLine.LINEAR_PERPETUAL, false).run(ctx -> {
+            var factory = ctx.getBean(org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory.class);
+            assertThat(factory.getClientConfiguration())
+                    .isInstanceOf(org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration.class);
+            var pooling = (org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration)
+                    factory.getClientConfiguration();
+            assertThat(pooling.getPoolConfig().getMaxTotal()).isEqualTo(4);
+        });
+    }
+
+    @org.junit.jupiter.api.Test
     void exportRequiresExplicitStorageConfiguration() {
         context(ProductLine.LINEAR_PERPETUAL, false)
                 .withPropertyValues("surprising.trade-export.enabled=true")

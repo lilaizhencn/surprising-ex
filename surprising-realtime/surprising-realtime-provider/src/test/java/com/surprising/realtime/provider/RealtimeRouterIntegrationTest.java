@@ -44,7 +44,9 @@ class RealtimeRouterIntegrationTest {
                         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                         .redirectError(ProcessBuilder.Redirect.DISCARD)
                         .start();
-        var factory = new LettuceConnectionFactory("127.0.0.1", port);
+        var factory = new LettuceConnectionFactory(
+                new org.springframework.data.redis.connection.RedisStandaloneConfiguration("127.0.0.1", port),
+                org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration.builder().build());
         factory.afterPropertiesSet();
         factory.start();
         try {
@@ -138,6 +140,25 @@ class RealtimeRouterIntegrationTest {
                 }
                 receivedA.clear();
                 receivedB.clear();
+                // A burst spans several 256-frame drains. Every event remains ordered and
+                // reaches only its subscribed node; pipelining must not coalesce trade-like events.
+                for (int i = 0; i < 20; i++)
+                    routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "PAIR" + i),
+                            i % 2 == 0 ? nodeA : nodeB, System.currentTimeMillis() + 30000);
+                long burstDrops = router.dropped();
+                for (int i = 0; i < 1024; i++)
+                    assertThat(router.offer(frame(RealtimeFrame.Kind.MARK, 0, 1000 + i, 0, 0,
+                            "PAIR" + (i % 20), "", new byte[] {'{', '}'}))).isTrue();
+                await(() -> receivedA.stream().filter(f -> f.sequence() >= 1000).count() == 512
+                        && receivedB.stream().filter(f -> f.sequence() >= 1000).count() == 512);
+                var burstA = receivedA.stream().filter(f -> f.sequence() >= 1000).toList();
+                var burstB = receivedB.stream().filter(f -> f.sequence() >= 1000).toList();
+                assertThat(burstA).allMatch(f -> Integer.parseInt(f.symbol().substring(4)) % 2 == 0);
+                assertThat(burstB).allMatch(f -> Integer.parseInt(f.symbol().substring(4)) % 2 == 1);
+                assertThat(burstA.stream().map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
+                assertThat(burstB.stream().map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
+                assertThat(router.dropped()).isEqualTo(burstDrops);
+                receivedA.clear(); receivedB.clear();
                 long droppedBefore = router.dropped();
                 assertThat(router.offer(frame(RealtimeFrame.Kind.CANDLE, 0, 9, 0, 0,
                         "BTCUSDT", "1m", new byte[17 * 1024 * 1024]))).isFalse();
@@ -192,12 +213,29 @@ class RealtimeRouterIntegrationTest {
                                         .getFirst()
                                         .availableUnits())
                         .isEqualTo(9);
+                receivedA.clear();
+                for (int i = 0; i < 1024; i++)
+                    commit(publication, 1000 + i, 3 + i, 4 + i, 20 + i);
+                await(() -> receivedA.stream().filter(f -> f.userId() == 42 && f.sequence() >= 1000)
+                        .count() == 1024);
+                assertThat(receivedA.stream().filter(f -> f.userId() == 42 && f.sequence() >= 1000)
+                        .map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
+                assertThat(UserReadView.from(views.read(ProductLine.SPOT, 42,
+                        System.currentTimeMillis(), 15000)).account().balances().getFirst().availableUnits())
+                        .isEqualTo(1043);
                 routes.unregister(userRoute, nodeA);
                 receivedA.clear();
-                commit(publication, 400, 3, 4, 11);
+                commit(publication, 5000, 1027, 1028, 11);
                 Thread.sleep(250);
-                assertThat(receivedA).noneMatch(f -> f.sequence() == 400 && f.userId() == 42);
+                assertThat(receivedA).noneMatch(f -> f.sequence() == 5000 && f.userId() == 42);
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);
+                var bookRequests = new ValkeySnapshotRequests(redis);
+                for (int i = 0; i < 20; i++)
+                    bookRequests.renewBook(ProductLine.SPOT, "PAIR" + i, System.currentTimeMillis() + 30000);
+                await(() -> control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST)
+                        .map(RealtimeFrame::symbol).distinct().count() == 20);
+                assertThat(control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST))
+                        .allMatch(f -> f.productLine() == ProductLine.SPOT && f.userId() == 0);
                 assertThat(router.failures()).isZero();
                 // The optional router control client must never invoke Aeron's process-exit
                 // handler when its MediaDriver disappears.

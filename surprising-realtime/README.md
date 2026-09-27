@@ -35,6 +35,30 @@ Kafka Streams 线程只做聚合、持久化与非阻塞入队；路由线程负
 
 实时数据在交易提交完成后进入有界 outbox，由独立 Aeron 线程发送到 Router。
 Router 在 Valkey 查询订阅节点，为每个目标 WS 节点维护一个 Publication；不向所有 WS 节点广播。
+`RealtimeRouter` 每轮最多取 256 帧，在 `ValkeyRouteDirectory.targets(Collection, now)`
+按产品线、用户/公共频道与币对去重，流水线查询有效订阅租约及节点端点。
+查询结果只属于这一轮，下一轮重新读取，不持久缓存订阅或延长租约。
+帧仍按接收顺序组装完整 commit，每个用户的绝对值更新仍由原 Lua 原子应用；
+跨轮完成的 commit 若包含本轮未查询的路由，会实时补查。发生查询错误时使来源失效，依靠权威快照恢复。
+保留 8192 帧 / 16 MiB 有界队列，并分别暴露 `realtime.router.input.dropped`
+（入队/查询丢弃）与 `realtime.router.transport.dropped`（节点传输丢弃），便于区分积压和连接问题。
+
+`ValkeyReadViewStore.applyCommits` 将本轮已收齐的提交按原顺序送入 Redis pipeline；
+每个用户、每次提交仍单独执行原子 Lua，不合并提交版本或资金事实。写入失败不继续向订阅节点发送。
+初始快照和来源切换先刷新前序提交，保持快照及增量的先后边界。
+
+realtime 使用 `spring-boot-starter-data-redis` 的 Lettuce。普通命令复用共享连接；
+pipeline 使用专用连接，因此显式引入 `commons-pool2` 并启用
+`spring.data.redis.lettuce.pool`：最大连接数/最大空闲数均为 4，最小空闲配置为 1，
+借用等待上限 500ms；连接和命令超时同为 500ms。池用于复用专用连接，不为每轮流水线建立 TCP 连接。
+`MarketApplicationContextTest` 校验实际创建 pooled Lettuce 配置及池上限，并覆盖六产品线启动边界。
+盘口快照请求每 100ms 最多轮询 8 个订阅币对；20 个币对约三轮覆盖。实际 WS 延迟仍受
+Core、路由队列和网络影响，不能把该周期当作端到端延迟承诺。
+
+成交导出 `CommittedTradeExporter` 在 Aeron 回放回调出错后保留第一个异常并停止本轮处理，
+从 poll 返回后向导出服务抛出；不再由 Aeron 默认错误处理器只打印错误后继续前进。
+失败批次不推进持久 checkpoint，后续重试仍从已确认位置开始。
+
 Valkey 只保存可重建的查询视图，不裁决余额、风控或成交。交易 owner 不调用 Valkey/Kafka/网络。
 新增编码、队列和异步快照有实际 CPU/分配成本；性能证据与限制见根目录 `PERFORMANCE_VALIDATION.md`。
 

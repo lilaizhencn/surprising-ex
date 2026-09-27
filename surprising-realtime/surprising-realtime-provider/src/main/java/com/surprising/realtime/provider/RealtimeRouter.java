@@ -41,7 +41,8 @@ public final class RealtimeRouter implements AutoCloseable {
     private final Set<ProductLine> dirtySources = EnumSet.noneOf(ProductLine.class);
     private final Map<ProductLine, Long> prefixes = new EnumMap<>(ProductLine.class);
     private final Map<String, Request> outstanding = new HashMap<>();
-    private final LongAdder dropped = new LongAdder(), failures = new LongAdder();
+    private final LongAdder inputDropped = new LongAdder(), transportDropped = new LongAdder(),
+            failures = new LongAdder();
     private final AeronRealtimeReceiver receiver;
     private final Thread worker;
     private volatile boolean running = true;
@@ -53,6 +54,8 @@ public final class RealtimeRouter implements AutoCloseable {
             io.micrometer.core.instrument.MeterRegistry metrics) {
         this(config, redis);
         metrics.gauge("realtime.router.dropped", this, RealtimeRouter::dropped);
+        metrics.gauge("realtime.router.input.dropped", inputDropped, LongAdder::sum);
+        metrics.gauge("realtime.router.transport.dropped", transportDropped, LongAdder::sum);
         metrics.gauge("realtime.router.failures", this, RealtimeRouter::failures);
         metrics.gauge("realtime.router.queued.bytes", queuedBytes);
         metrics.gauge("realtime.router.queued.frames", inbound, java.util.Collection::size);
@@ -78,7 +81,7 @@ public final class RealtimeRouter implements AutoCloseable {
         long bytes = frame.payloadLength() + 448;
         if (queuedBytes.addAndGet(bytes) > 16 * 1024 * 1024 || !inbound.offer(frame)) {
             queuedBytes.addAndGet(-bytes);
-            dropped.increment();
+            inputDropped.increment();
             return false;
         }
         return true;
@@ -109,17 +112,14 @@ public final class RealtimeRouter implements AutoCloseable {
                     long now = System.currentTimeMillis();
                     if (now >= nextRefresh) {
                         refresh(aeron, now);
-                        nextRefresh = now + 200;
+                        nextRefresh = now + 100;
                     }
                     RealtimeFrame frame = inbound.poll(10, TimeUnit.MILLISECONDS);
                     if (frame != null) {
-                        queuedBytes.addAndGet(-frame.payloadLength() - 448);
-                        try {
-                            route(aeron, frame, now);
-                        } catch (RuntimeException failure) {
-                            dirtySources.add(frame.productLine());
-                            failures.increment();
-                        }
+                        var frames = new ArrayList<RealtimeFrame>(256);
+                        frames.add(frame);
+                        inbound.drainTo(frames, 255);
+                        routeBatch(aeron, frames, now);
                     }
                 }
             } catch (InterruptedException interrupted) {
@@ -137,23 +137,59 @@ public final class RealtimeRouter implements AutoCloseable {
         }
     }
 
-    private void route(Aeron aeron, RealtimeFrame f, long now) {
-        if (dirtySources.remove(f.productLine())) resetSource(f.productLine());
+    /** Router thread owns this drain and its route lookup; neither survives the batch. */
+    private void routeBatch(Aeron aeron, List<RealtimeFrame> frames, long now) {
+        try {
+            var routeKeys = new HashSet<RealtimeRoute>();
+            for (var frame : frames)
+                if (frame.kind() != RealtimeFrame.Kind.COMMIT_BEGIN
+                        && frame.kind() != RealtimeFrame.Kind.COMMIT_END)
+                    routeKeys.add(RealtimeRoute.of(frame));
+            var targets = new HashMap<>(routes.targets(routeKeys, now));
+            var ready = new ArrayList<List<RealtimeFrame>>();
+            for (var frame : frames) {
+                try {
+                    route(aeron, frame, now, targets, ready);
+                } catch (RuntimeException failure) {
+                    dirtySources.add(frame.productLine());
+                    failures.increment();
+                    LOG.log(System.Logger.Level.WARNING, "Realtime frame routing failed", failure);
+                }
+            }
+            publishReady(aeron, ready, now, targets);
+        } catch (RuntimeException failure) {
+            frames.forEach(frame -> dirtySources.add(frame.productLine()));
+            failures.increment();
+            inputDropped.add(frames.size());
+            LOG.log(System.Logger.Level.WARNING, "Realtime route lookup failed", failure);
+        } finally {
+            for (var frame : frames) queuedBytes.addAndGet(-frame.payloadLength() - 448);
+        }
+    }
+
+    private void route(Aeron aeron, RealtimeFrame f, long now,
+            Map<RealtimeRoute, Map<String, String>> targets, List<List<RealtimeFrame>> ready) {
+        if (dirtySources.remove(f.productLine())) {
+            publishReady(aeron, ready, now, targets);
+            resetSource(f.productLine());
+        }
         if (f.snapshotId() != 0) {
+            // A recovery snapshot is an ordering fence, never pipelined across ordinary commits.
+            publishReady(aeron, ready, now, targets);
             String key = f.productLine() + ":" + f.userId();
             Request requested = outstanding.get(key);
             if (requested == null || requested.id != f.snapshotId() || now - requested.at > 5000)
                 return;
             if (f.kind() == RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE) {
                 views.unavailable(f.productLine(), f.userId());
-                send(aeron, f, now);
+                send(aeron, f, now, targets);
                 outstanding.remove(key);
                 return;
             }
             List<RealtimeFrame> complete = snapshots.accept(f, now);
             if (!complete.isEmpty()) {
                 if (views.install(complete, now, epochs.getOrDefault(f.productLine(), "0")))
-                    for (var part : complete) send(aeron, part, now);
+                    for (var part : complete) send(aeron, part, now, targets);
                 outstanding.remove(key);
             }
             return;
@@ -172,40 +208,50 @@ public final class RealtimeRouter implements AutoCloseable {
                 Long last = prefixes.get(f.productLine());
                 long end = ValkeyReadViewStore.exportSequence(batch.getLast());
                 if (last != null && end <= last) return;
-                if (last == null || previous != last) resetSource(f.productLine());
+                if (last == null || previous != last) {
+                    publishReady(aeron, ready, now, targets);
+                    resetSource(f.productLine());
+                }
                 prefixes.put(f.productLine(), end);
             }
-            var users = new HashMap<Long, List<RealtimeFrame>>();
-            for (var event : batch)
-                if (event.userId() > 0 && event.kind() != RealtimeFrame.Kind.EXECUTION)
-                    users.computeIfAbsent(event.userId(), u -> new ArrayList<>()).add(event);
-            for (var events : users.values())
-                views.applyBatch(events, ValkeyReadViewStore.exportSequence(batch.getLast()));
-            // A committed user update contains several frames on the same USER route.
-            // Resolve membership once for this commit; the next commit always reads fresh leases.
-            var batchTargets = new HashMap<RealtimeRoute, Map<String, String>>();
-            for (var event : batch) {
-                if (event.kind() == RealtimeFrame.Kind.COMMIT_BEGIN
-                        || event.kind() == RealtimeFrame.Kind.COMMIT_END) continue;
-                var targets = batchTargets.computeIfAbsent(RealtimeRoute.of(event),
-                        route -> routes.targets(route, now));
-                send(aeron, event, now, targets);
-            }
-        } else send(aeron, f, now);
+            ready.add(batch);
+        } else ready.add(List.of(f));
     }
 
-    private void send(Aeron aeron, RealtimeFrame f, long now) {
-        send(aeron, f, now, routes.targets(RealtimeRoute.of(f), now));
+    private void publishReady(Aeron aeron, List<List<RealtimeFrame>> ready, long now,
+            Map<RealtimeRoute, Map<String, String>> targets) {
+        if (ready.isEmpty()) return;
+        try {
+            views.applyCommits(ready);
+            for (var batch : ready)
+                for (var event : batch) {
+                    if (event.kind() == RealtimeFrame.Kind.COMMIT_BEGIN
+                            || event.kind() == RealtimeFrame.Kind.COMMIT_END) continue;
+                    send(aeron, event, now, targets);
+                }
+        } catch (RuntimeException failure) {
+            ready.forEach(batch -> dirtySources.add(batch.getFirst().productLine()));
+            throw failure;
+        } finally {
+            ready.clear();
+        }
     }
 
-    private void send(Aeron aeron, RealtimeFrame f, long now, Map<String, String> targets) {
+    private void send(Aeron aeron, RealtimeFrame f, long now,
+            Map<RealtimeRoute, Map<String, String>> targets) {
+        // A commit may begin in the preceding drain; resolve an unseen route freshly as needed.
+        sendToNodes(aeron, f, now, targets.computeIfAbsent(RealtimeRoute.of(f),
+                route -> routes.targets(route, System.currentTimeMillis())));
+    }
+
+    private void sendToNodes(Aeron aeron, RealtimeFrame f, long now, Map<String, String> targets) {
         if (targets.isEmpty()) return;
         byte[] bytes = RealtimeFrameCodec.encode(f);
         for (var entry : targets.entrySet()) {
             Node node = nodes.get(entry.getKey());
             if (node == null) {
                 if (nodes.size() >= 64) {
-                    dropped.increment();
+                    transportDropped.increment();
                     continue;
                 }
                 node =
@@ -220,7 +266,7 @@ public final class RealtimeRouter implements AutoCloseable {
             }
             node.lastUsed = now;
             long result = node.publication.offer(new UnsafeBuffer(bytes));
-            if (result < 0) dropped.increment();
+            if (result < 0) transportDropped.increment();
             if (result == Publication.CLOSED || result == Publication.MAX_POSITION_EXCEEDED) {
                 node.publication.close();
                 nodes.remove(entry.getKey());
@@ -247,8 +293,11 @@ public final class RealtimeRouter implements AutoCloseable {
         outstanding.values().removeIf(r -> now - r.at > 5000);
         for (var entry : controls.entrySet()) {
             long bookOffset = bookOffsets.getOrDefault(entry.getKey(), 0L);
-            var symbols = requests.books(entry.getKey(), now, bookOffset, 4);
-            bookOffsets.put(entry.getKey(), symbols.size() < 4 ? 0L : bookOffset + 4);
+            // At most 80 book reads/sec, below Core's shared 100 snapshot reads/sec ceiling.
+            // Look ahead one symbol so exact page multiples do not add an empty refresh cycle.
+            var activeBooks = requests.books(entry.getKey(), now, bookOffset, 9);
+            var symbols = activeBooks.stream().limit(8).toList();
+            bookOffsets.put(entry.getKey(), activeBooks.size() <= 8 ? 0L : bookOffset + 8);
             for (String symbol : symbols) {
                 var book =
                         new RealtimeFrame(
@@ -296,7 +345,7 @@ public final class RealtimeRouter implements AutoCloseable {
     }
 
     public long dropped() {
-        return dropped.sum();
+        return inputDropped.sum() + transportDropped.sum();
     }
 
     public long failures() {

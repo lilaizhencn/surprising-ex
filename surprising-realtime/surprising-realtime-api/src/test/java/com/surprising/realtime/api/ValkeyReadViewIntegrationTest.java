@@ -82,6 +82,35 @@ class ValkeyReadViewIntegrationTest {
     }
 
     @Test
+    void pipelinedRoutesKeepWildcardsPrivateLeasesAndProductBoundaries() {
+        var routes = new ValkeyRouteDirectory(redis);
+        String exact = UUID.randomUUID().toString(), wildcard = UUID.randomUUID().toString();
+        String expired = UUID.randomUUID().toString(), retired = UUID.randomUUID().toString();
+        for (String node : List.of(exact, wildcard, expired, retired))
+            routes.heartbeat(node, "aeron:udp?endpoint=127.0.0.1:25001", java.time.Duration.ofSeconds(10));
+        var btc = new RealtimeRoute(ProductLine.SPOT, 0, "TRADE", "BTCUSDT");
+        var eth = new RealtimeRoute(ProductLine.SPOT, 0, "TRADE", "ETHUSDT");
+        var perpetual = new RealtimeRoute(ProductLine.LINEAR_PERPETUAL, 0, "TRADE", "BTCUSDT");
+        var user = new RealtimeRoute(ProductLine.SPOT, 42, "USER", "");
+        routes.register(btc, exact, 2000);
+        routes.register(btc, expired, 1000);
+        routes.register(btc, retired, 2000);
+        routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "TRADE", "*"), wildcard, 2000);
+        routes.register(user, exact, 2000);
+        routes.removeNode(retired);
+        var requested = List.of(btc, eth, perpetual, user);
+        var batch = routes.targets(requested, 1000);
+        assertThat(batch.get(btc)).containsOnlyKeys(exact, wildcard);
+        assertThat(batch.get(eth)).containsOnlyKeys(wildcard);
+        assertThat(batch.get(perpetual)).isEmpty();
+        assertThat(batch.get(user)).containsOnlyKeys(exact);
+        routes.unregister(btc, exact);
+        assertThat(routes.targets(requested, 1001).get(btc)).containsOnlyKeys(wildcard);
+        assertThat(routes.targets(requested, 2000).values()).allMatch(Map::isEmpty);
+        assertThat(routes.targets(List.of(), 1000)).isEmpty();
+    }
+
+    @Test
     void delayedMembershipUpdatesCannotResurrectAnUnsubscribedNode() {
         var routes = new ValkeyRouteDirectory(redis);
         String node = UUID.randomUUID().toString();
@@ -110,6 +139,31 @@ class ValkeyReadViewIntegrationTest {
                                 .availableUnits())
                 .isEqualTo(7);
         assertThat(store.read(ProductLine.SPOT, 42, 1101, 100).status()).isEqualTo("STALE");
+    }
+
+    @Test
+    void pipelinedCommitsPreserveSnapshotFenceVersionsAndExportWatermark() {
+        store.install(snapshot(100, 1, 10), 1000);
+        store.applyCommits(List.of(commit(99, 1, 999), commit(101, 2, 11), commit(102, 3, 12),
+                commit(101, 2, 999)));
+        var view = store.read(ProductLine.SPOT, 42, 1001, 100);
+        assertThat(view.status()).isEqualTo("READY");
+        assertThat(UserReadView.from(view).account().balances().getFirst().availableUnits()).isEqualTo(12);
+        assertThat(redis.opsForHash().get("rt:view:{SPOT:42}", "@exportSequence"))
+                .isEqualTo(RealtimeVersion.of(3, 0));
+        store.install(snapshot(103, 2, 13), 1002);
+        store.applyCommits(List.of(commit(102, 3, 999)));
+        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42, 1003, 100))
+                .account().balances().getFirst().availableUnits()).isEqualTo(13);
+        assertThat(store.read(ProductLine.SPOT, 43, 1003, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42, 1003, 100).status()).isEqualTo("INITIALIZING");
+    }
+
+    private static List<RealtimeFrame> commit(long sequence, long export, long units) {
+        byte[] end = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .putLong(export).array();
+        return List.of(balance(sequence, 1, units), new RealtimeFrame(ProductLine.SPOT,
+                RealtimeFrame.Kind.COMMIT_END, 0, sequence, 2, 1, 0, "", "", end));
     }
 
     @Test

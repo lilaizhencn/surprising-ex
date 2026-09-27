@@ -253,6 +253,24 @@ class CommittedTradeExportIntegrationTest {
                     assertThat(events.getFirst().priceTicks()).isEqualTo(100);
                     assertThat(events.getFirst().quantitySteps()).isEqualTo(3);
                 }
+                byte[] committedCheckpoint = Files.readAllBytes(checkpoint);
+                var invalid = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
+                        UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY,
+                        77, 5, 1001, 1700000000000L, 1),
+                        TradingCommandCodec.encodePlaceOrder(order(3, CoreOrderSide.BUY)));
+                offer(publication, invalid);
+                long invalidEnd = offer(publication, command(CoreMessageType.ADJUST_BALANCE, 6, 1001,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
+                long recordedDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (aeron.countersReader().getCounterValue(recordingCounter) < invalidEnd) {
+                    if (System.nanoTime() > recordedDeadline) throw new IllegalStateException("recording lag");
+                    Thread.sleep(10);
+                }
+                counter.set(invalidEnd);
+                assertThatThrownBy(() -> runExport(clusterDir, directory, control,
+                        broker.getBrokersAsString(), checkpoint, invalidEnd))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessage("cross-product replay message");
+                assertThat(Files.readAllBytes(checkpoint)).isEqualTo(committedCheckpoint);
             }
         } finally {
             broker.destroy();

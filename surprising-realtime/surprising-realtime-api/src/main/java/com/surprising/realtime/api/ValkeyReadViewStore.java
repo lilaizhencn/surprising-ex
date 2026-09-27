@@ -76,6 +76,43 @@ public final class ValkeyReadViewStore {
     public long applyBatch(List<RealtimeFrame> frames, long exportSequence) {
         if (frames.isEmpty()) return 0;
         var first = frames.getFirst();
+        Long applied = redis.execute(DELTA, keys(first.productLine(), first.userId()),
+                deltaArguments(frames, exportSequence));
+        return applied == null ? 0 : applied;
+    }
+
+    /** Pipeline transport only: each committed user's update still runs one atomic DELTA script. */
+    public void applyCommits(List<List<RealtimeFrame>> commits) {
+        var commands = new ArrayList<byte[][]>();
+        for (var commit : commits) {
+            var users = new LinkedHashMap<Long, List<RealtimeFrame>>();
+            for (var frame : commit)
+                if (frame.userId() > 0 && frame.kind() != RealtimeFrame.Kind.EXECUTION)
+                    users.computeIfAbsent(frame.userId(), ignored -> new ArrayList<>()).add(frame);
+            if (users.isEmpty()) continue;
+            long exportSequence = exportSequence(commit.getLast());
+            for (var frames : users.values()) {
+                var first = frames.getFirst();
+                var keys = keys(first.productLine(), first.userId());
+                var args = deltaArguments(frames, exportSequence);
+                var command = new byte[keys.size() + args.length][];
+                for (int i = 0; i < keys.size(); i++) command[i] = utf8(keys.get(i));
+                for (int i = 0; i < args.length; i++) command[keys.size() + i] = utf8((String) args[i]);
+                commands.add(command);
+            }
+        }
+        if (commands.isEmpty()) return;
+        byte[] script = utf8(DELTA.getScriptAsString());
+        redis.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+            for (var command : commands)
+                connection.scriptingCommands().eval(script,
+                        org.springframework.data.redis.connection.ReturnType.INTEGER, 2, command);
+            return null;
+        });
+    }
+
+    private static Object[] deltaArguments(List<RealtimeFrame> frames, long exportSequence) {
+        var first = frames.getFirst();
         var args = new ArrayList<String>(frames.size() * 3 + 1);
         args.add(RealtimeVersion.of(exportSequence, 0));
         for (var frame : frames) {
@@ -88,9 +125,11 @@ public final class ValkeyReadViewStore {
             args.add(RealtimeVersion.of(frame.sequence(), frame.ordinal()));
             args.add(encode(frame));
         }
-        Long applied =
-                redis.execute(DELTA, keys(first.productLine(), first.userId()), args.toArray());
-        return applied == null ? 0 : applied;
+        return args.toArray();
+    }
+
+    private static byte[] utf8(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     public boolean install(List<RealtimeFrame> snapshot, long receivedAt) {

@@ -30,6 +30,13 @@ spring:
       port: ${VALKEY_PORT:6379}
       username: ${VALKEY_USERNAME:default}
       password: ${VALKEY_PASSWORD:}
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 4
+          max-idle: 4
+          min-idle: 1
+          max-wait: 500ms
       connect-timeout: 500ms
       timeout: 500ms
 management:

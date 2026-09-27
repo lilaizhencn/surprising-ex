@@ -234,12 +234,21 @@ final class CommittedTradeExporter {
                             LockSupport.parkNanos(100_000);
                         }
                         Image image = subscription.imageAtIndex(0);
+                        // Image.poll reports callback exceptions to Aeron's error handler and may
+                        // advance its position. Preserve the failure on this replay thread and
+                        // stop before publishing or checkpointing any subsequent message.
+                        RuntimeException[] replayFailure = {null};
                         while (running.get() && image.position() < safeEnd && !image.isClosed()) {
                             int work =
                                     image.poll(
                                             (buffer, offset, length, header) -> {
-                                                assembler.onFragment(
-                                                        buffer, offset, length, header);
+                                                if (replayFailure[0] != null) return;
+                                                try {
+                                                    assembler.onFragment(buffer, offset, length, header);
+                                                } catch (RuntimeException failure) {
+                                                    replayFailure[0] = failure;
+                                                    return;
+                                                }
                                                 partialMessage[0] =
                                                         (header.flags()
                                                                         & io.aeron.protocol
@@ -248,6 +257,7 @@ final class CommittedTradeExporter {
                                                                 == 0;
                                             },
                                             16);
+                            if (replayFailure[0] != null) throw replayFailure[0];
                             if (work == 0) {
                                 if (System.nanoTime() > deadline)
                                     throw new IllegalStateException("archive replay stalled");

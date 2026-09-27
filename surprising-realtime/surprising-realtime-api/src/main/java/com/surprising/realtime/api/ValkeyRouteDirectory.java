@@ -54,28 +54,58 @@ public final class ValkeyRouteDirectory {
     }
 
     public Map<String, String> targets(RealtimeRoute route, long now) {
-        var result = new LinkedHashMap<>(exactTargets(route, now));
-        if (route.userId() == 0 && !route.symbol().equals("*"))
-            result.putAll(
-                    exactTargets(
-                            new RealtimeRoute(route.productLine(), 0, route.channel(), "*"), now));
+        return targets(List.of(route), now).get(route);
+    }
+
+    /** One bounded router drain reads fresh leases in two pipelined round trips. No lease cache. */
+    public Map<RealtimeRoute, Map<String, String>> targets(
+            Collection<RealtimeRoute> requested, long now) {
+        if (requested.isEmpty()) return Map.of();
+        var exact = new LinkedHashSet<>(requested);
+        for (var route : requested)
+            if (route.userId() == 0 && !route.symbol().equals("*"))
+                exact.add(new RealtimeRoute(route.productLine(), 0, route.channel(), "*"));
+        var ordered = new ArrayList<>(exact);
+        var memberships = redis.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+            for (var route : ordered) {
+                byte[] key = bytes("rt:route:{" + route.key() + "}");
+                connection.zSetCommands().zRemRangeByScore(key, 0, now);
+                connection.zSetCommands().zRangeByScore(key, now + 1, Double.POSITIVE_INFINITY);
+            }
+            return null;
+        });
+        var members = new HashMap<RealtimeRoute, Set<String>>();
+        var nodeIds = new LinkedHashSet<String>();
+        for (int i = 0; i < ordered.size(); i++) {
+            @SuppressWarnings("unchecked")
+            var nodes = (Set<String>) memberships.get(i * 2 + 1);
+            members.put(ordered.get(i), nodes);
+            nodeIds.addAll(nodes);
+        }
+        var nodes = new ArrayList<>(nodeIds);
+        var endpoints = nodes.isEmpty() ? List.of() : redis.executePipelined(
+                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                    for (String node : nodes) connection.stringCommands().get(bytes("rt:node:" + node));
+                    return null;
+                });
+        var liveNodes = new HashMap<String, String>();
+        for (int i = 0; i < nodes.size(); i++)
+            if (endpoints.get(i) != null) liveNodes.put(nodes.get(i), (String) endpoints.get(i));
+        var result = new HashMap<RealtimeRoute, Map<String, String>>();
+        for (var route : requested) {
+            var targets = new LinkedHashMap<String, String>();
+            for (String node : members.get(route))
+                if (liveNodes.containsKey(node)) targets.put(node, liveNodes.get(node));
+            if (route.userId() == 0 && !route.symbol().equals("*"))
+                for (String node : members.get(new RealtimeRoute(route.productLine(), 0, route.channel(), "*")))
+                    if (liveNodes.containsKey(node)) targets.put(node, liveNodes.get(node));
+            result.put(route, targets);
+        }
         return result;
     }
 
-    private Map<String, String> exactTargets(RealtimeRoute route, long now) {
-        String key = "rt:route:{" + route.key() + "}";
-        redis.opsForZSet().removeRangeByScore(key, 0, now);
-        var nodes = redis.opsForZSet().rangeByScore(key, now + 1, Double.POSITIVE_INFINITY);
-        if (nodes == null || nodes.isEmpty()) return Map.of();
-        var endpoints =
-                redis.opsForValue().multiGet(nodes.stream().map(n -> "rt:node:" + n).toList());
-        var result = new LinkedHashMap<String, String>();
-        int i = 0;
-        for (String node : nodes) {
-            String endpoint = endpoints == null ? null : endpoints.get(i++);
-            if (endpoint != null) result.put(node, endpoint);
-        }
-        return result;
+    private static byte[] bytes(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     public void removeNode(String node) {
