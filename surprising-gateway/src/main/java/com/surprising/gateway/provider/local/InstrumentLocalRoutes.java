@@ -63,7 +63,9 @@ public final class InstrumentLocalRoutes {
             return instrumentRequests.list(r.query("type", InstrumentType.class, null, false),
                     r.query("status", InstrumentStatus.class, null, false),
                     r.header("X-Product-Line", String.class, null, false),
-                    r.query("productLine", String.class, null, false));
+                    r.query("productLine", String.class, null, false),
+                    r.query("includeMarketSummary", boolean.class, "false", false),
+                    r.query("includeTrend", boolean.class, "false", false));
         }
         if (r.matches(HttpMethod.POST, INSTRUMENT_CONTROLLER_CLOSEFORSETTLEMENT)) {
             return instrumentRequests.closeForSettlement(r.path("instrumentId", int.class),

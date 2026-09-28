@@ -65,6 +65,22 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 | `market-maker` | `http://localhost:9096/api/v1/market-maker` | 是 |
 | `wallet` | `http://localhost:8002/wallet/v1` | 是 |
 
+### 公共行情列表
+
+`GET /api/v1/gateway/instrument/list?productLine=LINEAR_PERPETUAL&status=TRADING&includeMarketSummary=true&includeTrend=true`
+由 `InstrumentRequestService.list` 一次返回合约配置与行情首屏摘要。
+`MarketSummaryRepository` 从已关闭的 1 分钟 K 线读取最近 24 小时，给每个币对添加
+`lastPrice`、`change24h`、`high24h`、`low24h`、`volume24h`（基础币）、
+`quoteVolume24h`（计价币）和最多 32 个收盘价组成的 `trend`。无成交时 `trend` 为空，
+其他摘要字段缺席；不伪造价格。趋势只在 HTTP 列表里返回，WebSocket 继续发送现有
+逐笔、标记价等轻量增量，不发送趋势数组。合约 ID 若在多个产品线重复，当前 K 线表
+无法区分归属，列表跳过该 ID 的摘要，避免跨产品线串价。
+不需要行情摘要的订单与资产页面省略 `includeMarketSummary`，只接收合约配置。
+交易页只带 `includeMarketSummary=true` 获取当前摘要，不接收趋势数组。
+
+首页和 Markets 页只请求一次列表与精度，之后使用 WebSocket 更新实时价格；
+交易页只请求所选产品线、所选合约和所选周期的 K 线历史。
+
 Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后端主机名，也不会处理任何动态表名。
 
 ## 安全模型

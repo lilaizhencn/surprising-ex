@@ -1,13 +1,18 @@
 package com.surprising.instrument.provider.service;
 
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
+import com.surprising.instrument.provider.repository.MarketSummaryRepository;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -20,9 +25,15 @@ import org.springframework.stereotype.Service;
 public class InstrumentRequestService {
 
     private final InstrumentService instrumentService;
+    private final MarketSummaryRepository marketSummaries;
+    private final ObjectMapper objectMapper;
 
-    public InstrumentRequestService(InstrumentService instrumentService) {
+    public InstrumentRequestService(InstrumentService instrumentService,
+                                    MarketSummaryRepository marketSummaries,
+                                    ObjectMapper objectMapper) {
         this.instrumentService = instrumentService;
+        this.marketSummaries = marketSummaries;
+        this.objectMapper = objectMapper;
     }
 
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
@@ -51,9 +62,36 @@ public class InstrumentRequestService {
         return instrumentService.assetScales().entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> Long.toString(entry.getValue())));
     }
 
-    public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, String productLineHeader, String productLineValue) {
+    public Object list(InstrumentType type, InstrumentStatus status, String productLineHeader,
+                       String productLineValue, boolean includeMarketSummary, boolean includeTrend) {
         try {
-            return instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
+            var instruments = instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
+            if (!includeMarketSummary) return instruments;
+            var summaries = marketSummaries.summaries(
+                    instruments.instruments().stream().map(InstrumentResponse::instrumentId).distinct().toList(),
+                    java.time.Instant.now());
+            List<Map<String, Object>> items = instruments.instruments().stream().map(instrument -> {
+                Map<String, Object> item = objectMapper.convertValue(instrument, new TypeReference<LinkedHashMap<String, Object>>() {});
+                var summary = summaries.get(instrument.instrumentId());
+                if (summary != null) {
+                    item.put("lastPrice", summary.lastPrice());
+                    item.put("change24h", summary.change24h());
+                    item.put("high24h", summary.high24h());
+                    item.put("low24h", summary.low24h());
+                    item.put("volume24h", summary.volume24h());
+                    item.put("quoteVolume24h", summary.quoteVolume24h());
+                    if (includeTrend) item.put("trend", summary.trend());
+                } else if (includeTrend) item.put("trend", List.of());
+                return item;
+            }).toList();
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("count", instruments.count());
+            response.put("instruments", items);
+            response.put("nextCursor", instruments.nextCursor());
+            response.put("hasMore", instruments.hasMore());
+            response.put("sort", instruments.sort());
+            response.put("limit", instruments.limit());
+            return response;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
