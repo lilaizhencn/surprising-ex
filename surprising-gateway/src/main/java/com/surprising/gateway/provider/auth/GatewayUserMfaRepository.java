@@ -34,7 +34,8 @@ public class GatewayUserMfaRepository {
     }
 
     public void upsertSecret(long userId, String secretCiphertext, Instant now) {
-        jdbcTemplate.update("""
+        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
+        int updated = jdbcTemplate.update("""
                 INSERT INTO gateway_user_mfa (
                     user_id, totp_secret_ciphertext, enabled, verified_at, created_at, updated_at
                 ) VALUES (?, ?, FALSE, NULL, ?, ?)
@@ -42,11 +43,15 @@ public class GatewayUserMfaRepository {
                    SET totp_secret_ciphertext = EXCLUDED.totp_secret_ciphertext,
                        enabled = FALSE,
                        verified_at = NULL,
-                       updated_at = EXCLUDED.updated_at
+                       updated_at = EXCLUDED.updated_at,
+                       last_login_step = -1
+                 WHERE gateway_user_mfa.enabled = FALSE AND gateway_user_mfa.verified_at IS NULL
                 """, userId, secretCiphertext, Timestamp.from(now), Timestamp.from(now));
+        if (updated == 0) throw new IllegalArgumentException("disable existing authenticator before enrolling a new one");
     }
 
     public void enable(long userId, Instant now) {
+        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_user_mfa
                    SET enabled = TRUE,
@@ -60,13 +65,17 @@ public class GatewayUserMfaRepository {
     }
 
     public void disable(long userId, Instant now) {
+        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
         jdbcTemplate.update("""
                 UPDATE gateway_user_mfa
                    SET enabled = FALSE,
-                       verified_at = NULL,
                        updated_at = ?
                  WHERE user_id = ?
                 """, Timestamp.from(now), userId);
+    }
+
+    public boolean consumeCode(long userId, long step) {
+        return jdbcTemplate.update("UPDATE gateway_user_mfa SET last_login_step=? WHERE user_id=? AND last_login_step<?", step,userId,step)==1;
     }
 
     private Instant nullableInstant(java.sql.ResultSet rs, String column) throws java.sql.SQLException {

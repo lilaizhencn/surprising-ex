@@ -51,19 +51,19 @@ public class TotpService {
     }
 
     public boolean verify(String secret, String code, Instant now) {
+        return matchingStep(secret, code, now) >= 0;
+    }
+
+    public long matchingStep(String secret, String code, Instant now) {
         String normalized = normalizeCode(code);
-        if (normalized == null) {
-            return false;
-        }
+        if (normalized == null) return -1;
         long counter = now.getEpochSecond() / PERIOD_SECONDS;
-        for (long offset = -1; offset <= 1; offset++) {
+        for (long offset = 1; offset >= -1; offset--) {
             String expected = code(secret, counter + offset);
             if (MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                    normalized.getBytes(StandardCharsets.UTF_8))) {
-                return true;
-            }
+                    normalized.getBytes(StandardCharsets.UTF_8))) return counter + offset;
         }
-        return false;
+        return -1;
     }
 
     public String encryptSecret(String secret) {

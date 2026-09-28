@@ -63,38 +63,6 @@ public class UserSecurityController {
         }
     }
 
-    @PostMapping("/mfa/enroll")
-    public UserSecurityService.UserMfaEnrollment enrollMfa(
-            @RequestHeader("Authorization") String authorization) {
-        try {
-            return securityService.enrollMfa(principal(authorization).userId());
-        } catch (IllegalArgumentException ex) {
-            throw badRequest(ex);
-        }
-    }
-
-    @PostMapping("/mfa/confirm")
-    public UserSecurityService.UserMfaStatus confirmMfa(
-            @RequestHeader("Authorization") String authorization,
-            @Valid @RequestBody UserMfaVerificationRequest request) {
-        try {
-            return securityService.confirmMfa(principal(authorization).userId(), request.totpCode());
-        } catch (IllegalArgumentException ex) {
-            throw badRequest(ex);
-        }
-    }
-
-    @PostMapping("/mfa/disable")
-    public UserSecurityService.UserMfaStatus disableMfa(
-            @RequestHeader("Authorization") String authorization,
-            @Valid @RequestBody UserMfaVerificationRequest request) {
-        try {
-            return securityService.disableMfa(principal(authorization).userId(), request.totpCode());
-        } catch (IllegalArgumentException ex) {
-            throw badRequest(ex);
-        }
-    }
-
     @GetMapping("/scenes")
     public java.util.List<UserSecurityService.Scene> scenes(
             @RequestHeader("Authorization") String authorization) {

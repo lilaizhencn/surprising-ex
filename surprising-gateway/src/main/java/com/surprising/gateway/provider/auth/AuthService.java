@@ -2,9 +2,7 @@ package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.AuthModels.AuthResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.AuthModels.AdminMfaEnrollmentResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminMfaStatusResponse;
-import com.surprising.gateway.provider.auth.AuthModels.AdminMfaVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AdminPermissionQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminRolePermissionsRequest;
@@ -39,22 +37,22 @@ public class AuthService {
     private final AuthPersistenceService repository;
     private final PasswordHasher passwordHasher;
     private final JwtTokenService jwtTokenService;
-    private final TotpService totpService;
     private final EmailVerificationService emailVerificationService;
+    private final LoginVerificationService loginVerification;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
                        AuthPersistenceService repository,
                        PasswordHasher passwordHasher,
                        JwtTokenService jwtTokenService,
-                       TotpService totpService,
-                       EmailVerificationService emailVerificationService) {
+                       EmailVerificationService emailVerificationService,
+                       LoginVerificationService loginVerification) {
         this.properties = properties;
         this.repository = repository;
         this.passwordHasher = passwordHasher;
         this.jwtTokenService = jwtTokenService;
-        this.totpService = totpService;
         this.emailVerificationService = emailVerificationService;
+        this.loginVerification = loginVerification;
     }
 
     @Transactional
@@ -91,8 +89,8 @@ public class AuthService {
                 email != null && properties.getSecurity().isRequireEmailVerification());
     }
 
-    @Transactional
-    public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthModels.LoginResult login(LoginRequest request, HttpServletRequest httpRequest) {
         String identifier = normalizeLoginIdentifier(request.identifier());
         Instant now = Instant.now();
         GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
@@ -108,7 +106,8 @@ public class AuthService {
         }
         AuthenticatedUser user = repository.user(credential.userId())
                 .orElseThrow(() -> new IllegalStateException("user not found"));
-        enforceAdminMfa(user, request.totpCode(), httpRequest, now);
+        var challenge = loginVerification.begin(user.userId(), credential.passwordHash(), now);
+        if (challenge != null) return challenge;
         repository.loginLog(user.userId(), "SUCCESS", "LOGIN", userAgent(httpRequest), ipAddress(httpRequest), now);
         return authResponse(user, httpRequest, now);
     }
@@ -365,69 +364,14 @@ public class AuthService {
                 .orElseGet(() -> new AdminMfaStatusResponse(false, null));
     }
 
-    @Transactional
-    public AdminMfaEnrollmentResponse enrollAdminMfa(String authorizationHeader) {
-        JwtPrincipal principal = authenticateAdminBearer(authorizationHeader);
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthResponse verifyLogin(LoginVerificationService.VerifyRequest request, HttpServletRequest httpRequest) {
         Instant now = Instant.now();
-        String secret = totpService.newSecret();
-        repository.upsertMfaSecret(principal.userId(), totpService.encryptSecret(secret), now);
-        return new AdminMfaEnrollmentResponse(
-                false,
-                secret,
-                totpService.provisioningUri(principal.username(), secret),
-                now);
-    }
-
-    @Transactional
-    public AdminMfaStatusResponse confirmAdminMfa(String authorizationHeader, AdminMfaVerificationRequest request) {
-        JwtPrincipal principal = authenticateAdminBearer(authorizationHeader);
-        GatewayUserMfaRepository.MfaCredential credential = repository.mfaCredential(principal.userId())
-                .orElseThrow(() -> new IllegalArgumentException("mfa enrollment not found"));
-        String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-        if (!totpService.verify(secret, request == null ? null : request.totpCode(), Instant.now())) {
-            throw new IllegalArgumentException("invalid totp code");
-        }
-        Instant now = Instant.now();
-        repository.enableMfa(principal.userId(), now);
-        return new AdminMfaStatusResponse(true, now);
-    }
-
-    @Transactional
-    public AdminMfaStatusResponse disableAdminMfa(String authorizationHeader, AdminMfaVerificationRequest request) {
-        JwtPrincipal principal = authenticateAdminBearer(authorizationHeader);
-        var credential = repository.mfaCredential(principal.userId()).orElse(null);
-        if (credential != null && credential.enabled()) {
-            String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-            if (!totpService.verify(secret, request == null ? null : request.totpCode(), Instant.now())) {
-                throw new IllegalArgumentException("invalid totp code");
-            }
-        }
-        repository.disableMfa(principal.userId(), Instant.now());
-        return new AdminMfaStatusResponse(false, null);
-    }
-
-    private void enforceAdminMfa(AuthenticatedUser user,
-                                 String totpCode,
-                                 HttpServletRequest httpRequest,
-                                 Instant now) {
-        var credential = repository.mfaCredential(user.userId()).orElse(null);
-        if (credential != null && credential.enabled()) {
-            String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-            if (!totpService.verify(secret, totpCode, now)) {
-                repository.loginLog(user.userId(), "FAILED", "MFA_INVALID",
-                        userAgent(httpRequest), ipAddress(httpRequest), now);
-                throw new IllegalArgumentException("invalid or missing totp code");
-            }
-            return;
-        }
-        if (!isAdmin(user.roles())) {
-            return;
-        }
-        if (properties.getSecurity().isRequireAdminMfa()) {
-            repository.loginLog(user.userId(), "FAILED", "MFA_NOT_ENROLLED",
-                    userAgent(httpRequest), ipAddress(httpRequest), now);
-            throw new IllegalStateException("admin mfa enrollment required");
-        }
+        long userId = loginVerification.verify(request, now);
+        AuthenticatedUser user = repository.user(userId).orElseThrow();
+        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        repository.loginLog(userId, "SUCCESS", "LOGIN", userAgent(httpRequest), ipAddress(httpRequest), now);
+        return authResponse(user, httpRequest, now);
     }
 
     private boolean isAdmin(List<String> roles) {

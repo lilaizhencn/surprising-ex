@@ -182,6 +182,8 @@ public class AuthPersistenceService {
         mfaRepository.upsertSecret(userId, secretCiphertext, now);
     }
 
+    public boolean consumeMfaCode(long userId, long step) { return mfaRepository.consumeCode(userId, step); }
+
     public void enableMfa(long userId, Instant now) {
         mfaRepository.enable(userId, now);
     }

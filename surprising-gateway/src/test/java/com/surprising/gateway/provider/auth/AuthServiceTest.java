@@ -30,8 +30,9 @@ class AuthServiceTest {
     private final JwtTokenService jwtTokenService = mock(JwtTokenService.class);
     private final TotpService totpService = mock(TotpService.class);
     private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
+    private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, totpService, emailVerificationService);
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification);
 
     @Test
     void adminRefreshSessionsReturnsRepositoryRows() {
@@ -183,24 +184,18 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginRequiresTotpWhenAdminMfaIsEnabled() {
-        Instant now = Instant.parse("2026-07-02T00:00:00Z");
+    void loginReturnsChallengeWithoutIssuingTokens() {
+        Instant now = Instant.now();
         when(repository.credentialByUsername("admin")).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
                 7L, "admin", null, "hash", "NORMAL", now)));
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        when(repository.mfaCredential(7L)).thenReturn(Optional.of(new GatewayUserMfaRepository.MfaCredential(
-                7L, "ciphertext", true, now, now, now)));
-        when(totpService.decryptSecret("ciphertext")).thenReturn("SECRET");
-        when(totpService.verify(eq("SECRET"), eq("123456"), any())).thenReturn(true);
-        when(jwtTokenService.createAccessToken(eq(7L), eq("admin"), eq(List.of("ADMIN")), any()))
-                .thenReturn("access");
-        HttpServletRequest request = new MockHttpServletRequest();
-
-        var response = service.login(new LoginRequest("admin", "password", "123456"), request);
-
-        assertThat(response.accessToken()).isEqualTo("access");
-        verify(repository).saveRefreshSession(eq(7L), any(), any(), any(), any(), any());
+        var challenge = new LoginVerificationService.ChallengeResponse(true,"challenge",now.plusSeconds(300),
+                List.of(new LoginVerificationService.Method("TOTP",null)));
+        when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
+        assertThat(service.login(new LoginRequest("admin","password"),new MockHttpServletRequest())).isSameAs(challenge);
+        verifyNoInteractions(jwtTokenService);
+        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(any(Long.class),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -214,7 +209,7 @@ class AuthServiceTest {
         when(jwtTokenService.createAccessToken(eq(42L), eq("user"), eq(List.of("USER")), any()))
                 .thenReturn("access");
 
-        var response = service.login(new LoginRequest("user", "password", null), new MockHttpServletRequest());
+        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new MockHttpServletRequest());
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
@@ -276,7 +271,7 @@ class AuthServiceTest {
         when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
                 .thenReturn("access");
 
-        var response = service.login(new LoginRequest("USER@EXAMPLE.COM", "password", null),
+        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("USER@EXAMPLE.COM", "password"),
                 new MockHttpServletRequest());
 
         assertThat(response.user().email()).isEqualTo("user@example.com");

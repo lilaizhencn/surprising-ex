@@ -48,41 +48,6 @@ public class UserSecurityService {
                 .orElseGet(() -> new UserMfaStatus(false, null));
     }
 
-    @Transactional
-    public UserMfaEnrollment enrollMfa(long userId) {
-        AuthenticatedUser user = requireUser(userId);
-        String secret = totpService.newSecret();
-        persistence.upsertMfaSecret(userId, totpService.encryptSecret(secret), Instant.now());
-        return new UserMfaEnrollment(false, secret,
-                totpService.provisioningUri(user.email() == null ? String.valueOf(userId) : user.email(), secret));
-    }
-
-    @Transactional
-    public UserMfaStatus confirmMfa(long userId, String totpCode) {
-        GatewayUserMfaRepository.MfaCredential credential = persistence.mfaCredential(userId)
-                .orElseThrow(() -> new IllegalArgumentException("mfa enrollment not found"));
-        String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-        if (!totpService.verify(secret, totpCode, Instant.now())) {
-            throw new IllegalArgumentException("invalid totp code");
-        }
-        Instant now = Instant.now();
-        persistence.enableMfa(userId, now);
-        return new UserMfaStatus(true, now);
-    }
-
-    @Transactional
-    public UserMfaStatus disableMfa(long userId, String totpCode) {
-        GatewayUserMfaRepository.MfaCredential credential = persistence.mfaCredential(userId).orElse(null);
-        if (credential != null && credential.enabled()) {
-            String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-            if (!totpService.verify(secret, totpCode, Instant.now())) {
-                throw new IllegalArgumentException("invalid totp code");
-            }
-        }
-        persistence.disableMfa(userId, Instant.now());
-        return new UserMfaStatus(false, null);
-    }
-
     public List<Scene> scenes(long userId) {
         Map<String, GatewayUserSecuritySceneRepository.SceneRecord> configured = sceneRepository.find(userId).stream()
                 .collect(Collectors.toMap(GatewayUserSecuritySceneRepository.SceneRecord::sceneCode, item -> item));

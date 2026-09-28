@@ -34,38 +34,4 @@ public class AdminSecurityController {
         }
     }
 
-    @PostMapping("/mfa/enroll")
-    public AdminMfaEnrollmentResponse enrollMfa(@RequestHeader("Authorization") String authorization) {
-        try {
-            return authService.enrollAdminMfa(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/mfa/confirm")
-    public AdminMfaStatusResponse confirmMfa(@RequestHeader("Authorization") String authorization,
-                                             @Valid @RequestBody AdminMfaVerificationRequest request) {
-        try {
-            return authService.confirmAdminMfa(authorization, request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/mfa/disable")
-    public AdminMfaStatusResponse disableMfa(@RequestHeader("Authorization") String authorization,
-                                             @Valid @RequestBody(required = false) AdminMfaVerificationRequest request) {
-        try {
-            return authService.disableAdminMfa(authorization, request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
 }

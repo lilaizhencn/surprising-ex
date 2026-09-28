@@ -228,3 +228,6 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 `status` 检查服务，`down` 统一停止；`python3 scripts/check-local-perpetual.py` 检查 20 币对
 真实三源指数、标记价和双边盘口。依赖、测试资金及初始合约单位边界见
 [本机部署说明](deployment/local-perpetual/README.md)。
+
+认证入口采用两步登录：账号密码通过后，后端按已绑定且启用的邮箱、手机、Google 验证方式签发一次性挑战；全部验证码通过后才创建会话。
+安全设置绑定验证密码和其余已绑定方式，登录开关关闭不会取消绑定交叉验证。接口及数据库迁移见 [Gateway 两步登录与安全设置](surprising-gateway/README.md#两步登录与安全设置2026-09-28)。

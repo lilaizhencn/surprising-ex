@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 public class ResendEmailMessageSender implements EmailMessageSender {
 
     private final GatewayProperties properties;
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
 
     public ResendEmailMessageSender(GatewayProperties properties) {
         this.properties = properties;
@@ -29,6 +29,7 @@ public class ResendEmailMessageSender implements EmailMessageSender {
                 + "\",\"text\":\"" + escape(text) + "\"}";
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(security.getResendBaseUrl() + "/emails"))
+                .timeout(java.time.Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + security.getResendApiKey())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload))

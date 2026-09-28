@@ -25,8 +25,7 @@ public final class AuthModels {
 
     public record LoginRequest(
             @NotBlank @JsonAlias({"username", "email", "phone"}) String identifier,
-            @NotBlank String password,
-            String totpCode) {
+            @NotBlank @Size(max = 128) String password) {
     }
 
     public record RefreshRequest(@NotBlank String refreshToken) {
@@ -52,7 +51,10 @@ public final class AuthModels {
     public record PasswordResetResponse(boolean accepted) {
     }
 
+    public record CurrentPasswordRequest(@NotBlank @Size(max=128) String currentPassword) {}
+
     public record UserMfaVerificationRequest(
+            @NotBlank @Size(max=128) String currentPassword,
             @NotBlank @Size(min = 6, max = 6) String totpCode) {
     }
 
@@ -94,13 +96,15 @@ public final class AuthModels {
             Instant refreshTokenExpiresAt) {
     }
 
+    public sealed interface LoginResult permits AuthResponse, LoginVerificationService.ChallengeResponse {}
+
     public record AuthResponse(
             AuthenticatedUser user,
             String accessToken,
             String refreshToken,
             Instant accessTokenExpiresAt,
             Instant refreshTokenExpiresAt,
-            boolean requiresEmailVerification) {
+            boolean requiresEmailVerification) implements LoginResult {
         public AuthResponse(AuthenticatedUser user,
                             String accessToken,
                             String refreshToken,

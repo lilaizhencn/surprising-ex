@@ -95,7 +95,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+    public AuthModels.LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         try {
             return authService.login(request, httpRequest);
         } catch (IllegalArgumentException ex) {
@@ -103,6 +103,20 @@ public class AuthController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
+    }
+
+    @PostMapping("/login/verify")
+    public AuthResponse verifyLogin(@Valid @RequestBody LoginVerificationService.VerifyRequest request,
+                                    HttpServletRequest httpRequest) {
+        return authService.verifyLogin(request, httpRequest);
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(LoginVerificationService.VerificationFailure.class)
+    public org.springframework.http.ResponseEntity<java.util.Map<String,String>> verificationFailure(
+            LoginVerificationService.VerificationFailure ex) {
+        int status = ex.getMessage().contains("RATE_LIMITED") ? 429
+                : ex.getMessage().contains("UNAVAILABLE") || ex.getMessage().contains("DELIVERY_FAILED") ? 503 : 400;
+        return org.springframework.http.ResponseEntity.status(status).body(java.util.Map.of("message",ex.getMessage()));
     }
 
     @PostMapping("/refresh")

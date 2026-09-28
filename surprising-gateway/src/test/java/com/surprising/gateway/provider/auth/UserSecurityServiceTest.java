@@ -24,26 +24,6 @@ class UserSecurityServiceTest {
             persistence, sceneRepository, totpService, passwordHasher);
 
     @Test
-    void enrollsAndConfirmsUserTotp() {
-        Instant now = Instant.parse("2026-08-04T00:00:00Z");
-        when(persistence.user(42L)).thenReturn(Optional.of(user(now)));
-        when(totpService.newSecret()).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.encryptSecret("JBSWY3DPEHPK3PXP")).thenReturn("ciphertext");
-        when(persistence.mfaCredential(42L)).thenReturn(Optional.of(new GatewayUserMfaRepository.MfaCredential(
-                42L, "ciphertext", false, null, now, now)));
-        when(totpService.decryptSecret("ciphertext")).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verify(eq("JBSWY3DPEHPK3PXP"), eq("123456"), any())).thenReturn(true);
-
-        var enrollment = service.enrollMfa(42L);
-        var status = service.confirmMfa(42L, "123456");
-
-        assertThat(enrollment.secret()).isEqualTo("JBSWY3DPEHPK3PXP");
-        assertThat(status.enabled()).isTrue();
-        verify(persistence).upsertMfaSecret(eq(42L), eq("ciphertext"), any());
-        verify(persistence).enableMfa(eq(42L), any());
-    }
-
-    @Test
     void sensitiveScenesDefaultToEnabledExceptTransfers() {
         when(sceneRepository.find(42L)).thenReturn(List.of());
 

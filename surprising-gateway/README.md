@@ -252,3 +252,34 @@ status=UNAVAILABLE，不用零代替失败。注册表拥有订阅生命周期�
 该频道由 gateway 查询出口直接发布，不注册 Aeron 实时路由，不更改 Core 提交或 Kafka topic。
 
 用户实际费率由私有路由 `GET /api/v1/gateway/trading-fees/effective?userId=...&symbol=...&productLine=...` 查询，映射到现有 `TradingFeeRequestService`。普通用户路由与管理员费率修改路由分离，沿用登录与账户归属校验。
+
+## 两步登录与安全设置（2026-09-28）
+
+`AuthService.login` 先校验账号密码，`LoginVerificationService.begin` 在用户行锁内读取已验证且已启用的登录因素。
+无启用因素才直接返回 `AuthResponse`；否则只返回 `requiresVerification=true`、随机 `challengeToken`、5 分钟有效期和脱敏的 `methods`，不创建 access/refresh 会话。
+第二步 `POST /api/v1/auth/login/verify` 提交 `{challengeToken,emailCode,phoneCode,totpCode}`，必须满足挑战记录中的全部方式。
+验证码不可在第一步直接提交；前端在模态框中按服务器要求显示输入框，第二步成功后才保存会话。
+
+安全设置接口统一为：
+
+- `GET /api/v1/security/login-verification`：EMAIL、PHONE、TOTP 的绑定/开启状态；账户注册联系方式在绑定其他方式时必须验证，但不会自动开启登录二次验证。
+- `POST /api/v1/security/login-verification/{method}/bind`：`{currentPassword,destination,enabled}`。开启/绑定要求密码、新绑定目标的验证码，以及另外两个已绑定方式的验证码，不受另外两个登录开关影响；关闭要求密码及目标自身验证码。省略 destination 使用已有绑定。
+- `POST /api/v1/security/login-verification/{method}/confirm`：`{currentPassword,codes:{challengeToken,emailCode,phoneCode,totpCode}}`。目标地址、目标开关、必填方式均以服务端挑战为准，客户端不能在确认时改变。
+- 首次 Google 绑定额外返回 secret/provisioningUri；前端只在本次弹窗展示二维码，不持久化密钥。已绑定的 Google 开关关闭后保留绑定，不允许未经验证覆盖密钥。
+- 原用户和管理员 `/mfa/enroll`、`/mfa/confirm`、`/mfa/disable` HTTP 写入口已移除，避免绕过密码及交叉验证。管理员也使用上述统一设置接口，生产强制管理员 MFA 时不允许关闭 TOTP。
+
+状态由 PostgreSQL `gateway_login_factors`、`gateway_login_challenges` 和现有 `gateway_user_mfa` 持有。
+每用户每用途至多一条挑战，新挑战替换旧挑战，数据库只保存 token/验证码摘要；用户行锁将设置变更和验证串行化。
+每用途 60 秒发送冷却、10 分钟最多 10 次发送/5 次失败；重发不清空当前窗口失败次数。
+`VerificationFailure` 明确不回滚失败计数和已失效状态，真正的数据/会话写入异常仍整体回滚。
+密码、账户状态、角色或验证设置变化会使旧挑战失效；Google 时间步在登录和设置验证之间共享一次性消费，阻止重放。
+
+已有库先执行 `deployment/migrations/20260928-login-verification.sql`，再部署 gateway 与前端；新库已合并到 `init.sql`。
+此迁移不修改交易资金、订单、持仓、行情或产品线状态。
+短信使用 `SmsMessageSender` 供应商接口，本轮按要求不接服务商；无实现时 PHONE 的绑定和验证明确拒绝，不返回假验证码、不跳过因素。
+邮件沿用 Resend 配置并增加连接/请求超时；没有有效邮件配置时不可完成需要邮箱验证码的操作。
+
+本轮验证：HotSpot JDK 27 的 67 项认证/安全及直接关联测试全部通过（包括 4 项独立 PostgreSQL schema 测试，结束后删除 schema）；前端 90 项测试、lint/build 通过。
+Chrome 桌面及 390px 手机检查双语三验证码弹窗、设置开关及导航；5174/9094 实际部署后使用独立临时账号验证两步 TOTP 登录、缺码拒绝、重放拒绝、设置密码检查、旧接口不能绕过，结束后删除该账号及认证记录。
+没有向外部真实收件人发送验证码；邮件/短信发送失败和多因素逻辑以可控发送器测试，短信真实投递待服务商配置。
+未重跑撮合/结算路径，因为仅修改认证域和前端认证页面，不改变交易协议、资金或持仓。运行证据位于本地 `verification/login-mfa-20260928/`。
