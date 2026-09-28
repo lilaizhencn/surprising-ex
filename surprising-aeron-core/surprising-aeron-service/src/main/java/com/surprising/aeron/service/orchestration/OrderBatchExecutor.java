@@ -157,14 +157,10 @@ final class OrderBatchExecutor {
     }
 
     boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, CommandSlot pending) {
-        if (pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL) {
-            if (batch.admissionOrderIndex == null)
-                batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
-            batch.admissionOrderIndex.reset(pending.command().header().userId());
-            batch.activated(true);
-            owner.matchingFlow.submitMatching(pending);
-            return true;
-        }
+        // A cancel batch must validate its current active-order route at the ordered head.
+        // An earlier command can fill or cancel that order after ingress routing; submitting
+        // the batch early would make a missing first route an unrecoverable matcher failure.
+        if (batch.kind == OrderBatchKind.CANCEL) return false;
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE
                 || owner.pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
