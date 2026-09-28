@@ -27,7 +27,7 @@ import org.apache.kafka.streams.state.KeyValueStore;
  * Kafka Streams processor that turns keyed product-line trades into one-minute candle snapshots.
  *
  * <p>Concurrency is controlled by Kafka partitioning: every record key must equal the normalized
- * symbol, so one symbol is processed by exactly one stream task at a time. RocksDB state stores
+ * instrumentId, so one instrumentId is processed by exactly one stream task at a time. RocksDB state stores
  * keep hot candles, dedupe keys, dirty snapshots, and latest sequence locally, while Kafka Streams
  * changelog topics make the state restorable after restart or rebalance.</p>
  */
@@ -85,16 +85,16 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         }
 
         TradeEvent trade;
-        String symbol;
+        String instrumentId;
         try {
             trade = tradeEventMapper.toTradeEvent(publicTrade);
-            symbol = CandleKey.normalizeSymbol(trade.symbol());
-            validateRecordKey(record.key(), symbol);
-            if (!symbolRegistryService.isEnabled(symbol)) {
-                log.warn("Rejected disabled or unknown symbol trade event: {}", symbol);
+            instrumentId = CandleKey.normalizeSymbol(trade.instrumentId());
+            validateRecordKey(record.key(), instrumentId);
+            if (!symbolRegistryService.isEnabled(instrumentId)) {
+                log.warn("Rejected disabled or unknown instrumentId trade event: {}", instrumentId);
                 return;
             }
-            if (isDuplicateOrOldTrade(symbol, trade)) {
+            if (isDuplicateOrOldTrade(instrumentId, trade)) {
                 return;
             }
         } catch (IllegalArgumentException ex) {
@@ -108,14 +108,14 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
 
         CandlePeriod period = CandlePeriod.M1;
         Instant openTime = period.floor(trade.tradeTime());
-        String candleKey = productKey + "|" + CandleKey.of(symbol, period, openTime).value();
-        Long closedThrough = closedWatermarkStore.get(sequenceKey(symbol));
+        String candleKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
+        Long closedThrough = closedWatermarkStore.get(sequenceKey(instrumentId));
         if (closedThrough != null && period.closeTime(openTime).toEpochMilli() <= closedThrough) {
-            rememberTrade(symbol, trade);
+            rememberTrade(instrumentId, trade);
             return;
         }
         CandleAccumulator accumulator = Optional.ofNullable(candleStore.get(candleKey))
-                .orElseGet(() -> CandleAccumulator.create(symbol, period, openTime));
+                .orElseGet(() -> CandleAccumulator.create(instrumentId, period, openTime));
 
         CandleMath.apply(accumulator, trade, now);
         candleStore.put(candleKey, accumulator);
@@ -126,42 +126,42 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         if (hotCache != null) {
             hotCache.put(snapshot.toUpdatedEvent(now));
         }
-        context.forward(new Record<>(symbol, snapshot.toUpdatedEvent(now), record.timestamp()));
-        rememberTrade(symbol, trade);
+        context.forward(new Record<>(instrumentId, snapshot.toUpdatedEvent(now), record.timestamp()));
+        rememberTrade(instrumentId, trade);
     }
 
-    private void rememberTrade(String symbol, TradeEvent trade) {
-        dedupeStore.put(dedupeKey(symbol, trade), trade.tradeTime().toEpochMilli());
+    private void rememberTrade(String instrumentId, TradeEvent trade) {
+        dedupeStore.put(dedupeKey(instrumentId, trade), trade.tradeTime().toEpochMilli());
         if (trade.sequence() >= 0) {
-            String key = sequenceKey(symbol);
+            String key = sequenceKey(instrumentId);
             sequenceStore.put(key, Math.max(trade.sequence(), Optional.ofNullable(sequenceStore.get(key)).orElse(-1L)));
         }
     }
 
-    private void validateRecordKey(String recordKey, String symbol) {
+    private void validateRecordKey(String recordKey, String instrumentId) {
         if (recordKey == null || recordKey.isBlank()) {
-            throw new IllegalArgumentException("Kafka record key must be the normalized symbol");
+            throw new IllegalArgumentException("Kafka record key must be the normalized instrumentId");
         }
         String normalizedKey = CandleKey.normalizeSymbol(recordKey);
-        if (!normalizedKey.equals(symbol)) {
-            throw new IllegalArgumentException("Kafka record key must equal trade symbol; key=" + recordKey + ", symbol=" + symbol);
+        if (!normalizedKey.equals(instrumentId)) {
+            throw new IllegalArgumentException("Kafka record key must equal trade instrumentId; key=" + recordKey + ", instrumentId=" + instrumentId);
         }
     }
 
-    private boolean isDuplicateOrOldTrade(String symbol, TradeEvent trade) {
-        if (dedupeStore.get(dedupeKey(symbol, trade)) != null) {
+    private boolean isDuplicateOrOldTrade(String instrumentId, TradeEvent trade) {
+        if (dedupeStore.get(dedupeKey(instrumentId, trade)) != null) {
             return true;
         }
-        Long lastSequence = sequenceStore.get(sequenceKey(symbol));
+        Long lastSequence = sequenceStore.get(sequenceKey(instrumentId));
         return lastSequence != null && trade.sequence() <= lastSequence;
     }
 
-    private String dedupeKey(String symbol, TradeEvent trade) {
-        return productKey + "|" + symbol + "|" + trade.idempotencyKey();
+    private String dedupeKey(String instrumentId, TradeEvent trade) {
+        return productKey + "|" + instrumentId + "|" + trade.idempotencyKey();
     }
 
-    private String sequenceKey(String symbol) {
-        return productKey + "|" + symbol;
+    private String sequenceKey(String instrumentId) {
+        return productKey + "|" + instrumentId;
     }
 
     private void flushDirtyCandles(long timestamp) {
@@ -205,14 +205,14 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
             String key = keys.get(index);
             CandleSnapshot snapshot = batch.get(index);
             CandleUpdatedEvent event = snapshot.toUpdatedEvent(emittedAt);
-            String watermarkKey = sequenceKey(snapshot.getSymbol());
+            String watermarkKey = sequenceKey(snapshot.getInstrumentId());
             long closeTime = snapshot.getCloseTime().toEpochMilli();
             closedWatermarkStore.put(watermarkKey,
                     Math.max(closeTime, Optional.ofNullable(closedWatermarkStore.get(watermarkKey)).orElse(-1L)));
             if (hotCache != null) {
                 hotCache.put(event);
             }
-            context.forward(new Record<>(snapshot.getSymbol(), event, emittedAt.toEpochMilli()));
+            context.forward(new Record<>(snapshot.getInstrumentId(), event, emittedAt.toEpochMilli()));
             dirtyStore.delete(key);
         }
         batch.clear();

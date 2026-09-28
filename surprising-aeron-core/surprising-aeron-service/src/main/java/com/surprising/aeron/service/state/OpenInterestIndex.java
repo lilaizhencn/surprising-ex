@@ -22,47 +22,47 @@ public final class OpenInterestIndex {
 
     public NavigableMap<String, Totals> totals() {
         TreeMap<String, Totals> snapshot = new TreeMap<>();
-        totals.forEach((symbol, value) -> snapshot.put(
-                symbol, new Totals(value.longQuantity, value.shortQuantity)));
+        totals.forEach((instrumentId, value) -> snapshot.put(
+                instrumentId, new Totals(value.longQuantity, value.shortQuantity)));
         return Collections.unmodifiableNavigableMap(snapshot);
     }
 
-    public long openInterestSteps(String symbol) {
-        MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+    public long openInterestSteps(String instrumentId) {
+        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
     }
 
-    public long longQuantity(String symbol) {
-        MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+    public long longQuantity(String instrumentId) {
+        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : value.longQuantity;
     }
 
-    public long longQuantityNormalized(String symbol) {
-        MutableTotals value = totals.get(symbol);
+    public long longQuantityNormalized(String instrumentId) {
+        MutableTotals value = totals.get(instrumentId);
         return value == null ? 0 : value.longQuantity;
     }
 
-    public long shortQuantity(String symbol) {
-        MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+    public long shortQuantity(String instrumentId) {
+        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : value.shortQuantity;
     }
 
-    public long shortQuantityNormalized(String symbol) {
-        MutableTotals value = totals.get(symbol);
+    public long shortQuantityNormalized(String instrumentId) {
+        MutableTotals value = totals.get(instrumentId);
         return value == null ? 0 : value.shortQuantity;
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
-        if (previous != null && current != null && previous.symbol().equals(current.symbol())) {
-            adjust(current.symbol(),
+        if (previous != null && current != null && previous.instrumentId().equals(current.instrumentId())) {
+            adjust(current.instrumentId(),
                     longQuantity(current.signedQuantitySteps()) - longQuantity(previous.signedQuantitySteps()),
                     shortQuantity(current.signedQuantitySteps()) - shortQuantity(previous.signedQuantitySteps()));
             return;
         }
-        if (previous != null) adjust(previous.symbol(),
+        if (previous != null) adjust(previous.instrumentId(),
                 -longQuantity(previous.signedQuantitySteps()),
                 -shortQuantity(previous.signedQuantitySteps()));
-        if (current != null) adjust(current.symbol(),
+        if (current != null) adjust(current.instrumentId(),
                 longQuantity(current.signedQuantitySteps()),
                 shortQuantity(current.signedQuantitySteps()));
     }
@@ -83,13 +83,13 @@ public final class OpenInterestIndex {
     private void add(CorePositionState position) {
         long quantity = position.signedQuantitySteps();
         if (quantity == 0) return;
-        adjust(position.symbol(), longQuantity(quantity), shortQuantity(quantity));
+        adjust(position.instrumentId(), longQuantity(quantity), shortQuantity(quantity));
     }
 
     private void remove(CorePositionState position) {
         long quantity = position.signedQuantitySteps();
         if (quantity == 0) return;
-        adjust(position.symbol(), -longQuantity(quantity), -shortQuantity(quantity));
+        adjust(position.instrumentId(), -longQuantity(quantity), -shortQuantity(quantity));
     }
 
     private void add(RuntimePositionIndexValue position) {
@@ -104,26 +104,26 @@ public final class OpenInterestIndex {
         long quantity = position.signedQuantitySteps();
         if (quantity == 0) return;
         long direction = add ? 1 : -1;
-        adjust(position.symbol(), Math.multiplyExact(longQuantity(quantity), direction),
+        adjust(position.instrumentId(), Math.multiplyExact(longQuantity(quantity), direction),
                 Math.multiplyExact(shortQuantity(quantity), direction));
     }
 
-    private void adjust(String symbol, long longDelta, long shortDelta) {
+    private void adjust(String instrumentId, long longDelta, long shortDelta) {
         if (longDelta == 0 && shortDelta == 0) return;
-        MutableTotals current = totals.get(symbol);
+        MutableTotals current = totals.get(instrumentId);
         if (current == null) {
             if (longDelta < 0 || shortDelta < 0) {
-                throw new IllegalStateException("open interest index is missing symbol=" + symbol);
+                throw new IllegalStateException("open interest index is missing instrumentId=" + instrumentId);
             }
-            totals.put(symbol, new MutableTotals(longDelta, shortDelta));
+            totals.put(instrumentId, new MutableTotals(longDelta, shortDelta));
             return;
         }
         current.longQuantity = Math.addExact(current.longQuantity, longDelta);
         current.shortQuantity = Math.addExact(current.shortQuantity, shortDelta);
         if (current.longQuantity < 0 || current.shortQuantity < 0) {
-            throw new IllegalStateException("open interest index is negative for symbol=" + symbol);
+            throw new IllegalStateException("open interest index is negative for instrumentId=" + instrumentId);
         }
-        if (current.longQuantity == 0 && current.shortQuantity == 0) totals.remove(symbol);
+        if (current.longQuantity == 0 && current.shortQuantity == 0) totals.remove(instrumentId);
     }
 
     private static long longQuantity(long signedQuantity) {

@@ -58,7 +58,7 @@ public final class ClusterDerivativeSmokeMain {
                 applied(client, command(productLine, sourceId + 1_000_000, seed, 1,
                         CoreMessageType.REGISTER_INSTRUMENT,
                         TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                "BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                                "1", ContractType.LINEAR_PERPETUAL.ordinal(),
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))));
                 applied(client, command(productLine, sourceId, seed, longUser, CoreMessageType.ADJUST_BALANCE,
@@ -67,17 +67,17 @@ public final class ClusterDerivativeSmokeMain {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))));
                 applied(client, command(productLine, sourceId + 2_000_000, seed, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "BTC-USDT", 100, seed, System.currentTimeMillis()))));
+                                "1", 100, seed, System.currentTimeMillis()))));
                 applied(client, command(productLine, sourceId, seed + 2, shortUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(sellOrder, CoreOrderSide.SELL)));
                 applied(client, command(productLine, sourceId, seed + 3, longUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(buyOrder, CoreOrderSide.BUY)));
                 applied(client, command(productLine, sourceId, seed + 4, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "BTC-USDT", 100, seed + 1, System.currentTimeMillis()))));
+                                "1", 100, seed + 1, System.currentTimeMillis()))));
                 applied(client, command(productLine, sourceId, seed + 5, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                settlementId, "BTC-USDT", 10_000))));
+                                settlementId, "1", 10_000))));
             }
 
             var longView = user(client, productLine, sourceId, longUser, seed + 10);
@@ -89,7 +89,7 @@ public final class ClusterDerivativeSmokeMain {
             if (!verify) {
                 rejected(client, command(productLine, sourceId, seed + 12, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                settlementId, "BTC-USDT", 10_000))));
+                                settlementId, "1", 10_000))));
             }
 
             String label = verify ? "derivativeRecovery" : "derivativeSmoke";
@@ -98,7 +98,7 @@ public final class ClusterDerivativeSmokeMain {
     }
 
     private static byte[] derivativeOrder(long orderId, CoreOrderSide side) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1", side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private static void requirePosition(
@@ -106,7 +106,7 @@ public final class ClusterDerivativeSmokeMain {
             long quantity,
             long entryPrice,
             long margin) {
-        var position = user.positions().stream().filter(value -> value.symbol().equals("BTC-USDT"))
+        var position = user.positions().stream().filter(value -> value.instrumentId().equals("1"))
                 .findFirst().orElseThrow(() -> new IllegalStateException("missing derivative position"));
         if (position.signedQuantitySteps() != quantity || position.entryPriceTicks() != entryPrice
                 || position.positionMarginUnits() != margin) {

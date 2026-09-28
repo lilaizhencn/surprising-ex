@@ -119,7 +119,7 @@ Valkey 只保存可重建的查询视图，不裁决余额、风控或成交。�
 3. WS 节点设置 `surprising.realtime.enabled=true`、`surprising.realtime.directory`、
    `surprising.realtime.ws.channel=aeron:udp?endpoint=THIS_WS_PRIVATE_IP:21030`，以及同一 Valkey 连接配置。
    端点必须是 Router 可达的本节点地址。每次进程启动生成新 UUID，节点租约15秒，每5秒续期；最后一个本地订阅取消后删除路由。
-   每个用户可连接多个节点，Router 只发给这些节点；节点再匹配本地频道、symbol、用户与 period。
+   每个用户可连接多个节点，Router 只发给这些节点；节点再匹配本地频道、instrumentId、用户与 period。
    Aeron receiver 不可用时停止发布节点租约并拒绝新订阅。
 
 4. Account/Trading Provider 设置 `surprising.realtime.enabled=true` 和同一 Valkey。
@@ -136,8 +136,8 @@ Valkey TLS/ACL/集群地址使用标准 Spring Data Redis 配置；生产务必�
 
 ## 状态与客户端协议
 
-- 所有订阅明确 `productLine`。私有订阅用户来自已认证连接，不能指定其他用户；公共频道按 symbol 路由。
-  新增 depth/bookTicker 使用具体 symbol，50 档完整深度覆盖更新，不发送需要连续重放的差量 order book。
+- 所有订阅明确 `productLine`。私有订阅用户来自已认证连接，不能指定其他用户；公共频道按 instrumentId 路由。
+  新增 depth/bookTicker 使用具体 instrumentId，50 档完整深度覆盖更新，不发送需要连续重放的差量 order book。
 - 实时实体以 `(productLine, userId, kind, entityId)` 为身份。`version` 是固定宽度字符串 `logPosition:ordinal`，不能转成 JavaScript Number。
   payload 是实体变更后的绝对值，余额不是加减差额；旧版本/重复版本直接忽略。订单终态删除未完成列表中的对应订单，仓位数量0删除当前仓位，终态触发单删除当前触发单。
 - 私有频道覆盖 orders、triggerOrders、positions、accountState、executionReports、positionRisk、accountRisk。
@@ -159,7 +159,7 @@ Core outbox 8192帧/8MiB，事务整体溢出则整体丢弃；Sender offer 不�
 Router 入口8192帧/16MiB，每个待组装批次最多8192帧/8MiB，最多32个待组装批次，5秒过期。
 单帧上限1MiB。每用户快照当前最多4096个账户/订单/预留/仓位/触发单/杠杆实体；超限不能返回截断的 READY 数据。
 Core 每10ms最多接一个后台请求，用户快照与深度各最多一个进行中；Lane 忙时拒绝，后续重试。
-Router 每200ms每产品最多请求16用户/4 symbol、全局32个待完成用户快照；快照新鲜度15秒，HTTP/WS兴趣租约30秒。
+Router 每200ms每产品最多请求16用户/4 instrumentId、全局32个待完成用户快照；快照新鲜度15秒，HTTP/WS兴趣租约30秒。
 这些是明确的首版容量边界，在线规模过大时会返回 STALE，不能承诺任意在线用户数下都在15秒内修复。
 
 每个 Router 最多64个目标节点 Publication，30秒未使用释放；8MiB term，每个 Publication 大约映射三个 term，需单独预算 native/mapped memory。
@@ -244,7 +244,7 @@ market-data API 编译通过，当前无独立测试类。12 组“六产品 × 
 真实 Redis + Aeron UDP/IPC 测试覆盖：订阅定向、断档快照恢复、本地 CANDLE 入队、超出 16 MiB 队列预算的帧被拒绝及后续正常路由。
 Kafka Streams TopologyTestDriver 覆盖原聚合、去重、水位线、迟到分钟及数据库写入重试边界，并验证本地发布 1m 和 5m 更新。
 初次新增发布断言漏计一个 5m 汇总帧，修正为验证两条 1m 与一条 5m 后全部通过，未修改聚合算法。
-盘口测试验证共用 Core 客户端、symbol/depth、买卖档位映射、错误不得伪装为空盘口，以及本地路由协议与权限。
+盘口测试验证共用 Core 客户端、instrumentId/depth、买卖档位映射、错误不得伪装为空盘口，以及本地路由协议与权限。
 
 12 组启动 dry-run、脚本语法和 production-chain-preflight 合约测试通过：行情应用只启动一次，位于 gateway 之后；不再启动 market-data provider。
 原始 Core 生产代码和协议没有改动，因此本轮未重跑资金主链路 JMH；没有宣称提高撮合吞吐或给出内存节省实测数。
@@ -328,3 +328,17 @@ Router 的控制及转发 Aeron 客户端也沿用默认 10 秒驱动超时（�
 `RealtimeRouter.refresh` 仍按活跃订阅查询核心最新盘口，但同产品线、同币对只有一个在途查询。路由线程独占 `pendingBooks`，收到 BOOK 即移除；丢包超过 2 秒或传输关闭后允许重试。不保存盘口内容，也不改变撮合、结算或快照权威来源。原来每 100ms 重发尚未完成的查询，会占满核心实时请求队列，使用户快照在路由的 5 秒窗口后才返回而被拒绝，页面一直 INITIALIZING。
 
 真实 Redis/Aeron 集成测试覆盖 20 币对同时订阅时不重复投递在途查询、私有快照恢复、产品隔离与传输重连。所有订单/余额仍使用绝对值增量和权威快照，未增加 REST 轮询或旧数据兜底。
+
+### 历史订单保留规则
+
+`CommittedOrderProjectionRepository` 只为查询写入 `core_order_projection`，不改变 Core 撮合、资金结算、恢复日志或实时 WebSocket。
+普通用户订单全部保留。产品线内配置的 `surprising.trade-export.market-maker-account-ids` 为专用做市账户（包括模拟成交账户）：
+纯做市互成交、同账户自成交、未成交撤单都不入历史订单表；只要订单涉及一次普通用户成交，就保存完整累计状态，后续内部成交和撤单也持续更新。
+账户分类以服务端配置 ID 为准，不能用客户端订单号前缀判断。每条产品线单独配置，专用账户不得改作普通用户使用。
+本地启动脚本从同一份做市策略和模拟成交账户配置自动生成列表，避免两处手工维护。
+
+导出器从一次已提交命令获取完整 ORDER/EXECUTION 对，先检查成交双方身份，再合并本批订单的最高 revision。
+已有历史订单行就是“曾涉及用户成交”的持久化依据；按产品线批量查询，重启后继续使用，不引入长期内存订单缓存或第二份检查点状态。
+订单写入和查询水位同事务，SQL 失败不会推进 Archive checkpoint；只有数据库提交和 Kafka 确认后才保存恢复点。
+公共成交和 K 线仍包含做市成交，过滤仅针对历史订单表。
+这是一套上线前的新保留规则；曾全量写入做市订单的测试历史不能直接沿用，否则旧行会被误当成用户成交凭据。需要保留历史时，清空查询表并从完整 Archive 重建；明确丢弃旧测试历史时，可以停机清空查询表，以选定恢复点作为新历史的起点。后者仅是测试环境的显式重置操作，生产恢复代码不会跳过日志。

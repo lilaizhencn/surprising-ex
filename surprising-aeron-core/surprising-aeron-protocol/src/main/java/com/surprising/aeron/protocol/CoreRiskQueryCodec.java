@@ -12,12 +12,12 @@ public final class CoreRiskQueryCodec {
     public static byte[] encode(List<CoreRiskSnapshotView> values) {
         int length = Integer.BYTES;
         for (var value : values) length = Math.addExact(length,
-                Long.BYTES * 12 + Integer.BYTES * 5 + bytes(value.symbol()).length
+                Long.BYTES * 12 + Integer.BYTES * 5 + bytes(value.instrumentId()).length
                         + bytes(value.settleAsset()).length + bytes(value.status()).length);
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(values.size());
         values.forEach(value -> {
             output.putLong(value.userId());
-            put(output, value.symbol());
+            put(output, value.instrumentId());
             output.putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode());
             put(output, value.settleAsset());
             output.putLong(value.signedQuantitySteps()).putLong(value.entryPriceTicks())
@@ -39,13 +39,13 @@ public final class CoreRiskQueryCodec {
         for (int index = 0; index < count; index++) {
             if (input.remaining() < Long.BYTES) throw new ProtocolException("risk state is truncated");
             long userId = input.getLong();
-            String symbol = text(input);
+            String instrumentId = text(input);
             if (input.remaining() < Integer.BYTES * 2) throw new ProtocolException("risk state is truncated");
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(input.getInt());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(input.getInt());
             String settleAsset = text(input);
             if (input.remaining() < Long.BYTES * 11) throw new ProtocolException("risk state is truncated");
-            values.add(new CoreRiskSnapshotView(userId, symbol, marginMode, positionSide,
+            values.add(new CoreRiskSnapshotView(userId, instrumentId, marginMode, positionSide,
                     settleAsset, input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(),
                     input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(), text(input)));
         }

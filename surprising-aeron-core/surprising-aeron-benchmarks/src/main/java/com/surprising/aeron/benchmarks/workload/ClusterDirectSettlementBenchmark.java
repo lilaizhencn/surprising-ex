@@ -33,7 +33,7 @@ public class ClusterDirectSettlementBenchmark {
     private long sequence, orderId, accepted, terminal, messages, marks;
     private long markSequence = 1;
     private final long[] lastOrderIds = new long[SYMBOLS * 2];
-    private static String symbol(int index) { return "DIRECT" + index + "-USDT"; }
+    private static String instrumentId(int index) { return "DIRECT" + index + "-USDT"; }
     private static long user(int index, int side) { return 820_000_000L + index * 2L + side; }
 
     private void connect() {
@@ -52,13 +52,13 @@ public class ClusterDirectSettlementBenchmark {
         long now = System.currentTimeMillis();
         for (int index = 0; index < SYMBOLS; index++) {
             applied(send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand(symbol(index), type.ordinal(), "BTC", "USDT", settle,
+                    new RegisterInstrumentCommand(instrumentId(index), type.ordinal(), "BTC", "USDT", settle,
                             1, 1, 1, 100_000, 50_000, 0, 0,
                             type.isDelivery() || type.isOption() ? now + 3_600_000 : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))).join());
             applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                    ? new ApplyMarkPriceCommand(symbol(index), 100, 100, 100, 1, now)
-                    : new ApplyMarkPriceCommand(symbol(index), 100, 1, now))).join());
+                    ? new ApplyMarkPriceCommand(instrumentId(index), 100, 100, 100, 1, now)
+                    : new ApplyMarkPriceCommand(instrumentId(index), 100, 1, now))).join());
             for (int side = 0; side < 2; side++) {
                 applied(send(CoreMessageType.ADJUST_BALANCE, user(index, side), TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settle, CASH))).join());
@@ -80,7 +80,7 @@ public class ClusterDirectSettlementBenchmark {
         for (int item = 0; item < count; item++) {
             long id = ++orderId;
             lastOrderIds[index * 2 + who] = id;
-            orders.add(new PlaceOrderCommand(id, symbol(index), side, 100, 1, false,
+            orders.add(new PlaceOrderCommand(id, instrumentId(index), side, 100, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "direct-" + id));
         }
@@ -103,8 +103,8 @@ public class ClusterDirectSettlementBenchmark {
                 for (int index = group; index < group + GROUP; index++) {
                     prices.add(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                             product == ProductLine.OPTION
-                                    ? new ApplyMarkPriceCommand(symbol(index), 100, 100, 100, markSequence, now)
-                                    : new ApplyMarkPriceCommand(symbol(index), 100, markSequence, now))));
+                                    ? new ApplyMarkPriceCommand(instrumentId(index), 100, 100, 100, markSequence, now)
+                                    : new ApplyMarkPriceCommand(instrumentId(index), 100, markSequence, now))));
                     accepted++;
                 }
                 // Market freshness is a financial prerequisite; orders themselves remain asynchronous.
@@ -154,7 +154,7 @@ public class ClusterDirectSettlementBenchmark {
                     || !view.reservations().isEmpty() || view.positions().stream().anyMatch(position -> position.signedQuantitySteps() != 0))
                 throw new IllegalStateException("direct settlement funds/position/reservation mismatch for " + id);
             var orders = client.query(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), id,
-                    CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(symbol(index), 0, 1)));
+                    CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrumentId(index), 0, 1)));
             if (!CoreStateQueryCodec.decodeOpenOrders(orders.data()).orders().isEmpty())
                 throw new IllegalStateException("unfinished direct order");
         }

@@ -14,7 +14,7 @@ import java.time.Instant;
  * have been converted from their fixed-point wire encoding.</p>
  */
 public record PerpTradeEvent(
-        @NotBlank String symbol,
+        @NotBlank String instrumentId,
         String tradeId,
         @PositiveOrZero long sequence,
         @NotNull Instant tradeTime,

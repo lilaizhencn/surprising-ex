@@ -14,20 +14,20 @@ import org.springframework.stereotype.Repository;
 /**
  * 只负责 {@code candlestick_candles} 表的批量写入。
  *
- * <p>处理器只写入首次关闭的完整 1 分钟快照；相同 symbol 和开盘时间的重试不会改写历史。</p>
+ * <p>处理器只写入首次关闭的完整 1 分钟快照；相同 instrumentId 和开盘时间的重试不会改写历史。</p>
  */
 @Repository
 public class PostgresCandleSink implements CandleSink {
 
     private static final String UPSERT_SQL = """
             INSERT INTO candlestick_candles (
-                symbol, period, open_time, close_time,
+                instrument_id, period, open_time, close_time,
                 open_price, high_price, low_price, close_price,
                 base_volume, quote_volume, trade_count,
                 first_trade_id, last_trade_id, first_sequence, last_sequence,
                 status, updated_at, source_partition, source_offset
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, period, open_time) DO NOTHING
+            ON CONFLICT (instrument_id, period, open_time) DO NOTHING
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -55,7 +55,7 @@ public class PostgresCandleSink implements CandleSink {
             @Override
             public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
                 CandleSnapshot candle = closedCandles.get(i);
-                ps.setString(1, candle.getSymbol());
+                ps.setString(1, candle.getInstrumentId());
                 ps.setString(2, candle.getPeriod());
                 ps.setTimestamp(3, Timestamp.from(candle.getOpenTime()));
                 ps.setTimestamp(4, Timestamp.from(candle.getCloseTime()));

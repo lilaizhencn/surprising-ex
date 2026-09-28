@@ -68,7 +68,7 @@ class RuntimeCommitRecoveryTest {
     @Test
     void restorePublishesAuxiliaryStateWithTheCanonicalCandidate() {
         CoreFeePolicyState feePolicy = new CoreFeePolicyState(
-                91, 3, 1001, "BTC-USDT", -25, 75, 2, true, 900, 2_000);
+                91, 3, 1001, "1", -25, 75, 2, true, 900, 2_000);
         TransferRuntime transfer = new TransferRuntime(1001, new TransferFundsCommand(
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
                 "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity"));
@@ -116,7 +116,7 @@ class RuntimeCommitRecoveryTest {
                 command(8, 11, CoreMessageType.CANCEL_ORDER,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(102))),
                 operationsCommand(2, CoreMessageType.APPLY_FUNDING,
-                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(501, "BTC-USDT", 10_000))));
+                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(501, "1", 10_000))));
         List<CoreMessage> tail = List.of(
                 command(9, 11, CoreMessageType.PLACE_ORDER, place(401, CoreOrderSide.BUY, 100, 10, false)),
                 command(10, 22, CoreMessageType.PLACE_ORDER, place(402, CoreOrderSide.SELL, 100, 4, true)),
@@ -148,7 +148,7 @@ class RuntimeCommitRecoveryTest {
                         uninterruptedMiddle.responses().get(3).data())).orders().getFirst();
                 assertThat(canceledOrder.orderId()).isEqualTo(102);
                 assertThat(canceledOrder.status()).isEqualTo("CANCELED");
-                assertThat(uninterrupted.tradingState().treasuryState().fundingSettlements()).containsEntry("BTC-USDT", 501L);
+                assertThat(uninterrupted.tradingState().treasuryState().fundingSettlements()).containsEntry("1", 501L);
                 assertThat(economicUsdt(uninterrupted.tradingState())).isEqualTo(6_000);
 
                 byte[] secondSnapshot = uninterrupted.snapshot(702);
@@ -159,11 +159,11 @@ class RuntimeCommitRecoveryTest {
                     ReplayResult secondRestoreTail = replay(secondRestore, tail);
                     assertParity(firstRestore, uninterrupted, firstRestoreTail, uninterruptedTail);
                     assertParity(secondRestore, uninterrupted, secondRestoreTail, uninterruptedTail);
-                    assertThat(uninterrupted.tradingState().user(11).positions().get("BTC-USDT")
+                    assertThat(uninterrupted.tradingState().user(11).positions().get("1")
                             .signedQuantitySteps()).isZero();
-                    assertThat(uninterrupted.tradingState().user(22).positions().get("BTC-USDT")
+                    assertThat(uninterrupted.tradingState().user(22).positions().get("1")
                             .signedQuantitySteps()).isZero();
-                    assertThat(uninterrupted.tradingState().user(33).positions().get("BTC-USDT")
+                    assertThat(uninterrupted.tradingState().user(33).positions().get("1")
                             .signedQuantitySteps()).isZero();
                     assertThat(uninterrupted.tradingState().orders()).isEmpty();
                     assertThat(uninterrupted.tradingState().users().values()).allSatisfy(user -> {
@@ -276,9 +276,9 @@ class RuntimeCommitRecoveryTest {
             assertThat(recovered.state().tradingState().user(1001).reservations()).isEmpty();
             assertThat(recovered.state().tradingState().user(2001).balances().get("USDT").lockedUnits()).isPositive();
             assertThat(recovered.state().tradingState().user(2001).reservations()).isEmpty();
-            assertThat(recovered.state().tradingState().user(1001).positions().get("BTC-USDT").signedQuantitySteps())
+            assertThat(recovered.state().tradingState().user(1001).positions().get("1").signedQuantitySteps())
                     .isEqualTo(2);
-            assertThat(recovered.state().tradingState().user(2001).positions().get("BTC-USDT").signedQuantitySteps())
+            assertThat(recovered.state().tradingState().user(2001).positions().get("1").signedQuantitySteps())
                     .isEqualTo(-2);
             assertThat(recovered.state().tradingState().orders()).isEmpty();
             assertThat(recovered.state().tradingState().clientOrderIndex()).isEmpty();
@@ -323,12 +323,12 @@ class RuntimeCommitRecoveryTest {
             ReplayResult setup = replayClustered(uninterrupted, List.of(
                     operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                             TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                    "BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                                    "1", ContractType.LINEAR_PERPETUAL.ordinal(),
                                     "BTC", "USDT", "USDT", 1, 1, 1,
                                     100_000, 50_000, 0, 0, 0, -1, 0))),
                     kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
-                                    new ApplyMarkPriceCommand("BTC-USDT", 100, 1, 1_000))),
+                                    new ApplyMarkPriceCommand("1", 100, 1, 1_000))),
                     command(1, 1, CoreMessageType.ADJUST_BALANCE, balance(110)),
                     command(2, 2, CoreMessageType.ADJUST_BALANCE, balance(1_000)),
                     command(3, 3, CoreMessageType.ADJUST_BALANCE, balance(100)),
@@ -346,10 +346,10 @@ class RuntimeCommitRecoveryTest {
                             place(91_006, CoreOrderSide.SELL, 110, 1, true)),
                     operationsCommand(2, CoreMessageType.APPLY_FUNDING,
                             TradingCommandCodec.encodeApplyFunding(
-                                    new ApplyFundingCommand(901, "BTC-USDT", 1_000))),
+                                    new ApplyFundingCommand(901, "1", 1_000))),
                     kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
-                                    new ApplyMarkPriceCommand("BTC-USDT", 1, 2, 2_000)))));
+                                    new ApplyMarkPriceCommand("1", 1, 2, 2_000)))));
             assertThat(uninterrupted.state().tradingState().treasuryState().fundingSettlements()).isNotEmpty();
             long operationsSequence = 3;
             CoreLiquidationWorkView work = liquidationWork(uninterrupted.state());
@@ -369,7 +369,7 @@ class RuntimeCommitRecoveryTest {
                 CoreMessage executeLiquidation;
                 if (batch) {
                     var action = new com.surprising.aeron.protocol.ExecuteLiquidationBatchAction(
-                            current.liquidationId(), current.userId(), current.symbol(), current.triggerPriceSequence(), 1, current.nextCancelOrderId());
+                            current.liquidationId(), current.userId(), current.instrumentId(), current.triggerPriceSequence(), 1, current.nextCancelOrderId());
                     executeLiquidation = operationsCommand(operationsSequence++, CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
                             TradingCommandCodec.encodeExecuteLiquidationBatch(
                                     new com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand(List.of(action), 1, 0, null, 0)));
@@ -441,14 +441,14 @@ class RuntimeCommitRecoveryTest {
                     assertBatchRecoveryParity(restoredAfterInsurance.state(), uninterrupted.state());
                     CoreMessage adl = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
                             TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
-                                    planned.liquidationId(), 2, "BTC-USDT", CoreMarginMode.CROSS,
+                                    planned.liquidationId(), 2, "1", CoreMarginMode.CROSS,
                                     CorePositionSide.NET, -10, 100, 2, 10, residual)));
                     try (var rejectedState = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, afterInsurance)) {
                         var beforeRejected = rejectedState.tradingState();
                         long handoff = (long) field(rejectedState.runtimeState, "laneHandoffEpoch");
                         var invalid = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
                                 TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(planned.liquidationId(),
-                                        2, "BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.NET, -10, 101, 2, 10, residual)));
+                                        2, "1", CoreMarginMode.CROSS, CorePositionSide.NET, -10, 101, 2, 10, residual)));
                         var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
@@ -481,7 +481,7 @@ class RuntimeCommitRecoveryTest {
                     assertThat(deficit(uninterrupted.state())).isZero();
                     assertThat(liquidation(uninterrupted.state(), planned.liquidationId()).status())
                             .isEqualTo(CoreLiquidationState.Status.COMPLETED);
-                    assertThat(uninterrupted.state().tradingState().user(2).positions().get("BTC-USDT")
+                    assertThat(uninterrupted.state().tradingState().user(2).positions().get("1")
                             .signedQuantitySteps()).isZero();
                     assertThat(economicEquityUsdt(uninterrupted.state())).isEqualTo(beforeAdlEconomic);
 
@@ -542,11 +542,11 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        "1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("BTC-USDT", 100, 1, 1_000))));
+                        new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
         apply(state, command(1, 11, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(2, 22, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(3, 11, CoreMessageType.PLACE_ORDER,
@@ -558,11 +558,11 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        "1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 10_000, 20_000, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("BTC-USDT", 100, 1, 1_000))));
+                        new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
         apply(state, command(1, 2001, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(2, 1001, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(3, 2001, CoreMessageType.PLACE_ORDER,
@@ -601,14 +601,14 @@ class RuntimeCommitRecoveryTest {
 
     private static byte[] place(long orderId, CoreOrderSide side, long price, long quantity,
                                 boolean reduceOnly) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT",
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1",
                 side, price, quantity, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "recovery-" + orderId));
     }
 
     private static PlaceOrderCommand batchPlace(long orderId, String clientOrderId, CoreOrderSide side,
                                                 long price, long quantity) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", side, price, quantity, false,
+        return new PlaceOrderCommand(orderId, "1", side, price, quantity, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, clientOrderId);
     }
@@ -675,7 +675,7 @@ class RuntimeCommitRecoveryTest {
                 command(15, 55, CoreMessageType.PLACE_ORDER, place(502, CoreOrderSide.BUY, 100, 10, false)),
                 kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand("BTC-USDT", 80, 2, 2_000))));
+                                new ApplyMarkPriceCommand("1", 80, 2, 2_000))));
         setup.forEach(command -> {
 
             responses.add(response(apply(state, command)));
@@ -838,8 +838,8 @@ class RuntimeCommitRecoveryTest {
         long unrealized = 0;
         for (var user : core.users().values()) {
             for (var position : user.positions().values()) {
-                var instrument = core.instruments().get(position.symbol());
-                var mark = core.riskState().markPrices().get(position.symbol());
+                var instrument = core.instruments().get(position.instrumentId());
+                var mark = core.riskState().markPrices().get(position.instrumentId());
                 if (position.signedQuantitySteps() != 0 && mark != null
                         && instrument.settleAsset().equals("USDT")) {
                     unrealized = Math.addExact(unrealized, Math.multiplyExact(

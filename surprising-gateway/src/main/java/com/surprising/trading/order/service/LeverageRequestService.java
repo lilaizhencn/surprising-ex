@@ -39,9 +39,9 @@ public class LeverageRequestService {
         return set(request, productLineHeader, productLineValue);
     }
 
-    public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode, String productLineHeader, String productLineValue) {
+    public LeverageSettingResponse get(long userId, String instrumentId, MarginMode marginMode, String productLineHeader, String productLineValue) {
         try {
-            return leverageService.get(userId, symbol, marginMode, productLine(productLineValue, productLineHeader));
+            return leverageService.get(userId, instrumentId, marginMode, productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -53,7 +53,7 @@ public class LeverageRequestService {
         if (request == null || request.productLine() != null || productLine == null) {
             return request;
         }
-        return new LeverageSettingRequest(request.userId(), productLine, request.symbol(), request.marginMode(), request.leveragePpm(), request.reason());
+        return new LeverageSettingRequest(request.userId(), productLine, request.instrumentId(), request.marginMode(), request.leveragePpm(), request.reason());
     }
 
     private ProductLine productLine(String queryValue, String headerValue) {

@@ -33,6 +33,7 @@ public class CustodyWithdrawalService {
     private final CustodyWithdrawalRefundService refundService;
     private final CustodyWithdrawalReconciliationService reconciliationService;
     private final ObjectMapper objectMapper;
+    private final com.surprising.asset.service.AssetConfigurationService assets;
 
     public CustodyWithdrawalService(GatewayProperties properties,
                                     CustodyWithdrawalRepository repository,
@@ -41,8 +42,9 @@ public class CustodyWithdrawalService {
                                     WithdrawalValuationClient valuationClient,
                                     CustodyWithdrawalRefundService refundService,
                                     CustodyWithdrawalReconciliationService reconciliationService,
-                                    ObjectMapper objectMapper) {
+                                    ObjectMapper objectMapper, com.surprising.asset.service.AssetConfigurationService assets) {
         this.properties = properties;
+        this.assets = assets;
         this.repository = repository;
         this.walletClient = walletClient;
         this.spotAccountClient = spotAccountClient;
@@ -55,7 +57,7 @@ public class CustodyWithdrawalService {
     public WithdrawalResponse submit(long userId, String idempotencyKey, WithdrawalRequest request) {
         validateInput(userId, idempotencyKey, request);
         String normalizedKey = idempotencyKey.trim();
-        long amountUnits = walletClient.amountUnits(request.assetSymbol(), request.amount());
+        long amountUnits = assets.amountUnits(request.assetSymbol(), request.amount());
         BigDecimal amount = new BigDecimal(request.amount().trim());
         BigDecimal usdtValue = valuationClient.toUsdt(request.assetSymbol(), amount);
         String spotReference = "custody-wallet-withdrawal:" + normalizedKey;

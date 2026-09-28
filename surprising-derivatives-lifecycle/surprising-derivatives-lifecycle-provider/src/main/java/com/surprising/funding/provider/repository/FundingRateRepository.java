@@ -24,28 +24,28 @@ public class FundingRateRepository {
     public boolean saveFinal(FundingRateResponse rate) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO funding_rate_ticks (
-                    symbol, sequence, funding_time, funding_interval_hours,
+                    instrument_id, sequence, funding_time, funding_interval_hours,
                     premium_rate_ppm, interest_rate_ppm, funding_rate_ppm,
                     status, event_time, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'FINAL', ?, now())
-                ON CONFLICT (symbol, sequence) DO NOTHING
-                """, rate.symbol(), rate.sequence(), Timestamp.from(rate.fundingTime()), rate.fundingIntervalHours(),
+                ON CONFLICT (instrument_id, sequence) DO NOTHING
+                """, rate.instrumentId(), rate.sequence(), Timestamp.from(rate.fundingTime()), rate.fundingIntervalHours(),
                 rate.premiumRatePpm(), rate.interestRatePpm(), rate.fundingRatePpm(),
                 Timestamp.from(rate.eventTime()));
         return rows == 1;
     }
 
-    public Optional<FundingRateResponse> latest(String symbol) {
+    public Optional<FundingRateResponse> latest(String instrumentId) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM funding_rate_ticks
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                  ORDER BY event_time DESC, sequence DESC
                  LIMIT 1
-                """, (rs, rowNum) -> toRate(rs), symbol).stream().findFirst();
+                """, (rs, rowNum) -> toRate(rs), instrumentId).stream().findFirst();
     }
 
-    public AdminCursorPage.CursorPage<FundingRateResponse> historyPage(String symbol,
+    public AdminCursorPage.CursorPage<FundingRateResponse> historyPage(String instrumentId,
                                                                        int limit,
                                                                        String cursor,
                                                                        String sort) {
@@ -57,13 +57,13 @@ public class FundingRateRepository {
         AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
-        args.add(symbol);
+        args.add(instrumentId);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<FundingRateResponse> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM funding_rate_ticks
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -76,7 +76,7 @@ public class FundingRateRepository {
 
     static FundingRateResponse toRate(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new FundingRateResponse(
-                rs.getString("symbol"),
+                rs.getString("instrument_id"),
                 rs.getLong("sequence"),
                 rs.getLong("funding_rate_ppm"),
                 rs.getLong("premium_rate_ppm"),

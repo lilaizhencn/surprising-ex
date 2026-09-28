@@ -133,7 +133,7 @@ public final class RiskScanCoordinator {
         initial = selected;
         if (initial == null || initial.riskComplete() || sliceBudget <= 0)
             throw new IllegalStateException("risk scan is not pending");
-        instrument = runtime.instrument(identities.symbol(initial.symbolId()));
+        instrument = runtime.instrument(identities.instrumentId(initial.symbolId()));
         mark = runtime.markPrice(initial.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != initial.priceSequence())
             throw new IllegalStateException("risk scan input is missing");
@@ -169,7 +169,7 @@ public final class RiskScanCoordinator {
     }
 
     private boolean hasNextIndexedUser(int lane, long cursor) {
-        if (positionUsers != null) return positionUsers.higherUserId(instrument.symbol(), lane, cursor) != 0;
+        if (positionUsers != null) return positionUsers.higherUserId(instrument.instrumentId(), lane, cursor) != 0;
         if (!(indexedUserIds instanceof java.util.NavigableSet<?>))
             throw new IllegalStateException("risk user index must be ordered for online scanning");
         @SuppressWarnings("unchecked")

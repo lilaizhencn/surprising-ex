@@ -15,9 +15,9 @@ public class MaintenanceRepository {
 
     public MaintenanceTask create(ProductLine line, String admin, MaintenanceRequest request) {
         jdbc.update("""
-                INSERT INTO trading_maintenance_task(product_line,request_id,symbol,user_id,mode,price_ticks,reason,admin_user_id)
+                INSERT INTO trading_maintenance_task(product_line,request_id,instrument_id,user_id,mode,price_ticks,reason,admin_user_id)
                 VALUES(?,?::uuid,?,?,?,?,?,?) ON CONFLICT(product_line,request_id) DO NOTHING
-                """, line.name(), request.requestId().toString(), request.symbol(), Long.parseLong(request.userId()),
+                """, line.name(), request.requestId().toString(), request.instrumentId(), Long.parseLong(request.userId()),
                 request.mode().name(), Long.parseLong(request.priceTicks()), request.reason(), admin);
         var task = jdbc.queryForObject("SELECT * FROM trading_maintenance_task WHERE product_line=? AND request_id=?::uuid",
                 this::map, line.name(), request.requestId().toString());
@@ -65,7 +65,7 @@ public class MaintenanceRepository {
     }
     private MaintenanceTask map(ResultSet r, int row) throws SQLException {
         return new MaintenanceTask(r.getString("id"),ProductLine.valueOf(r.getString("product_line")),
-                new MaintenanceRequest(UUID.fromString(r.getString("request_id")),r.getString("symbol"),r.getString("user_id"),
+                new MaintenanceRequest(UUID.fromString(r.getString("request_id")),r.getString("instrument_id"),r.getString("user_id"),
                         MaintenanceRequest.Mode.valueOf(r.getString("mode")),r.getString("price_ticks"),r.getString("reason")),
                 r.getString("admin_user_id"),r.getString("status"),r.getString("phase"),r.getLong("cursor_user_id"),
                 r.getInt("round_no"),r.getLong("step"),r.getString("error"),

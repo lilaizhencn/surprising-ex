@@ -139,7 +139,7 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation) {
         long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
-        return new PlaceOrderCommand(orderId, request.symbol(),
+        return new PlaceOrderCommand(orderId, request.instrumentId(),
                 side(request.side()), limitPriceTicks, request.quantitySteps(), request.reduceOnly(),
                 marginMode(request.marginMode()), positionSide(request.positionSide()),
                 orderType(request.orderType()), timeInForce(request.timeInForce()), request.postOnly(),
@@ -389,12 +389,12 @@ public class AeronOrderCommandService {
         }
     }
 
-    public List<OrderResponse> lifecycleOpenOrders(String symbol, int limit) {
+    public List<OrderResponse> lifecycleOpenOrders(String instrumentId, int limit) {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         ProductLine productLine = properties.getKafka().getProductLine();
-        return aeron.lifecycleOpenOrders(symbol, limit).stream()
+        return aeron.lifecycleOpenOrders(instrumentId, limit).stream()
                 .map(view -> requireLocalOrder(view, productLine))
                 .toList();
     }
@@ -407,8 +407,8 @@ public class AeronOrderCommandService {
         return toOrder(aeron.orderStateByClientOrderId(userId, clientOrderId));
     }
 
-    public List<OrderResponse> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
-        return aeron.openOrders(userId, symbol, beforeOrderId, limit).stream()
+    public List<OrderResponse> openOrders(long userId, String instrumentId, long beforeOrderId, int limit) {
+        return aeron.openOrders(userId, instrumentId, beforeOrderId, limit).stream()
                 .map(AeronOrderCommandService::toOrder)
                 .toList();
     }
@@ -419,7 +419,7 @@ public class AeronOrderCommandService {
 
     private static OrderResponse requireOrder(CoreOrderStateView view, String message) {
         if (view == null) throw new IllegalStateException(message);
-        return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.symbol(),
+        return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.instrumentId(),
                 OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
                 TimeInForce.valueOf(view.timeInForce().name()), view.priceTicks(), view.quantitySteps(),
                 view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),

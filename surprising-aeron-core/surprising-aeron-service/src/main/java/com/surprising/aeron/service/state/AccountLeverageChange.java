@@ -36,7 +36,7 @@ public final class AccountLeverageChange implements java.util.function.IntFuncti
         this.key = DerivativeAccountCommandProcessor.leverageKey(runtime, identities, userId, command);
         this.leveragePpm = command.leveragePpm();
         this.laneId = runtime.topology().accountLaneId(userId);
-        this.symbolId = identities.symbolId(key.symbol());
+        this.symbolId = identities.symbolId(key.instrumentId());
         this.completed = false;
         runtime.dispatchControlLanes(1L << laneId, this);
     }

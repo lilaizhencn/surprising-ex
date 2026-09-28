@@ -53,12 +53,12 @@ class GatewayProxyServiceTest {
         GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-market/orderbook");
-        request.setQueryString("symbol=BTC-USDT&depth=50");
+        request.setQueryString("instrumentId=1&depth=50");
 
         URI target = controller.targetUri("trading-market", properties.getRoutes().get("trading-market"), request);
 
         assertThat(target.toString())
-                .isEqualTo("local:/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50");
+                .isEqualTo("local:/api/v1/trading/market/orderbook?instrumentId=1&depth=50");
         assertThat(properties.getRoutes().get("trading-market").isPrivateRoute()).isFalse();
     }
 
@@ -87,13 +87,13 @@ class GatewayProxyServiceTest {
         GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/trading-trigger/open");
-        request.setQueryString("userId=42&symbol=BTC-USDT");
+        request.setQueryString("userId=42&instrumentId=1");
 
         URI target = controller.targetUri("trading-trigger",
                 properties.getRoutes().get("trading-trigger"), request);
 
         assertThat(target.toString())
-                .isEqualTo("http://trading-provider:9084/api/v1/trading/trigger-orders/open?userId=42&symbol=BTC-USDT");
+                .isEqualTo("http://trading-provider:9084/api/v1/trading/trigger-orders/open?userId=42&instrumentId=1");
         assertThat(properties.getRoutes().get("trading-trigger").isPrivateRoute()).isTrue();
     }
 
@@ -132,13 +132,13 @@ class GatewayProxyServiceTest {
         GatewayProxyService controller = gateway(properties, new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/admin/gateway/trading-trigger");
-        request.setQueryString("userId=42&symbol=BTC-USDT");
+        request.setQueryString("userId=42&instrumentId=1");
 
         URI target = controller.targetUri("trading-trigger",
                 properties.getAdminRoutes().get("trading-trigger"), request);
 
         assertThat(target.toString())
-                .isEqualTo("http://trading-provider:9084/api/v1/admin/trading/trigger-orders?userId=42&symbol=BTC-USDT");
+                .isEqualTo("http://trading-provider:9084/api/v1/admin/trading/trigger-orders?userId=42&instrumentId=1");
     }
 
     @Test
@@ -309,6 +309,7 @@ class GatewayProxyServiceTest {
 
     @ParameterizedTest
     @CsvSource({
+            "/api/v3/order, SPOT, http://order-spot:9084",
             "/fapi/v1/order, LINEAR_PERPETUAL, http://order-linear-perpetual:9084",
             "/dapi/v1/order, INVERSE_PERPETUAL, http://order-inverse-perpetual:9184",
             "/eapi/v1/order, OPTION, http://order-option:9284"
@@ -389,12 +390,12 @@ class GatewayProxyServiceTest {
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/v1/gateway/remote-market/orderbook");
         request.addHeader("X-Account-Type", "COIN_DELIVERY");
-        request.setQueryString("symbol=BTC-USD-260925&depth=50");
+        request.setQueryString("instrumentId=8&depth=50");
 
         controller.proxy("remote-market", HttpMethod.GET, request, null);
 
         assertThat(restTemplate.url.toString())
-                .isEqualTo("http://matching-inverse-delivery:9185/api/v1/trading/market/orderbook?symbol=BTC-USD-260925&depth=50");
+                .isEqualTo("http://matching-inverse-delivery:9185/api/v1/trading/market/orderbook?instrumentId=8&depth=50");
     }
 
     @Test

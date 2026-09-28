@@ -35,9 +35,9 @@ public final class CoreAlgoOrderCodec {
         reader.consumed(); return List.copyOf(values);
     }
 
-    public static byte[] encodeQuery(long userId, long algoOrderId, String symbol, long dueAtEpochMillis, int limit) {
+    public static byte[] encodeQuery(long userId, long algoOrderId, String instrumentId, long dueAtEpochMillis, int limit) {
         Writer writer = new Writer(); writer.longValue(userId); writer.longValue(algoOrderId);
-        writer.text(symbol == null ? "" : symbol);
+        writer.text(instrumentId == null ? "" : instrumentId);
         writer.longValue(dueAtEpochMillis); writer.intValue(limit); return writer.bytes();
     }
 
@@ -48,7 +48,7 @@ public final class CoreAlgoOrderCodec {
 
     private static void write(Writer writer, CoreAlgoOrderView value) {
         writer.longValue(value.algoOrderId()); writer.longValue(value.userId()); writer.text(value.clientAlgoOrderId());
-        writer.text(value.symbol()); writer.intValue(value.algoTypeCode()); writer.intValue(value.side().wireCode());
+        writer.text(value.instrumentId()); writer.intValue(value.algoTypeCode()); writer.intValue(value.side().wireCode());
         writer.longValue(value.priceTicks()); writer.longValue(value.quantitySteps()); writer.longValue(value.childQuantitySteps());
         writer.longValue(value.intervalSeconds()); writer.longValue(value.durationSeconds());
         writer.intValue(value.marginMode().wireCode()); writer.intValue(value.positionSide().wireCode());
@@ -63,7 +63,7 @@ public final class CoreAlgoOrderCodec {
     }
 
     private static CoreAlgoOrderView read(Reader reader) {
-        long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.text(), symbol = reader.text();
+        long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.text(), instrumentId = reader.text();
         int type = reader.intValue(); CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
         long interval = reader.longValue(), duration = reader.longValue();
@@ -75,12 +75,12 @@ public final class CoreAlgoOrderCodec {
         long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
         int childCount = reader.count(); List<Long> children = new ArrayList<>(childCount);
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
-        return new CoreAlgoOrderView(id, userId, clientId, symbol, type, side, price, quantity, childQuantity,
+        return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
                 interval, duration, margin, position, reduce, post, tif, status, current, reason, trace,
                 start, next, completed, created, updated, revision, children, reader.longValue(), reader.longValue(), reader.intValue());
     }
 
-    public record Query(long userId, long algoOrderId, String symbol, long dueAtEpochMillis, int limit) {
+    public record Query(long userId, long algoOrderId, String instrumentId, long dueAtEpochMillis, int limit) {
         public Query { if (userId < 0 || algoOrderId < 0 || dueAtEpochMillis < 0 || limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid algo query"); }
     }
 

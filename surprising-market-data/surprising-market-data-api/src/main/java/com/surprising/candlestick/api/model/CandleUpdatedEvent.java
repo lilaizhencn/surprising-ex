@@ -11,7 +11,7 @@ import java.time.Instant;
  * {@code status=CLOSED} means the time bucket has ended.</p>
  */
 public record CandleUpdatedEvent(
-        String symbol,
+        String instrumentId,
         String period,
         Instant openTime,
         Instant closeTime,

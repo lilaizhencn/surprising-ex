@@ -24,7 +24,7 @@ public class IndexPriceCalculator {
         this.properties = properties;
     }
 
-    public IndexPriceEvent calculate(String symbol, long sequence, int symbolMinValidSources,
+    public IndexPriceEvent calculate(String instrumentId, long sequence, int symbolMinValidSources,
                                      List<SourceQuote> quotes, Instant now) {
         List<SourceQuote> freshnessChecked = quotes.stream()
                 .map(quote -> staleAware(quote, now))
@@ -50,7 +50,7 @@ public class IndexPriceCalculator {
                 : properties.getCalculation().getMinValidSources();
         int validCount = (int) components.stream().filter(component -> component.status() == SourceStatus.HEALTHY).count();
         if (validCount < minValidSources || totalValidWeight.signum() <= 0) {
-            return new IndexPriceEvent(symbol, null, sequence, PriceStatus.INSUFFICIENT_SOURCES, components.size(),
+            return new IndexPriceEvent(instrumentId, null, sequence, PriceStatus.INSUFFICIENT_SOURCES, components.size(),
                     validCount, configuredWeightTotal(quotes), now, components);
         }
 
@@ -70,7 +70,7 @@ public class IndexPriceCalculator {
         }
 
         PriceStatus status = validCount == components.size() ? PriceStatus.HEALTHY : PriceStatus.DEGRADED;
-        return new IndexPriceEvent(symbol, indexPrice.setScale(properties.getCalculation().getScale(), RoundingMode.HALF_UP),
+        return new IndexPriceEvent(instrumentId, indexPrice.setScale(properties.getCalculation().getScale(), RoundingMode.HALF_UP),
                 sequence, status, weightedComponents.size(), validCount, configuredWeightTotal(quotes), now, weightedComponents);
     }
 

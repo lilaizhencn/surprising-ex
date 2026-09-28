@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Size;
 
 public record AdminBatchCancelOrdersRequest(
         @Positive Long userId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         @Positive @Max(1000) Integer limit,
         @Size(max = 500) String reason) {
 }

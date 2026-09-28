@@ -15,19 +15,19 @@ final class CoreStateTestFixtures {
 
     private static final CoreInstrument RUNTIME_INSTRUMENT = CoreInstrument.from(
             ProductLine.LINEAR_PERPETUAL,
-            instrument(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", "BTC", "USDT", "USDT"));
+            instrument(ProductLine.LINEAR_PERPETUAL, "1", "BTC", "USDT", "USDT"));
 
     private CoreStateTestFixtures() {
     }
 
     static TradingCoreState withInstrument(RuntimeTestStateTransitions reducer, ProductLine productLine) {
         return reducer.registerInstrument(TradingCoreState.empty(productLine), instrument(productLine,
-                "BTC-USDT", "BTC", "USDT", settleAsset(productLine)));
+                "1", "BTC", "USDT", settleAsset(productLine)));
     }
 
     static RegisterInstrumentCommand instrument(
             ProductLine productLine,
-            String symbol,
+            String instrumentId,
             String baseAsset,
             String quoteAsset,
             String settleAsset) {
@@ -35,7 +35,7 @@ final class CoreStateTestFixtures {
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         int optionType = type.isOption() ? 0 : -1;
         long strike = type.isOption() ? 100 : 0;
-        return new RegisterInstrumentCommand(symbol, type.ordinal(), baseAsset, quoteAsset, settleAsset,
+        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), baseAsset, quoteAsset, settleAsset,
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, optionType, strike);
     }

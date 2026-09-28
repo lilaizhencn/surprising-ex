@@ -6,7 +6,7 @@ public record AlgoOrderResponse(
         long algoOrderId,
         long userId,
         String clientAlgoOrderId,
-        String symbol,
+        String instrumentId,
         AlgoOrderType algoType,
         OrderSide side,
         long priceTicks,

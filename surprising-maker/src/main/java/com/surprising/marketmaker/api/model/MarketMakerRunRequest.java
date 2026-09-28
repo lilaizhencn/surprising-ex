@@ -5,10 +5,10 @@ import jakarta.validation.constraints.Size;
 
 public record MarketMakerRunRequest(
         @Size(max = 64) String strategyId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         ProductLine productLine) {
 
-    public MarketMakerRunRequest(String strategyId, String symbol) {
-        this(strategyId, symbol, null);
+    public MarketMakerRunRequest(String strategyId, String instrumentId) {
+        this(strategyId, instrumentId, null);
     }
 }

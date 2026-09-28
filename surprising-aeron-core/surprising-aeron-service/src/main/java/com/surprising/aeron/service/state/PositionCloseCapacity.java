@@ -36,17 +36,17 @@ public record PositionCloseCapacity(
     public static PositionCloseCapacity inspect(
             TradingCoreState state,
             CoreUserState user,
-            String symbol,
+            String instrumentId,
             CorePositionSide positionSide,
             CoreOrderSide closeSide,
             ActiveOrderIndex activeOrderIndex) {
-        return inspect(state, user, symbol, positionSide, closeSide, activeOrderIndex, 0);
+        return inspect(state, user, instrumentId, positionSide, closeSide, activeOrderIndex, 0);
     }
 
     public static PositionCloseCapacity inspect(
             TradingCoreState state,
             CoreUserState user,
-            String symbol,
+            String instrumentId,
             CorePositionSide positionSide,
             CoreOrderSide closeSide,
             ActiveOrderIndex activeOrderIndex,
@@ -54,7 +54,7 @@ public record PositionCloseCapacity(
         if (state == null || user == null || positionSide == null || closeSide == null) {
             throw new IllegalArgumentException("position close capacity input is required");
         }
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
         CorePositionState position = user.positions().get(positionKey(normalizedSymbol, positionSide));
         long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
         long requestedQuantity = 0;
@@ -65,7 +65,7 @@ public record PositionCloseCapacity(
             if (orderId == null || orderId == excludedOrderId) continue;
             CoreOrderState order = state.order(orderId);
             if (order == null || order.status() != CoreOrderStatus.OPEN
-                    || order.userId() != user.userId() || !order.symbol().equals(normalizedSymbol)
+                    || order.userId() != user.userId() || !order.instrumentId().equals(normalizedSymbol)
                     || order.positionSide() != positionSide || order.side() != closeSide) {
                 continue;
             }
@@ -82,14 +82,14 @@ public record PositionCloseCapacity(
     }
 
     public static PositionCloseCapacity inspectRuntime(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String symbol,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String instrumentId,
             CorePositionSide positionSide, CoreOrderSide closeSide, ActiveOrderIndex activeOrderIndex,
             long excludedOrderId) {
         if (runtime == null || identities == null || userId <= 0 || positionSide == null
                 || closeSide == null || activeOrderIndex == null) {
             throw new IllegalArgumentException("runtime close-capacity input is required");
         }
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
         String positionName = positionSide == CorePositionSide.NET
                 ? normalizedSymbol : normalizedSymbol + ':' + positionSide.name();
         Long positionKey = identities.findPositionKey(userId, positionName);
@@ -103,7 +103,7 @@ public record PositionCloseCapacity(
             if (orderId == excludedOrderId) continue;
             OrderRuntime order = runtime.order(orderId);
             if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
-                    || !identities.symbol(order.symbolId()).equals(normalizedSymbol)
+                    || !identities.instrumentId(order.symbolId()).equals(normalizedSymbol)
                     || order.positionSide() != positionSide || order.side() != closeSide) continue;
             if (order.reduceOnly()) {
                 if (commitments == null) commitments = new ArrayList<>();
@@ -143,8 +143,8 @@ public record PositionCloseCapacity(
         return List.copyOf(conflicts);
     }
 
-    private static String positionKey(String symbol, CorePositionSide positionSide) {
-        return positionSide == CorePositionSide.NET ? symbol : symbol + ':' + positionSide.name();
+    private static String positionKey(String instrumentId, CorePositionSide positionSide) {
+        return positionSide == CorePositionSide.NET ? instrumentId : instrumentId + ':' + positionSide.name();
     }
 
     public record Commitment(long orderId, long quantitySteps, long corePosition) {

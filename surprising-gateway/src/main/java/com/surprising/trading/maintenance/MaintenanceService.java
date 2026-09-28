@@ -33,8 +33,8 @@ public class MaintenanceService {
     public ProductLine productLine() { return line; }
     public MaintenanceTask create(String admin, MaintenanceRequest request) {
         request.validate(line);
-        // Verify Core availability and the symbol before accepting a durable task.
-        core.maintenance(request.symbol(),0,1);
+        // Verify Core availability and the instrumentId before accepting a durable task.
+        core.maintenance(request.instrumentId(),0,1);
         return transactions.execute(status -> repository.create(line,admin,request));
     }
     public MaintenanceTask get(long id) { return repository.get(line,id,false); }
@@ -71,23 +71,23 @@ public class MaintenanceService {
         });
     }
 
-    public record Position(String userId, String symbol, String marginMode, String positionSide,
+    public record Position(String userId, String instrumentId, String marginMode, String positionSide,
                            String signedQuantitySteps, String entryPriceTicks, String positionMarginUnits) { }
-    public record Preview(ProductLine productLine, String symbol, String gateMode, String gateTaskId,
+    public record Preview(ProductLine productLine, String instrumentId, String gateMode, String gateTaskId,
                           List<Position> positions, List<String> orderIds,
                           List<String> triggerOrderIds, boolean moreUsers, String nextUserId,
                           boolean moreOrders, boolean moreTriggers) { }
-    public Preview preview(String symbol, long userId, long afterUserId) {
+    public Preview preview(String instrumentId, long userId, long afterUserId) {
         if (userId < 0 || afterUserId < 0) throw new IllegalArgumentException("invalid user cursor");
-        var page = core.maintenance(symbol,afterUserId,8);
+        var page = core.maintenance(instrumentId,afterUserId,8);
         var positions = new ArrayList<Position>();
         for (long owner : userId == 0 ? page.userIds() : List.of(userId)) {
-            for (var p : positions(owner,symbol)) positions.add(new Position(Long.toString(owner),p.symbol(),p.marginMode().name(),p.positionSide().name(),
+            for (var p : positions(owner,instrumentId)) positions.add(new Position(Long.toString(owner),p.instrumentId(),p.marginMode().name(),p.positionSide().name(),
                     Long.toString(p.signedQuantitySteps()),Long.toString(p.entryPriceTicks()),Long.toString(p.positionMarginUnits())));
         }
-        var open = core.openOrders(userId,symbol,0,21);
-        var pending = core.openTriggers(userId,symbol,0,21);
-        return new Preview(line,symbol,page.state().mode().name(),Long.toString(page.state().taskId()),
+        var open = core.openOrders(userId,instrumentId,0,21);
+        var pending = core.openTriggers(userId,instrumentId,0,21);
+        return new Preview(line,instrumentId,page.state().mode().name(),Long.toString(page.state().taskId()),
                 List.copyOf(positions),open.stream().limit(20).map(v -> Long.toString(v.orderId())).toList(),
                 pending.stream().limit(20).map(v -> Long.toString(v.triggerOrderId())).toList(),userId == 0 && page.hasMore(),
                 page.userIds().isEmpty() ? "0" : Long.toString(page.userIds().getLast()),open.size()>20,pending.size()>20);
@@ -111,7 +111,7 @@ public class MaintenanceService {
     private void step(MaintenanceTask task) {
         var pending = repository.pendingAction(task);
         if (pending != null) { execute(task,pending); return; }
-        String symbol = task.request().symbol();
+        String instrumentId = task.request().instrumentId();
         switch (task.phase()) {
             case "GATE" -> {
                 CoreInstrumentMaintenance.Mode mode = switch (task.request().mode()) {
@@ -119,18 +119,18 @@ public class MaintenanceService {
                     case MARKET,LIMIT -> CoreInstrumentMaintenance.Mode.REDUCE_ONLY;
                     case SETTLEMENT -> CoreInstrumentMaintenance.Mode.SETTLEMENT;
                 };
-                updateGate(task,new CoreMaintenanceCodec.Command(symbol,0,
+                updateGate(task,new CoreMaintenanceCodec.Command(instrumentId,0,
                         new CoreInstrumentMaintenance(task.taskId(),mode,mode == CoreInstrumentMaintenance.Mode.SETTLEMENT ? task.priceTicks() : 0)),false);
             }
-            case "RELEASE" -> updateGate(task,new CoreMaintenanceCodec.Command(symbol,task.taskId(),CoreInstrumentMaintenance.TRADING),true);
+            case "RELEASE" -> updateGate(task,new CoreMaintenanceCodec.Command(instrumentId,task.taskId(),CoreInstrumentMaintenance.TRADING),true);
             case "TRIGGERS" -> {
-                var values = core.openTriggers(task.userId(),symbol,0,1);
+                var values = core.openTriggers(task.userId(),instrumentId,0,1);
                 if (values.isEmpty()) { repository.phase(task,"ORDERS"); return; }
                 var trigger = values.getFirst();
                 plan(task,"trigger:"+trigger.triggerOrderId(),new PlannedAction("TRIGGER",trigger.userId(),trigger.triggerOrderId(),null,null));
             }
             case "ORDERS" -> {
-                var values = core.openOrders(task.userId(),symbol,0,1);
+                var values = core.openOrders(task.userId(),instrumentId,0,1);
                 if (values.isEmpty()) {
                     repository.phase(task,switch(task.request().mode()) { case CANCEL -> "VERIFY"; case MARKET,LIMIT -> "CLOSE"; case SETTLEMENT -> "SETTLE"; });
                     return;
@@ -140,11 +140,11 @@ public class MaintenanceService {
             }
             case "CLOSE" -> planNextUser(task);
             case "SETTLE" -> {
-                var progress = core.settlementProgress(symbol);
+                var progress = core.settlementProgress(instrumentId);
                 if (progress.settlementId() == task.taskId() && progress.complete()) { repository.phase(task,"VERIFY"); return; }
                 if (progress.settlementId() != 0 && progress.settlementId() != task.taskId() && !progress.complete()) throw new IllegalStateException("another settlement is in progress");
-                var page = core.maintenance(symbol,0,1);
-                var command = new SettleInstrumentCommand(task.taskId(),symbol,task.priceTicks(),0,
+                var page = core.maintenance(instrumentId,0,1);
+                var command = new SettleInstrumentCommand(task.taskId(),instrumentId,task.priceTicks(),0,
                         progress.settlementId() == task.taskId() ? progress.nextCursorUserId() : 0,16,
                         progress.settlementId() == task.taskId() ? progress.nextCursorOrderId() : 0,20);
                 plan(task,"settle:"+task.step(),new PlannedAction("SETTLE",0,0,null,command));
@@ -160,14 +160,14 @@ public class MaintenanceService {
             if (task.cursorUserId() != 0) { repository.phase(task,"VERIFY"); return; }
             owner = task.userId();
         } else {
-            var page = core.maintenance(task.request().symbol(),task.cursorUserId(),1);
+            var page = core.maintenance(task.request().instrumentId(),task.cursorUserId(),1);
             if (page.userIds().isEmpty()) { repository.phase(task,"VERIFY"); return; }
             owner = page.userIds().getFirst();
         }
-        for (var position : positions(owner,task.request().symbol())) {
+        for (var position : positions(owner,task.request().instrumentId())) {
             String key = "close:"+task.roundNo()+":"+owner+":"+position.marginMode()+":"+position.positionSide();
             String clientId = "maint-"+stable(task,key);
-            var order = new PlaceOrderCommand(StableOrderIdentity.orderId(line,owner,clientId),task.request().symbol(),position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+            var order = new PlaceOrderCommand(StableOrderIdentity.orderId(line,owner,clientId),task.request().instrumentId(),position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                     task.priceTicks(),Math.absExact(position.signedQuantitySteps()),true,position.marginMode(),position.positionSide(),
                     task.request().mode() == MaintenanceRequest.Mode.LIMIT ? CoreOrderType.LIMIT : CoreOrderType.MARKET,
                     CoreTimeInForce.IOC,false,clientId);
@@ -223,7 +223,7 @@ public class MaintenanceService {
     }
 
     private void verify(MaintenanceTask task) {
-        var state = preview(task.request().symbol(),task.userId(),0);
+        var state = preview(task.request().instrumentId(),task.userId(),0);
         if (!state.orderIds().isEmpty() || !state.triggerOrderIds().isEmpty()) {
             repository.block(task,"Residual orders remain; retry cancellation before completion"); return;
         }
@@ -232,17 +232,17 @@ public class MaintenanceService {
             repository.block(task,"BLOCKED_LIQUIDITY: positions remain; inspect the executed orders and retry or release maintenance"); return;
         }
         if (task.request().mode() == MaintenanceRequest.Mode.SETTLEMENT) {
-            var progress = core.settlementProgress(task.request().symbol());
+            var progress = core.settlementProgress(task.request().instrumentId());
             if (!progress.complete() || progress.settlementId() != task.taskId()) throw new IllegalStateException("Core settlement is not complete");
             core.command(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,stable(task,"closed"),0,
-                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command(task.request().symbol(),task.taskId(),
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command(task.request().instrumentId(),task.taskId(),
                             new CoreInstrumentMaintenance(task.taskId(),CoreInstrumentMaintenance.Mode.CLOSED,task.priceTicks()))));
         }
         repository.update(task,"COMPLETED","VERIFY",task.cursorUserId(),task.roundNo(),null);
     }
-    private List<CorePositionView> positions(long userId, String symbol) {
+    private List<CorePositionView> positions(long userId, String instrumentId) {
         var user = core.userState(userId);
-        return user == null ? List.of() : user.positions().stream().filter(p -> p.symbol().equals(symbol) && p.signedQuantitySteps()!=0).toList();
+        return user == null ? List.of() : user.positions().stream().filter(p -> p.instrumentId().equals(instrumentId) && p.signedQuantitySteps()!=0).toList();
     }
     private void plan(MaintenanceTask task, String key, PlannedAction action) { repository.addAction(task,key,json.writeValueAsString(action)); }
     private void updateGate(MaintenanceTask task,CoreMaintenanceCodec.Command command,boolean release) {

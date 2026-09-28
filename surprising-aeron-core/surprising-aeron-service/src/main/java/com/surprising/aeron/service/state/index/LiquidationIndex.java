@@ -25,8 +25,8 @@ public final class LiquidationIndex {
         rebuild(state);
     }
 
-    public long activeId(long userId, String symbol, CorePositionSide positionSide) {
-        NavigableSet<Long> ids = activeIds.get(new LiquidationKey(userId, symbol, positionSide));
+    public long activeId(long userId, String instrumentId, CorePositionSide positionSide) {
+        NavigableSet<Long> ids = activeIds.get(new LiquidationKey(userId, instrumentId, positionSide));
         return ids == null || ids.isEmpty() ? 0 : ids.first();
     }
 
@@ -37,7 +37,7 @@ public final class LiquidationIndex {
     public void apply(long liquidationId, LiquidationRuntime after, RuntimeIdentityRegistry identities) {
         LiquidationKey previous = keysById.get(liquidationId);
         LiquidationKey current = isActive(after)
-                ? new LiquidationKey(after.userId(), identities.symbol(after.symbolId()), after.positionSide())
+                ? new LiquidationKey(after.userId(), identities.instrumentId(after.symbolId()), after.positionSide())
                 : null;
         if (java.util.Objects.equals(previous, current)) return;
         if (previous != null) {
@@ -70,7 +70,7 @@ public final class LiquidationIndex {
     }
 
     private void add(CoreLiquidationState value) {
-        LiquidationKey key = new LiquidationKey(value.userId(), value.symbol(), value.positionSide());
+        LiquidationKey key = new LiquidationKey(value.userId(), value.instrumentId(), value.positionSide());
         keysById.put(value.liquidationId(), key);
         add(value.liquidationId(), key);
     }
@@ -81,7 +81,7 @@ public final class LiquidationIndex {
     }
 
     private void remove(CoreLiquidationState value) {
-        LiquidationKey key = new LiquidationKey(value.userId(), value.symbol(), value.positionSide());
+        LiquidationKey key = new LiquidationKey(value.userId(), value.instrumentId(), value.positionSide());
         keysById.remove(value.liquidationId());
         remove(value.liquidationId(), key);
     }
@@ -94,17 +94,17 @@ public final class LiquidationIndex {
         if (ids.isEmpty()) activeIds.remove(key);
     }
 
-    private record LiquidationKey(long userId, String symbol, CorePositionSide positionSide)
+    private record LiquidationKey(long userId, String instrumentId, CorePositionSide positionSide)
             implements Comparable<LiquidationKey> {
         private LiquidationKey {
-            symbol = OrderReservation.normalizeSymbol(symbol);
+            instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         }
 
         @Override
         public int compareTo(LiquidationKey other) {
             int user = Long.compare(userId, other.userId);
             if (user != 0) return user;
-            int symbolCompare = symbol.compareTo(other.symbol);
+            int symbolCompare = instrumentId.compareTo(other.instrumentId);
             return symbolCompare != 0 ? symbolCompare : Integer.compare(positionSide.ordinal(), other.positionSide.ordinal());
         }
     }

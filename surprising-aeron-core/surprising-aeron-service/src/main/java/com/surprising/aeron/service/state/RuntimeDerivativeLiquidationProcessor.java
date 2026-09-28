@@ -181,7 +181,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 }
             }
             CoreInstrument instrument = advance || obsolete ? null : requireInstrument(runtime,
-                    identities.symbol(liquidation.symbolId()));
+                    identities.instrumentId(liquidation.symbolId()));
             int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
             long positionKey = instrument == null ? 0 : identities.positionKey(
                     liquidation.userId(), instrument, liquidation.positionSide());
@@ -418,8 +418,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                       RuntimeIdentityRegistry identities) {
-        String symbol = identities.symbol(liquidation.symbolId());
-        CoreInstrument instrument = runtime.instrument(symbol);
+        String instrumentId = identities.instrumentId(liquidation.symbolId());
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         long positionKey = identities.positionKey(
@@ -444,8 +444,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
     }
 
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
-        CoreInstrument instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }

@@ -58,12 +58,12 @@ public class AeronAlgoOrderStore {
         if (value == null) throw new IllegalStateException("算法单不存在: " + id);
         return value;
     }
-    public List<CoreAlgoOrderView> query(long userId, String symbol, long dueAt, int limit) {
-        return aeron.algoOrders(userId, symbol, dueAt, limit);
+    public List<CoreAlgoOrderView> query(long userId, String instrumentId, long dueAt, int limit) {
+        return aeron.algoOrders(userId, instrumentId, dueAt, limit);
     }
     public AlgoOrderRecord record(CoreAlgoOrderView value) {
         return new AlgoOrderRecord(value.algoOrderId(), properties.getKafka().getProductLine(), value.userId(), empty(value.clientAlgoOrderId()),
-                value.symbol(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
+                value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
                 value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(), value.intervalSeconds(),
                 value.durationSeconds(), MarginMode.valueOf(value.marginMode().name()),
                 PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(), value.postOnly(),
@@ -83,7 +83,7 @@ public class AeronAlgoOrderStore {
     }
     public AlgoOrderResponse response(CoreAlgoOrderView value) {
         AlgoOrderRecord record = record(value); AlgoOrderProgress progress = progress(value);
-        return new AlgoOrderResponse(record.algoOrderId(), record.userId(), record.clientAlgoOrderId(), record.symbol(),
+        return new AlgoOrderResponse(record.algoOrderId(), record.userId(), record.clientAlgoOrderId(), record.instrumentId(),
                 record.algoType(), record.side(), record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(),
                 record.intervalSeconds(), record.durationSeconds(), record.marginMode(), record.positionSide(), record.reduceOnly(),
                 record.postOnly(), record.timeInForce(), record.status(), progress.executedQuantitySteps(),
@@ -92,7 +92,7 @@ public class AeronAlgoOrderStore {
     }
     private CoreAlgoOrderView view(AlgoOrderRecord value, List<Long> children, long revision,
                                    long executed, long active, int activeCount) {
-        return new CoreAlgoOrderView(value.algoOrderId(), value.userId(), text(value.clientAlgoOrderId()), value.symbol(),
+        return new CoreAlgoOrderView(value.algoOrderId(), value.userId(), text(value.clientAlgoOrderId()), value.instrumentId(),
                 value.algoType().ordinal(), CoreOrderSide.valueOf(value.side().name()), value.priceTicks(), value.quantitySteps(),
                 value.childQuantitySteps(), value.intervalSeconds(), value.durationSeconds(),
                 CoreMarginMode.valueOf(value.marginMode().name()), CorePositionSide.valueOf(value.positionSide().name()),

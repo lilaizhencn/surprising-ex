@@ -28,24 +28,24 @@ public class OrderFeeSnapshotLookup {
 
     public Optional<OrderFeeSnapshot> lookup(ProductLine requestedProductLine,
                                              long userId,
-                                             String symbol,
+                                             String instrumentId,
                                              long instrumentChangeId,
                                              Instant now) {
         ProductLine productLine = requestedProductLine == null
                 ? properties.getKafka().getProductLine() : requestedProductLine;
-        var instrument = instrumentSnapshotCache.current(productLine, symbol, instrumentChangeId);
+        var instrument = instrumentSnapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId);
         if (instrument.isEmpty()) {
             return Optional.empty();
         }
         var value = instrument.get();
         Optional<FeeScheduleResponse> schedule = feeScheduleSnapshotCache.effective(
-                productLine, userId, symbol, now);
+                productLine, userId, instrumentId, now);
         if (schedule.isEmpty()) {
             return Optional.of(new OrderFeeSnapshot(productLine, value.makerFeeRatePpm(), value.takerFeeRatePpm(),
                     "INSTRUMENT"));
         }
         FeeScheduleResponse selected = schedule.get();
-        String scope = selected.symbol() == null ? "GLOBAL" : "SYMBOL";
+        String scope = selected.instrumentId() == null ? "GLOBAL" : "SYMBOL";
         return Optional.of(new OrderFeeSnapshot(productLine, selected.makerFeeRatePpm(),
                 selected.takerFeeRatePpm(), selected.sourceType().name() + "_" + scope));
     }

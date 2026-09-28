@@ -39,7 +39,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private static final long LIQUIDATION_USER_UNITS = 180;
 
     private final ProductLine productLine;
-    private final String symbol;
+    private final String instrumentId;
     private final long seed;
     private final int pairs;
     private final AeronClientPool clients;
@@ -58,7 +58,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
             throw new IllegalArgumentException("lifecycle pairs must be <= 128 for one bounded risk scan");
         }
         this.productLine = productLine;
-        this.symbol = "P9-LIFECYCLE-" + productLine.name().replace('_', '-');
+        this.instrumentId = "40000";
         this.seed = seed;
         this.pairs = pairs;
         this.clients = new AeronClientPool(
@@ -97,8 +97,8 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         // 与生产准入一致：建仓前提供新鲜标记价；期权同时提供指数价和远期价。
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                        ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, System.currentTimeMillis())
-                        : new ApplyMarkPriceCommand(symbol, 100, 1, System.currentTimeMillis())),
+                        ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, System.currentTimeMillis())
+                        : new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())),
                 "mark:initial");
         for (int pair = 0; pair < pairs; pair++) {
             long shortUser = shortUser(pair);
@@ -119,13 +119,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void liquidationStorm() {
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 100, 2, System.currentTimeMillis())),
+                        instrumentId, 100, 2, System.currentTimeMillis())),
                 "mark:normal");
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long started = System.nanoTime();
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, markPrice, 3, System.currentTimeMillis())),
+                        instrumentId, markPrice, 3, System.currentTimeMillis())),
                 "mark:shock");
         var work = CoreLiquidationWorkCodec.decodeWork(query(
                 CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,
@@ -171,7 +171,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         long started = System.nanoTime();
         applied(CoreMessageType.SETTLE_INSTRUMENT, 1,
                 TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        9_500_000_000L + seed, symbol, 120, productLine == ProductLine.OPTION ? 25 : 0)),
+                        9_500_000_000L + seed, instrumentId, 120, productLine == ProductLine.OPTION ? 25 : 0)),
                 "settle");
         long elapsed = System.nanoTime() - started;
         verifyFundsAndPositions(false);
@@ -215,13 +215,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
 
     private byte[] order(long orderId, CoreOrderSide side, long reservedUnits) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, instrumentId, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private void adjust(long userId, long units) {
@@ -263,7 +263,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     }
 
     private void requirePosition(com.surprising.aeron.protocol.CoreUserStateView state, long expected) {
-        long actual = state.positions().stream().filter(value -> value.symbol().equals(symbol))
+        long actual = state.positions().stream().filter(value -> value.instrumentId().equals(instrumentId))
                 .mapToLong(value -> value.signedQuantitySteps()).sum();
         if (actual != expected) {
             throw new IllegalStateException("position mismatch user=" + state.userId()

@@ -12,7 +12,7 @@ public record PlaceTriggerOrderRequest(
         @Positive long userId,
         @NotBlank @Size(max = 64) String clientTriggerOrderId,
         @Size(max = 64) String ocoGroupId,
-        @NotBlank @Size(max = 64) String symbol,
+        @NotBlank @Size(max = 64) String instrumentId,
         @NotNull OrderSide side,
         @NotNull TriggerOrderType triggerType,
         @Min(0) long triggerPriceTicks,
@@ -34,7 +34,7 @@ public record PlaceTriggerOrderRequest(
     public PlaceTriggerOrderRequest(long userId,
                                     String clientTriggerOrderId,
                                     String ocoGroupId,
-                                    String symbol,
+                                    String instrumentId,
                                     OrderSide side,
                                     TriggerOrderType triggerType,
                                     long triggerPriceTicks,
@@ -44,7 +44,7 @@ public record PlaceTriggerOrderRequest(
                                     long quantitySteps,
                                     MarginMode marginMode,
                                     Instant expiresAt) {
-        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
+        this(userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
                 PositionSide.NET, expiresAt);
     }
@@ -52,7 +52,7 @@ public record PlaceTriggerOrderRequest(
     public PlaceTriggerOrderRequest(long userId,
                                     String clientTriggerOrderId,
                                     String ocoGroupId,
-                                    String symbol,
+                                    String instrumentId,
                                     OrderSide side,
                                     TriggerOrderType triggerType,
                                     long triggerPriceTicks,
@@ -63,7 +63,7 @@ public record PlaceTriggerOrderRequest(
                                     MarginMode marginMode,
                                     PositionSide positionSide,
                                     Instant expiresAt) {
-        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
+        this(userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
                 positionSide, expiresAt);
     }

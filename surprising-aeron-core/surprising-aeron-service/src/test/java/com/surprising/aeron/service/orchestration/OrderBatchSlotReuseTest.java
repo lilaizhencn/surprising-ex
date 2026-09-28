@@ -35,8 +35,8 @@ class OrderBatchSlotReuseTest {
         var first = batch.items.getFirst();
         first.laneResultPrepared = true;
         first.executionCount = 3;
-        first.resultOrderSymbol = "BTC-USDT";
-        first.cancelSymbol = "BTC-USDT";
+        first.resultOrderSymbol = "1";
+        first.cancelSymbol = "1";
         for (int i = 2; i <= 20; i++) batch.addItem(i, 0, 0, command);
         var last = batch.items.getLast();
         batch.clear();

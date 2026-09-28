@@ -130,14 +130,14 @@ public final class MatcherSnapshotCodec {
             }
             long businessHash = input.readLong();
             int engineHash = input.readInt();
-            int symbolCount = readCount(input, "symbol registry");
+            int symbolCount = readCount(input, "instrumentId registry");
             Map<String, Integer> symbols = new LinkedHashMap<>();
             Set<Integer> symbolIds = new LinkedHashSet<>();
             for (int index = 0; index < symbolCount; index++) {
-                String symbol = readText(input);
+                String instrumentId = readText(input);
                 int symbolId = input.readInt();
-                if (symbolId <= 0 || symbols.put(symbol, symbolId) != null || !symbolIds.add(symbolId)) {
-                    throw new ProtocolException("duplicate matcher symbol");
+                if (symbolId <= 0 || symbols.put(instrumentId, symbolId) != null || !symbolIds.add(symbolId)) {
+                    throw new ProtocolException("duplicate matcher instrumentId");
                 }
             }
             int userCount = readCount(input, "user registry");

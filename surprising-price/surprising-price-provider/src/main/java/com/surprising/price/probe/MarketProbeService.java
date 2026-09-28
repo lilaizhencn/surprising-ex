@@ -40,19 +40,19 @@ public class MarketProbeService {
         this.indexPriceProperties = indexPriceProperties;
     }
 
-    public MarketProbeSnapshot snapshot(String symbol) {
-        return snapshot(symbol, SourceMode.PUBLIC_WEBSOCKET_ONLY);
+    public MarketProbeSnapshot snapshot(String instrumentId) {
+        return snapshot(instrumentId, SourceMode.PUBLIC_WEBSOCKET_ONLY);
     }
 
-    public MarketProbeSnapshot snapshot(String symbol, SourceMode sourceMode) {
+    public MarketProbeSnapshot snapshot(String instrumentId, SourceMode sourceMode) {
         Instant observedAt = Instant.now();
-        IndexPriceResponse index = indexPriceCache.requireFresh(symbol);
-        MarkPriceResponse mark = markPriceQueryService.latest(symbol);
+        IndexPriceResponse index = indexPriceCache.requireFresh(instrumentId);
+        MarkPriceResponse mark = markPriceQueryService.latest(instrumentId);
         List<ExternalSpotWebSocketManager.WebSocketHealth> webSockets = webSocketManager.health();
         List<SourceHealth> sourceHealth = sourceHealth(index.components(), webSockets);
         int freshSourceCount = freshSourceCount(index.components(), sourceHealth, sourceMode, observedAt);
         int requiredSourceQuorum = indexPriceProperties.getCalculation().getMinValidSources();
-        CadenceWindows cadence = cadenceBySymbol.computeIfAbsent(index.symbol(), ignored -> new CadenceWindows());
+        CadenceWindows cadence = cadenceBySymbol.computeIfAbsent(index.instrumentId(), ignored -> new CadenceWindows());
         CadenceSummary indexCadence = cadence.index().observe(index.eventTime(), observedAt,
                 indexPriceProperties.getCalculation().getMaxSourceAge());
         CadenceSummary markCadence = cadence.mark().observe(mark.eventTime(), observedAt,

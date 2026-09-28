@@ -12,12 +12,12 @@ class RuntimeIdentityRegistryTest {
         long user = 17;
         var topology = LaneTopology.configured(false);
         var lane = new AccountLaneState(topology.accountLaneId(user), 16);
-        long expected = registry.positionKey(user, "BTC-USDT:LONG");
+        long expected = registry.positionKey(user, "1:LONG");
         try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             long actual = executor.submit(() -> registry.retainPositionInLane(
-                    lane, user, "BTC-USDT", CorePositionSide.LONG)).get();
+                    lane, user, "1", CorePositionSide.LONG)).get();
             assertThat(actual).isEqualTo(expected);
-            assertThat(registry.preparedPositionKey(user, "BTC-USDT", CorePositionSide.LONG))
+            assertThat(registry.preparedPositionKey(user, "1", CorePositionSide.LONG))
                     .isEqualTo(expected);
             registry.releasePublishedPosition(actual);
             registry.releasePositionKey(actual);
@@ -31,19 +31,19 @@ class RuntimeIdentityRegistryTest {
         long user = 17;
         var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
         try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
-            long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             registry.releasePositionKey(key);
-            assertThat(registry.positionKey(user, key)).isEqualTo("BTC-USDT:LONG");
-            executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            assertThat(registry.positionKey(user, key)).isEqualTo("1:LONG");
+            executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
-            assertThat(registry.findPositionKey(user, "BTC-USDT:LONG")).isEqualTo(key);
+            assertThat(registry.findPositionKey(user, "1:LONG")).isEqualTo(key);
             registry.releasePublishedPosition(key);
             var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
-            assertThat(restored.positionKey(user, key)).isEqualTo("BTC-USDT:LONG");
+            assertThat(restored.positionKey(user, key)).isEqualTo("1:LONG");
             registry.releasePositionKey(key);
-            assertThat(registry.findPositionKey(user, "BTC-USDT:LONG")).isNull();
-            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             assertThat(recreated).isEqualTo(key);
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
@@ -165,12 +165,12 @@ class RuntimeIdentityRegistryTest {
     @Test
     void exactIdentityHitsPreserveNormalizationAndRejectInvalidMisses() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        int symbol = identities.symbolId(" btc-usdt ");
+        int instrumentId = identities.symbolId("1");
         int asset = identities.assetId(" usdt ");
         long version = identities.dictionaryVersion();
-        for (String value : new String[] {"BTC-USDT", new String("BTC-USDT"), "btc-usdt", " BTC-USDT "}) {
-            assertThat(identities.symbolId(value)).isEqualTo(symbol);
-            assertThat(identities.findSymbolId(value)).isEqualTo(symbol);
+        for (String value : new String[] {"1", new String("1"), "1", "1"}) {
+            assertThat(identities.symbolId(value)).isEqualTo(instrumentId);
+            assertThat(identities.findSymbolId(value)).isEqualTo(instrumentId);
         }
         for (String value : new String[] {"USDT", new String("USDT"), "usdt", " USDT "}) {
             assertThat(identities.assetId(value)).isEqualTo(asset);
@@ -183,7 +183,7 @@ class RuntimeIdentityRegistryTest {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.findSymbolId(value))
                     .isInstanceOf(IllegalArgumentException.class);
         }
-        assertThat(identities.findSymbolId("ETH-USDT")).isNull();
+        assertThat(identities.findSymbolId("2")).isNull();
     }
 
     @Test
@@ -191,7 +191,7 @@ class RuntimeIdentityRegistryTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long[] keys = new long[256];
         for (int index = 0; index < keys.length; index++) {
-            keys[index] = identities.positionKey(index + 1, "BTC-USDT:NET");
+            keys[index] = identities.positionKey(index + 1, "1:NET");
         }
         var started = new java.util.concurrent.CountDownLatch(4);
         var start = new java.util.concurrent.CountDownLatch(1);
@@ -203,7 +203,7 @@ class RuntimeIdentityRegistryTest {
                     start.await();
                     for (int index = 0; index < 100_000; index++) {
                         int slot = index & 255;
-                        long actual = identities.preparedPositionKey(slot + 1, "BTC-USDT:NET");
+                        long actual = identities.preparedPositionKey(slot + 1, "1:NET");
                         if (actual != keys[slot]) throw new AssertionError("prepared identity changed");
                     }
                     return null;
@@ -215,7 +215,7 @@ class RuntimeIdentityRegistryTest {
                 start.countDown();
             }
             for (int index = 257; index < 50_000; index++) {
-                identities.positionKey(index, "BTC-USDT:NET");
+                identities.positionKey(index, "1:NET");
             }
             for (var result : results) result.get(10, java.util.concurrent.TimeUnit.SECONDS);
         }
@@ -226,31 +226,31 @@ class RuntimeIdentityRegistryTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long initial = identities.dictionaryVersion();
         int assetId = identities.assetId("USDT");
-        int symbolId = identities.symbolId("BTC-USDT");
+        int symbolId = identities.symbolId("1");
         identities.assetId("USDT");
-        identities.symbolId("BTC-USDT");
+        identities.symbolId("1");
 
         assertThat(identities.dictionaryVersion()).isEqualTo(initial + 2);
         RuntimeIdentityRegistry restored = RuntimeIdentityRegistry.restore(identities.snapshot());
         assertThat(restored.asset(assetId)).isEqualTo("USDT");
-        assertThat(restored.symbol(symbolId)).isEqualTo("BTC-USDT");
+        assertThat(restored.instrumentId(symbolId)).isEqualTo("1");
         assertThat(restored.dictionaryVersion()).isEqualTo(identities.dictionaryVersion());
     }
 
     @Test
     void rollbackPositionKeysSkipsAllocationsAlreadyReleasedAfterCheckpoint() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        identities.positionKey(1001, "BTC-USDT:NET");
+        identities.positionKey(1001, "1:NET");
         long checkpoint = identities.positionCheckpoint();
-        long released = identities.positionKey(1002, "BTC-USDT:NET");
-        identities.positionKey(1003, "ETH-USDT:NET");
+        long released = identities.positionKey(1002, "1:NET");
+        identities.positionKey(1003, "2:NET");
 
         identities.releasePositionKey(released);
         identities.rollbackPositionKeys(checkpoint);
 
-        assertThat(identities.findPositionKey(1001, "BTC-USDT:NET")).isNotNull();
-        assertThat(identities.findPositionKey(1002, "BTC-USDT:NET")).isNull();
-        assertThat(identities.findPositionKey(1003, "ETH-USDT:NET")).isNull();
+        assertThat(identities.findPositionKey(1001, "1:NET")).isNotNull();
+        assertThat(identities.findPositionKey(1002, "1:NET")).isNull();
+        assertThat(identities.findPositionKey(1003, "2:NET")).isNull();
         assertThat(identities.positionCheckpoint()).isEqualTo(checkpoint);
     }
 

@@ -23,7 +23,7 @@ public class InstrumentCoreSyncService {
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
     private record Attempt(RegisterInstrumentCommand configuration, UUID commandId, boolean outcomeUnknown, boolean applied,
                            long retryAfterNanos, String error) { }
-    public record SyncState(String productLine, String symbol, String state, String error) { }
+    public record SyncState(String productLine, String instrumentId, String state, String error) { }
 
     public InstrumentCoreSyncService(@Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache cache,
             MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
@@ -34,14 +34,14 @@ public class InstrumentCoreSyncService {
     public synchronized void reconcile() {
         if (!cache.initialized(line)) return;
         long now=System.nanoTime();
-        for (var value : cache.current(line).stream().sorted(Comparator.comparing(InstrumentResponse::symbol)).toList()) {
-            var attempt=attempts.get(value.symbol());
+        for (var value : cache.current(line).stream().sorted(Comparator.comparing(InstrumentResponse::instrumentId)).toList()) {
+            var attempt=attempts.get(Integer.toString(value.instrumentId()));
             RegisterInstrumentCommand configuration;
             try {
                 configuration=command(value);
             } catch (RuntimeException failure) {
                 if (attempt!=null && attempt.configuration()==null && now<attempt.retryAfterNanos()) continue;
-                attempts.put(value.symbol(),new Attempt(null,null,false,false,
+                attempts.put(Integer.toString(value.instrumentId()),new Attempt(null,null,false,false,
                         now+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error(failure)));
                 continue;
             }
@@ -73,24 +73,24 @@ public class InstrumentCoreSyncService {
             outcomeUnknown=true;
             error=error(failure);
         }
-        attempts.put(configuration.symbol(),new Attempt(configuration,id,outcomeUnknown,applied,
+        attempts.put(configuration.instrumentId(),new Attempt(configuration,id,outcomeUnknown,applied,
                 System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error));
     }
 
-    public SyncState state(String symbol, ProductLine requestedLine) {
+    public SyncState state(String instrumentId, ProductLine requestedLine) {
         if (requestedLine!=line) throw new IllegalArgumentException("product line mismatch");
-        var instrument = cache.current(line,symbol).orElse(null);
+        var instrument = cache.current(line, com.surprising.product.api.InstrumentIds.parse(instrumentId)).orElse(null);
         if (instrument == null) throw new IllegalArgumentException("instrument not found in configuration cache");
-        var attempt=attempts.get(instrument.symbol());
+        var attempt=attempts.get(Integer.toString(instrument.instrumentId()));
         RegisterInstrumentCommand configuration;
         try {
             configuration=command(instrument);
         } catch (RuntimeException failure) {
-            return new SyncState(line.name(),instrument.symbol(),"BLOCKED",error(failure));
+            return new SyncState(line.name(),Integer.toString(instrument.instrumentId()),"BLOCKED",error(failure));
         }
         boolean currentAttempt=attempt!=null && configuration.equals(attempt.configuration());
         boolean applied=currentAttempt && attempt.applied();
-        return new SyncState(line.name(),instrument.symbol(),
+        return new SyncState(line.name(),Integer.toString(instrument.instrumentId()),
                 applied?"APPLIED":currentAttempt && attempt.error()!=null?"BLOCKED":"PENDING",
                 currentAttempt?attempt.error():null);
     }
@@ -126,7 +126,7 @@ public class InstrumentCoreSyncService {
                 }
             }
         }
-        return new RegisterInstrumentCommand(value.symbol(),value.contractType().ordinal(),
+        return new RegisterInstrumentCommand(Integer.toString(value.instrumentId()),value.contractType().ordinal(),
                 value.baseAsset(),value.quoteAsset(),value.settleAsset(),value.notionalMultiplierUnits(),value.priceTickUnits(),
                 settleScale,value.initialMarginRatePpm(),value.maintenanceMarginRatePpm(),
                 value.makerFeeRatePpm(),value.takerFeeRatePpm(),value.expiryTime()==null?0:value.expiryTime().toEpochMilli(),

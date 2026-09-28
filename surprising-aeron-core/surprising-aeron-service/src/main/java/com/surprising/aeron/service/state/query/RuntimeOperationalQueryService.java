@@ -53,8 +53,8 @@ public final class RuntimeOperationalQueryService {
     }
 
     public static CoreFundingProgressView fundingProgress(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreFundingProgressView(0, true, 0, 0);
         TreasuryRuntime treasury = runtime.treasury();
         TreasuryRuntime.FundingProgressRuntime progress = treasury.fundingProgress(symbolId);
@@ -64,8 +64,8 @@ public final class RuntimeOperationalQueryService {
     }
 
     public static CoreSettlementProgressView settlementProgress(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreSettlementProgressView(0, true, true, 0, 0, 0, 0);
         TreasuryRuntime treasury = runtime.treasury();
         TreasuryRuntime.LifecycleProgressRuntime progress = treasury.lifecycleProgress(symbolId);
@@ -76,7 +76,7 @@ public final class RuntimeOperationalQueryService {
     }
 
     public static List<CoreTriggerOrderStateView> triggerOrders(
-            TradingRuntimeState runtime, Iterable<Long> candidateIds, long userId, String symbol,
+            TradingRuntimeState runtime, Iterable<Long> candidateIds, long userId, String instrumentId,
             com.surprising.aeron.protocol.CoreTriggerOrderStatus status, long triggerOrderId,
             long beforeTriggerOrderId, boolean openOnly, int limit) {
         ArrayList<CoreTriggerOrderStateView> result = new ArrayList<>(Math.min(limit, 256));
@@ -86,7 +86,7 @@ public final class RuntimeOperationalQueryService {
             CoreTriggerOrderState order = runtime.triggerOrder(id);
             if (order == null || userId != 0 && order.userId() != userId
                     || triggerOrderId != 0 && order.triggerOrderId() != triggerOrderId
-                    || symbol != null && !symbol.isEmpty() && !order.symbol().equalsIgnoreCase(symbol)
+                    || instrumentId != null && !instrumentId.isEmpty() && !order.instrumentId().equalsIgnoreCase(instrumentId)
                     || status != null && order.status() != status
                     || triggerOrderId == 0 && order.triggerOrderId() >= beforeTriggerOrderId
                     || openOnly && !order.status().open()) continue;
@@ -120,7 +120,7 @@ public final class RuntimeOperationalQueryService {
                 }
             }
             result.add(new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
-                    state.symbol(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
+                    state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
                     state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
                     state.positionSide(), state.reduceOnly(), state.postOnly(), state.timeInForce(), state.statusCode(),
                     state.currentOrderId(), state.rejectReason(), state.traceId(), state.startAtEpochMillis(),

@@ -96,7 +96,7 @@ final class SpotMixedWorkload {
             takers = List.copyOf(takers);
             for (int index = 0; index < activeUsers; index++) {
                 long userId = retailUsers.get(index);
-                String symbol = symbols.get(index % symbolCount);
+                String instrumentId = symbols.get(index % symbolCount);
                 String baseAsset = baseAssets.get(index % symbolCount);
                 harness.adjust(userId, QUOTE_ASSET, RETAIL_QUOTE_UNITS + index);
                 harness.adjust(userId, baseAsset, RETAIL_BASE_UNITS + (index & 7));
@@ -105,7 +105,7 @@ final class SpotMixedWorkload {
                     CoreOrderSide side = (order & 1) == 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL;
                     long price = side == CoreOrderSide.BUY ? 90 - order : 110 + order;
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                            order(harness.nextOrderId(), symbol, side, price, 1, CoreTimeInForce.GTC)));
+                            order(harness.nextOrderId(), instrumentId, side, price, 1, CoreTimeInForce.GTC)));
                 }
             }
             for (int index = 0; index < symbolCount; index++) {
@@ -263,9 +263,9 @@ final class SpotMixedWorkload {
                                               Set<Long> lifecycleOrders) {
         List<List<Long>> quotedOrderIds = new ArrayList<>(template.symbols().size());
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
-            String symbol = template.symbols().get(symbolIndex);
+            String instrumentId = template.symbols().get(symbolIndex);
             long maker = template.makers().get(symbolIndex);
-            List<Long> quotedIds = placeBatch(harness, maker, symbol, CoreOrderSide.SELL,
+            List<Long> quotedIds = placeBatch(harness, maker, instrumentId, CoreOrderSide.SELL,
                     102, 2, CoreTimeInForce.GTC, batchSize);
             quotedOrderIds.add(quotedIds);
             lifecycleOrders.addAll(quotedIds);
@@ -278,13 +278,13 @@ final class SpotMixedWorkload {
 
         long[] partialSellIds = new long[template.symbols().size()];
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
-            String symbol = template.symbols().get(symbolIndex);
+            String instrumentId = template.symbols().get(symbolIndex);
             long maker = template.makers().get(symbolIndex);
             long partialSellId = harness.nextOrderId();
             partialSellIds[symbolIndex] = partialSellId;
             lifecycleOrders.add(partialSellId);
             harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
-                    order(partialSellId, symbol, CoreOrderSide.SELL, 101, batchSize * 2L, CoreTimeInForce.GTC)));
+                    order(partialSellId, instrumentId, CoreOrderSide.SELL, 101, batchSize * 2L, CoreTimeInForce.GTC)));
         }
         harness.drainSubmitted();
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
@@ -300,13 +300,13 @@ final class SpotMixedWorkload {
 
         long[] partialBuyIds = new long[template.symbols().size()];
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
-            String symbol = template.symbols().get(symbolIndex);
+            String instrumentId = template.symbols().get(symbolIndex);
             long maker = template.makers().get(symbolIndex);
             long partialBuyId = harness.nextOrderId();
             partialBuyIds[symbolIndex] = partialBuyId;
             lifecycleOrders.add(partialBuyId);
             harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
-                    order(partialBuyId, symbol, CoreOrderSide.BUY, 99, batchSize * 2L, CoreTimeInForce.GTC)));
+                    order(partialBuyId, instrumentId, CoreOrderSide.BUY, 99, batchSize * 2L, CoreTimeInForce.GTC)));
         }
         harness.drainSubmitted();
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
@@ -321,14 +321,14 @@ final class SpotMixedWorkload {
         harness.drainSubmitted();
     }
 
-    private static List<Long> placeBatch(Harness harness, long userId, String symbol, CoreOrderSide side,
+    private static List<Long> placeBatch(Harness harness, long userId, String instrumentId, CoreOrderSide side,
                                          long price, long quantity, CoreTimeInForce timeInForce, int size) {
         List<Long> orderIds = new ArrayList<>(size);
         List<PlaceOrderCommand> orders = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
             long orderId = harness.nextOrderId();
             orderIds.add(orderId);
-            orders.add(orderCommand(orderId, symbol, side, price, quantity, timeInForce));
+            orders.add(orderCommand(orderId, instrumentId, side, price, quantity, timeInForce));
         }
         harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
@@ -390,7 +390,7 @@ final class SpotMixedWorkload {
 
     private static List<String> symbols(int count) {
         List<String> symbols = new ArrayList<>(count);
-        for (int index = 0; index < count; index++) symbols.add("JMH-SPOT-" + index + "-USDT");
+        for (int index = 0; index < count; index++) symbols.add(Integer.toString(10000 + index));
         return List.copyOf(symbols);
     }
 
@@ -400,21 +400,21 @@ final class SpotMixedWorkload {
         return List.copyOf(assets);
     }
 
-    private static byte[] order(long orderId, String symbol, CoreOrderSide side, long price, long quantity,
+    private static byte[] order(long orderId, String instrumentId, CoreOrderSide side, long price, long quantity,
                                 CoreTimeInForce timeInForce) {
         return TradingCommandCodec.encodePlaceOrder(
-                orderCommand(orderId, symbol, side, price, quantity, timeInForce));
+                orderCommand(orderId, instrumentId, side, price, quantity, timeInForce));
     }
 
-    private static PlaceOrderCommand orderCommand(long orderId, String symbol, CoreOrderSide side, long price,
+    private static PlaceOrderCommand orderCommand(long orderId, String instrumentId, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce timeInForce) {
-        return new PlaceOrderCommand(orderId, symbol, side, price, quantity, false,
+        return new PlaceOrderCommand(orderId, instrumentId, side, price, quantity, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false,
                 "spot-mixed-" + orderId);
     }
 
-    private static RegisterInstrumentCommand instrument(String symbol, String baseAsset) {
-        return new RegisterInstrumentCommand(symbol, ContractType.SPOT.ordinal(), baseAsset, QUOTE_ASSET,
+    private static RegisterInstrumentCommand instrument(String instrumentId, String baseAsset) {
+        return new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(), baseAsset, QUOTE_ASSET,
                 QUOTE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 }

@@ -22,10 +22,10 @@ public class InstrumentPauseAdmissionBenchmark {
         @Setup(Level.Trial) public void initialize() {
             var type=ContractType.valueOf(productLine.contractTypeCode());
             try(var state=new TradingCoreRuntime(productLine)) {
-                var config=new RegisterInstrumentCommand("BTC-USDT",type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
+                var config=new RegisterInstrumentCommand("1",type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
                         1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                         type.isOption()?0:-1,type.isOption()?100:0);
-                var paused=new RegisterInstrumentCommand(config.symbol(),config.contractTypeCode(),config.baseAsset(),
+                var paused=new RegisterInstrumentCommand(config.instrumentId(),config.contractTypeCode(),config.baseAsset(),
                         config.quoteAsset(),config.settleAsset(),config.notionalMultiplierUnits(),config.priceTickUnits(),config.settleScaleUnits(),
                         config.initialMarginRatePpm(),config.maintenanceMarginRatePpm(),config.makerFeeRatePpm(),config.takerFeeRatePpm(),
                         config.expiryEpochMillis(),config.optionTypeCode(),config.strikePriceTicks(),config.maxLeveragePpm(),config.maxPositionNotionalUnits(),
@@ -33,37 +33,37 @@ public class InstrumentPauseAdmissionBenchmark {
                 requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused))));
                 if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                ? new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,1_700_000_000_002L)
-                                : new ApplyMarkPriceCommand("BTC-USDT",100,1,1_700_000_000_002L)))));
+                                ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_002L)
+                                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_002L)))));
                 requireApplied(state.apply(message(productLine,3,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
-                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",0,
+                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
                                 new CoreInstrumentMaintenance(1,CoreInstrumentMaintenance.Mode.HALTED,0))))));
                 requireApplied(state.apply(message(productLine,4,CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",20_000)))));
                 snapshot=state.snapshot(777);
             }
             order=message(productLine,9,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
-                    new PlaceOrderCommand(100,"BTC-USDT",CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
+                    new PlaceOrderCommand(100,"1",CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"pause-benchmark")));
         }
         @Setup(Level.Invocation) public void restore() {
             core=TradingCoreRuntime.fromSnapshot(productLine,snapshot);
-            if(core.tradingState().instruments().get("BTC-USDT").maintenance().mode()
+            if(core.tradingState().instruments().get("1").maintenance().mode()
                     !=CoreInstrumentMaintenance.Mode.HALTED)
                 throw new IllegalStateException("pause lost on recovery");
             funds=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState());
             // Exercise reuse after a completed admission, not just a freshly allocated event.
             requireApplied(applyAndDrain(core,message(productLine,5,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
-                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",1,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",1,
                             CoreInstrumentMaintenance.TRADING)))));
             requireApplied(applyAndDrain(core,message(productLine,6,CoreMessageType.PLACE_ORDER,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(99,"BTC-USDT",CoreOrderSide.BUY,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(99,"1",CoreOrderSide.BUY,
                             100,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC,false,"recycle-benchmark")))));
             requireApplied(applyAndDrain(core,message(productLine,7,CoreMessageType.CANCEL_ORDER,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(99)))));
             requireApplied(applyAndDrain(core,message(productLine,8,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
-                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("BTC-USDT",0,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
                             new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0))))));
         }
         @TearDown(Level.Invocation) public void verify() {

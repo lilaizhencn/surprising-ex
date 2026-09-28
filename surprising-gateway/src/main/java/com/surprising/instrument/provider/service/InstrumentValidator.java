@@ -91,10 +91,13 @@ public class InstrumentValidator {
     private void validateOptionRules(InstrumentUpsertRequest request) {
         validateExpiringRules(request, "OPTION");
         validateDerivativeRules(request);
-        if (request.underlyingSymbol() == null || request.underlyingSymbol().isBlank()) {
-            throw new IllegalArgumentException("option instruments require underlyingSymbol");
+        if (request.underlyingInstrumentId() == null || request.underlyingInstrumentId().isBlank()) {
+            throw new IllegalArgumentException("option instruments require underlyingInstrumentId");
         }
-        requireSymbol(request.underlyingSymbol().trim().toUpperCase());
+        com.surprising.product.api.InstrumentIds.parse(request.underlyingInstrumentId());
+        if (request.underlyingProductLine() == null || request.underlyingProductLine() == com.surprising.product.api.ProductLine.OPTION) {
+            throw new IllegalArgumentException("option underlying requires an explicit non-option product line");
+        }
         requirePositive("strikePriceUnits", request.strikePriceUnits());
         if (request.optionType() == null) {
             throw new IllegalArgumentException("option instruments require optionType");
@@ -128,8 +131,8 @@ public class InstrumentValidator {
         if (request.expiryTime() != null || request.deliveryTime() != null || request.settlementMethod() != null) {
             throw new IllegalArgumentException(name + " instruments must not define expiry or settlement metadata");
         }
-        if (request.underlyingSymbol() != null && !request.underlyingSymbol().isBlank()) {
-            throw new IllegalArgumentException(name + " instruments must not define underlyingSymbol");
+        if (request.underlyingInstrumentId() != null || request.underlyingProductLine() != null) {
+            throw new IllegalArgumentException(name + " instruments must not define underlyingInstrumentId");
         }
         if (request.strikePriceUnits() != null || request.optionType() != null
                 || request.optionExerciseStyle() != null) {
@@ -211,7 +214,7 @@ public class InstrumentValidator {
     }
 
     private void requireSymbol(String symbol) {
-        if (symbol == null || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
+        if (symbol == null || symbol.endsWith("-SWAP") || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
     }

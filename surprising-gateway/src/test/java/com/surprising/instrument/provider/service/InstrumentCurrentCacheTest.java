@@ -13,6 +13,7 @@ class InstrumentCurrentCacheTest {
     private InstrumentResponse row(long calculation,long audit,String status) {
         var value=org.mockito.Mockito.mock(InstrumentResponse.class);
         org.mockito.Mockito.when(value.symbol()).thenReturn("BTC-USDT");
+        org.mockito.Mockito.when(value.instrumentId()).thenReturn(1);
         org.mockito.Mockito.when(value.contractType()).thenReturn(ContractType.SPOT);
         org.mockito.Mockito.when(value.changeId()).thenReturn(calculation);
         org.mockito.Mockito.when(value.lastChangeId()).thenReturn(audit);
@@ -20,7 +21,7 @@ class InstrumentCurrentCacheTest {
         return value;
     }
     private InstrumentEvent event(InstrumentResponse row) {
-        return new InstrumentEvent(row.symbol(),row.lastChangeId(),row.status(),InstrumentEventType.STATUS_CHANGED,Instant.now(),row,ProductLine.SPOT,row.lastChangeId());
+        return new InstrumentEvent(row.instrumentId(), row.symbol(),row.lastChangeId(),row.status(),InstrumentEventType.STATUS_CHANGED,Instant.now(),row,ProductLine.SPOT,row.lastChangeId());
     }
     @Test void snapshotAndOldEventsCannotUndoNewerPauseAndNoHistoricalConfigurationIsSelected() {
         var cache=new InstrumentSnapshotCache();
@@ -30,10 +31,10 @@ class InstrumentCurrentCacheTest {
         assertThat(cache.apply(event(trading))).isFalse();
         assertThat(cache.apply(event(halted))).isFalse();
         cache.replace(ProductLine.SPOT,List.of(trading));
-        assertThat(cache.current(ProductLine.SPOT,"BTC-USDT",1).orElseThrow().status()).isEqualTo(InstrumentStatus.HALT);
-        assertThat(cache.current(ProductLine.INVERSE_PERPETUAL,"BTC-USDT")).isEmpty();
+        assertThat(cache.current(ProductLine.SPOT,1,1).orElseThrow().status()).isEqualTo(InstrumentStatus.HALT);
+        assertThat(cache.current(ProductLine.INVERSE_PERPETUAL,1)).isEmpty();
         assertThat(cache.apply(event(row(3,3,"HALT")))).isTrue();
         assertThat(cache.size(ProductLine.SPOT)).isEqualTo(1);
-        assertThat(cache.current(ProductLine.SPOT,"BTC-USDT",1)).isEmpty();
+        assertThat(cache.current(ProductLine.SPOT,1,1)).isEmpty();
     }
 }

@@ -38,11 +38,11 @@ public class ExpiringContractSettlementConsumer {
     public void onDeliverySettlement(ConsumerRecord<String, String> record) {
         try {
             DeliverySettlementEvent event = objectMapper.readValue(record.value(), DeliverySettlementEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "delivery settlement");
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "delivery settlement");
             requireCurrentProductTopic(record.topic(), deliverySettlementsTopic(), "delivery settlement");
             int commands = requireFanoutService().fanout(event);
-            log.info("Applied Aeron delivery settlement symbol={} version={} coreCommands={}",
-                    event.symbol(), event.changeId(), commands);
+            log.info("Applied Aeron delivery settlement instrumentId={} version={} coreCommands={}",
+                    event.instrumentId(), event.changeId(), commands);
         } catch (Exception ex) {
             log.error("Failed to process delivery settlement: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process delivery settlement", ex);
@@ -57,11 +57,11 @@ public class ExpiringContractSettlementConsumer {
     public void onOptionExercise(ConsumerRecord<String, String> record) {
         try {
             OptionExerciseEvent event = objectMapper.readValue(record.value(), OptionExerciseEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "option exercise");
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "option exercise");
             requireCurrentProductTopic(record.topic(), optionExercisesTopic(), "option exercise");
             int commands = requireFanoutService().fanout(event);
-            log.info("Applied Aeron option exercise symbol={} version={} coreCommands={}",
-                    event.symbol(), event.changeId(), commands);
+            log.info("Applied Aeron option exercise instrumentId={} version={} coreCommands={}",
+                    event.instrumentId(), event.changeId(), commands);
         } catch (Exception ex) {
             log.error("Failed to process option exercise: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process option exercise", ex);

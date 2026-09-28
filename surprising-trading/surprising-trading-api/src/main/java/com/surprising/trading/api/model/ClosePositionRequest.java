@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Size;
 public record ClosePositionRequest(
         @Positive long userId,
         @NotBlank @Size(max = 64) String clientOrderId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide) {
 

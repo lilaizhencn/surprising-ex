@@ -8,7 +8,7 @@ public record FundingPaymentResponse(
         long paymentId,
         long settlementId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         String asset,
@@ -26,7 +26,7 @@ public record FundingPaymentResponse(
     public FundingPaymentResponse(long paymentId,
                                   long settlementId,
                                   long userId,
-                                  String symbol,
+                                  String instrumentId,
                                   MarginMode marginMode,
                                   String asset,
                                   long signedQuantitySteps,
@@ -34,21 +34,21 @@ public record FundingPaymentResponse(
                                   long fundingRatePpm,
                                   long amountUnits,
                                   Instant createdAt) {
-        this(paymentId, settlementId, userId, symbol, marginMode, PositionSide.NET, asset, signedQuantitySteps,
+        this(paymentId, settlementId, userId, instrumentId, marginMode, PositionSide.NET, asset, signedQuantitySteps,
                 notionalUnits, fundingRatePpm, amountUnits, createdAt);
     }
 
     public FundingPaymentResponse(long paymentId,
                                   long settlementId,
                                   long userId,
-                                  String symbol,
+                                  String instrumentId,
                                   String asset,
                                   long signedQuantitySteps,
                                   long notionalUnits,
                                   long fundingRatePpm,
                                   long amountUnits,
                                   Instant createdAt) {
-        this(paymentId, settlementId, userId, symbol, MarginMode.CROSS, PositionSide.NET, asset, signedQuantitySteps, notionalUnits,
+        this(paymentId, settlementId, userId, instrumentId, MarginMode.CROSS, PositionSide.NET, asset, signedQuantitySteps, notionalUnits,
                 fundingRatePpm, amountUnits, createdAt);
     }
 }

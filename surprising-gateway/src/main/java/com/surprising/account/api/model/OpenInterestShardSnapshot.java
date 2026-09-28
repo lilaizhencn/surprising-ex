@@ -10,7 +10,7 @@ import java.time.Instant;
  */
 public record OpenInterestShardSnapshot(
         ProductLine productLine,
-        String symbol,
+        String instrumentId,
         int shardId,
         long longQuantitySteps,
         long shortQuantitySteps,
@@ -21,10 +21,10 @@ public record OpenInterestShardSnapshot(
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
         }
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        symbol = symbol.trim().toUpperCase();
+        instrumentId = instrumentId.trim().toUpperCase();
         if (shardId < 0 || shardId >= 64) {
             throw new IllegalArgumentException("shardId must be in [0, 63]");
         }

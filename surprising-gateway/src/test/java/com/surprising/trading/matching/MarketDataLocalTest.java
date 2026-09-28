@@ -16,20 +16,20 @@ class MarketDataLocalTest {
     void queriesSharedCoreClientAndPreservesBookShape() {
         var client = mock(AeronClientPool.class);
         var view = new CoreOrderBookView(123, List.of(
-                new CoreBookLevelView("BTC-USDT", CoreOrderSide.BUY, 100, 8, 2),
-                new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 101, 9, 3)));
+                new CoreBookLevelView("1", CoreOrderSide.BUY, 100, 8, 2),
+                new CoreBookLevelView("1", CoreOrderSide.SELL, 101, 9, 3)));
         when(client.query(eq(CoreMessageType.BOOK_STATE_QUERY), any(), eq(0L), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, 123, CoreStateQueryCodec.encodeOrderBookView(view)));
         var controller = new MarketDataInternalController(new MatchingMarketDataService(new OrderAeronGateway(client)));
-        var book = controller.orderBook(" btc-usdt ", 30);
-        assertThat(book.symbol()).isEqualTo("BTC-USDT");
+        var book = controller.orderBook("1", 30);
+        assertThat(book.instrumentId()).isEqualTo("1");
         assertThat(book.bids()).hasSize(1);
         assertThat(book.asks()).hasSize(1);
         assertThat(book.bids().getFirst().priceTicks()).isEqualTo(100);
         assertThat(book.asks().getFirst().quantitySteps()).isEqualTo(9);
         var payload = ArgumentCaptor.forClass(byte[].class);
         verify(client).query(eq(CoreMessageType.BOOK_STATE_QUERY), any(), eq(0L), payload.capture());
-        assertThat(CoreStateQueryCodec.decodeOrderBookQuery(payload.getValue())).isEqualTo(new CoreOrderBookQuery("BTC-USDT", 30));
+        assertThat(CoreStateQueryCodec.decodeOrderBookQuery(payload.getValue())).isEqualTo(new CoreOrderBookQuery("1", 30));
         verifyNoMoreInteractions(client);
     }
 
@@ -37,7 +37,7 @@ class MarketDataLocalTest {
     void invalidDepthIsRejectedBeforeCallingCore() {
         var client = mock(AeronClientPool.class);
         var controller = new MarketDataInternalController(new MatchingMarketDataService(new OrderAeronGateway(client)));
-        assertThatThrownBy(() -> controller.orderBook("BTC-USDT", 101))
+        assertThatThrownBy(() -> controller.orderBook("1", 101))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("400");
         verifyNoInteractions(client);
@@ -49,7 +49,7 @@ class MarketDataLocalTest {
         when(client.query(eq(CoreMessageType.BOOK_STATE_QUERY), any(), eq(0L), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, 0, new byte[0]));
         var service = new MatchingMarketDataService(new OrderAeronGateway(client));
-        assertThatThrownBy(() -> service.orderBookSnapshot("BTC-USDT", 30))
+        assertThatThrownBy(() -> service.orderBookSnapshot("1", 30))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("INVALID_COMMAND");
     }
 }

@@ -22,13 +22,13 @@ class CandleQueryServiceTest {
         CandleQueryService service = new CandleQueryService(repository, properties);
         Instant start = Instant.parse("2025-08-25T10:00:00Z");
         Instant end = Instant.parse("2025-08-25T11:00:00Z");
-        CandleResponse candle = new CandleResponse("BTC-USDT", "5m", start, start.plusSeconds(300),
+        CandleResponse candle = new CandleResponse("1", "5m", start, start.plusSeconds(300),
                 BigDecimal.ONE, BigDecimal.TWO, BigDecimal.ONE, BigDecimal.TWO,
                 BigDecimal.ONE, BigDecimal.TWO, 1, "a", "a", 1L, 1L,
                 CandleStatus.CLOSED, start.plusSeconds(300));
-        when(repository.findRange("BTC-USDT", "5m", start, end, 100)).thenReturn(List.of(candle));
+        when(repository.findRange("1", "5m", start, end, 100)).thenReturn(List.of(candle));
 
-        var response = service.query(" btc-usdt ", "M5", start, end, 100);
+        var response = service.query("1", "M5", start, end, 100);
 
         assertThat(response.candles()).hasSize(12);
         assertThat(response.candles().getFirst()).isEqualTo(candle);
@@ -36,6 +36,6 @@ class CandleQueryServiceTest {
         assertThat(response.candles().get(1).openPrice()).isEqualTo(BigDecimal.TWO);
         assertThat(response.candles().get(1).baseVolume()).isEqualTo(BigDecimal.ZERO);
         assertThat(response.candles().get(1).tradeCount()).isZero();
-        verify(repository).findRange("BTC-USDT", "5m", start, end, 100);
+        verify(repository).findRange("1", "5m", start, end, 100);
     }
 }

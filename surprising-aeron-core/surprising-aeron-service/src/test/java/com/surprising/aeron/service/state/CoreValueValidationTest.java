@@ -13,16 +13,16 @@ class CoreValueValidationTest {
 
     @Test
     void reservationAmountTransitionsPreserveImmutableValidatedIdentityAndValueSemantics() {
-        var original = OrderReservation.create(9, " btc-usdt ",
+        var original = OrderReservation.create(9, "1",
                 ReservationKind.SPOT_ASSET, " usdt ", 100, 10);
         var consumed = original.consume(30);
         var released = consumed.release(20);
         var resized = released.replaceReservedUnits(80);
         var closed = resized.releaseAll();
         for (var value : new OrderReservation[]{consumed, released, resized, closed}) {
-            assertThat(value.symbol()).isSameAs(original.symbol());
+            assertThat(value.instrumentId()).isSameAs(original.instrumentId());
             assertThat(value.asset()).isSameAs(original.asset());
-            var reconstructed = new OrderReservation(value.orderId(), value.symbol(), value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
+            var reconstructed = new OrderReservation(value.orderId(), value.instrumentId(), value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
                     value.consumedUnits(), value.orderQuantitySteps());
             assertThat(value).isEqualTo(reconstructed);
             assertThat(value.hashCode()).isEqualTo(reconstructed.hashCode());
@@ -39,21 +39,21 @@ class CoreValueValidationTest {
         assertThatThrownBy(() -> released.replaceReservedUnits(49)).isInstanceOf(CoreStateRejectedException.class);
         assertThatThrownBy(() -> closed.release(1)).isInstanceOf(CoreStateRejectedException.class);
         assertThatThrownBy(() -> original.consume(0)).isInstanceOf(CoreStateRejectedException.class);
-        assertThatThrownBy(() -> new OrderReservation(1, "BTC-USDT", ReservationKind.SPOT_ASSET,
+        assertThatThrownBy(() -> new OrderReservation(1, "1", ReservationKind.SPOT_ASSET,
                 "USDT", Long.MAX_VALUE, Long.MAX_VALUE, 1, 1)).isInstanceOf(ArithmeticException.class);
     }
 
     @Test
-    void normalizesValidSymbolAndAssetWithoutChangingTheirContracts() {
+    void preservesCanonicalInstrumentIdAndNormalizesAsset() {
         OrderReservation reservation = OrderReservation.create(
-                1, " btc-usdt ", ReservationKind.SPOT_ASSET, " usdt ", 100, 1);
+                1, "1", ReservationKind.SPOT_ASSET, " usdt ", 100, 1);
 
-        assertThat(reservation.symbol()).isEqualTo("BTC-USDT");
+        assertThat(reservation.instrumentId()).isEqualTo("1");
         assertThat(reservation.asset()).isEqualTo("USDT");
     }
 
     @Test
-    void rejectsInvalidSymbolBoundaries() {
+    void rejectsNamesAndInvalidInstrumentIds() {
         assertThatThrownBy(() -> OrderReservation.create(
                 1, "-BTC", ReservationKind.SPOT_ASSET, "USDT", 100, 1))
                 .isInstanceOf(IllegalArgumentException.class);

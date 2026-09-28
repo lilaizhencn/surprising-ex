@@ -21,11 +21,11 @@ class CustodyWalletWebhookServiceTest {
 
     private final GatewayProperties properties = new GatewayProperties();
     private final CustodyWalletWebhookRepository repository = mock(CustodyWalletWebhookRepository.class);
-    private final CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
+    private final com.surprising.asset.service.AssetConfigurationService assets = mock(com.surprising.asset.service.AssetConfigurationService.class);
     private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
     private final SpotAccountClient spotAccountClient = mock(SpotAccountClient.class);
     private final CustodyWalletWebhookService service = new CustodyWalletWebhookService(
-            properties, repository, walletClient, withdrawalService, spotAccountClient, new ObjectMapper());
+            properties, repository, withdrawalService, spotAccountClient, new ObjectMapper(), assets);
 
     @BeforeEach
     void setUp() {
@@ -33,17 +33,6 @@ class CustodyWalletWebhookServiceTest {
         wallet.setEnabled(true);
         wallet.setWebhookSecret("webhook-secret");
         wallet.setSpotAccountBaseUrl("http://account:9086");
-        wallet.setAssetScales(Map.of("USDT", 6L));
-    }
-
-    @Test
-    void convertsConfiguredDecimalAmountToSmallestUnits() {
-        when(walletClient.amountUnits("usdt", "1.250000")).thenReturn(1_250_000L);
-        assertThat(walletClient.amountUnits("usdt", "1.250000")).isEqualTo(1_250_000L);
-        when(walletClient.amountUnits("USDT", "1.0000001"))
-                .thenThrow(new IllegalArgumentException("amount is not exact"));
-        assertThatThrownBy(() -> walletClient.amountUnits("USDT", "1.0000001"))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -54,7 +43,7 @@ class CustodyWalletWebhookServiceTest {
         long timestamp = Instant.now().getEpochSecond();
         when(repository.claim(eq("event-1"), eq("DEPOSIT.CONFIRMED"), any(), any()))
                 .thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
-        when(walletClient.amountUnits("USDT", "1.25")).thenReturn(1_250_000L);
+        when(assets.amountUnits("USDT", "1.25")).thenReturn(1_250_000L);
         service.handle("event-1", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
                 service.signature("webhook-secret", "event-1", "DEPOSIT.CONFIRMED", timestamp, body), body);
 

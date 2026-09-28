@@ -12,7 +12,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /**
- * K 线运行时 symbol 门禁；服务层组合品种版本与当前版本快照。
+ * K 线运行时 instrumentId 门禁；服务层组合品种版本与当前版本快照。
  */
 @Service
 public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer {
@@ -52,13 +52,13 @@ public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer
                 .filter(instrument -> instrument.status() == InstrumentStatus.PRE_TRADING
                         || instrument.status() == InstrumentStatus.TRADING
                         || instrument.status() == InstrumentStatus.HALT)
-                .map(InstrumentResponse::symbol)
+                .map(instrument -> Integer.toString(instrument.instrumentId()))
                 .map(CandleKey::normalizeSymbol)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
-    public boolean isEnabled(String symbol) {
-        return enabledSymbols.contains(CandleKey.normalizeSymbol(symbol));
+    public boolean isEnabled(String instrumentId) {
+        return enabledSymbols.contains(CandleKey.normalizeSymbol(instrumentId));
     }
 
 }

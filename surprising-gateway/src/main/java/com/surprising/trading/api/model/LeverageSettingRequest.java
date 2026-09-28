@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 public record LeverageSettingRequest(
         @Positive long userId,
         ProductLine productLine,
-        @NotBlank @Size(max = 64) String symbol,
+        @NotBlank @Size(max = 64) String instrumentId,
         MarginMode marginMode,
         @Positive long leveragePpm,
         @Size(max = 256) String reason) {

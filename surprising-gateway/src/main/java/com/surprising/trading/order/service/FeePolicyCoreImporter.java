@@ -22,7 +22,7 @@ public final class FeePolicyCoreImporter {
     public void importPolicy(FeeScheduleResponse policy) {
         long revision = policy.updatedAt().toEpochMilli();
         UpsertFeePolicyCommand command = new UpsertFeePolicyCommand(
-                policy.feeScheduleId(), revision, policy.userId(), policy.symbol(),
+                policy.feeScheduleId(), revision, policy.userId(), policy.instrumentId(),
                 policy.makerFeeRatePpm(), policy.takerFeeRatePpm(), sourcePriority(policy.sourceType()),
                 policy.status() == FeeScheduleStatus.ACTIVE, policy.effectiveTime().toEpochMilli(),
                 policy.expireTime() == null ? 0 : policy.expireTime().toEpochMilli());

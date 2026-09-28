@@ -73,13 +73,13 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
         // 当前产品线的公共行情；没有账户订阅，也不依赖浏览器是否打开。
         directory.register(new RealtimeRoute(product, 0, "TRADE", "*"), node, now + 15000);
         directory.register(new RealtimeRoute(product, 0, "BOOK", "*"), node, now + 15000);
-        for (String symbol : prices.indexSymbols()) requests.renewBook(product, symbol, now + 15000);
+        for (String instrumentId : prices.indexSymbols()) requests.renewBook(product, instrumentId, now + 15000);
     }
 
     void receive(RealtimeFrame frame) {
         if (frame.productLine() != properties.getKafka().getProductLine() || frame.userId() != 0
                 || (frame.kind() != RealtimeFrame.Kind.BOOK && frame.kind() != RealtimeFrame.Kind.TRADE)) return;
-        MarkPriceEncoding encoding = encodings.currentEncoding(frame.symbol());
+        MarkPriceEncoding encoding = encodings.currentEncoding(frame.instrumentId());
         Instant time = Instant.ofEpochMilli(frame.timestamp());
         if (frame.kind() == RealtimeFrame.Kind.BOOK) {
             CoreOrderBookView book = CoreStateQueryCodec.decodeOrderBookView(frame.payload());
@@ -90,7 +90,7 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
                 else ask = Math.min(ask, level.priceTicks());
             }
             // 单边/空盘口也覆盖旧输入；不能继续用旧买卖价计算。
-            prices.acceptBookTicker(new PerpBookTickerEvent(frame.symbol(),
+            prices.acceptBookTicker(new PerpBookTickerEvent(frame.instrumentId(),
                     bid == 0 ? null : price(bid, encoding),
                     ask == Long.MAX_VALUE ? null : price(ask, encoding), frame.sequence(), time));
         } else {
@@ -101,7 +101,7 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
             int side = Byte.toUnsignedInt(bytes.get());
             if (ticks <= 0 || quantity <= 0 || side >= CoreOrderSide.values().length)
                 throw new IllegalArgumentException("invalid market trade");
-            prices.acceptTrade(new PerpTradeEvent(frame.symbol(), frame.entityId(), frame.sequence(), time,
+            prices.acceptTrade(new PerpTradeEvent(frame.instrumentId(), frame.entityId(), frame.sequence(), time,
                     price(ticks, encoding), BigDecimal.valueOf(quantity).multiply(BigDecimal.valueOf(encoding.quantityStepUnits()))
                     .divide(BigDecimal.valueOf(encoding.baseScaleUnits()), 18, RoundingMode.HALF_UP),
                     CoreOrderSide.values()[side].name()));

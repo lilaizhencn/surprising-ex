@@ -396,6 +396,9 @@ public class GatewayProxyService {
         if (requestUri == null) {
             return null;
         }
+        if (requestUri.equals("/api/v3") || requestUri.startsWith("/api/v3/")) {
+            return ProductLine.SPOT.name();
+        }
         if (requestUri.equals("/fapi/v1") || requestUri.startsWith("/fapi/v1/")) {
             return ProductLine.LINEAR_PERPETUAL.name();
         }

@@ -15,13 +15,13 @@ public final class InsuranceAllocationPolicy {
     private static final Comparator<Claim> CLAIM_ORDER = Comparator
             .comparingLong((Claim claim) -> claim.liquidation().triggerPriceSequence())
             .thenComparingLong(claim -> claim.liquidation().userId())
-            .thenComparing(Claim::symbol)
+            .thenComparing(Claim::instrumentId)
             .thenComparingInt(claim -> claim.liquidation().positionSide().ordinal())
             .thenComparingLong(claim -> claim.liquidation().liquidationId());
     private static final Comparator<CoreClaim> CORE_CLAIM_ORDER = Comparator
             .comparingLong((CoreClaim claim) -> claim.liquidation().triggerPriceSequence())
             .thenComparingLong(claim -> claim.liquidation().userId())
-            .thenComparing(claim -> claim.liquidation().symbol())
+            .thenComparing(claim -> claim.liquidation().instrumentId())
             .thenComparingInt(claim -> claim.liquidation().positionSide().ordinal())
             .thenComparingLong(claim -> claim.liquidation().liquidationId());
 
@@ -41,11 +41,11 @@ public final class InsuranceAllocationPolicy {
             if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
                 continue;
             }
-            CoreInstrument instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
+            CoreInstrument instrument = runtime.instrument(identities.instrumentId(liquidation.symbolId()));
             if (instrument == null || instrument != liquidation.instrument()) continue;
             int assetId = identities.assetId(instrument.settleAsset());
             byAsset.computeIfAbsent(assetId, ignored -> new ArrayList<>())
-                    .add(new Claim(liquidation, identities.symbol(liquidation.symbolId())));
+                    .add(new Claim(liquidation, identities.instrumentId(liquidation.symbolId())));
         }
         Map<Long, Long> result = new HashMap<>();
         byAsset.forEach((assetId, claims) -> allocateAsset(runtime.treasury().insurance(assetId), claims, result));
@@ -76,7 +76,7 @@ public final class InsuranceAllocationPolicy {
         if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
             return new Resolution(false, 0);
         }
-        CoreInstrument targetInstrument = runtime.instrument(identities.symbol(target.symbolId()));
+        CoreInstrument targetInstrument = runtime.instrument(identities.instrumentId(target.symbolId()));
         if (targetInstrument == null || targetInstrument != target.instrument()) {
             return new Resolution(false, 0);
         }
@@ -86,10 +86,10 @@ public final class InsuranceAllocationPolicy {
             if (id == null) continue;
             LiquidationRuntime claim = runtime.liquidation(id);
             if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            CoreInstrument instrument = runtime.instrument(identities.symbol(claim.symbolId()));
+            CoreInstrument instrument = runtime.instrument(identities.instrumentId(claim.symbolId()));
             if (instrument != null && instrument == claim.instrument()
                     && identities.assetId(instrument.settleAsset()) == assetId) {
-                claims.add(new Claim(claim, identities.symbol(claim.symbolId())));
+                claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
             }
         }
         if (claims.isEmpty()) return new Resolution(false, 0);
@@ -125,13 +125,13 @@ public final class InsuranceAllocationPolicy {
         }
         CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
         if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return 0;
-        CoreInstrument targetInstrument = state.instruments().get(target.symbol());
+        CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
         if (targetInstrument == null) return 0;
         String asset = targetInstrument.settleAsset();
         ArrayList<CoreClaim> claims = new ArrayList<>();
         for (CoreLiquidationState liquidation : state.riskState().liquidations().values()) {
             if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            CoreInstrument instrument = state.instruments().get(liquidation.symbol());
+            CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
             if (instrument != null && asset.equals(instrument.settleAsset())) {
                 claims.add(new CoreClaim(liquidation));
             }
@@ -144,13 +144,13 @@ public final class InsuranceAllocationPolicy {
     public static boolean isNext(TradingCoreState state, long liquidationId) {
         CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
         if (target == null) return false;
-        CoreInstrument targetInstrument = state.instruments().get(target.symbol());
+        CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
         if (targetInstrument == null) return false;
         String targetAsset = targetInstrument.settleAsset();
         CoreLiquidationState first = state.riskState().liquidations().values().stream()
                 .filter(liquidation -> liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
                 .filter(liquidation -> {
-                    CoreInstrument instrument = state.instruments().get(liquidation.symbol());
+                    CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
                     return instrument != null && targetAsset.equals(instrument.settleAsset());
                 })
                 .map(CoreClaim::new)
@@ -205,7 +205,7 @@ public final class InsuranceAllocationPolicy {
         return targetIndex < 0 ? 0 : targetBase + (targetIndex < remainder ? 1 : 0);
     }
 
-    private record Claim(LiquidationRuntime liquidation, String symbol) {
+    private record Claim(LiquidationRuntime liquidation, String instrumentId) {
     }
 
     private record CoreClaim(CoreLiquidationState liquidation) {

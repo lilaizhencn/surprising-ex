@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 class RealtimeFrameCodecTest {
  @Test void orderEnvelopeMatchesExistingWireFormatForAllProductsAndUtf8() {
-  for(var product:ProductLine.values()) for(String text:new String[]{"BTC-USDT","币对😀","bad\uD800", "x".repeat(64)}) {
+  for(var product:ProductLine.values()) for(String text:new String[]{"1","币对😀","bad\uD800", "x".repeat(64)}) {
    var order=new CoreOrderStateView(Long.MAX_VALUE,product,42,text,CoreOrderSide.SELL,
      100,2,1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
      CoreTimeInForce.GTC,false,"客户😀",new java.util.UUID(1,2),0,0,1,2,3,"OPEN",9);
@@ -21,8 +21,8 @@ class RealtimeFrameCodecTest {
  @Test void directEncodingPreservesWireBytesAndPayloadIsolation() {
   for(var p:ProductLine.values()) for(var k:RealtimeFrame.Kind.values()) {
    byte[] payload={1,2,3};
-   var frame=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单😀",payload);
-   byte[] encoded=RealtimeFrameCodec.encode(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单😀",payload);
+   var frame=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"1","订单😀",payload);
+   byte[] encoded=RealtimeFrameCodec.encode(p,k,42,Long.MAX_VALUE,31,123,4,"1","订单😀",payload);
    assertThat(encoded).containsExactly(RealtimeFrameCodec.encode(frame));
    payload[0]=9;
    assertThat(RealtimeFrameCodec.decode(encoded).payload()).containsExactly((byte)1,(byte)2,(byte)3);
@@ -34,13 +34,13 @@ class RealtimeFrameCodecTest {
  }
  @Test void roundTripsEveryProductAndKindWithoutPrecisionLoss() {
   for(var p:ProductLine.values()) for(var k:RealtimeFrame.Kind.values()) {
-   byte[] payload={1,2,3}; var f=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单",payload);
+   byte[] payload={1,2,3}; var f=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"1","订单",payload);
    payload[0]=9; var decoded=RealtimeFrameCodec.decode(RealtimeFrameCodec.encode(f));
    assertThat(decoded).usingRecursiveComparison().isEqualTo(f);assertThat(decoded.payload()).containsExactly((byte)1,(byte)2,(byte)3);
   }
  }
  @Test void rejectsMalformedAndOversizedEnvelopes() {
-  var f=new RealtimeFrame(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,1,2,3,4,0,"BTC-USDT","1",new byte[2]);
+  var f=new RealtimeFrame(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,1,2,3,4,0,"1","1",new byte[2]);
   byte[] valid=RealtimeFrameCodec.encode(f);
   for(int n=0;n<valid.length;n++) {byte[] truncated=java.util.Arrays.copyOf(valid,n);
    assertThatThrownBy(()->RealtimeFrameCodec.decode(truncated)).isInstanceOf(IllegalArgumentException.class);}

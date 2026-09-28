@@ -167,7 +167,7 @@ class OrderBatchServiceTest {
     }
 
     private static PlaceOrderRequest place(String clientOrderId) {
-        return new PlaceOrderRequest(1001L, clientOrderId, "BTC-USDT", OrderSide.BUY, OrderType.LIMIT,
+        return new PlaceOrderRequest(1001L, clientOrderId, "1", OrderSide.BUY, OrderType.LIMIT,
                 TimeInForce.GTC, 60_000L, 2L, MarginMode.CROSS, PositionSide.NET, false, false);
     }
 

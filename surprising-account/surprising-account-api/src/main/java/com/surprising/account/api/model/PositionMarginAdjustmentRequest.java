@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 
 public record PositionMarginAdjustmentRequest(
         @Positive long userId,
-        @NotBlank @Size(max = 64) String symbol,
+        @NotBlank @Size(max = 64) String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         long amountUnits,
@@ -21,11 +21,11 @@ public record PositionMarginAdjustmentRequest(
     }
 
     public PositionMarginAdjustmentRequest(long userId,
-                                           String symbol,
+                                           String instrumentId,
                                            MarginMode marginMode,
                                            long amountUnits,
                                            String referenceId,
                                            String reason) {
-        this(userId, symbol, marginMode, PositionSide.NET, amountUnits, referenceId, reason);
+        this(userId, instrumentId, marginMode, PositionSide.NET, amountUnits, referenceId, reason);
     }
 }

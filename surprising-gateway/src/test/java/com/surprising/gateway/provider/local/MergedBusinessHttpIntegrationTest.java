@@ -19,7 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** Requires an isolated, seeded business application, independent Core and Kafka; never runs against production. */
 @EnabledIfEnvironmentVariable(named = "MERGED_BUSINESS_IT_BASE_URL", matches = "http://127\\.0\\.0\\.1:[0-9]+")
 class MergedBusinessHttpIntegrationTest {
-    private static final String SYMBOL = "BTC-USDT-SWAP";
+    private static final String SYMBOL = "49";
     private static final long PRICE = 100_000;
     private static final long DEPOSIT = 1_000_000_000_000_000L;
     private final JsonMapper json = JsonMapper.builder().findAndAddModules().build();
@@ -29,7 +29,7 @@ class MergedBusinessHttpIntegrationTest {
     @Test
     void identityOrdersAccountsAndInstrumentsRunInOneAppWhileCoreRemainsIndependent() throws Exception {
         assertThat(get("/actuator/health/liveness", null).get("status").asText()).isEqualTo("UP");
-        var instrument = get("/api/v1/gateway/instrument/latest?symbol=" + SYMBOL, null);
+        var instrument = get("/api/v1/gateway/instrument/latest?instrumentId=" + SYMBOL, null);
         long changeId = Long.parseLong(instrument.get("changeId").asText());
         long priceUnits = PRICE * Long.parseLong(instrument.get("priceTickUnits").asText());
         User maker = register("maker");
@@ -85,7 +85,7 @@ class MergedBusinessHttpIntegrationTest {
             var resting = place(user, "BUY", PRICE - 100, false);
             long orderId = Long.parseLong(resting.get("prospectiveOrderIds").get(0).asText());
             command("/api/v1/gateway/trading/cancel", user,
-                    Map.of("userId", user.id(), "orderId", orderId, "symbol", SYMBOL));
+                    Map.of("userId", user.id(), "orderId", orderId, "instrumentId", SYMBOL));
             // The maker remains active and provides the closing liquidity.
             place(maker, "BUY", PRICE, true);
             place(user, "SELL", PRICE, true);
@@ -110,7 +110,7 @@ class MergedBusinessHttpIntegrationTest {
     }
 
     private Map<String, Object> order(User actor, String side, long price, boolean reduceOnly) {
-        return Map.of("userId", actor.id(), "clientOrderId", "merge-" + UUID.randomUUID(), "symbol", SYMBOL,
+        return Map.of("userId", actor.id(), "clientOrderId", "merge-" + UUID.randomUUID(), "instrumentId", SYMBOL,
                 "side", side, "orderType", "LIMIT", "timeInForce", "GTC", "priceTicks", price,
                 "quantitySteps", 1, "reduceOnly", reduceOnly, "postOnly", false);
     }
@@ -131,7 +131,7 @@ class MergedBusinessHttpIntegrationTest {
     }
 
     private long position(User actor) throws Exception {
-        return Long.parseLong(get("/api/v1/gateway/account/position?symbol=" + SYMBOL, actor.token()).get("signedQuantitySteps").asText());
+        return Long.parseLong(get("/api/v1/gateway/account/position?instrumentId=" + SYMBOL, actor.token()).get("signedQuantitySteps").asText());
     }
 
     private User register(String name) throws Exception {
@@ -159,16 +159,16 @@ class MergedBusinessHttpIntegrationTest {
     private String priceEvent(long changeId, long units) {
         var root = json.createObjectNode();
         String now = Instant.now().toString();
-        root.put("schemaVersion", 1).put("eventType", "MARK_PRICE").put("symbol", SYMBOL).put("generatedAt", now);
+        root.put("schemaVersion", 1).put("eventType", "MARK_PRICE").put("instrumentId", SYMBOL).put("generatedAt", now);
         var mark = root.putObject("markPrice");
         mark.put("calculatedAt", now).put("basisWindowSeconds", 1);
         var result = mark.putObject("result");
-        result.put("productLine", "LINEAR_PERPETUAL").put("symbol", SYMBOL).put("instrumentChangeId", changeId)
+        result.put("productLine", "LINEAR_PERPETUAL").put("instrumentId", SYMBOL).put("instrumentChangeId", changeId)
                 .put("markPriceUnits", units).put("markPriceTicks", PRICE).put("sequence", System.currentTimeMillis())
                 .put("timeUntilFundingSeconds", 1).put("basisWindowSeconds", 1)
                 .put("status", "HEALTHY").put("eventTime", now).put("publishedAt", now).put("markPrice", 1).put("indexPrice", 1);
         var index = mark.putObject("indexInput");
-        index.put("symbol", SYMBOL).put("indexPrice", 1).put("eventTime", now).put("status", "HEALTHY");
+        index.put("instrumentId", SYMBOL).put("indexPrice", 1).put("eventTime", now).put("status", "HEALTHY");
         index.put("sequence", System.currentTimeMillis()).put("componentCount", 1).put("validComponentCount", 1);
         index.putArray("components");
         return json.writeValueAsString(root);

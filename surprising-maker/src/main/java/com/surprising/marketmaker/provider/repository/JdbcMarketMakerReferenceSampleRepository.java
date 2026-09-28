@@ -21,14 +21,14 @@ public class JdbcMarketMakerReferenceSampleRepository implements MarketMakerRefe
     public void record(MarketMakerReferenceSampleWrite sample) {
         jdbcTemplate.update("""
                 INSERT INTO market_maker_reference_samples (
-                    product_line, strategy_id, symbol, node_id, cycle_sequence, source_name, transport,
+                    product_line, strategy_id, instrument_id, node_id, cycle_sequence, source_name, transport,
                     bid_levels, ask_levels, best_bid_ticks, best_ask_ticks, mid_price_ticks,
                     spread_ticks, received_at, trace_id, sampled_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 sample.productLine().name(),
                 sample.strategyId(),
-                sample.symbol(),
+                sample.instrumentId(),
                 sample.nodeId(),
                 sample.cycleSequence(),
                 truncate(sample.sourceName(), 64),

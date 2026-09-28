@@ -33,32 +33,32 @@ public class LatestMarkPriceCache {
 
     public boolean update(MarkPriceEvent event) {
         validate(event, clock.instant());
-        String symbol = normalizeSymbol(event.symbol());
-        MarkPriceEvent updated = latestBySymbol.compute(symbol, (ignored, current) ->
+        String instrumentId = normalizeSymbol(event.instrumentId());
+        MarkPriceEvent updated = latestBySymbol.compute(instrumentId, (ignored, current) ->
                 current == null || newer(event, current) ? event : current);
         return updated == event;
     }
 
-    public Optional<MarkPriceEvent> latest(String symbol) {
-        return Optional.ofNullable(latestBySymbol.get(normalizeSymbol(symbol)));
+    public Optional<MarkPriceEvent> latest(String instrumentId) {
+        return Optional.ofNullable(latestBySymbol.get(normalizeSymbol(instrumentId)));
     }
 
-    public Optional<MarkPriceEvent> fresh(String symbol) {
-        return latest(symbol).filter(this::isFresh);
+    public Optional<MarkPriceEvent> fresh(String instrumentId) {
+        return latest(instrumentId).filter(this::isFresh);
     }
 
-    public Optional<MarkPriceEvent> fresh(String symbol, Duration maxAge) {
+    public Optional<MarkPriceEvent> fresh(String instrumentId, Duration maxAge) {
         if (maxAge == null || maxAge.isZero() || maxAge.isNegative()) {
             throw new IllegalArgumentException("maxAge must be positive");
         }
-        return latest(symbol).filter(event -> isFresh(event, maxAge));
+        return latest(instrumentId).filter(event -> isFresh(event, maxAge));
     }
 
-    public MarkPriceEvent requireFresh(String symbol) {
-        MarkPriceEvent event = latest(symbol)
-                .orElseThrow(() -> new StaleMarkPriceException("mark price unavailable: " + normalizeSymbol(symbol)));
+    public MarkPriceEvent requireFresh(String instrumentId) {
+        MarkPriceEvent event = latest(instrumentId)
+                .orElseThrow(() -> new StaleMarkPriceException("mark price unavailable: " + normalizeSymbol(instrumentId)));
         if (!isFresh(event)) {
-            throw new StaleMarkPriceException("mark price is stale: " + event.symbol()
+            throw new StaleMarkPriceException("mark price is stale: " + event.instrumentId()
                     + " eventTime=" + event.eventTime());
         }
         return event;
@@ -84,7 +84,7 @@ public class LatestMarkPriceCache {
         }
         return latestBySymbol.values().stream()
                 .filter(event -> isFresh(event, maxAge))
-                .sorted(Comparator.comparing(MarkPriceEvent::symbol))
+                .sorted(Comparator.comparing(MarkPriceEvent::instrumentId))
                 .toList();
     }
 
@@ -113,7 +113,7 @@ public class LatestMarkPriceCache {
         if (event.publishedAt().isAfter(now.plus(properties.getAllowedFutureSkew()))) {
             throw new IllegalArgumentException("mark price publishedAt is in the future: " + event.publishedAt());
         }
-        normalizeSymbol(event.symbol());
+        normalizeSymbol(event.instrumentId());
     }
 
     private boolean newer(MarkPriceEvent candidate, MarkPriceEvent current) {
@@ -122,13 +122,13 @@ public class LatestMarkPriceCache {
                 && candidate.eventTime().isAfter(current.eventTime());
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

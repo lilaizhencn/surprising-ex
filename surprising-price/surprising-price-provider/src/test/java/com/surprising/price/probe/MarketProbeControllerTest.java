@@ -31,23 +31,23 @@ class MarketProbeControllerTest {
         MarkPriceQueryService markPriceQueryService = mock(MarkPriceQueryService.class);
         ExternalSpotWebSocketManager webSocketManager = mock(ExternalSpotWebSocketManager.class);
         IndexComponentSnapshot restComponent = new IndexComponentSnapshot(
-                "OKX", "BTC-USDT", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                "OKX", "1", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, SourceStatus.HEALTHY, null, now, now, 1L,
                 QuoteTransport.REST);
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(new IndexPriceResponse(
-                "BTC-USDT", BigDecimal.ONE, 1, PriceStatus.HEALTHY, 1, 1, now, List.of(restComponent)));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(indexPriceCache.requireFresh("1")).thenReturn(new IndexPriceResponse(
+                "1", BigDecimal.ONE, 1, PriceStatus.HEALTHY, 1, 1, now, List.of(restComponent)));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(new ExternalSpotWebSocketManager.WebSocketHealth(
                 "wss://ws.okx.com:8443/ws/v5/public", 1, true, 10, 2,
                 List.of(new ExternalSpotWebSocketManager.WebSocketSourceHealth(
-                        "BTC-USDT", "OKX", "PUBLIC_WEBSOCKET")))));
+                        "1", "OKX", "PUBLIC_WEBSOCKET")))));
         MarketProbeService service = new MarketProbeService(indexPriceCache, markPriceQueryService,
                 webSocketManager, new IndexPriceProperties());
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new MarketProbeController(service)).build();
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .get("/api/v1/price/market-probe")
-                        .param("symbol", "BTC-USDT")
+                        .param("instrumentId", "1")
                         .accept(MediaType.APPLICATION_JSON))
                 .andDo(print())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
@@ -74,13 +74,13 @@ class MarketProbeControllerTest {
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .get("/api/v1/price/market-probe")
-                        .param("symbol", "BTC-USDT")
+                        .param("instrumentId", "1")
                         .param("sourceMode", "REST"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
     }
 
     private MarkPriceResponse mark(Instant eventTime) {
-        return new MarkPriceResponse("BTC-USDT", BigDecimal.ONE, 1, BigDecimal.ONE, BigDecimal.ONE,
+        return new MarkPriceResponse("1", BigDecimal.ONE, 1, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO, null,
                 0, BigDecimal.ZERO, 60, BigDecimal.ONE, BigDecimal.ONE, 1, PriceStatus.HEALTHY, eventTime);
     }

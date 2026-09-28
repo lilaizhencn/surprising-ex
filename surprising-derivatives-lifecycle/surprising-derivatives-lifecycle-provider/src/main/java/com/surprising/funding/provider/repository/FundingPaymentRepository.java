@@ -23,11 +23,11 @@ public class FundingPaymentRepository {
     }
 
     public AdminCursorPage.CursorPage<FundingPaymentResponse> corePage(long userId,
-                                                                       String symbol,
+                                                                       String instrumentId,
                                                                        int limit,
                                                                        String cursor,
                                                                        String sort) {
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase();
         int safeLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec desc =
                 new AdminCursorPage.SortSpec("createdAt", "occurred_at_epoch_ms", "payment_id", true);
@@ -50,14 +50,14 @@ public class FundingPaymentRepository {
                 SELECT *
                   FROM core_funding_payment_projection
                  WHERE product_line = ? AND user_id = ?
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
                 """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
                         sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
                 (rs, rowNum) -> new FundingPaymentResponse(rs.getLong("payment_id"),
-                        rs.getLong("settlement_id"), rs.getLong("user_id"), rs.getString("symbol"),
+                        rs.getLong("settlement_id"), rs.getLong("user_id"), rs.getString("instrument_id"),
                         MarginMode.valueOf(rs.getString("margin_mode")),
                         PositionSide.valueOf(rs.getString("position_side")), rs.getString("asset"),
                         rs.getLong("signed_quantity_steps"), rs.getLong("notional_units"),

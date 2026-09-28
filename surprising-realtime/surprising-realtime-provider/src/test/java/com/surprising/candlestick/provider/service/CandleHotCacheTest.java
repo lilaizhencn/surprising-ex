@@ -14,13 +14,13 @@ class CandleHotCacheTest {
     void rangeReadsOnlyTheRequestedSymbolPeriodBucket() {
         CandleHotCache cache = new CandleHotCache();
         Instant first = Instant.parse("2026-07-01T00:00:00Z");
-        cache.put(event("BTC-USDT", "1m", first));
-        cache.put(event("BTC-USDT", "5m", first));
-        cache.put(event("ETH-USDT", "1m", first));
+        cache.put(event("1", "1m", first));
+        cache.put(event("1", "5m", first));
+        cache.put(event("2", "1m", first));
 
-        assertThat(cache.range(" btc-usdt ", "1m", first, first.plusSeconds(60), 10))
-                .extracting(value -> value.symbol() + ":" + value.period())
-                .containsExactly("BTC-USDT:1m");
+        assertThat(cache.range("1", "1m", first, first.plusSeconds(60), 10))
+                .extracting(value -> value.instrumentId() + ":" + value.period())
+                .containsExactly("1:1m");
         assertThat(cache.size()).isEqualTo(3);
     }
 
@@ -28,16 +28,16 @@ class CandleHotCacheTest {
     void latestUsesTheLastEntryInTheTimeOrderedBucket() {
         CandleHotCache cache = new CandleHotCache();
         Instant first = Instant.parse("2026-07-01T00:00:00Z");
-        cache.put(event("BTC-USDT", "1m", first));
-        cache.put(event("BTC-USDT", "1m", first.plusSeconds(60)));
+        cache.put(event("1", "1m", first));
+        cache.put(event("1", "1m", first.plusSeconds(60)));
 
-        assertThat(cache.latest("BTC-USDT", "1m")).get()
+        assertThat(cache.latest("1", "1m")).get()
                 .extracting(value -> value.openTime())
                 .isEqualTo(first.plusSeconds(60));
     }
 
-    private CandleUpdatedEvent event(String symbol, String period, Instant openTime) {
-        return new CandleUpdatedEvent(symbol, period, openTime, openTime.plusSeconds(60), BigDecimal.ONE,
+    private CandleUpdatedEvent event(String instrumentId, String period, Instant openTime) {
+        return new CandleUpdatedEvent(instrumentId, period, openTime, openTime.plusSeconds(60), BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, 1L,
                 "trade-1", "trade-1", 1L, 1L, CandleStatus.PARTIAL, openTime, openTime, 0, 1L);
     }

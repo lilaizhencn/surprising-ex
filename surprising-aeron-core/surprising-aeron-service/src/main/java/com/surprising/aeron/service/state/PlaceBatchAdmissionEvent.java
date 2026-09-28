@@ -115,7 +115,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         var position = lane.positions.get(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                            var summary = lane.admissionOrderIndex(symbolIds[index]).inspect(userId, order.symbol(),
+                            var summary = lane.admissionOrderIndex(symbolIds[index]).inspect(userId, order.instrumentId(),
                                     order.positionSide(), order.side(), order.marginMode());
                             if (summary.reduceOnlyQuantity() > 0 && Math.addExact(Math.addExact(summary.pendingQuantity(), summary.reduceOnlyQuantity()), order.quantitySteps())
                                     > Math.absExact(position.signedQuantitySteps()))

@@ -38,8 +38,8 @@ public final class RuntimeDerivativeRiskProcessor {
         if (command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        CoreInstrument instrument = requireInstrument(runtime, command.symbol());
-        int symbolId = identities.symbolId(instrument.symbol());
+        CoreInstrument instrument = requireInstrument(runtime, command.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         MarkPriceRuntime current = runtime.markPrice(symbolId);
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
@@ -108,8 +108,8 @@ public final class RuntimeDerivativeRiskProcessor {
         if (!runtime.riskScanControl().enabled()) return 0;
         RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
         if (sourceScan == null || sourceScan.riskComplete()) return 0;
-        String symbol = identities.symbol(sourceScan.symbolId());
-        CoreInstrument instrument = runtime.instrument(symbol);
+        String instrumentId = identities.instrumentId(sourceScan.symbolId());
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
@@ -130,8 +130,8 @@ public final class RuntimeDerivativeRiskProcessor {
         if (!runtime.riskScanControl().enabled()) return 0;
         RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
         if (sourceScan == null || sourceScan.riskComplete()) return 0;
-        String symbol = identities.symbol(sourceScan.symbolId());
-        CoreInstrument instrument = runtime.instrument(symbol);
+        String instrumentId = identities.instrumentId(sourceScan.symbolId());
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
@@ -142,7 +142,7 @@ public final class RuntimeDerivativeRiskProcessor {
         return completedWork;
     }
 
-    /** Owner-only shared budget. Charge empty symbol visits too, so empty scans cannot form an unbounded loop. */
+    /** Owner-only shared budget. Charge empty instrumentId visits too, so empty scans cannot form an unbounded loop. */
     public static int continueRiskBudget(int maxWork, PositionUserIndex positionUsers,
                                          TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || positionUsers == null || maxWork <= 0 || maxWork > 4096) {
@@ -155,8 +155,8 @@ public final class RuntimeDerivativeRiskProcessor {
         while (remaining > 0) {
             RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
             if (selected == null) break;
-            // Rotate before a busy symbol consumes the command's whole budget. Saved user/position
-            // cursors preserve partial work; a lone symbol can receive successive slices.
+            // Rotate before a busy instrumentId consumes the command's whole budget. Saved user/position
+            // cursors preserve partial work; a lone instrumentId can receive successive slices.
             int work = applyContinuationRuntime(Math.min(8, remaining), selected.symbolId(), positionUsers,
                     runtime, identities);
             remaining -= Math.max(1, work);
@@ -169,19 +169,19 @@ public final class RuntimeDerivativeRiskProcessor {
         if (source == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime risk scan synchronization");
         }
-        source.riskState().scans().forEach((symbol, scan) -> runtime.putRiskScan(toRuntimeScan(
-                identities.symbolId(symbol), scan)));
+        source.riskState().scans().forEach((instrumentId, scan) -> runtime.putRiskScan(toRuntimeScan(
+                identities.symbolId(instrumentId), scan)));
     }
 
     private static int continueScan(TradingRuntimeState runtime, CoreInstrument instrument,
             long priceSequence, int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
             RuntimeIdentityRegistry identities) {
-        return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.symbol()), positionUsers,
+        return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.instrumentId()), positionUsers,
                 indexedUserIds, runtime, identities);
     }
 
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
-        CoreInstrument instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         return instrument;
     }

@@ -7,7 +7,7 @@ public record FeeScheduleResponse(
         long feeScheduleId,
         ProductLine productLine,
         long userId,
-        String symbol,
+        String instrumentId,
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         FeeScheduleSourceType sourceType,

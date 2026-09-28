@@ -13,14 +13,14 @@ public final class CoreOpenInterestCodec {
         if (values == null) throw new IllegalArgumentException("open interest values are required");
         int size = Integer.BYTES;
         for (CoreOpenInterestView value : values) {
-            size = Math.addExact(size, Math.addExact(Integer.BYTES + value.symbol().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+            size = Math.addExact(size, Math.addExact(Integer.BYTES + value.instrumentId().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
                     Long.BYTES * 2));
         }
         ByteBuffer buffer = ByteBuffer.allocate(size);
         buffer.putInt(values.size());
         for (CoreOpenInterestView value : values) {
-            byte[] symbol = value.symbol().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            buffer.putInt(symbol.length).put(symbol);
+            byte[] instrumentId = value.instrumentId().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            buffer.putInt(instrumentId.length).put(instrumentId);
             buffer.putLong(value.longQuantitySteps()).putLong(value.shortQuantitySteps());
         }
         return buffer.array();
@@ -35,12 +35,12 @@ public final class CoreOpenInterestCodec {
             for (int index = 0; index < count; index++) {
                 int length = buffer.getInt();
                 if (length < 1 || length > 64 || length > buffer.remaining() - Long.BYTES * 2) {
-                    throw new ProtocolException("invalid open interest symbol");
+                    throw new ProtocolException("invalid open interest instrumentId");
                 }
-                byte[] symbol = new byte[length];
-                buffer.get(symbol);
+                byte[] instrumentId = new byte[length];
+                buffer.get(instrumentId);
                 values.add(new CoreOpenInterestView(
-                        new String(symbol, java.nio.charset.StandardCharsets.UTF_8),
+                        new String(instrumentId, java.nio.charset.StandardCharsets.UTF_8),
                         buffer.getLong(), buffer.getLong()));
             }
             if (buffer.hasRemaining()) throw new ProtocolException("trailing open interest bytes");

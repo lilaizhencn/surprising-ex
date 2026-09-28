@@ -67,17 +67,17 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private static final class LeverageLookup {
         long userId;
-        String symbol;
+        String instrumentId;
         CoreMarginMode marginMode;
 
-        void set(long userId, String symbol, CoreMarginMode marginMode) {
+        void set(long userId, String instrumentId, CoreMarginMode marginMode) {
             this.userId = userId;
-            this.symbol = symbol;
+            this.instrumentId = instrumentId;
             this.marginMode = marginMode;
         }
 
         void clear() {
-            symbol = null;
+            instrumentId = null;
             marginMode = null;
         }
 
@@ -85,7 +85,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         public int hashCode() {
             // Matches the record hash generated for CoreLeverageKey, without
             // allocating the varargs array used by Objects.hash.
-            int hash = 31 * Long.hashCode(userId) + symbol.hashCode();
+            int hash = 31 * Long.hashCode(userId) + instrumentId.hashCode();
             return 31 * hash + marginMode.hashCode();
         }
 
@@ -93,7 +93,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         public boolean equals(Object other) {
             return other instanceof CoreLeverageKey(long id, String symbol1, CoreMarginMode mode)
                     && userId == id
-                    && symbol.equals(symbol1)
+                    && instrumentId.equals(symbol1)
                     && marginMode == mode;
         }
     }
@@ -185,7 +185,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
     /** 手续费、保险、清算等全局资金状态，按提交边界合并。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
-    /** 启动注册阶段创建的币对对象；同一 symbol 注册后不再替换。 */
+    /** 启动注册阶段创建的币对对象；同一 instrumentId 注册后不再替换。 */
     final Map<String, CoreInstrument> instruments = new HashMap<>();
     /** 第一条非注册业务命令到达后冻结，恢复出的非空 registry 也直接冻结。 */
     private boolean instrumentRegistrySealed;
@@ -2677,11 +2677,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         return treasury;
     }
 
-    public CoreInstrument instrument(String symbol) {
+    public CoreInstrument instrument(String instrumentId) {
         assertOwner();
-        CoreInstrument known = symbol == null ? null : instruments.get(symbol);
+        CoreInstrument known = instrumentId == null ? null : instruments.get(instrumentId);
         if (known != null) return known;
-        return instruments.get(OrderReservation.normalizeSymbol(symbol));
+        return instruments.get(OrderReservation.requireInstrumentId(instrumentId));
     }
 
     public void sealInstrumentRegistry() {
@@ -2695,18 +2695,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (instrumentRegistrySealed) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument registry is sealed");
         }
-        if (instrument == null || instruments.containsKey(instrument.symbol())) {
+        if (instrument == null || instruments.containsKey(instrument.instrumentId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is already registered");
         }
-        globalRollback.captureRegisteredInstrument(instrument.symbol());
-        instruments.put(instrument.symbol(), instrument);
+        globalRollback.captureRegisteredInstrument(instrument.instrumentId());
+        instruments.put(instrument.instrumentId(), instrument);
     }
 
     void updateInstrumentConfiguration(CoreInstrument instrument, CoreInstrument updated) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument configuration");
-        if (instrument == null || updated == null || instruments.get(instrument.symbol()) != instrument
-                || !instrument.symbol().equals(updated.symbol())) {
+        if (instrument == null || updated == null || instruments.get(instrument.instrumentId()) != instrument
+                || !instrument.instrumentId().equals(updated.instrumentId())) {
             throw new IllegalArgumentException("invalid canonical instrument configuration update");
         }
         globalRollback.captureInstrumentConfiguration(instrument);
@@ -2718,7 +2718,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument operation");
-        if (instrument == null || maintenance == null || instruments.get(instrument.symbol()) != instrument) {
+        if (instrument == null || maintenance == null || instruments.get(instrument.instrumentId()) != instrument) {
             throw new IllegalArgumentException("invalid canonical instrument operation");
         }
         globalRollback.captureInstrumentMaintenance(instrument);
@@ -2732,7 +2732,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /**
      * Lookup the configured leverage without allocating a CoreLeverageKey.
-     * Callers must pass the already canonical instrument symbol held by the
+     * Callers must pass the already canonical instrument instrumentId held by the
      * runtime identity dictionary; normalization belongs at the command edge.
      */
     Long leverage(long userId, String canonicalSymbol, CoreMarginMode marginMode) {
@@ -2915,7 +2915,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 var iterator = ids.longIterator();
                 while (iterator.hasNext()) {
                     CoreTriggerOrderState trigger = lane.cold.triggerOrders.get(iterator.next());
-                    if (!trigger.status().open() || !trigger.symbol().equals(view.symbol())
+                    if (!trigger.status().open() || !trigger.instrumentId().equals(view.instrumentId())
                             || trigger.marginMode() != view.marginMode()
                             || trigger.positionSide() != view.positionSide() || trigger.side() != view.side()) continue;
                     capacity = Math.addExact(capacity, trigger.quantitySteps());
@@ -3047,11 +3047,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         setMetadata(productLine, Math.incrementExact(revision));
     }
 
-    public CoreFeeRate resolveFee(long userId, String symbol, long clusterTimestamp,
+    public CoreFeeRate resolveFee(long userId, String instrumentId, long clusterTimestamp,
                                   CoreInstrument instrument) {
         assertOwner();
-        String normalizedSymbol = instrument.symbol().equals(symbol)
-                ? instrument.symbol() : OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = instrument.instrumentId().equals(instrumentId)
+                ? instrument.instrumentId() : OrderReservation.requireInstrumentId(instrumentId);
         CoreFeePolicyState selected = null;
         for (CoreFeePolicyState policy : feePolicies.values()) {
             if (policy.effective(userId, normalizedSymbol, clusterTimestamp)
@@ -3370,7 +3370,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedUsers.add(userId);
     }
 
-    /** Same operation with the symbol identity supplied explicitly for a newly opened position. */
+    /** Same operation with the instrumentId identity supplied explicitly for a newly opened position. */
     PositionRuntime updatePositionInLane(long positionKey, long userId, int symbolId, int assetId,
                                          CoreInstrument instrument, long signedQuantitySteps,
                                          long entryPriceTicks, long entryValueTicks,
@@ -4088,10 +4088,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         if (changes == null || !changes.directPositionIdentities || laneCommandScope.get() != lane)
             throw new IllegalStateException("direct position identity requires its settlement Lane");
-        long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), instrument.symbol(), order.positionSide());
+        long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), instrument.instrumentId(), order.positionSide());
         var output = changes.laneDeltas[lane.laneId()].positions;
         if (output.indexOf(key) >= 0) return;
-        long retained = identities.retainPositionInLane(lane, order.userId(), instrument.symbol(), order.positionSide());
+        long retained = identities.retainPositionInLane(lane, order.userId(), instrument.instrumentId(), order.positionSide());
         if (retained != key) throw new IllegalStateException("position identity changed during retention");
         output.put(key, lane.positions.get(key));
     }
@@ -4484,7 +4484,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return;
         }
         // Both callers validate the same user. Metadata, quantity and sign changes do
-        // not change user membership, or symbol membership while exposure stays open.
+        // not change user membership, or instrumentId membership while exposure stays open.
         if (previous.symbolId() == replacement.symbolId()
                 && (previous.signedQuantitySteps() != 0) == (replacement.signedQuantitySteps() != 0)) return;
         unindexOpenPosition(lane, positionKey, previous);

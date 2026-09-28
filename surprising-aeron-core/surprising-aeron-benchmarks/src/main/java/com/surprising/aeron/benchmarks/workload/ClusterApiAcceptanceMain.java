@@ -36,19 +36,19 @@ public final class ClusterApiAcceptanceMain {
     private final SurprisingAeronClient client;
     private final long seed;
     private final long sourceId;
-    private final String symbol;
+    private final String instrumentId;
     private long sequence;
 
     private ClusterApiAcceptanceMain(
             ProductLine productLine,
             SurprisingAeronClient client,
             long seed,
-            String symbol) {
+            String instrumentId) {
         this.productLine = productLine;
         this.client = client;
         this.seed = seed;
         this.sourceId = 280_000 + seed;
-        this.symbol = symbol;
+        this.instrumentId = instrumentId;
         this.sequence = System.currentTimeMillis();
     }
 
@@ -60,12 +60,12 @@ public final class ClusterApiAcceptanceMain {
                 .map(String::trim).toList();
         String egress = System.getProperty("surprising.aeron.egress-hostname", "localhost");
         long seed = Long.parseLong(System.getProperty("surprising.aeron.acceptance-seed", "9001"));
-        String symbol = System.getProperty("surprising.aeron.symbol", "P8-BTC-USDT").trim().toUpperCase();
+        String instrumentId = System.getProperty("surprising.aeron.instrumentId", "16").trim().toUpperCase();
         String mode = System.getProperty("surprising.aeron.acceptance-mode", "setup").trim().toLowerCase();
         try (SurprisingAeronClient client = SurprisingAeronClient.connect(
                 productLine, hosts, egress, Duration.ofSeconds(10))) {
             ClusterApiAcceptanceMain acceptance = new ClusterApiAcceptanceMain(
-                    productLine, client, seed, symbol);
+                    productLine, client, seed, instrumentId);
             switch (mode) {
                 case "setup" -> acceptance.setup();
                 case "verify" -> acceptance.verify(false);
@@ -73,7 +73,7 @@ public final class ClusterApiAcceptanceMain {
                 case "verify-final" -> acceptance.verify(true);
                 default -> throw new IllegalArgumentException("unsupported acceptance mode: " + mode);
             }
-            log.info("apiAcceptance=PASS mode={} productLine={} symbol={} seller={} buyer={} fundsDiff=0 seed={}", mode, productLine, symbol, acceptance.seller(), acceptance.buyer(), seed);
+            log.info("apiAcceptance=PASS mode={} productLine={} instrumentId={} seller={} buyer={} fundsDiff=0 seed={}", mode, productLine, instrumentId, acceptance.seller(), acceptance.buyer(), seed);
         }
     }
 
@@ -93,14 +93,14 @@ public final class ClusterApiAcceptanceMain {
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_MARK_PRICE,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, 100, 19_000_000_000L + seed, 1_700_000_000_000L)));
+                            instrumentId, 100, 19_000_000_000L + seed, 1_700_000_000_000L)));
             applied(1, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            19_000_000_000L + seed, symbol, 10_000)));
+                            19_000_000_000L + seed, instrumentId, 10_000)));
         } else if (isExpiring()) {
             applied(1, CoreMessageType.SETTLE_INSTRUMENT,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                            19_100_000_000L + seed, symbol, 120,
+                            19_100_000_000L + seed, instrumentId, 120,
                             productLine == ProductLine.OPTION ? 25 : 0)));
         }
     }
@@ -142,7 +142,7 @@ public final class ClusterApiAcceptanceMain {
     private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
@@ -185,7 +185,7 @@ public final class ClusterApiAcceptanceMain {
     }
 
     private void requirePosition(CoreUserStateView state, long expectedQuantity) {
-        long actual = state.positions().stream().filter(value -> value.symbol().equals(symbol))
+        long actual = state.positions().stream().filter(value -> value.instrumentId().equals(instrumentId))
                 .mapToLong(value -> value.signedQuantitySteps()).sum();
         if (actual != expectedQuantity) {
             throw new IllegalStateException("position mismatch user=" + state.userId()

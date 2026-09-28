@@ -16,7 +16,7 @@ class CandleMathTest {
     @Test
     void aggregatesOutOfOrderTradesWithoutChangingWrongOpenOrClose() {
         Instant bucket = Instant.parse("2026-06-30T10:15:00Z");
-        CandleAccumulator candle = CandleAccumulator.create("BTC-USDT", CandlePeriod.M1, bucket);
+        CandleAccumulator candle = CandleAccumulator.create("1", CandlePeriod.M1, bucket);
 
         applyOnce(candle, trade("t2", 2, "2026-06-30T10:15:20Z", "101.00", "0.30"), new HashSet<>());
         applyOnce(candle, trade("t1", 1, "2026-06-30T10:15:05Z", "99.00", "0.20"), new HashSet<>());
@@ -37,7 +37,7 @@ class CandleMathTest {
     @Test
     void simulationDropsDuplicateTradeId() {
         Instant bucket = Instant.parse("2026-06-30T10:15:00Z");
-        CandleAccumulator candle = CandleAccumulator.create("ETH-USDT", CandlePeriod.M1, bucket);
+        CandleAccumulator candle = CandleAccumulator.create("2", CandlePeriod.M1, bucket);
         Set<String> seenTrades = new HashSet<>();
 
         applyOnce(candle, trade("t100", 100, "2026-06-30T10:15:01Z", "10.00", "2.00"), seenTrades);
@@ -65,7 +65,7 @@ class CandleMathTest {
 
     private TradeEvent trade(String id, long sequence, String time, String price, String quantity) {
         return new TradeEvent(
-                "BTC-USDT",
+                "1",
                 id,
                 sequence,
                 Instant.parse(time),

@@ -36,16 +36,16 @@ class MarketProbeServiceTest {
     @Test
     void threeFreshUniquePublicWebSocketExchangesPassTheDefaultQuorum() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0),
                 webSocketHealth("BYBIT", 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.sourceMode()).isEqualTo(MarketProbeService.SourceMode.PUBLIC_WEBSOCKET_ONLY);
         assertThat(snapshot.freshSourceCount()).isEqualTo(3);
@@ -55,14 +55,14 @@ class MarketProbeServiceTest {
     @Test
     void twoFreshPublicWebSocketExchangesDoNotPassTheQuorum() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(2);
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -71,18 +71,18 @@ class MarketProbeServiceTest {
     @Test
     void configuredFourSourceQuorumDoesNotTreatThreeFreshSourcesAsHealthy() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0),
                 webSocketHealth("BYBIT", 20, 0)));
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.getCalculation().setMinValidSources(4);
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service(properties).snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service(properties).snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(3);
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -91,16 +91,16 @@ class MarketProbeServiceTest {
     @Test
     void reportsDegradedQuorumWhenOneHealthySourceIsStale() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now.minusSeconds(6)))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 2), webSocketHealth("BINANCE", 20, 0),
                 webSocketHealth("BYBIT", 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(2);
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -114,16 +114,16 @@ class MarketProbeServiceTest {
     @Test
     void disconnectedPublicWebSocketExchangeDoesNotPassTheQuorum() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0),
                 webSocketHealth("BYBIT", false, 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(2);
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -132,15 +132,15 @@ class MarketProbeServiceTest {
     @Test
     void duplicateExchangeComponentsDoNotPassTheQuorum() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now, List.of(
                 component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                 component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(
                 webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(2);
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -149,7 +149,7 @@ class MarketProbeServiceTest {
     @Test
     void reportsTimestampRegressionAcrossConsecutiveSnapshots() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT"))
+        when(indexPriceCache.requireFresh("1"))
                 .thenReturn(index(now, List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                         component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                         component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))))
@@ -159,7 +159,7 @@ class MarketProbeServiceTest {
                 .thenReturn(index(now.plusSeconds(1), List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
                         component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
                         component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT"))
+        when(markPriceQueryService.latest("1"))
                 .thenReturn(mark(now))
                 .thenReturn(mark(now.minusSeconds(1)))
                 .thenReturn(mark(now.plusSeconds(1)));
@@ -169,9 +169,9 @@ class MarketProbeServiceTest {
 
         MarketProbeService marketProbeService = service();
 
-        MarketProbeService.MarketProbeSnapshot initial = marketProbeService.snapshot("BTC-USDT");
-        MarketProbeService.MarketProbeSnapshot regressed = marketProbeService.snapshot("BTC-USDT");
-        MarketProbeService.MarketProbeSnapshot recovered = marketProbeService.snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot initial = marketProbeService.snapshot("1");
+        MarketProbeService.MarketProbeSnapshot regressed = marketProbeService.snapshot("1");
+        MarketProbeService.MarketProbeSnapshot recovered = marketProbeService.snapshot("1");
 
         assertThat(initial.timestampRegressed()).isFalse();
         assertThat(initial.sourceQuorumHealthy()).isTrue();
@@ -184,12 +184,12 @@ class MarketProbeServiceTest {
     @Test
     void okxRestComponentRemainsRestAndDoesNotPassWhenOkxPublicWebSocketIsHealthy() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now,
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now,
                 List.of(component("OKX", QuoteTransport.REST, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(webSocketHealth("OKX", 20, 0)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).as("only healthy OKX public WebSocket components count").isZero();
         assertThat(snapshot.sourceQuorumHealthy()).isFalse();
@@ -202,12 +202,12 @@ class MarketProbeServiceTest {
     @Test
     void missingTransportProvenanceFailsClosedForAnOtherwiseHealthyOkxComponent() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now,
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now,
                 List.of(component("OKX", null, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(webSocketHealth("OKX", 20, 2)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isZero();
         assertThat(snapshot.sourceHealth()).singleElement().extracting(MarketProbeService.SourceHealth::transport)
@@ -217,12 +217,12 @@ class MarketProbeServiceTest {
     @Test
     void actualOkxPublicWebSocketComponentPassesTheDefaultSourceMode() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now,
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now,
                 List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(webSocketHealth("OKX", 20, 1)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isEqualTo(1);
         assertThat(snapshot.sourceHealth()).singleElement()
@@ -233,12 +233,12 @@ class MarketProbeServiceTest {
     @Test
     void stalePublicWebSocketFrameDoesNotCountTowardTheQuorum() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now,
+        when(indexPriceCache.requireFresh("1")).thenReturn(index(now,
                 List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(markPriceQueryService.latest("1")).thenReturn(mark(now));
         when(webSocketManager.health()).thenReturn(List.of(webSocketHealth("OKX", 5_001, 1)));
 
-        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("BTC-USDT");
+        MarketProbeService.MarketProbeSnapshot snapshot = service().snapshot("1");
 
         assertThat(snapshot.freshSourceCount()).isZero();
         assertThat(snapshot.sourceHealth()).singleElement().extracting(MarketProbeService.SourceHealth::frameAgeMillis)
@@ -248,13 +248,13 @@ class MarketProbeServiceTest {
     @Test
     void reportsBoundedCadencePercentilesAndRegressionWithoutSamplingDuplicateSnapshots() {
         Instant now = Instant.now();
-        when(indexPriceCache.requireFresh("BTC-USDT"))
+        when(indexPriceCache.requireFresh("1"))
                 .thenReturn(index(now, List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))))
                 .thenReturn(index(now, List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))))
                 .thenReturn(index(now.plusMillis(1_000), List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))))
                 .thenReturn(index(now.plusMillis(3_000), List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))))
                 .thenReturn(index(now.plusMillis(2_000), List.of(component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now))));
-        when(markPriceQueryService.latest("BTC-USDT"))
+        when(markPriceQueryService.latest("1"))
                 .thenReturn(mark(now))
                 .thenReturn(mark(now))
                 .thenReturn(mark(now.plusMillis(1_000)))
@@ -264,11 +264,11 @@ class MarketProbeServiceTest {
 
         MarketProbeService marketProbeService = service();
 
-        marketProbeService.snapshot("BTC-USDT");
-        assertThat(marketProbeService.snapshot("BTC-USDT").indexCadence().sampleCount()).isZero();
-        marketProbeService.snapshot("BTC-USDT");
-        marketProbeService.snapshot("BTC-USDT");
-        MarketProbeService.MarketProbeSnapshot regressed = marketProbeService.snapshot("BTC-USDT");
+        marketProbeService.snapshot("1");
+        assertThat(marketProbeService.snapshot("1").indexCadence().sampleCount()).isZero();
+        marketProbeService.snapshot("1");
+        marketProbeService.snapshot("1");
+        MarketProbeService.MarketProbeSnapshot regressed = marketProbeService.snapshot("1");
 
         assertThat(regressed.timestampRegressed()).isTrue();
         assertThat(regressed.indexCadence()).extracting(MarketProbeService.CadenceSummary::sampleCount,
@@ -289,17 +289,17 @@ class MarketProbeServiceTest {
     }
 
     private IndexPriceResponse index(Instant eventTime, List<IndexComponentSnapshot> components) {
-        return new IndexPriceResponse("BTC-USDT", BigDecimal.ONE, 1, PriceStatus.HEALTHY,
+        return new IndexPriceResponse("1", BigDecimal.ONE, 1, PriceStatus.HEALTHY,
                 components.size(), components.size(), eventTime, components);
     }
 
     private IndexComponentSnapshot component(String source, QuoteTransport transport, Instant receivedAt) {
-        SourceQuote quote = new SourceQuote(source, "BTC-USDT", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+        SourceQuote quote = new SourceQuote(source, "1", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, SourceStatus.HEALTHY, null, receivedAt, receivedAt, null, transport);
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.getCalculation().setMinValidSources(1);
         return new IndexPriceCalculator(properties)
-                .calculate("BTC-USDT", 1, 1, List.of(quote), receivedAt)
+                .calculate("1", 1, 1, List.of(quote), receivedAt)
                 .components().getFirst();
     }
 
@@ -313,11 +313,11 @@ class MarketProbeServiceTest {
                                                                            int reconnectAttempts) {
         return new ExternalSpotWebSocketManager.WebSocketHealth("wss://" + exchange.toLowerCase(), 1, connected, frameAgeMillis,
                 reconnectAttempts, List.of(new ExternalSpotWebSocketManager.WebSocketSourceHealth(
-                        "BTC-USDT", exchange, "PUBLIC_WEBSOCKET")));
+                        "1", exchange, "PUBLIC_WEBSOCKET")));
     }
 
     private MarkPriceResponse mark(Instant eventTime) {
-        return new MarkPriceResponse("BTC-USDT", BigDecimal.ONE, 1, BigDecimal.ONE, BigDecimal.ONE,
+        return new MarkPriceResponse("1", BigDecimal.ONE, 1, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO, null,
                 0, BigDecimal.ZERO, 60, BigDecimal.ONE, BigDecimal.ONE, 1, PriceStatus.HEALTHY, eventTime);
     }

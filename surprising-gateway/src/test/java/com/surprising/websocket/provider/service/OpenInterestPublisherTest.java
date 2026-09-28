@@ -17,8 +17,8 @@ class OpenInterestPublisherTest {
     private final AccountOpenInterestSnapshotService snapshots = mock(AccountOpenInterestSnapshotService.class);
     private final WebSocketProperties properties = new WebSocketProperties();
     private final ProductLine product = ProductLine.LINEAR_PERPETUAL;
-    private SubscriptionTopic topic(String symbol, ProductLine line) {
-        return new SubscriptionTopic(WsChannel.OPEN_INTEREST, symbol, null, null, line);
+    private SubscriptionTopic topic(String instrumentId, ProductLine line) {
+        return new SubscriptionTopic(WsChannel.OPEN_INTEREST, instrumentId, null, null, line);
     }
     private OpenInterestPublisher publisher() {
         properties.getKafka().setProductLine(product);
@@ -30,25 +30,25 @@ class OpenInterestPublisherTest {
         verifyNoInteractions(snapshots);
     }
     @Test void publishesSingleSidedTotalsAndAuthoritativeZeroFromOneQuery() {
-        var btc = topic("BTC-USDT-SWAP", product);
-        var eth = topic("ETH-USDT-SWAP", product);
-        var other = topic("BTC-USDT-SWAP", ProductLine.INVERSE_PERPETUAL);
+        var btc = topic("49", product);
+        var eth = topic("50", product);
+        var other = topic("49", ProductLine.INVERSE_PERPETUAL);
         when(registry.topics(WsChannel.OPEN_INTEREST)).thenReturn(List.of(btc, eth, other));
         Instant now = Instant.now();
         when(snapshots.snapshot(product)).thenReturn(new OpenInterestSnapshotResponse(product, 7, now,
-                List.of(new OpenInterestShardSnapshot(product, btc.symbol(), 0, 5, 5, 7, now),
-                        new OpenInterestShardSnapshot(product, btc.symbol(), 1, 3, 3, 7, now))));
+                List.of(new OpenInterestShardSnapshot(product, btc.instrumentId(), 0, 5, 5, 7, now),
+                        new OpenInterestShardSnapshot(product, btc.instrumentId(), 1, 3, 3, 7, now))));
         publisher().publish();
         verify(snapshots, times(1)).snapshot(product);
-        verify(registry).publish(btc, Map.of("symbol", btc.symbol(), "status", "READY", "openInterestSteps", "8", "sequence", "7"), now);
-        verify(registry).publish(eth, Map.of("symbol", eth.symbol(), "status", "READY", "openInterestSteps", "0", "sequence", "7"), now);
+        verify(registry).publish(btc, Map.of("instrumentId", btc.instrumentId(), "status", "READY", "openInterestSteps", "8", "sequence", "7"), now);
+        verify(registry).publish(eth, Map.of("instrumentId", eth.instrumentId(), "status", "READY", "openInterestSteps", "0", "sequence", "7"), now);
         verify(registry, never()).publish(eq(other), any(), any());
     }
     @Test void unavailableIsNotZero() {
-        var btc = topic("BTC-USDT-SWAP", product);
+        var btc = topic("49", product);
         when(registry.topics(WsChannel.OPEN_INTEREST)).thenReturn(List.of(btc));
         when(snapshots.snapshot(product)).thenThrow(new IllegalStateException("recovering"));
         publisher().publish();
-        verify(registry).publish(eq(btc), eq(Map.of("symbol", btc.symbol(), "status", "UNAVAILABLE")), any());
+        verify(registry).publish(eq(btc), eq(Map.of("instrumentId", btc.instrumentId(), "status", "UNAVAILABLE")), any());
     }
 }

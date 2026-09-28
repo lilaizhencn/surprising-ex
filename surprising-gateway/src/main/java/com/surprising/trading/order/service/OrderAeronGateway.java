@@ -88,17 +88,17 @@ public class OrderAeronGateway implements AutoCloseable {
         return CoreStateQueryCodec.decodeUserState(response.data());
     }
 
-    public com.surprising.aeron.protocol.CoreMaintenanceCodec.Page maintenance(String symbol, long afterUserId, int limit) {
+    public com.surprising.aeron.protocol.CoreMaintenanceCodec.Page maintenance(String instrumentId, long afterUserId, int limit) {
         var response = clients.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(), 0,
                 com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
-                        new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(symbol, afterUserId, limit)));
+                        new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(instrumentId, afterUserId, limit)));
         if (response.status() != ResponseStatus.OK) throw new IllegalStateException(response.resultCode() + ": maintenance query failed");
         return com.surprising.aeron.protocol.CoreMaintenanceCodec.decodePage(response.data());
     }
 
-    public com.surprising.aeron.protocol.CoreSettlementProgressView settlementProgress(String symbol) {
+    public com.surprising.aeron.protocol.CoreSettlementProgressView settlementProgress(String instrumentId) {
         var response = clients.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(), 0,
-                CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
+                CoreStateQueryCodec.encodeSettlementProgressQuery(instrumentId));
         if (response.status() != ResponseStatus.OK) throw new IllegalStateException(response.resultCode() + ": settlement query failed");
         return com.surprising.aeron.protocol.CoreSettlementProgressCodec.decode(response.data());
     }
@@ -134,31 +134,31 @@ public class OrderAeronGateway implements AutoCloseable {
         return CoreStateQueryCodec.decodeOrderState(response.data());
     }
 
-    public List<CoreOrderStateView> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
+    public List<CoreOrderStateView> openOrders(long userId, String instrumentId, long beforeOrderId, int limit) {
         if (userId < 0 || beforeOrderId < 0 || limit < 1 || limit > 1_001) {
             throw new IllegalArgumentException("invalid open orders query");
         }
         CoreResponse response = clients.query(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), userId,
-                CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(symbol, beforeOrderId, limit)));
+                CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrumentId, beforeOrderId, limit)));
         if (response.status() != ResponseStatus.OK) {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron open orders query failed");
         }
         return CoreStateQueryCodec.decodeOpenOrders(response.data()).orders();
     }
 
-    public CoreLeverageView leverage(long userId, String symbol, com.surprising.aeron.protocol.CoreMarginMode mode) {
+    public CoreLeverageView leverage(long userId, String instrumentId, com.surprising.aeron.protocol.CoreMarginMode mode) {
         CoreUserStateView user = userState(userId);
         if (user == null) return null;
         return user.leverages().stream()
-                .filter(value -> value.symbol().equalsIgnoreCase(symbol) && value.marginMode() == mode)
+                .filter(value -> value.instrumentId().equalsIgnoreCase(instrumentId) && value.marginMode() == mode)
                 .findFirst().orElse(null);
     }
 
-    public List<CoreOrderStateView> lifecycleOpenOrders(String symbol, int limit) {
+    public List<CoreOrderStateView> lifecycleOpenOrders(String instrumentId, int limit) {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        CoreResponse response = clients.lifecycleOpenOrders(0L, symbol, limit);
+        CoreResponse response = clients.lifecycleOpenOrders(0L, instrumentId, limit);
         if (response.status() != ResponseStatus.OK) {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron lifecycle order query failed");
         }
@@ -176,10 +176,10 @@ public class OrderAeronGateway implements AutoCloseable {
     }
 
     public java.util.List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoOrders(
-            long userId, String symbol, long dueAtEpochMillis, int limit) {
+            long userId, String instrumentId, long dueAtEpochMillis, int limit) {
         CoreResponse response = clients.query(CoreMessageType.ALGO_ORDER_QUERY, UUID.randomUUID(), userId,
                 com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeQuery(
-                        userId, 0, symbol, dueAtEpochMillis, limit));
+                        userId, 0, instrumentId, dueAtEpochMillis, limit));
         if (response.status() != ResponseStatus.OK) {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron algo query failed");
         }

@@ -26,8 +26,8 @@ class LatestMarkPriceCacheTest {
         assertThat(cache.update(newest)).isTrue();
         assertThat(cache.update(event(10L, NOW, PriceStatus.HEALTHY))).isFalse();
 
-        assertThat(cache.requireFresh("btc-usdt")).isEqualTo(newest);
-        assertThat(cache.requireFresh("BTC-USDT").markPriceTicks()).isEqualTo(59_001L);
+        assertThat(cache.requireFresh("1")).isEqualTo(newest);
+        assertThat(cache.requireFresh("1").markPriceTicks()).isEqualTo(59_001L);
     }
 
     @Test
@@ -35,10 +35,10 @@ class LatestMarkPriceCacheTest {
         LatestMarkPriceCache cache = cache(Duration.ofSeconds(3));
         cache.update(event(12L, NOW.minusSeconds(4), PriceStatus.HEALTHY));
 
-        assertThat(cache.latest("BTC-USDT")).isPresent();
-        assertThat(cache.fresh("BTC-USDT")).isEmpty();
+        assertThat(cache.latest("1")).isPresent();
+        assertThat(cache.fresh("1")).isEmpty();
         assertThat(cache.freshSnapshots()).isEmpty();
-        assertThatThrownBy(() -> cache.requireFresh("BTC-USDT"))
+        assertThatThrownBy(() -> cache.requireFresh("1"))
                 .isInstanceOf(StaleMarkPriceException.class)
                 .hasMessageContaining("mark price is stale");
     }
@@ -79,7 +79,7 @@ class LatestMarkPriceCacheTest {
 
     private MarkPriceEvent event(ProductLine productLine, long sequence, Instant eventTime, PriceStatus status) {
         BigDecimal price = new BigDecimal("59001.00");
-        return new MarkPriceEvent(productLine, "BTC-USDT", 7L, 5_900_100L, 59_001L,
+        return new MarkPriceEvent(productLine, "1", 7L, 5_900_100L, 59_001L,
                 price, price, null, price, price, price, price, price, BigDecimal.ZERO,
                 eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L, price, price,
                 sequence, status, eventTime, eventTime);

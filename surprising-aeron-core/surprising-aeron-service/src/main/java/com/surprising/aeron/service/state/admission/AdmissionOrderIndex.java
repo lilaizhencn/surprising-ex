@@ -7,7 +7,7 @@ import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 
 /** Owner-confined view of active orders used by order admission. */
 public interface AdmissionOrderIndex {
-    AdmissionSummary inspect(long userId, String symbol, CorePositionSide positionSide,
+    AdmissionSummary inspect(long userId, String instrumentId, CorePositionSide positionSide,
                              CoreOrderSide side, CoreMarginMode conflictingMarginMode);
 
     default void admitted(long userId, ResolvedPlaceOrder order) {

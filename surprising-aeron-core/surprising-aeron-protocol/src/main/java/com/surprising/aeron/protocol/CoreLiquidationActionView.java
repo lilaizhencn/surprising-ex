@@ -3,7 +3,7 @@ package com.surprising.aeron.protocol;
 public record CoreLiquidationActionView(
         long liquidationId,
         long userId,
-        String symbol,
+        String instrumentId,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,
         long triggerPriceSequence,
@@ -13,18 +13,18 @@ public record CoreLiquidationActionView(
         String status,
         long cursorOrderId) {
 
-    public CoreLiquidationActionView(long liquidationId, long userId, String symbol,
+    public CoreLiquidationActionView(long liquidationId, long userId, String instrumentId,
                                      CoreMarginMode marginMode, CorePositionSide positionSide,
                                      long triggerPriceSequence,
                                      long signedQuantitySteps, long closeQuantitySteps,
                                      long markPriceTicks) {
-        this(liquidationId, userId, symbol, marginMode, positionSide,
+        this(liquidationId, userId, instrumentId, marginMode, positionSide,
                 triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, markPriceTicks,
                 "PLANNED", 0);
     }
 
     public CoreLiquidationActionView {
-        if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
+        if (liquidationId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank()
                 || marginMode == null || positionSide == null
                 || triggerPriceSequence <= 0 || signedQuantitySteps == 0 || closeQuantitySteps <= 0
                 || closeQuantitySteps > Math.absExact(signedQuantitySteps) || markPriceTicks <= 0

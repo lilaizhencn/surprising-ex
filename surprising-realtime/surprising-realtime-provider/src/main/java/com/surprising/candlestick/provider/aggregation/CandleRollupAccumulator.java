@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 public class CandleRollupAccumulator {
-    private String symbol;
+    private String instrumentId;
     private String period;
     private Instant openTime;
     private Instant closeTime;
@@ -27,9 +27,9 @@ public class CandleRollupAccumulator {
     private Instant updatedAt;
     private boolean complete;
 
-    public static CandleRollupAccumulator create(String symbol, CandlePeriod period, Instant openTime) {
+    public static CandleRollupAccumulator create(String instrumentId, CandlePeriod period, Instant openTime) {
         CandleRollupAccumulator value = new CandleRollupAccumulator();
-        value.symbol = symbol;
+        value.instrumentId = instrumentId;
         value.period = period.code();
         value.openTime = openTime;
         value.closeTime = period.closeTime(openTime);
@@ -67,13 +67,13 @@ public class CandleRollupAccumulator {
     }
 
     public CandleUpdatedEvent event(Instant emittedAt) {
-        return new CandleUpdatedEvent(symbol, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
+        return new CandleUpdatedEvent(instrumentId, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
                 baseVolume, quoteVolume, tradeCount, firstTradeId, lastTradeId, firstSequence, lastSequence,
                 complete ? CandleStatus.CLOSED : CandleStatus.PARTIAL, updatedAt, emittedAt, null, null);
     }
 
-    public String getSymbol() { return symbol; }
-    public void setSymbol(String symbol) { this.symbol = symbol; }
+    public String getInstrumentId() { return instrumentId; }
+    public void setInstrumentId(String instrumentId) { this.instrumentId = instrumentId; }
     public String getPeriod() { return period; }
     public void setPeriod(String period) { this.period = period; }
     public Instant getOpenTime() { return openTime; }

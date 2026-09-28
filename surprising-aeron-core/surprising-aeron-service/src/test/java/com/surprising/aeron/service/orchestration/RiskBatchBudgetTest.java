@@ -20,20 +20,20 @@ class RiskBatchBudgetTest {
             var type = ContractType.valueOf(line.contractTypeCode());
             String asset=type.isInverse()?"BTC":"USDT";
             for (int i=0;i<2;i++) {
-                String symbol="SYM"+i+"-USDT";
+                String instrumentId=Integer.toString(100+i);
                 applied(state,command(line,CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
                                 type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,
                                 100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                                 type.isOption()?0:-1,type.isOption()?100:0))));
             }
-            for (int i=0;i<2;i++) applied(state,mark(line,"SYM"+i+"-USDT",1));
+            for (int i=0;i<2;i++) applied(state,mark(line,Integer.toString(100+i),1));
             for(long user=1;user<=50;user++) {
                 applied(state,command(line,CoreMessageType.ADJUST_BALANCE,user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,1_000_000))));
                 applied(state,command(line,CoreMessageType.PLACE_ORDER,user,
                         TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,
-                                user<=48?"SYM0-USDT":"SYM1-USDT",
+                                user<=48?"100":"101",
                                 user%2==1?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                                 CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
             }
@@ -62,8 +62,8 @@ class RiskBatchBudgetTest {
                 assertThat(state.tradingState().businessStateHash())
                         .isEqualTo(reference.tradingState().businessStateHash());
             }
-            assertThat(state.tradingState().riskState().scans().get("SYM0-USDT").riskComplete()).isFalse();
-            assertThat(state.tradingState().riskState().scans().get("SYM1-USDT").lastScheduledRevision()).isPositive();
+            assertThat(state.tradingState().riskState().scans().get("100").riskComplete()).isFalse();
+            assertThat(state.tradingState().riskState().scans().get("101").lastScheduledRevision()).isPositive();
             try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 for(int i=0;i<30 && work(state,line).riskScanPending();i++) {
                     var next=batch(line,work(state,line),64);
@@ -83,19 +83,19 @@ class RiskBatchBudgetTest {
         try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             for (int i=0;i<5;i++) {
-                String symbol="SYM"+i+"-USDT";
+                String instrumentId=Integer.toString(100+i);
                 applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
                                 type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",1,1,
                                 type.isInverse()?1000:1,100_000,50_000,0,0,
                                 type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                                 type.isOption()?0:-1,type.isOption()?100:0))));
             }
-            for (int i=0;i<5;i++) applied(state, mark(line,"SYM"+i+"-USDT",1));
+            for (int i=0;i<5;i++) applied(state, mark(line,Integer.toString(100+i),1));
             for(long user:new long[]{7,8}) applied(state,command(line,CoreMessageType.ADJUST_BALANCE,user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",1_000_000))));
             for(long user:new long[]{7,8}) applied(state,command(line,CoreMessageType.PLACE_ORDER,user,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"SYM4-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"104",
                             user==7?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
             long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
@@ -106,9 +106,9 @@ class RiskBatchBudgetTest {
             long hash=state.tradingState().businessStateHash();
             assertThat(apply(state,batch(line,first,2)).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(hash);
-            applied(state,mark(line,first.riskScanContinuation().symbol(),2));
+            applied(state,mark(line,first.riskScanContinuation().instrumentId(),2));
             var next=work(state,line);
-            assertThat(next.riskScanContinuation().symbol()).isNotEqualTo(first.riskScanContinuation().symbol());
+            assertThat(next.riskScanContinuation().instrumentId()).isNotEqualTo(first.riskScanContinuation().instrumentId());
             try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(work(restored,line).riskScanContinuation()).isEqualTo(next.riskScanContinuation());
                 var finish=batch(line,next,64);
@@ -125,15 +125,15 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
-            applied(state, mark(line, "BTC-USDT", 1));
+            applied(state, mark(line, "1", 1));
             for (long user : new long[]{7, 8}) {
                 applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
                 applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
-                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT",
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
                                 user == 7 ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 1, false,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, "overflow-" + user))));
@@ -143,7 +143,7 @@ class RiskBatchBudgetTest {
             // 仅功能测试将编号放到边界；通过随后正常的行情命令提交为恢复基线。
             state.runtimeState.setNextLiquidationId(Long.MAX_VALUE);
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("BTC-USDT", 80, 2, TIME))));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 80, 2, TIME))));
             var before = state.tradingState();
             var scan = command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
@@ -153,7 +153,7 @@ class RiskBatchBudgetTest {
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(before.businessStateHash());
             try (var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(600))) {
-                var normalPrice = mark(line, "BTC-USDT", 3);
+                var normalPrice = mark(line, "1", 3);
                 applied(state, normalPrice); applied(restored, normalPrice);
                 var normalScan = command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
@@ -171,28 +171,28 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
-            applied(state, mark(line, "BTC-USDT", 1));
+            applied(state, mark(line, "1", 1));
             for (long user : new long[]{1, 2, 3}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
             applied(state, command(line, CoreMessageType.PLACE_ORDER, 2,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "BTC-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "1",
                             CoreOrderSide.SELL, 100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "maker"))));
             for (long user : new long[]{1, 3}) {
                 applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
-                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT",
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
                                 CoreOrderSide.BUY, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "taker-" + user))));
                 for (int n = 0; n < 2; n++) applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
-                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(200 + user * 10 + n, "BTC-USDT",
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(200 + user * 10 + n, "1",
                                 CoreOrderSide.SELL, 110, 1, true, CoreMarginMode.CROSS, CorePositionSide.NET,
                                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cancel-" + user + "-" + n))));
             }
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("BTC-USDT", 1, 2, TIME))));
+                    new ApplyMarkPriceCommand("1", 1, 2, TIME))));
             while (work(state, line).riskScanPending()) applied(state, command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
             assertThat(work(state, line).actions()).hasSize(2);
@@ -269,10 +269,10 @@ class RiskBatchBudgetTest {
         return command(line,CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
                 TradingCommandCodec.encodeExecuteLiquidationBatch(ExecuteLiquidationBatchCommand.fromWork(work,0,budget)));
     }
-    private CoreMessage mark(ProductLine line,String symbol,long priceSequence) {
+    private CoreMessage mark(ProductLine line,String instrumentId,long priceSequence) {
         return command(line,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
-                line==ProductLine.OPTION ? new ApplyMarkPriceCommand(symbol,100,100,100,priceSequence,TIME)
-                        :new ApplyMarkPriceCommand(symbol,100,priceSequence,TIME)));
+                line==ProductLine.OPTION ? new ApplyMarkPriceCommand(instrumentId,100,100,100,priceSequence,TIME)
+                        :new ApplyMarkPriceCommand(instrumentId,100,priceSequence,TIME)));
     }
     private CoreMessage command(ProductLine line,CoreMessageType type,byte[] payload) {
         return command(line,type,0,payload);

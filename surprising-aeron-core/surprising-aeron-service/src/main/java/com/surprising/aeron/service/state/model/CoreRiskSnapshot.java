@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 
 public record CoreRiskSnapshot(
         long userId,
-        String symbol,
+        String instrumentId,
         CorePositionSide positionSide,
         long priceSequence,
         long equityUnits,
@@ -15,7 +15,7 @@ public record CoreRiskSnapshot(
         long marginRatioPpm,
         CoreRiskStatus status) {
     public CoreRiskSnapshot {
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         if (userId <= 0 || positionSide == null || priceSequence <= 0 || maintenanceMarginUnits < 0
                 || marginRatioPpm < 0 || status == null) {
             throw new IllegalArgumentException("invalid risk snapshot");
@@ -24,14 +24,14 @@ public record CoreRiskSnapshot(
 
     public String key() {
         return positionSide == CorePositionSide.NET
-                ? userId + ":" + symbol
-                : userId + ":" + symbol + ":" + positionSide.name();
+                ? userId + ":" + instrumentId
+                : userId + ":" + instrumentId + ":" + positionSide.name();
     }
 
-    public CoreRiskSnapshot(long userId, String symbol, long priceSequence, long equityUnits,
+    public CoreRiskSnapshot(long userId, String instrumentId, long priceSequence, long equityUnits,
                             long unrealizedPnlUnits, long maintenanceMarginUnits, long marginRatioPpm,
                             CoreRiskStatus status) {
-        this(userId, symbol, CorePositionSide.NET, priceSequence, equityUnits, unrealizedPnlUnits,
+        this(userId, instrumentId, CorePositionSide.NET, priceSequence, equityUnits, unrealizedPnlUnits,
                 maintenanceMarginUnits, marginRatioPpm, status);
     }
 }

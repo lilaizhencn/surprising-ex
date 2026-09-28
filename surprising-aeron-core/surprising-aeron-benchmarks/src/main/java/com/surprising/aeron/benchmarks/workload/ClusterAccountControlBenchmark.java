@@ -27,7 +27,7 @@ public class ClusterAccountControlBenchmark {
     private AeronClientPool client;
     private long sequence, operations;
     private String asset;
-    private static final String SYMBOL = "CONTROL-USDT";
+    private static final String SYMBOL = "20";
     private static final long USER = 900_000_001, MAKER = 900_000_002, POSITION_USER = 900_000_003;
     private static final long FUNDS = 1_000_000;
 

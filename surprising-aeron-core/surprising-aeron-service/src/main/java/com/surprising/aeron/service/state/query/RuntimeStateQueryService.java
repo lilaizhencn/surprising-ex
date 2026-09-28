@@ -54,7 +54,7 @@ public final class RuntimeStateQueryService {
             ReservationRuntime reservation = runtime.reservation(orderId);
             if (reservation == null) continue;
             reservations.add(new CoreReservationView(reservation.orderId(),
-                    identities.symbol(reservation.symbolId()), reservation.kind(),
+                    identities.instrumentId(reservation.symbolId()), reservation.kind(),
                     identities.asset(reservation.assetId()), reservation.totalReservedUnits(),
                     reservation.releasedUnits(), reservation.consumedUnits(), reservation.orderQuantitySteps()));
         }
@@ -63,13 +63,13 @@ public final class RuntimeStateQueryService {
         for (long positionKey : positionKeys) {
             PositionRuntime position = runtime.position(positionKey);
             if (position == null) continue;
-            String symbol = identities.symbol(position.symbolId());
-            CorePositionView view = new CorePositionView(symbol, identities.asset(position.assetId()),
+            String instrumentId = identities.instrumentId(position.symbolId());
+            CorePositionView view = new CorePositionView(instrumentId, identities.asset(position.assetId()),
                     position.marginMode(), position.positionSide(),
                     position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                     position.realizedPnlUnits(), position.positionMarginUnits());
             String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? symbol : symbol + ':' + position.positionSide().name();
+                    ? instrumentId : instrumentId + ':' + position.positionSide().name();
             positionEntries.add(new PositionEntry(key, view));
         }
         positionEntries.sort(Comparator.comparing(PositionEntry::key));
@@ -77,7 +77,7 @@ public final class RuntimeStateQueryService {
 
         ArrayList<CoreLeverageView> leverages = new ArrayList<>(leverageKeys.size());
         for (CoreLeverageKey key : leverageKeys) {
-            leverages.add(new CoreLeverageView(key.symbol(), key.marginMode(), runtime.leverage(key)));
+            leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), runtime.leverage(key)));
         }
         CoreUserStateView view = new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
                 user.positionMode(), balances, reservations, positions, leverages);
@@ -91,13 +91,13 @@ public final class RuntimeStateQueryService {
         OrderRuntime order = runtime.order(orderId);
         if (order == null) return OrderQueryResult.notFound();
         CoreOrderStateView view = new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
-                identities.symbol(order.symbolId()), order.side(), order.priceTicks(),
+                identities.instrumentId(order.symbolId()), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
                 order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),
                 order.updatedAtEpochMillis(), order.clusterPosition(), order.status().name(), order.revision());
-        return OrderQueryResult.found(view, orderStateHash(order, identities.symbol(order.symbolId())));
+        return OrderQueryResult.found(view, orderStateHash(order, identities.instrumentId(order.symbolId())));
     }
 
     public static OrderQueryResult clientOrderState(
@@ -126,7 +126,7 @@ public final class RuntimeStateQueryService {
                 continue;
             }
             hash = CoreStateHash.mix(hash, reservation.orderId());
-            hash = CoreStateHash.mix(hash, reservation.symbol());
+            hash = CoreStateHash.mix(hash, reservation.instrumentId());
             hash = CoreStateHash.mix(hash, reservation.kind().wireCode());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -135,7 +135,7 @@ public final class RuntimeStateQueryService {
             hash = CoreStateHash.mix(hash, reservation.orderQuantitySteps());
         }
         for (CorePositionView position : user.positions()) {
-            hash = CoreStateHash.mix(hash, position.symbol());
+            hash = CoreStateHash.mix(hash, position.instrumentId());
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
@@ -146,18 +146,18 @@ public final class RuntimeStateQueryService {
             hash = CoreStateHash.mix(hash, position.positionMarginUnits());
         }
         for (CoreLeverageView leverage : user.leverages()) {
-            hash = CoreStateHash.mix(hash, leverage.symbol());
+            hash = CoreStateHash.mix(hash, leverage.instrumentId());
             hash = CoreStateHash.mix(hash, leverage.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, leverage.leveragePpm());
         }
         return hash;
     }
 
-    private static long orderStateHash(OrderRuntime order, String symbol) {
+    private static long orderStateHash(OrderRuntime order, String instrumentId) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), order.orderId());
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
-        hash = CoreStateHash.mix(hash, symbol);
+        hash = CoreStateHash.mix(hash, instrumentId);
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());

@@ -23,7 +23,7 @@ class LatestIndexPriceCacheTest {
         cache.update(event(10, PriceStatus.HEALTHY, new BigDecimal("100"), NOW.minusSeconds(1)));
         cache.update(event(11, PriceStatus.INSUFFICIENT_SOURCES, null, NOW));
 
-        assertThatThrownBy(() -> cache.requireFresh("BTC-USDT"))
+        assertThatThrownBy(() -> cache.requireFresh("1"))
                 .isInstanceOf(StaleIndexPriceException.class)
                 .hasMessageContaining("unavailable")
                 .hasMessageContaining("INSUFFICIENT_SOURCES");
@@ -34,7 +34,7 @@ class LatestIndexPriceCacheTest {
         LatestIndexPriceCache cache = cache();
         cache.update(event(10, PriceStatus.HEALTHY, new BigDecimal("100"), NOW.minusSeconds(6)));
 
-        assertThatThrownBy(() -> cache.requireFresh("BTC-USDT"))
+        assertThatThrownBy(() -> cache.requireFresh("1"))
                 .isInstanceOf(StaleIndexPriceException.class)
                 .hasMessageContaining("stale");
     }
@@ -44,7 +44,7 @@ class LatestIndexPriceCacheTest {
         LatestIndexPriceCache cache = cache();
         cache.update(event(10, PriceStatus.HEALTHY, new BigDecimal("100"), NOW));
 
-        assertThat(cache.requireFresh("btc-usdt").indexPrice()).isEqualByComparingTo("100");
+        assertThat(cache.requireFresh("1").indexPrice()).isEqualByComparingTo("100");
     }
 
     private LatestIndexPriceCache cache() {
@@ -54,7 +54,7 @@ class LatestIndexPriceCacheTest {
     }
 
     private IndexPriceEvent event(long sequence, PriceStatus status, BigDecimal price, Instant eventTime) {
-        return new IndexPriceEvent("BTC-USDT", price, sequence, status, 3, price == null ? 1 : 3,
+        return new IndexPriceEvent("1", price, sequence, status, 3, price == null ? 1 : 3,
                 BigDecimal.valueOf(3), eventTime, List.of());
     }
 }

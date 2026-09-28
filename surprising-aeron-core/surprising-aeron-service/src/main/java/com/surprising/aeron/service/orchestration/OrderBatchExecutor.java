@@ -183,12 +183,12 @@ final class OrderBatchExecutor {
 
     void registerPipelinedBatchSymbols(OrderBatchPending batch, CommandSlot pending) {
         if (batch.pipelineRegistered()) return;
-        for (String symbol : batch.preparedSymbols) {
+        for (String instrumentId : batch.preparedSymbols) {
             // Retain the newest batch: ordered completion removes all predecessors first.
             // The cluster window has already checked exact account and matching dependencies.
-            OrderBatchPending previous = pipelinedBatchBySymbol.put(symbol, batch);
+            OrderBatchPending previous = pipelinedBatchBySymbol.put(instrumentId, batch);
             if (previous != null && previous != batch && !pending.clusterIndependent) {
-                throw new IllegalStateException("pipelined symbol ownership conflict");
+                throw new IllegalStateException("pipelined instrumentId ownership conflict");
             }
         }
         batch.pipelineRegistered(true);
@@ -197,8 +197,8 @@ final class OrderBatchExecutor {
 
     void unregisterPipelinedBatchSymbols(OrderBatchPending batch) {
         if (!batch.pipelineRegistered()) return;
-        for (String symbol : batch.preparedSymbols) {
-            pipelinedBatchBySymbol.remove(symbol, batch);
+        for (String instrumentId : batch.preparedSymbols) {
+            pipelinedBatchBySymbol.remove(instrumentId, batch);
         }
         batch.pipelineRegistered(false);
         activePipelinedOrderBatches--;
@@ -219,24 +219,24 @@ final class OrderBatchExecutor {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 int itemMatcherShard = batch.decodedCommand == null
-                        ? owner.matchingAdapter.matcherShardId(command.symbol())
-                        : batch.decodedCommand.matcherShard(owner.matchingAdapter, command.symbol());
+                        ? owner.matchingAdapter.matcherShardId(command.instrumentId())
+                        : batch.decodedCommand.matcherShard(owner.matchingAdapter, command.instrumentId());
                 if (batchMatcherShard == -1) batchMatcherShard = itemMatcherShard;
                 else if (batchMatcherShard != itemMatcherShard) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 owner.requireOrderIdentityAvailable(userId, command);
-                int contextIndex = batch.preparedSymbols.indexOf(command.symbol());
+                int contextIndex = batch.preparedSymbols.indexOf(command.instrumentId());
                 var decision = contextIndex < 0 ? null : batch.preparedContextDecisions[contextIndex];
                 if (decision == null) {
                     var context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
-                            userId, command.symbol(), owner.currentClusterTimestamp);
+                            userId, command.instrumentId(), owner.currentClusterTimestamp);
                     var instrument = context.instrument();
                     decision = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision(context,
-                            batchOpenInterestSteps(batch, command.symbol()),
+                            batchOpenInterestSteps(batch, command.instrumentId()),
                             owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
                             owner.identities.assetId(instrument.settleAsset()));
                     contextIndex = batch.preparedSymbols.size();
-                    batch.preparedSymbols.add(command.symbol());
+                    batch.preparedSymbols.add(command.instrumentId());
                     batch.preparedContextDecisions[contextIndex] = decision;
                 }
                 batch.preparedDecisions[index] = decision;
@@ -414,7 +414,7 @@ final class OrderBatchExecutor {
                 owner.identities, userId, command, owner.currentClusterTimestamp);
         long required = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                 owner.runtimeState, owner.identities, userId, resolved,
-                batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, 0);
+                batchOpenInterestSteps(batch, command.instrumentId()), batch.admissionOrderIndex, 0);
         int assetId = owner.identities.assetId(resolved.reservationAsset());
         long sequence = batch.sequence;
         int laneId = owner.runtimeState.topology().accountLaneId(userId);
@@ -492,7 +492,7 @@ final class OrderBatchExecutor {
                             owner.identities, userId, replacement, owner.currentClusterTimestamp);
                     long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                             owner.runtimeState, owner.identities, userId, resolved,
-                            batchOpenInterestSteps(batch, replacement.symbol()), batch.admissionOrderIndex,
+                            batchOpenInterestSteps(batch, replacement.instrumentId()), batch.admissionOrderIndex,
                             command.originalOrderId());
                     if (owner.productLine == ProductLine.SPOT) {
                         var reservation = owner.runtimeState.reservation(command.originalOrderId());
@@ -574,10 +574,10 @@ final class OrderBatchExecutor {
             var route = owner.activeOrderIndex.activeOrderRoute(item.orderId);
             if (route == null || route.runtime() == null) break;
             OrderRuntime order = route.runtime();
-            String symbol = route.symbol();
-            if (owner.matchingAdapter.matcherShardId(symbol) != shard) break;
+            String instrumentId = route.instrumentId();
+            if (owner.matchingAdapter.matcherShardId(instrumentId) != shard) break;
             batch.preparedAdmittedOrders[end - start] = order;
-            item.cancelSymbol = symbol;
+            item.cancelSymbol = instrumentId;
             end++;
         }
         if (end == start) throw new IllegalStateException("validated cancel chunk is empty");
@@ -811,13 +811,13 @@ final class OrderBatchExecutor {
         batch.matchingApplied(true);
     }
 
-    long batchOpenInterestSteps(OrderBatchPending batch, String symbol) {
-        long longQuantity = owner.openInterestIndex.longQuantityNormalized(symbol);
-        long shortQuantity = owner.openInterestIndex.shortQuantityNormalized(symbol);
+    long batchOpenInterestSteps(OrderBatchPending batch, String instrumentId) {
+        long longQuantity = owner.openInterestIndex.longQuantityNormalized(instrumentId);
+        long shortQuantity = owner.openInterestIndex.shortQuantityNormalized(instrumentId);
         for (int index = 0; index < batch.changedUserIds.size(); index++) {
             long userId = batch.changedUserIds.valueAt(index);
-            long before = batchPositionQuantityBefore(userId, symbol);
-            long current = owner.runtimePositionQuantity(userId, symbol);
+            long before = batchPositionQuantityBefore(userId, instrumentId);
+            long current = owner.runtimePositionQuantity(userId, instrumentId);
             if (before > 0) longQuantity = Math.subtractExact(longQuantity, before);
             else if (before < 0) shortQuantity = Math.subtractExact(shortQuantity, Math.negateExact(before));
             if (current > 0) longQuantity = Math.addExact(longQuantity, current);
@@ -826,9 +826,9 @@ final class OrderBatchExecutor {
         return Math.max(longQuantity, shortQuantity);
     }
 
-    long batchPositionQuantityBefore(long userId, String symbol) {
+    long batchPositionQuantityBefore(long userId, String instrumentId) {
         long quantity = 0;
-        var instrument = owner.runtimeState.instrument(symbol);
+        var instrument = owner.runtimeState.instrument(instrumentId);
         if (instrument == null) return 0;
         for (com.surprising.aeron.protocol.CorePositionSide side
                 : com.surprising.aeron.protocol.CorePositionSide.values()) {
@@ -1092,20 +1092,20 @@ final class OrderBatchExecutor {
             throw new IllegalArgumentException("order batch matcher route is unavailable");
         }
         OrderBatchItem item = batch.items.get(batch.nextIndex);
-        String symbol = switch (batch.kind) {
-            case PLACE -> ((PlaceOrderCommand) item.command).symbol();
+        String instrumentId = switch (batch.kind) {
+            case PLACE -> ((PlaceOrderCommand) item.command).instrumentId();
             case CANCEL -> {
                 var route = owner.activeOrderIndex.activeOrderRoute(((CancelOrderCommand) item.command).orderId());
-                yield route == null ? "" : route.symbol();
+                yield route == null ? "" : route.instrumentId();
             }
             case AMEND -> {
                 var route = owner.activeOrderIndex.activeOrderRoute(((AmendOrderCommand) item.command).originalOrderId());
-                yield route == null ? "" : route.symbol();
+                yield route == null ? "" : route.instrumentId();
             }
         };
-        return symbol.isBlank() ? 0 : batch.decodedCommand == null
-                ? owner.matchingAdapter.matcherShardId(symbol)
-                : batch.decodedCommand.matcherShard(owner.matchingAdapter, symbol);
+        return instrumentId.isBlank() ? 0 : batch.decodedCommand == null
+                ? owner.matchingAdapter.matcherShardId(instrumentId)
+                : batch.decodedCommand.matcherShard(owner.matchingAdapter, instrumentId);
     }
 
     void beginOrderBatchCommitContext(OrderBatchPending batch, CommandSlot pending) {
@@ -1153,7 +1153,7 @@ final class OrderBatchExecutor {
     boolean conflictsWithEarlierPipelinedBatch(OrderBatchPending candidate) {
         if (activePipelinedOrderBatches != pendingBatchCount() - 1) return true;
         for (OrderBatchItem item : candidate.items) {
-            if (pipelinedBatchBySymbol.containsKey(((PlaceOrderCommand) item.command).symbol())) return true;
+            if (pipelinedBatchBySymbol.containsKey(((PlaceOrderCommand) item.command).instrumentId())) return true;
         }
         return false;
     }
@@ -1280,10 +1280,10 @@ final class OrderBatchExecutor {
                 OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
                 PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
                 orderId = replacement.orderId();
-                String symbol = owner.runtimeOrderSymbol(order);
+                String instrumentId = owner.runtimeOrderSymbol(order);
                 var matchingOrder = batch.replacementAdmission.matchingOrder();
                 submission = () -> owner.matchingAdapter.replaceOrder(
-                        pending.command().header().userId(), command.originalOrderId(), symbol, matchingOrder);
+                        pending.command().header().userId(), command.originalOrderId(), instrumentId, matchingOrder);
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
         }
@@ -1298,12 +1298,12 @@ final class OrderBatchExecutor {
             } else {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
                 OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                String symbol = owner.runtimeOrderSymbol(order);
+                String instrumentId = owner.runtimeOrderSymbol(order);
                 var matchingOrder = batch.replacementAdmission.matchingOrder();
                 directSubmission = () -> owner.matchingAdapter.replaceDirect(
                         shard, pending.sequence(), pending.command().header().commandId(),
                         matchingOrder.orderId(), pending.command().header().submittedAtEpochMillis(),
-                        pending.command().header().userId(), command.originalOrderId(), symbol,
+                        pending.command().header().userId(), command.originalOrderId(), instrumentId,
                         matchingOrder, direct);
             }
             return owner.matcherCommands.directWithCancellations(

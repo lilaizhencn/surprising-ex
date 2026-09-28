@@ -65,13 +65,13 @@ public class OrderFeeRepository {
         Instant effectiveTime = schedule.effectiveTime() == null ? now : schedule.effectiveTime();
         jdbcTemplate.update("""
                 INSERT INTO trading_fee_schedules (
-                    fee_schedule_id, product_line, user_id, symbol, maker_fee_rate_ppm, taker_fee_rate_ppm,
+                    fee_schedule_id, product_line, user_id, instrument_id, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     source_type, tier_code, reason, status, effective_time, expire_time, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (fee_schedule_id) DO UPDATE SET
                     product_line = EXCLUDED.product_line,
                     user_id = EXCLUDED.user_id,
-                    symbol = EXCLUDED.symbol,
+                    instrument_id = EXCLUDED.instrument_id,
                     maker_fee_rate_ppm = EXCLUDED.maker_fee_rate_ppm,
                     taker_fee_rate_ppm = EXCLUDED.taker_fee_rate_ppm,
                     source_type = EXCLUDED.source_type,
@@ -84,7 +84,7 @@ public class OrderFeeRepository {
                 WHERE trading_fee_schedules.updated_at IS NULL
                    OR trading_fee_schedules.updated_at <= EXCLUDED.updated_at
                 """, schedule.feeScheduleId(), schedule.productLine().name(), schedule.userId(),
-                emptyToNull(schedule.symbol()), schedule.makerFeeRatePpm(), schedule.takerFeeRatePpm(),
+                emptyToNull(schedule.instrumentId()), schedule.makerFeeRatePpm(), schedule.takerFeeRatePpm(),
                 sourceType(schedule.sourceType()).name(), emptyToNull(schedule.tierCode()), schedule.reason(),
                 status(schedule.status()).name(), Timestamp.from(effectiveTime),
                 timestampOrNull(schedule.expireTime()), Timestamp.from(schedule.createdAt() == null ? now : schedule.createdAt()),
@@ -93,21 +93,21 @@ public class OrderFeeRepository {
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
                                                    long userId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                        FeeScheduleStatus status,
                                                        int limit) {
         requireProductLine(productLine);
         int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedSymbol = emptyToNull(instrumentId);
         String statusName = status == null ? null : status.name();
         List<FeeScheduleResponse> schedules = jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_schedules
                  WHERE (CAST(? AS text) IS NULL OR product_line = ?)
                    AND (? <= 0 OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
-                 ORDER BY product_line ASC, user_id ASC, symbol ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
+                 ORDER BY product_line ASC, user_id ASC, instrument_id ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toResponse(rs),
                 productLine.name(), productLine.name(),
@@ -118,14 +118,14 @@ public class OrderFeeRepository {
 
     public FeeScheduleQueryResponse querySchedulesPage(ProductLine productLine,
                                                        long userId,
-                                                       String symbol,
+                                                       String instrumentId,
                                                        FeeScheduleStatus status,
                                                        int limit,
                                                        String cursor,
                                                        String sort) {
         requireProductLine(productLine);
         int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedSymbol = emptyToNull(instrumentId);
         String statusName = status == null ? null : status.name();
         AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, SCHEDULE_UPDATED_DESC, SCHEDULE_SORTS);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
@@ -143,7 +143,7 @@ public class OrderFeeRepository {
                   FROM trading_fee_schedules
                  WHERE (CAST(? AS text) IS NULL OR product_line = ?)
                    AND (? <= 0 OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
                  ORDER BY %s %s, fee_schedule_id %s
@@ -174,7 +174,7 @@ public class OrderFeeRepository {
             throw new IllegalArgumentException("userId must be positive");
         }
         productLine(request.productLine());
-        validateSymbol(request.symbol());
+        validateSymbol(request.instrumentId());
         validateFeeRate(request.makerFeeRatePpm(), "makerFeeRatePpm");
         validateFeeRate(request.takerFeeRatePpm(), "takerFeeRatePpm");
         if (request.makerFeeRatePpm() > request.takerFeeRatePpm()) {
@@ -199,7 +199,7 @@ public class OrderFeeRepository {
                 rs.getLong("fee_schedule_id"),
                 ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
-                rs.getString("symbol"),
+                rs.getString("instrument_id"),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),
                 FeeScheduleSourceType.valueOf(rs.getString("source_type")),
@@ -237,12 +237,12 @@ public class OrderFeeRepository {
         }
     }
 
-    private static void validateSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
+    private static void validateSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
             return;
         }
-        if (!symbol.trim().toUpperCase().matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId.trim().toUpperCase())) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
     }
 

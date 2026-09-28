@@ -231,3 +231,11 @@ Spring Boot 服务继续使用 Boot 的日志配置。独立 `surprising-aeron-t
 
 认证入口采用两步登录：账号密码通过后，后端按已绑定且启用的邮箱、手机、Google 验证方式签发一次性挑战；全部验证码通过后才创建会话。
 安全设置绑定验证密码和其余已绑定方式，登录开关关闭不会取消绑定交叉验证。接口及数据库迁移见 [Gateway 两步登录与安全设置](surprising-gateway/README.md#两步登录与安全设置2026-09-28)。
+
+### 币种与网络配置
+
+全产品线共用 `assets` 币种主目录，`asset_networks` 按永久币种 ID 配置多个充提网络；合约配置引用基础币、计价币、结算币及合约价值币的 ID。管理后台同页配置币种和网络，操作权限、审批和审计说明见 [Gateway README](surprising-gateway/README.md#币种主目录与充提网络)。
+
+### 永久标的 ID
+
+六条产品线的交易、行情、持仓和结算统一使用产品线与永久 `instrumentId`；名称仅作显示。配置边界、协议变化和本机重建规则见 [永久标的身份说明](docs/instrument-identity.md)。

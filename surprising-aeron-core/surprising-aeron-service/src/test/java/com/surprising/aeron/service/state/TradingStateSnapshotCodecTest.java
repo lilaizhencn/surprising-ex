@@ -29,13 +29,13 @@ class TradingStateSnapshotCodecTest {
     void executionTotalSurvivesCheckpointAndCommitMetadata() {
         var reducer = new RuntimeTestStateTransitions();
         var empty = reducer.adjustBalance(reducer.registerInstrument(TradingCoreState.empty(ProductLine.SPOT),
-                CoreStateTestFixtures.instrument(ProductLine.SPOT, "BTC-USDT", "BTC", "USDT", "USDT")),
+                CoreStateTestFixtures.instrument(ProductLine.SPOT, "1", "BTC", "USDT", "USDT")),
                 7, new BalanceAdjustmentCommand("USDT", 50_000));
         var runtimeOrder = CoreStateTestFixtures.order(11, 7, 5, 10)
                 .withFill(3, 7, 4, com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN, 2)
                 .withExecutionValue(1, -1).snapshot().withCommitMetadata(100, 200);
         var order = new com.surprising.aeron.service.state.model.CoreOrderState(11, ProductLine.SPOT, 7,
-                "BTC-USDT", CoreOrderSide.BUY, 5, 5, 10, 3, 7, false,
+                "1", CoreOrderSide.BUY, 5, 5, 10, 3, 7, false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", new java.util.UUID(0, 11),
                 0, 0, 4, runtimeOrder.executedValueHigh(), runtimeOrder.executedValueLow(),
@@ -54,11 +54,11 @@ class TradingStateSnapshotCodecTest {
         TradingCoreState state = reducer.adjustBalance(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.OPTION),
                         CoreStateTestFixtures.instrument(ProductLine.OPTION,
-                                "BTC-OPTION", "BTC", "USDT", "USDT")), 7,
+                                "6", "BTC", "USDT", "USDT")), 7,
                 new BalanceAdjustmentCommand("USDT", 50_000));
         state = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-OPTION", 500, 1_000, 1_000, 1, 1_000));
-        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", CoreOrderSide.BUY, 500, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true, "option-client-71"));
+                new ApplyMarkPriceCommand("6", 500, 1_000, 1_000, 1, 1_000));
+        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "6", CoreOrderSide.BUY, 500, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true, "option-client-71"));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.OPTION);
@@ -73,12 +73,12 @@ class TradingStateSnapshotCodecTest {
     void roundTripPreservesRiskAndTriggerContinuationCursor() {
         TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
         CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(
-                "BTC-USDT", 7, 6, 0, false, 7, 1, "position-key", 9,
+                "1", 7, 6, 0, false, 7, 1, "position-key", 9,
                 10, 11, 12, 13, false, TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL,
                 400, 300, 500, 70_000, 1_234, 88, 77);
         CoreRiskState risk = new CoreRiskState(
-                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 70_000, 7, 1_000)),
-                Map.of(), Map.of(), Map.of("BTC-USDT", scan), 1);
+                Map.of("1", new CoreMarkPriceState("1", 70_000, 7, 1_000)),
+                Map.of(), Map.of(), Map.of("1", scan), 1);
         TradingCoreState state = new TradingCoreState(empty.productLine(), empty.revision(), empty.users(),
                 empty.orders(), empty.instruments(), risk, empty.treasuryState(),
                 empty.leverages(), empty.algoOrders(), empty.cancelAllAfterTimers(), empty.clientOrderIndex(),
@@ -87,7 +87,7 @@ class TradingStateSnapshotCodecTest {
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
 
-        assertThat(restored.riskState().scans().get("BTC-USDT")).isEqualTo(scan);
+        assertThat(restored.riskState().scans().get("1")).isEqualTo(scan);
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
 

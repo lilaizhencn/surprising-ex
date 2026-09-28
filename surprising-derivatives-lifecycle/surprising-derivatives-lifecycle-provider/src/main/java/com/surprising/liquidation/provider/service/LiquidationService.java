@@ -126,7 +126,7 @@ public class LiquidationService {
     private static LiquidationOrderResponse response(CoreLiquidationProjection value) {
         OrderSide side = value.signedQuantitySteps() > 0 ? OrderSide.SELL : OrderSide.BUY;
         return new LiquidationOrderResponse(value.liquidationId(), value.liquidationId(), value.liquidationId(),
-                value.userId(), value.symbol(), marginMode(value), positionSide(value), side,
+                value.userId(), value.instrumentId(), marginMode(value), positionSide(value), side,
                 value.closeQuantitySteps(), 0, value.executionPriceTicks(), value.liquidationFeeRatePpm(),
                 value.liquidationFeeUnits(), status(value.status()), "AERON_CORE_" + value.status(),
                 value.updatedAt());

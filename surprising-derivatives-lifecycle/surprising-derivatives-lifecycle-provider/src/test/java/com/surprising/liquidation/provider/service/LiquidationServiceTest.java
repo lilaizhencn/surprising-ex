@@ -32,10 +32,10 @@ class LiquidationServiceTest {
     @Test
     void executesLiquidationsAfterScanningWithoutReusingQueriedRiskCursor() {
         control(true, 0);
-        var action = new CoreLiquidationActionView(1, 7, "BTC-USDT-SWAP", CoreMarginMode.CROSS,
+        var action = new CoreLiquidationActionView(1, 7, "49", CoreMarginMode.CROSS,
                 CorePositionSide.NET, 10, 1, 1, 100);
         var work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL, 1, true,
-                new CoreRiskScanContinuation("BTC-USDT-SWAP", 10, 0), List.of(action), List.of());
+                new CoreRiskScanContinuation("49", 10, 0), List.of(action), List.of());
         when(aeron.work(0, 256, 1_048_576)).thenReturn(work);
         when(aeron.executeBatch(work, 3000, 0)).thenReturn(new CoreLiquidationBatchResultView(1, 1, 0, 0, 0, 0));
         assertThat(service.processWork().applied()).isEqualTo(1);

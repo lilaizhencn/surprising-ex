@@ -69,7 +69,7 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void placeSubmitsOnlyTradingIntentAndLeavesFundsDecisionToCore() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-1", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-1", "1", OrderSide.BUY,
                 OrderType.MARKET, TimeInForce.IOC, 0, 7, MarginMode.ISOLATED, PositionSide.LONG,
                 false, false);
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -95,7 +95,7 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void spotLimitPreflightSubmitsOnlyTheValidatedIntent() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "spot-limit", "BTC-USDT", OrderSide.SELL,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "spot-limit", "1", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         service.preflight(request,
@@ -108,7 +108,7 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void placeUsesAuthoritativeCommandResponseWithoutOrderQuery() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-response", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-response", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -128,7 +128,7 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void placeSubmitsAuthoritativeCommandWithoutPreflightRoundTrip() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-no-funds", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-no-funds", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L),
@@ -150,10 +150,10 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void clientOrderIdCommandIdentityIsStableAcrossChangedPayloads() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-identity", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-identity", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        PlaceOrderRequest changed = new PlaceOrderRequest(1001, "client-identity", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest changed = new PlaceOrderRequest(1001, "client-identity", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 3, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -177,7 +177,7 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void cancelMapsOrderIdentityAndReturnsAuthoritativeState() {
-        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-2", "BTC-USDT", OrderSide.SELL,
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-2", "1", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 61_000, 3, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(aeron.commandOutcome(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -194,34 +194,34 @@ class AeronOrderCommandServiceTest {
 
     @Test
     void lifecycleOpenOrdersUsesAuthorityQueryAndRejectsCrossProductLineResults() {
-        when(aeron.lifecycleOpenOrders("BTC-USDT", 1000))
-                .thenReturn(List.of(orderView(91, new PlaceOrderRequest(1001, "client-91", "BTC-USDT",
+        when(aeron.lifecycleOpenOrders("1", 1000))
+                .thenReturn(List.of(orderView(91, new PlaceOrderRequest(1001, "client-91", "1",
                         OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS,
                         PositionSide.NET, false, false))));
 
-        assertThat(service.lifecycleOpenOrders("BTC-USDT", 1000)).hasSize(1);
-        verify(aeron).lifecycleOpenOrders("BTC-USDT", 1000);
+        assertThat(service.lifecycleOpenOrders("1", 1000)).hasSize(1);
+        verify(aeron).lifecycleOpenOrders("1", 1000);
 
-        when(aeron.lifecycleOpenOrders("BTC-USDT", 1))
+        when(aeron.lifecycleOpenOrders("1", 1))
                 .thenReturn(List.of(orderView(ProductLine.OPTION, 92, new PlaceOrderRequest(1001, "client-92",
-                        "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2,
+                        "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2,
                         MarginMode.CROSS, PositionSide.NET, false, false))));
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.lifecycleOpenOrders("BTC-USDT", 1))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.lifecycleOpenOrders("1", 1))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("product line");
     }
 
     @Test
     void replaceCarriesCompleteReplacementInOneCoreCommand() {
-        PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 5, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTX, 59_000, 4, MarginMode.CROSS, PositionSide.NET,
                 false, true);
         com.surprising.trading.api.model.OrderResponse original = new com.surprising.trading.api.model.OrderResponse(
-                77, 1001, "old", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                77, 1001, "old", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                 60_000, 5, 0, 5, MarginMode.CROSS, PositionSide.NET, -10, 25,
                 false, false, OrderStatus.ACCEPTED, null,
                 java.time.Instant.ofEpochMilli(1_000), java.time.Instant.ofEpochMilli(1_000));
@@ -254,10 +254,10 @@ class AeronOrderCommandServiceTest {
     void amendCarriesOnlyPatchAndDoesNotReadOriginalOrder() {
         AmendOrderRequest request = new AmendOrderRequest(1001, 77, "new", 59_000L, 4L,
                 TimeInForce.GTX, true);
-        PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 5, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "BTC-USDT", OrderSide.BUY,
+        PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTX, 59_000, 4, MarginMode.CROSS, PositionSide.NET,
                 false, true);
         when(aeron.commandOutcome(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -286,14 +286,14 @@ class AeronOrderCommandServiceTest {
     }
 
     private static InstrumentRule perpetualRule() {
-        return new InstrumentRule("BTC-USDT", 7, "TRADING", InstrumentType.PERPETUAL,
+        return new InstrumentRule("1", 7, "TRADING", InstrumentType.PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC", "FOK", "GTX"),
                 true, true, true, 1, 1, 1_000_000, 1, Long.MAX_VALUE, 1, 100_000_000, 10_000);
     }
 
     private static InstrumentRule spotRule() {
-        return new InstrumentRule("BTC-USDT", 7, "TRADING", InstrumentType.SPOT,
+        return new InstrumentRule("1", 7, "TRADING", InstrumentType.SPOT,
                 ContractType.SPOT, "BTC", "USDT", "USDT",
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC", "FOK", "GTX"),
                 true, false, true, 1, 1, 1_000_000, 1, Long.MAX_VALUE, 1, 100_000_000, 0);
@@ -304,7 +304,7 @@ class AeronOrderCommandServiceTest {
     }
 
     private static CoreOrderStateView orderView(ProductLine productLine, long orderId, PlaceOrderRequest request) {
-        return new CoreOrderStateView(orderId, productLine, request.userId(), request.symbol(),
+        return new CoreOrderStateView(orderId, productLine, request.userId(), request.instrumentId(),
                 CoreOrderSide.valueOf(request.side().name()), request.priceTicks(), request.quantitySteps(),
                 0, request.quantitySteps(), request.reduceOnly(), CoreMarginMode.valueOf(request.marginMode().name()),
                 CorePositionSide.valueOf(request.positionSide().name()), CoreOrderType.valueOf(request.orderType().name()),

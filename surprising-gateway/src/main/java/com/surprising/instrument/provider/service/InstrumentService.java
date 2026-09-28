@@ -43,21 +43,22 @@ public class InstrumentService {
         this.outboxService = outboxService;
     }
 
-    public InstrumentResponse latest(String symbol) {
-        return storageService.latest(normalizeSymbol(symbol))
-                .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
+    @Transactional(readOnly = true)
+    public InstrumentResponse defaultInstrument(ProductLine line) {
+        return storageService.firstTrading(line).orElseThrow(() -> new IllegalStateException("no trading instrument in product line: " + line));
     }
 
-    public InstrumentResponse latest(String symbol, ProductLine productLine) {
-        var value = storageService.latest(normalizeSymbol(symbol),productLine)
-                .orElseThrow(()->new IllegalStateException("instrument not found for productLine: "+symbol+":"+productLine));
-        if (productLine != null && value.contractType().productLine() != productLine) {
+    public InstrumentResponse latest(int instrumentId, ProductLine productLine) {
+        if (instrumentId <= 0 || productLine == null) throw new IllegalArgumentException("productLine and positive instrumentId are required");
+        var value = storageService.latest(instrumentId, productLine)
+                .orElseThrow(() -> new IllegalStateException("instrument not found for productLine: " + productLine + ":" + instrumentId));
+        if (value.contractType().productLine() != productLine || value.instrumentId() != instrumentId) {
             throw new IllegalStateException("instrument product current mismatch");
         }
         return value;
     }
 
-    public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine line,String symbol,long id) { return storageService.tradeEncoding(line,normalizeSymbol(symbol),id); }
+    public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine line,int instrumentId,long id) { return storageService.tradeEncoding(line,instrumentId,id); }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
         var rows = storageService.list(type, status);
@@ -107,8 +108,8 @@ public class InstrumentService {
     }
 
     public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(
-            String symbol,ProductLine line,long beforeId,int limit) {
-        return storageService.changes(line,normalizeSymbol(symbol),beforeId,limit);
+            int instrumentId,ProductLine line,long beforeId,int limit) {
+        return storageService.changes(line,instrumentId,beforeId,limit);
     }
 
     @Transactional
@@ -133,22 +134,17 @@ public class InstrumentService {
     }
 
     @Transactional
-    public InstrumentResponse updateStatus(String symbol, InstrumentStatus status) {
-        return updateStatus(symbol, null, status);
+    public InstrumentResponse updateStatus(int instrumentId, ProductLine productLine, InstrumentStatus status) {
+        return updateStatus(instrumentId,productLine,status,"SYSTEM:LIFECYCLE","Lifecycle state update");
     }
 
     @Transactional
-    public InstrumentResponse updateStatus(String symbol, ProductLine productLine, InstrumentStatus status) {
-        return updateStatus(symbol,productLine,status,"SYSTEM:LIFECYCLE","Lifecycle state update");
-    }
-
-    @Transactional
-    public InstrumentResponse updateStatus(String symbol,ProductLine productLine,InstrumentStatus status,String operator,String reason) {
-        storageService.lockForUpdate(normalizeSymbol(symbol));
-        InstrumentResponse current = latest(symbol, productLine);
+    public InstrumentResponse updateStatus(int instrumentId,ProductLine productLine,InstrumentStatus status,String operator,String reason) {
+        InstrumentResponse current = latest(instrumentId, productLine);
+        storageService.lockForUpdate(current.instrumentId(), current.contractType().productLine());
+        current = latest(instrumentId, productLine);
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
-                current.symbol(), current.instrumentType(), current.contractType(), current.baseAsset(),
-                current.quoteAsset(), current.settleAsset(), current.contractMultiplierPpm(), current.contractValueAsset(),
+                current.instrumentId(), current.symbol(), current.instrumentType(), current.contractType(), current.baseAssetId(), current.quoteAssetId(), current.settleAssetId(), current.contractMultiplierPpm(), current.contractValueAssetId(),
                 current.priceTickUnits(), current.quantityStepUnits(), current.minQuantitySteps(), current.maxQuantitySteps(),
                 current.minNotionalUnits(), current.maxNotionalUnits(), current.notionalMultiplierUnits(),
                 current.pricePrecision(), current.quantityPrecision(),
@@ -160,7 +156,7 @@ public class InstrumentService {
                 current.fundingIntervalHours(),
                 current.interestRatePpm(), current.fundingRateCapPpm(), current.fundingRateFloorPpm(),
                 current.impactNotionalUnits(), current.minValidIndexSources(), current.expiryTime(),
-                current.deliveryTime(), current.underlyingSymbol(), current.strikePriceUnits(),
+                current.deliveryTime(), current.underlyingInstrumentId(), current.underlyingProductLine(), current.strikePriceUnits(),
                 current.optionType(), current.optionExerciseStyle(), current.settlementMethod(), status, Instant.now(),
                 current.riskLimitBrackets(), current.indexSources());
         return upsert(request, InstrumentEventType.STATUS_CHANGED,operator,reason);
@@ -168,7 +164,7 @@ public class InstrumentService {
 
     private void publish(InstrumentResponse response, InstrumentEventType eventType) {
         Instant eventTime = Instant.now();
-        InstrumentEvent event = new InstrumentEvent(response.symbol(), response.lastChangeId(), response.status(),
+        InstrumentEvent event = new InstrumentEvent(response.instrumentId(), response.symbol(), response.lastChangeId(), response.status(),
                 eventType, eventTime, response, response.contractType().productLine(), response.lastChangeId());
         outboxService.enqueue("INSTRUMENT", response.lastChangeId(),
                 ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
@@ -188,8 +184,8 @@ public class InstrumentService {
         Instant eventTime = Instant.now();
         if (response.instrumentType() == InstrumentType.DELIVERY) {
             outboxService.enqueue("INSTRUMENT", response.lastChangeId(), deliverySettlementsTopic(response),
-                    response.symbol(), "DELIVERY_SETTLEMENT", new DeliverySettlementEvent(
-                    response.symbol(),
+                    Integer.toString(response.instrumentId()), "DELIVERY_SETTLEMENT", new DeliverySettlementEvent(
+                    Integer.toString(response.instrumentId()),
                     response.changeId(),
                     response.contractType(),
                     settlementPriceTicks,
@@ -203,10 +199,10 @@ public class InstrumentService {
         }
         if (response.instrumentType() == InstrumentType.OPTION) {
             outboxService.enqueue("INSTRUMENT", response.lastChangeId(), optionExercisesTopic(response),
-                    response.symbol(), "OPTION_EXERCISE", new OptionExerciseEvent(
-                    response.symbol(),
+                    Integer.toString(response.instrumentId()), "OPTION_EXERCISE", new OptionExerciseEvent(
+                    Integer.toString(response.instrumentId()),
                     response.changeId(),
-                    response.underlyingSymbol(),
+                    response.underlyingInstrumentId(), response.underlyingProductLine(),
                     response.strikePriceUnits(),
                     underlyingSettlementPriceUnits,
                     optionCashSettlementUnitsPerContract(response, underlyingSettlementPriceUnits),
@@ -225,26 +221,27 @@ public class InstrumentService {
      * 关闭到期品种时，把状态变更和产品结算事件写入同一个数据库事务。
      */
     @Transactional
-    public InstrumentResponse closeForSettlement(String symbol) {
+    public InstrumentResponse closeForSettlement(int instrumentId) {
         throw new IllegalStateException("关闭到期合约前必须确认结算价");
     }
 
     @Transactional
-    public InstrumentResponse closeForSettlement(String symbol,
+    public InstrumentResponse closeForSettlement(int instrumentId,
                                                  ProductLine productLine,
                                                  long settlementPriceTicks,
                                                  long underlyingSettlementPriceUnits) {
-        return closeForSettlement(symbol,productLine,settlementPriceTicks,underlyingSettlementPriceUnits,"SYSTEM:LIFECYCLE","Confirm settlement");
+        return closeForSettlement(instrumentId,productLine,settlementPriceTicks,underlyingSettlementPriceUnits,"SYSTEM:LIFECYCLE","Confirm settlement");
     }
 
     @Transactional
-    public InstrumentResponse closeForSettlement(String symbol, ProductLine productLine, long settlementPriceTicks,
+    public InstrumentResponse closeForSettlement(int instrumentId, ProductLine productLine, long settlementPriceTicks,
             long underlyingSettlementPriceUnits, String operator, String reason) {
         if (productLine == null || (!productLine.isDeliveryProduct() && productLine != ProductLine.OPTION)) {
             throw new IllegalArgumentException("交割或行权必须指定到期产品线");
         }
-        storageService.lockForUpdate(normalizeSymbol(symbol));
-        InstrumentResponse current = latest(symbol, productLine);
+        InstrumentResponse current = latest(instrumentId, productLine);
+        storageService.lockForUpdate(current.instrumentId(), current.contractType().productLine());
+        current = latest(instrumentId, productLine);
         // 已关闭合约的重复请求必须幂等返回，不能再次创建版本或重复发布资金事件。
         if (current.status() == InstrumentStatus.CLOSED) {
             return current;
@@ -252,7 +249,7 @@ public class InstrumentService {
         if (current.status() != InstrumentStatus.SETTLING) {
             throw new IllegalStateException("合约必须先进入 SETTLING 才能确认结算: " + current.symbol());
         }
-        InstrumentResponse closed = updateStatus(symbol, productLine, InstrumentStatus.CLOSED,operator,reason);
+        InstrumentResponse closed = updateStatus(instrumentId, productLine, InstrumentStatus.CLOSED,operator,reason);
         publishProductLifecycleEvent(closed, settlementPriceTicks, underlyingSettlementPriceUnits);
         return closed;
     }
@@ -264,15 +261,15 @@ public class InstrumentService {
     private long optionCashSettlementUnitsPerContract(InstrumentResponse option,
                                                        long underlyingSettlementPriceUnits) {
         if (underlyingSettlementPriceUnits <= 0L || option.strikePriceUnits() == null
-                || option.underlyingSymbol() == null || option.underlyingSymbol().isBlank()
+                || option.underlyingInstrumentId() == null || option.underlyingInstrumentId().isBlank()
                 || option.optionType() == null) {
             throw new IllegalArgumentException("期权行权缺少完整标的结算信息");
         }
-        InstrumentResponse underlying = latest(option.underlyingSymbol());
+        InstrumentResponse underlying = latest(com.surprising.product.api.InstrumentIds.parse(option.underlyingInstrumentId()), option.underlyingProductLine());
         if (underlying.instrumentType() == InstrumentType.OPTION
                 || underlying.priceTickUnits() <= 0L
-                || !underlying.settleAsset().equalsIgnoreCase(option.settleAsset())) {
-            throw new IllegalStateException("期权标的合约规格不可用于现金结算: " + option.underlyingSymbol());
+                || underlying.settleAssetId() != option.settleAssetId()) {
+            throw new IllegalStateException("期权标的合约规格不可用于现金结算: " + option.underlyingInstrumentId());
         }
         BigInteger underlyingPrice = BigInteger.valueOf(underlyingSettlementPriceUnits);
         BigInteger strike = BigInteger.valueOf(option.strikePriceUnits());
@@ -319,9 +316,9 @@ public class InstrumentService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             digest.update(productLine.name().getBytes(StandardCharsets.UTF_8));
             rows.stream()
-                    .sorted(Comparator.comparing(InstrumentResponse::symbol)
+                    .sorted(Comparator.comparingInt(InstrumentResponse::instrumentId)
                             .thenComparingLong(InstrumentResponse::changeId))
-                    .forEach(row -> digest.update((row.symbol() + "|" + row.lastChangeId() + "|"
+                    .forEach(row -> digest.update((row.instrumentId() + "|" + row.symbol() + "|" + row.lastChangeId() + "|"
                             + row.status() + "|" + row.updatedAt() + "\n").getBytes(StandardCharsets.UTF_8)));
             assetScales.entrySet().stream()
                     .sorted(java.util.Map.Entry.comparingByKey())

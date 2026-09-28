@@ -49,7 +49,7 @@ final class LinearPerpetualBenchmarkSupport {
     static final int DEFAULT_MAKER_DEPTH = 16;
     static final int DEFAULT_RISK_USERS = 32;
     static final int MAX_BENCHMARK_SCALE = 10_000;
-    private static final String SYMBOL = "JMH-BTC-USDT";
+    private static final String SYMBOL = "10";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
     private static final long ADVERSE_PRICE = 80;
@@ -731,7 +731,7 @@ final class LinearPerpetualBenchmarkSupport {
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
         }
         CoreLiquidationActionView action = harness.executionWork().actions().getFirst();
-        var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
+        var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.instrumentId(),
                 action.triggerPriceSequence(), action.markPriceTicks(),
                 action.cursorOrderId());
         var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
@@ -783,7 +783,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.triggerPriceSequence(),
+                        action.instrumentId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         CoreMessage command = harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS,
@@ -820,7 +820,7 @@ final class LinearPerpetualBenchmarkSupport {
         List<CoreLiquidationActionView> actions = harness.executionWork().actions();
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.triggerPriceSequence(),
+                        action.instrumentId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         harness.execute(harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS, 0,
@@ -845,7 +845,7 @@ final class LinearPerpetualBenchmarkSupport {
         CoreLiquidationWorkView.Resolution resolution = harness.insuranceWork().resolutions().stream()
                 .min(Comparator.comparingLong(CoreLiquidationWorkView.Resolution::triggerPriceSequence)
                         .thenComparingLong(CoreLiquidationWorkView.Resolution::userId)
-                        .thenComparing(CoreLiquidationWorkView.Resolution::symbol)
+                        .thenComparing(CoreLiquidationWorkView.Resolution::instrumentId)
                         .thenComparingInt(value -> value.positionSide().ordinal())
                         .thenComparingLong(CoreLiquidationWorkView.Resolution::liquidationId))
                 .orElseThrow();
@@ -1173,23 +1173,23 @@ final class LinearPerpetualBenchmarkSupport {
 
         void refreshMarkPricesIfDue(List<String> symbols) {
             long now = nextCommandTimestamp();
-            for (String symbol : symbols) {
-                var mark = state.runtimeMarkPrice(symbol);
-                if (mark == null) throw new IllegalStateException("workload mark price is missing: " + symbol);
+            for (String instrumentId : symbols) {
+                var mark = state.runtimeMarkPrice(instrumentId);
+                if (mark == null) throw new IllegalStateException("workload mark price is missing: " + instrumentId);
                 if (now - mark.generatedAtEpochMillis() < 1_000) continue;
                 execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
-                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
+                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId,
                                 mark.markPriceTicks(),
                                 Math.incrementExact(mark.priceSequence()), now))));
             }
         }
 
-        void publishMarkPriceHeartbeat(String symbol) {
+        void publishMarkPriceHeartbeat(String instrumentId) {
             long now = nextCommandTimestamp();
-            var mark = state.runtimeMarkPrice(symbol);
-            if (mark == null) throw new IllegalStateException("workload mark price is missing: " + symbol);
+            var mark = state.runtimeMarkPrice(instrumentId);
+            if (mark == null) throw new IllegalStateException("workload mark price is missing: " + instrumentId);
             submit(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId,
                             mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now))));
         }
 

@@ -55,7 +55,7 @@ public class CoreResponseEncodingBenchmark {
         @Setup(Level.Trial)
         public void setUp() {
             order = new com.surprising.aeron.protocol.CoreOrderStateView(71, ProductLine.valueOf(productLine),
-                    7, "BTC-USDT", CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
+                    7, "1", CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
         }
     }
 

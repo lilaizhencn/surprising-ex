@@ -241,7 +241,7 @@ class HttpOpenLoopLoadTest {
             StableIdentityLedger.Intent original;
             try (StableIdentityLedger ledger = StableIdentityLedger.open(
                     output, "restart-run", 41L, config.fingerprint())) {
-                original = ledger.intent(1L, WorkloadOperation.PLACE, 1_001L, "BTC-USDT", "APPLIED");
+                original = ledger.intent(1L, WorkloadOperation.PLACE, 1_001L, "1", "APPLIED");
                 ledger.scheduled(original, System.nanoTime());
                 ledger.sent(original.sequence(), System.nanoTime());
             }
@@ -264,7 +264,7 @@ class HttpOpenLoopLoadTest {
                                              Duration duration, int maxInFlight, Duration timeout, int maxPolls) {
         return new HttpWorkloadConfig(baseUri, output, runId, 41L, rate, duration, maxInFlight,
                 timeout, Duration.ofMillis(5), maxPolls, 700_000L, 700_000L, new long[] {1_001L, 1_002L},
-                new String[] {"BTC-USDT", "ETH-USDT"}, TrafficSkew.UNIFORM,
+                new String[] {"1", "2"}, TrafficSkew.UNIFORM,
                 HttpWorkloadConfig.defaultTraffic());
     }
 

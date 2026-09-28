@@ -5,7 +5,7 @@ import com.surprising.instrument.api.model.InstrumentType;
 import java.util.Set;
 
 public record InstrumentRule(
-        String symbol,
+        String instrumentId,
         long changeId,
         String status,
         InstrumentType instrumentType,
@@ -27,7 +27,7 @@ public record InstrumentRule(
         long maxLeveragePpm,
         long initialMarginRatePpm) {
 
-    public InstrumentRule(String symbol,
+    public InstrumentRule(String instrumentId,
                           long changeId,
                           String status,
                           ContractType contractType,
@@ -43,7 +43,7 @@ public record InstrumentRule(
                           long notionalMultiplierUnits,
                           long maxLeveragePpm,
                           long initialMarginRatePpm) {
-        this(symbol, changeId, status, InstrumentType.PERPETUAL, contractType, "", "", "",
+        this(instrumentId, changeId, status, InstrumentType.PERPETUAL, contractType, "", "", "",
                 supportedOrderTypes, supportedTimeInForce, marketOrderEnabled, postOnlyEnabled,
                 reduceOnlyEnabled, 1L, minQuantitySteps, maxQuantitySteps, minNotionalUnits,
                 maxNotionalUnits, notionalMultiplierUnits, maxLeveragePpm, initialMarginRatePpm);

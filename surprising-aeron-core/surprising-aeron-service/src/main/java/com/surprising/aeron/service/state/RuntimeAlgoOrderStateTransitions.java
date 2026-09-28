@@ -15,7 +15,7 @@ public final class RuntimeAlgoOrderStateTransitions {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime algo order update");
         }
-        upsert(runtime, userId, view, identities.symbolId(view.symbol()));
+        upsert(runtime, userId, view, identities.symbolId(view.instrumentId()));
     }
 
     public static void upsert(TradingRuntimeState runtime, long userId,
@@ -66,7 +66,7 @@ public final class RuntimeAlgoOrderStateTransitions {
 
     private static void requireSameIntent(CoreAlgoOrderState left, CoreAlgoOrderState right) {
         if (left.userId() != right.userId() || !left.clientAlgoOrderId().equals(right.clientAlgoOrderId())
-                || !left.symbol().equals(right.symbol()) || left.algoTypeCode() != right.algoTypeCode()
+                || !left.instrumentId().equals(right.instrumentId()) || left.algoTypeCode() != right.algoTypeCode()
                 || left.side() != right.side() || left.priceTicks() != right.priceTicks()
                 || left.quantitySteps() != right.quantitySteps()
                 || left.childQuantitySteps() != right.childQuantitySteps()

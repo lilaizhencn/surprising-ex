@@ -18,12 +18,12 @@ public final class RuntimeInstrumentStateTransitions {
         }
         runtime.assertOwner();
         CoreInstrument instrument = CoreInstrument.from(runtime.productLine(), command);
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         if (runtime.treasury().fundingProgress(symbolId) != null
                 || runtime.treasury().lifecycleProgress(symbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "instrument lifecycle is in progress");
         }
-        CoreInstrument current = runtime.instrument(instrument.symbol());
+        CoreInstrument current = runtime.instrument(instrument.instrumentId());
         if (current == null) {
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
@@ -64,7 +64,7 @@ public final class RuntimeInstrumentStateTransitions {
             throw new IllegalArgumentException("invalid runtime instrument maintenance update");
         }
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -84,7 +84,7 @@ public final class RuntimeInstrumentStateTransitions {
                 || (before.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 && (after.mode() != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
                 || after.settlementPriceTicks() != before.settlementPriceTicks()
-                || runtime.treasury().lifecycleSettlement(identities.symbolId(command.symbol())) != before.taskId()))) {
+                || runtime.treasury().lifecycleSettlement(identities.symbolId(command.instrumentId())) != before.taskId()))) {
             throw new CoreStateRejectedException("INVALID_COMMAND",
                     "settlement maintenance cannot be released or repriced");
         }
@@ -94,7 +94,7 @@ public final class RuntimeInstrumentStateTransitions {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                     "spot assets cannot be closed as positions");
         }
-        int symbolId = identities.symbolId(command.symbol());
+        int symbolId = identities.symbolId(command.instrumentId());
         if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument settlement is already complete");

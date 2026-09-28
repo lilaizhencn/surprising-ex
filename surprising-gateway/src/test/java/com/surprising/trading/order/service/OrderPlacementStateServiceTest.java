@@ -27,14 +27,14 @@ class OrderPlacementStateServiceTest {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
         when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
                 ProductLine.LINEAR_PERPETUAL, 1001, 7, CorePositionMode.HEDGE, List.of(), List.of(), List.of(
-                position("ETH-USDT", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, -9),
-                position("BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.SHORT, -8),
-                position("BTC-USDT", CoreMarginMode.ISOLATED, CorePositionSide.LONG, 7),
-                position("BTC-USDT", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, 0),
-                position("BTC-USDT", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, -5))));
+                position("2", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, -9),
+                position("1", CoreMarginMode.CROSS, CorePositionSide.SHORT, -8),
+                position("1", CoreMarginMode.ISOLATED, CorePositionSide.LONG, 7),
+                position("1", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, 0),
+                position("1", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, -5))));
         var service = new OrderPlacementStateService(aeron);
 
-        var result = service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001, "btc-usdt",
+        var result = service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001, "1",
                 MarginMode.ISOLATED, PositionSide.SHORT);
 
         assertThat(result.signedQuantitySteps()).isEqualTo(-5);
@@ -49,7 +49,7 @@ class OrderPlacementStateServiceTest {
                 ProductLine.LINEAR_PERPETUAL, 1001, 7, CorePositionMode.HEDGE,
                 List.of(), List.of(), List.of()));
         assertThatThrownBy(() -> new OrderPlacementStateService(aeron).requireClosePosition(
-                ProductLine.LINEAR_PERPETUAL, 1001, "BTC-USDT", null, null))
+                ProductLine.LINEAR_PERPETUAL, 1001, "1", null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("positionSide LONG or SHORT is required in HEDGE position mode");
         verify(aeron).userState(1001);
@@ -60,19 +60,19 @@ class OrderPlacementStateServiceTest {
     void closeRejectsFlatPositionAndSpotWithoutSubmittingAnything() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
         var service = new OrderPlacementStateService(aeron);
-        assertThatThrownBy(() -> service.requireClosePosition(ProductLine.SPOT, 1001, "BTC-USDT", null, null))
+        assertThatThrownBy(() -> service.requireClosePosition(ProductLine.SPOT, 1001, "1", null, null))
                 .hasMessage("open position not found");
         verifyNoInteractions(aeron);
         when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
                 ProductLine.LINEAR_PERPETUAL, 1001, 7, List.of(), List.of(), List.of(
-                position("BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.NET, 0))));
+                position("1", CoreMarginMode.CROSS, CorePositionSide.NET, 0))));
         assertThatThrownBy(() -> service.requireClosePosition(
-                ProductLine.LINEAR_PERPETUAL, 1001, "BTC-USDT", null, null))
+                ProductLine.LINEAR_PERPETUAL, 1001, "1", null, null))
                 .hasMessage("open position not found");
     }
 
-    private static CorePositionView position(String symbol, CoreMarginMode margin, CorePositionSide side, long qty) {
-        return new CorePositionView(symbol, "USDT", margin, side, qty, 100, 500, 0, 50);
+    private static CorePositionView position(String instrumentId, CoreMarginMode margin, CorePositionSide side, long qty) {
+        return new CorePositionView(instrumentId, "USDT", margin, side, qty, 100, 500, 0, 50);
     }
 
     @Test
@@ -98,7 +98,7 @@ class OrderPlacementStateServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("product line mismatch");
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_DELIVERY, 1001L,
-                "BTC-USDT", null, null)).hasMessageContaining("product line mismatch");
+                "1", null, null)).hasMessageContaining("product line mismatch");
     }
 
     @Test
@@ -110,6 +110,6 @@ class OrderPlacementStateServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Aeron user state not found");
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001L,
-                "BTC-USDT", null, null)).hasMessageContaining("Aeron user state not found");
+                "1", null, null)).hasMessageContaining("Aeron user state not found");
     }
 }

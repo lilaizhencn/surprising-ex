@@ -16,14 +16,14 @@ public class InstrumentRiskBracketRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO instrument_risk_brackets (
-                symbol, product_line, bracket_no, notional_floor_units, notional_cap_units,
+                instrument_id, product_line, bracket_no, notional_floor_units, notional_cap_units,
                 max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
                 option_margin_factor_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-    public void delete(com.surprising.product.api.ProductLine line, String symbol) {
-        jdbcTemplate.update("DELETE FROM instrument_risk_brackets WHERE product_line=? AND symbol=?",line.name(),symbol);
+    public void delete(com.surprising.product.api.ProductLine line, int instrumentId) {
+        jdbcTemplate.update("DELETE FROM instrument_risk_brackets WHERE product_line=? AND instrument_id=?",line.name(),instrumentId);
     }
 
     private final JdbcTemplate jdbcTemplate;
@@ -32,7 +32,7 @@ public class InstrumentRiskBracketRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insertBatch(com.surprising.product.api.ProductLine productLine, String symbol, List<RiskLimitBracket> brackets) {
+    public void insertBatch(com.surprising.product.api.ProductLine productLine, int instrumentId, List<RiskLimitBracket> brackets) {
         if (brackets == null || brackets.isEmpty()) {
             return;
         }
@@ -40,7 +40,7 @@ public class InstrumentRiskBracketRepository {
             @Override
             public void setValues(PreparedStatement ps, int index) throws java.sql.SQLException {
                 RiskLimitBracket bracket = brackets.get(index);
-                ps.setString(1, symbol);
+                ps.setInt(1, instrumentId);
                 ps.setString(2, productLine.name());
                 ps.setInt(3, bracket.bracketNo());
                 ps.setLong(4, bracket.notionalFloorUnits());
@@ -65,14 +65,14 @@ public class InstrumentRiskBracketRepository {
         List<Object> args = new ArrayList<>(keys.size() * 2);
         String tuplePredicate = tuplePredicate(keys, args);
         List<RiskBracketRow> rows = jdbcTemplate.query("""
-                SELECT symbol, product_line, bracket_no, notional_floor_units, notional_cap_units,
+                SELECT instrument_id, product_line, bracket_no, notional_floor_units, notional_cap_units,
                        max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
                        option_margin_factor_ppm
                   FROM instrument_risk_brackets
-                 WHERE (symbol, product_line) IN (%s)
-                 ORDER BY symbol, product_line, bracket_no
+                 WHERE (instrument_id, product_line) IN (%s)
+                 ORDER BY instrument_id, product_line, bracket_no
                 """.formatted(tuplePredicate), (rs, rowNum) -> new RiskBracketRow(
-                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getString("symbol")),
+                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getInt("instrument_id")),
                 new RiskLimitBracket(
                         rs.getInt("bracket_no"),
                         rs.getLong("notional_floor_units"),
@@ -95,7 +95,7 @@ public class InstrumentRiskBracketRepository {
             }
             sql.append("(?, ?)");
             InstrumentKey key = keys.get(index);
-            args.add(key.symbol());
+            args.add(key.instrumentId());
             args.add(key.productLine().name());
         }
         return sql.toString();

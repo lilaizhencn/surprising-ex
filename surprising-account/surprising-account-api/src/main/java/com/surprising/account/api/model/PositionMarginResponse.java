@@ -6,7 +6,7 @@ import java.time.Instant;
 
 public record PositionMarginResponse(
         long userId,
-        String symbol,
+        String instrumentId,
         String asset,
         MarginMode marginMode,
         PositionSide positionSide,
@@ -19,11 +19,11 @@ public record PositionMarginResponse(
     }
 
     public PositionMarginResponse(long userId,
-                                  String symbol,
+                                  String instrumentId,
                                   String asset,
                                   MarginMode marginMode,
                                   long marginUnits,
                                   Instant updatedAt) {
-        this(userId, symbol, asset, marginMode, PositionSide.NET, marginUnits, updatedAt);
+        this(userId, instrumentId, asset, marginMode, PositionSide.NET, marginUnits, updatedAt);
     }
 }

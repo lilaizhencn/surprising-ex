@@ -55,8 +55,8 @@ public class CandleQueryService {
         }
     }
 
-    public CandleQueryResponse query(String symbol, String period, Instant startTime, Instant endTime, int limit) {
-        String normalizedSymbol = CandleKey.normalizeSymbol(symbol);
+    public CandleQueryResponse query(String instrumentId, String period, Instant startTime, Instant endTime, int limit) {
+        String normalizedSymbol = CandleKey.normalizeSymbol(instrumentId);
         CandlePeriod candlePeriod = CandlePeriod.fromCode(period);
         validateRange(startTime, endTime);
         int safeLimit = Math.min(limit, properties.getQuery().getMaxLimit());
@@ -97,7 +97,7 @@ public class CandleQueryService {
             }
             Instant close = period.closeTime(open);
             BigDecimal price = previous.closePrice();
-            CandleResponse carried = new CandleResponse(previous.symbol(), period.code(), open, close,
+            CandleResponse carried = new CandleResponse(previous.instrumentId(), period.code(), open, close,
                     price, price, price, price, BigDecimal.ZERO, BigDecimal.ZERO, 0,
                     null, null, null, null,
                     close.isAfter(through) ? CandleStatus.PARTIAL : CandleStatus.CLOSED,
@@ -108,8 +108,8 @@ public class CandleQueryService {
         return List.copyOf(result);
     }
 
-    public Optional<CandleResponse> latest(String symbol, String period) {
-        String normalizedSymbol = CandleKey.normalizeSymbol(symbol);
+    public Optional<CandleResponse> latest(String instrumentId, String period) {
+        String normalizedSymbol = CandleKey.normalizeSymbol(instrumentId);
         CandlePeriod candlePeriod = CandlePeriod.fromCode(period);
         if (hotCache != null) {
             Optional<CandleResponse> latest = hotCache.latest(normalizedSymbol, candlePeriod.code());
@@ -121,13 +121,13 @@ public class CandleQueryService {
         return candleQueryRepository.findLatest(normalizedSymbol, candlePeriod.code());
     }
 
-    private List<CandleResponse> loadPersistedRange(String symbol,
+    private List<CandleResponse> loadPersistedRange(String instrumentId,
                                                     String period,
                                                     Instant startTime,
                                                     Instant endTime,
                                                     int limit) {
         databaseFallbacks.increment();
-        return candleQueryRepository.findRange(symbol, period, startTime, endTime, limit);
+        return candleQueryRepository.findRange(instrumentId, period, startTime, endTime, limit);
     }
 
     private void validateRange(Instant startTime, Instant endTime) {

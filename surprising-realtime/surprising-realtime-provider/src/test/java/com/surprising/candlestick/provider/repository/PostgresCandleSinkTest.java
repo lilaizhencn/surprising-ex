@@ -28,12 +28,12 @@ class PostgresCandleSinkTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).batchUpdate(sql.capture(),
                 org.mockito.ArgumentMatchers.any(BatchPreparedStatementSetter.class));
-        assertThat(sql.getValue()).contains("ON CONFLICT (symbol, period, open_time) DO NOTHING");
+        assertThat(sql.getValue()).contains("ON CONFLICT (instrument_id, period, open_time) DO NOTHING");
     }
 
     private CandleSnapshot snapshot(String period, CandleStatus status) {
         Instant open = Instant.parse("2026-08-25T10:00:00Z");
-        return new CandleSnapshot("BTC-USDT", period, open, open.plusSeconds(60),
+        return new CandleSnapshot("1", period, open, open.plusSeconds(60),
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, 1, "a", "a", 1L, 1L,
                 status, open, 0, 1L);

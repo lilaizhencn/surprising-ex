@@ -33,20 +33,20 @@ public class CandlestickController {
     }
 
     @GetMapping(CandlestickApiPaths.BASE_PATH + "/trades/recent")
-    public java.util.Map<String, ?> recentTrades(@RequestParam("symbol") String symbol,
+    public java.util.Map<String, ?> recentTrades(@RequestParam("instrumentId") String instrumentId,
                                                    @RequestParam(value = "limit", defaultValue = "20") int limit,
                                                    @RequestHeader(value = "X-Product-Line", required = false) String productLine) {
         if (productLine != null && !properties.getKafka().getProductLine().name().equalsIgnoreCase(productLine))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product line is not enabled here");
         try {
-            return java.util.Map.of("trades", recentTradeQueryService.recent(symbol, limit));
+            return java.util.Map.of("trades", recentTradeQueryService.recent(instrumentId, limit));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
     @GetMapping(CandlestickApiPaths.BASE_PATH + "/candles")
-    public CandleQueryResponse queryCandles(@RequestParam("symbol") String symbol,
+    public CandleQueryResponse queryCandles(@RequestParam("instrumentId") String instrumentId,
                                             @RequestParam("period") String period,
                                             @RequestParam("startTime")
                                             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
@@ -56,16 +56,16 @@ public class CandlestickController {
                                             @Valid Instant endTime,
                                             @RequestParam(value = "limit", defaultValue = "500") int limit) {
         try {
-            return candleQueryService.query(symbol, period, startTime, endTime, limit);
+            return candleQueryService.query(instrumentId, period, startTime, endTime, limit);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
     @GetMapping(CandlestickApiPaths.BASE_PATH + "/candles/latest")
-    public CandleResponse latestCandle(@RequestParam("symbol") String symbol, @RequestParam("period") String period) {
+    public CandleResponse latestCandle(@RequestParam("instrumentId") String instrumentId, @RequestParam("period") String period) {
         try {
-            return candleQueryService.latest(symbol, period)
+            return candleQueryService.latest(instrumentId, period)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "candle not found"));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

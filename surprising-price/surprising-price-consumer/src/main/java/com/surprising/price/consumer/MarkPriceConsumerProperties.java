@@ -30,14 +30,14 @@ public class MarkPriceConsumerProperties {
     private int concurrency = 1;
     @Setter
     private int maxPollRecords = 500;
-    private List<String> requiredSymbols = List.of();
+    private List<String> requiredInstrumentIds = List.of();
 
     public String resolvedTopic() {
         return ProductTopicNames.of(productLine).priceEventsTopic();
     }
 
-    public void setRequiredSymbols(List<String> requiredSymbols) {
-        this.requiredSymbols = requiredSymbols == null ? List.of() : requiredSymbols.stream()
+    public void setRequiredInstrumentIds(List<String> requiredInstrumentIds) {
+        this.requiredInstrumentIds = requiredInstrumentIds == null ? List.of() : requiredInstrumentIds.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .distinct()

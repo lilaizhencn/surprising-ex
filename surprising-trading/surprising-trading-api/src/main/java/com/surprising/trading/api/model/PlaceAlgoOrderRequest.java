@@ -11,7 +11,7 @@ import java.time.Instant;
 public record PlaceAlgoOrderRequest(
         @Positive long userId,
         @NotBlank @Size(max = 64) String clientAlgoOrderId,
-        @NotBlank @Size(max = 64) String symbol,
+        @NotBlank @Size(max = 64) String instrumentId,
         @NotNull AlgoOrderType algoType,
         @NotNull OrderSide side,
         @Min(0) long priceTicks,

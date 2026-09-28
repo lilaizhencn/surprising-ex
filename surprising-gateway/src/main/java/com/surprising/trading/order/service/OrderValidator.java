@@ -23,7 +23,7 @@ public class OrderValidator {
     private final MarkPriceLookup markPriceLookup;
 
     public OrderValidator(InstrumentRuleLookup instrumentRuleLookup) {
-        this(instrumentRuleLookup, new TradingOrderProperties(), (symbol, instrumentChangeId, maxAgeMs) -> OptionalLong.empty());
+        this(instrumentRuleLookup, new TradingOrderProperties(), (instrumentId, instrumentChangeId, maxAgeMs) -> OptionalLong.empty());
     }
 
     @Autowired
@@ -36,12 +36,12 @@ public class OrderValidator {
     }
 
     public ValidationResult validate(PlaceOrderRequest request) {
-        InstrumentRule rule = instrumentRuleLookup.currentRule(request.symbol()).orElse(null);
+        InstrumentRule rule = instrumentRuleLookup.currentRule(request.instrumentId()).orElse(null);
         return validate(request, rule);
     }
 
-    public java.util.Optional<InstrumentRule> currentRule(String symbol) {
-        return instrumentRuleLookup.currentRule(symbol);
+    public java.util.Optional<InstrumentRule> currentRule(String instrumentId) {
+        return instrumentRuleLookup.currentRule(instrumentId);
     }
 
     public ValidationResult validate(PlaceOrderRequest request, InstrumentRule rule) {
@@ -56,7 +56,7 @@ public class OrderValidator {
         }
 
         if (rule == null) {
-            return ValidationResult.reject("unknown symbol");
+            return ValidationResult.reject("unknown instrumentId");
         }
         ValidationResult tradingMode = validateInstrumentTradingMode(request, rule);
         if (!tradingMode.accepted()) {
@@ -129,7 +129,7 @@ public class OrderValidator {
         if (request.timeInForce() != TimeInForce.IOC && request.timeInForce() != TimeInForce.FOK) {
             return ValidationResult.reject("market order requires IOC or FOK", rule.changeId(), rule.instrumentType());
         }
-        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.changeId(),
+        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
             return ValidationResult.reject("mark price unavailable", rule.changeId(), rule.instrumentType());
@@ -166,7 +166,7 @@ public class OrderValidator {
         if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
             return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
         }
-        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.changeId(),
+        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getLimitPriceMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
             return ValidationResult.reject("mark price unavailable", rule.changeId(), rule.instrumentType());

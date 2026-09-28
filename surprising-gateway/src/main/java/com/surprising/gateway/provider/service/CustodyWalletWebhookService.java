@@ -24,20 +24,19 @@ public class CustodyWalletWebhookService {
 
     private final GatewayProperties properties;
     private final CustodyWalletWebhookRepository repository;
-    private final CustodyWalletClient walletClient;
     private final CustodyWithdrawalService withdrawalService;
     private final SpotAccountClient spotAccountClient;
     private final ObjectMapper objectMapper;
+    private final com.surprising.asset.service.AssetConfigurationService assets;
 
     public CustodyWalletWebhookService(GatewayProperties properties,
                                        CustodyWalletWebhookRepository repository,
-                                       CustodyWalletClient walletClient,
                                        CustodyWithdrawalService withdrawalService,
                                        SpotAccountClient spotAccountClient,
-                                       ObjectMapper objectMapper) {
+                                       ObjectMapper objectMapper, com.surprising.asset.service.AssetConfigurationService assets) {
         this.properties = properties;
+        this.assets = assets;
         this.repository = repository;
-        this.walletClient = walletClient;
         this.withdrawalService = withdrawalService;
         this.spotAccountClient = spotAccountClient;
         this.objectMapper = objectMapper;
@@ -118,7 +117,7 @@ public class CustodyWalletWebhookService {
         if (amount.isBlank()) {
             amount = stringValue(data.get("amount"), "wallet webhook amount");
         }
-        long units = walletClient.amountUnits(asset, amount);
+        long units = assets.amountUnits(asset, amount);
         if (DEPOSIT_REORGED.equals(eventType)) {
             units = Math.negateExact(units);
         }

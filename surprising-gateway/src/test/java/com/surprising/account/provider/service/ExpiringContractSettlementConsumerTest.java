@@ -29,10 +29,10 @@ class ExpiringContractSettlementConsumerTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
-        DeliverySettlementEvent event = deliveryEvent("BTC-USDT-260327");
+        DeliverySettlementEvent event = deliveryEvent("51");
 
         consumer.onDeliverySettlement(new ConsumerRecord<>(properties.getKafka().getDeliverySettlementsTopic(),
-                0, 1L, "BTC-USDT-260327", objectMapper.writeValueAsString(event)));
+                0, 1L, "51", objectMapper.writeValueAsString(event)));
 
         assertThat(fanoutService.deliveryEvent).isEqualTo(event);
     }
@@ -45,10 +45,10 @@ class ExpiringContractSettlementConsumerTest {
         properties.getKafka().setProductLine(ProductLine.OPTION);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
-        OptionExerciseEvent event = optionEvent("BTC-USDT-260925-70000-C");
+        OptionExerciseEvent event = optionEvent("45");
 
         consumer.onOptionExercise(new ConsumerRecord<>(properties.getKafka().getOptionExercisesTopic(),
-                0, 1L, "BTC-USDT-260925-70000-C", objectMapper.writeValueAsString(event)));
+                0, 1L, "45", objectMapper.writeValueAsString(event)));
 
         assertThat(fanoutService.optionEvent).isEqualTo(event);
     }
@@ -62,12 +62,12 @@ class ExpiringContractSettlementConsumerTest {
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onDeliverySettlement(new ConsumerRecord<>(
-                "surprising.linear-delivery.delivery.settlements.v1", 0, 1L, "ETH-USDT-260327",
-                objectMapper.writeValueAsString(deliveryEvent("BTC-USDT-260327")))))
+                "surprising.linear-delivery.delivery.settlements.v1", 0, 1L, "52",
+                objectMapper.writeValueAsString(deliveryEvent("51")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process delivery settlement")
                 .satisfies(ex -> assertThat(ex.getCause())
-                        .hasMessageContaining("delivery settlement Kafka key must match payload symbol"));
+                        .hasMessageContaining("delivery settlement Kafka key must match payload instrumentId"));
 
         assertThat(fanoutService.deliveryEvent).isNull();
     }
@@ -82,8 +82,8 @@ class ExpiringContractSettlementConsumerTest {
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onDeliverySettlement(new ConsumerRecord<>(
-                "surprising.inverse-delivery.delivery.settlements.v1", 0, 1L, "BTC-USDT-260327",
-                objectMapper.writeValueAsString(deliveryEvent("BTC-USDT-260327")))))
+                "surprising.inverse-delivery.delivery.settlements.v1", 0, 1L, "51",
+                objectMapper.writeValueAsString(deliveryEvent("51")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process delivery settlement")
                 .satisfies(ex -> assertThat(ex.getCause())
@@ -103,8 +103,8 @@ class ExpiringContractSettlementConsumerTest {
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onOptionExercise(new ConsumerRecord<>(
-                "surprising.linear-delivery.option.exercises.v1", 0, 1L, "BTC-USDT-260925-70000-C",
-                objectMapper.writeValueAsString(optionEvent("BTC-USDT-260925-70000-C")))))
+                "surprising.linear-delivery.option.exercises.v1", 0, 1L, "45",
+                objectMapper.writeValueAsString(optionEvent("45")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process option exercise")
                 .satisfies(ex -> assertThat(ex.getCause())
@@ -135,13 +135,13 @@ class ExpiringContractSettlementConsumerTest {
         assertThat(deliveryConsumer.groupId()).isEqualTo("surprising-option-account-v1");
     }
 
-    private static DeliverySettlementEvent deliveryEvent(String symbol) {
-        return new DeliverySettlementEvent(symbol, 4L, ContractType.LINEAR_DELIVERY, 100L,
+    private static DeliverySettlementEvent deliveryEvent(String instrumentId) {
+        return new DeliverySettlementEvent(instrumentId, 4L, ContractType.LINEAR_DELIVERY, 100L,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null);
     }
 
-    private static OptionExerciseEvent optionEvent(String symbol) {
-        return new OptionExerciseEvent(symbol, 6L, "BTC-USDT", 70_000_000L, 71_000_000L, 1_000L,
+    private static OptionExerciseEvent optionEvent(String instrumentId) {
+        return new OptionExerciseEvent(instrumentId, 6L, "1", com.surprising.product.api.ProductLine.SPOT, 70_000_000L, 71_000_000L, 1_000L,
                 OptionType.CALL, OptionExerciseStyle.EUROPEAN, EVENT_TIME, EVENT_TIME,
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null);
     }

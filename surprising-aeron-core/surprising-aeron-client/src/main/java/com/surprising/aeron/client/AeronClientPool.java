@@ -357,10 +357,10 @@ public final class AeronClientPool implements AutoCloseable {
         return lifecycleControlQueryAsync(type, queryId, userId, payload).join();
     }
 
-    public CoreResponse lifecycleOpenOrders(long userId, String symbol, int limit) {
+    public CoreResponse lifecycleOpenOrders(long userId, String instrumentId, int limit) {
         return lifecycleControlQuery(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), userId,
                 com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOpenOrdersQuery(
-                        new com.surprising.aeron.protocol.CoreOpenOrdersQuery(symbol, 0L, limit)));
+                        new com.surprising.aeron.protocol.CoreOpenOrdersQuery(instrumentId, 0L, limit)));
     }
 
     private CompletableFuture<CoreResponse> enqueueControlQuery(

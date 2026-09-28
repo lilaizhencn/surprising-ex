@@ -17,17 +17,17 @@ public class FundingSequenceRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public long next(String symbol) {
+    public long next(String instrumentId) {
         Long value = jdbcTemplate.queryForObject("""
-                INSERT INTO price_symbol_sequences (module, symbol, sequence, updated_at)
+                INSERT INTO price_symbol_sequences (module, instrument_id, sequence, updated_at)
                 VALUES (?, ?, 1, now())
-                ON CONFLICT (module, symbol) DO UPDATE SET
+                ON CONFLICT (module, instrument_id) DO UPDATE SET
                     sequence = price_symbol_sequences.sequence + 1,
                     updated_at = now()
                 RETURNING sequence
-                """, Long.class, RATE_MODULE, symbol);
+                """, Long.class, RATE_MODULE, instrumentId);
         if (value == null) {
-            throw new IllegalStateException("failed to allocate funding-rate sequence for " + symbol);
+            throw new IllegalStateException("failed to allocate funding-rate sequence for " + instrumentId);
         }
         return value;
     }

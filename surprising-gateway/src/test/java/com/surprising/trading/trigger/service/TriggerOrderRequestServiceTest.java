@@ -63,6 +63,6 @@ class TriggerOrderRequestServiceTest {
     }
 
     private static PlaceTriggerOrderRequest request() {
-        return new PlaceTriggerOrderRequest(1001L, "client-trigger-1", null, "BTC-USDT", OrderSide.BUY, TriggerOrderType.STOP_LOSS, 60_000L, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, null, null);
+        return new PlaceTriggerOrderRequest(1001L, "client-trigger-1", null, "1", OrderSide.BUY, TriggerOrderType.STOP_LOSS, 60_000L, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, null, null);
     }
 }

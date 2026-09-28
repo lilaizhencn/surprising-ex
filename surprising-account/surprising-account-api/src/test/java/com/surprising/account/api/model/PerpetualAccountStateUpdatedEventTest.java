@@ -19,23 +19,23 @@ class PerpetualAccountStateUpdatedEventTest {
                 1, 11L, 7L, ProductLine.LINEAR_PERPETUAL, 1001L, "usdt_perpetual",
                 List.of(new PerpetualAccountStateUpdatedEvent.Balance("usdt", 90L, 10L)),
                 List.of(new PerpetualAccountStateUpdatedEvent.Deficit("usdt", 5L, 2L)),
-                List.of(new PerpetualAccountStateUpdatedEvent.Position("btc-usdt", MarginMode.CROSS,
+                List.of(new PerpetualAccountStateUpdatedEvent.Position("1", MarginMode.CROSS,
                         PositionSide.NET, 2L, 100L, 200L, 0L, Instant.EPOCH)),
-                List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("btc-usdt", "usdt",
+                List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("1", "usdt",
                         MarginMode.ISOLATED, PositionSide.NET, 20L)),
                 List.of(new PerpetualAccountStateUpdatedEvent.OrderLock("usdt", 30L)),
                 PositionMode.ONE_WAY, Instant.EPOCH, "trace");
 
         assertThat(event.accountType()).isEqualTo("USDT_PERPETUAL");
         assertThat(event.balances().getFirst().asset()).isEqualTo("USDT");
-        assertThat(event.positions().getFirst().symbol()).isEqualTo("BTC-USDT");
+        assertThat(event.positions().getFirst().instrumentId()).isEqualTo("1");
         assertThat(event.partitionKey()).isEqualTo("LINEAR_PERPETUAL:1001");
     }
 
     @Test
     void rejectsIncompleteOpenPosition() {
         assertThatThrownBy(() -> new PerpetualAccountStateUpdatedEvent.Position(
-                "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                "1", MarginMode.CROSS, PositionSide.NET,
                 1L, 0L, 100L, 0L, Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("open position fields");

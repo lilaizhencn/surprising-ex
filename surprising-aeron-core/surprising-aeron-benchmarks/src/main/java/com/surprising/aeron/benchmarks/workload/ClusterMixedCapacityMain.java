@@ -155,11 +155,11 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for (int i = 0; i < SYMBOLS; i++) {
             long account = topology.accountLaneMask(maker(i));
             // Instruments are registered in index order; a different starting ID only rotates shards.
-            long symbol = 1L << topology.matcherShardId(i + 1);
+            long instrumentId = 1L << topology.matcherShardId(i + 1);
             if ((accounts & account) != 0) accountCollisions++;
-            if ((symbols & symbol) != 0) symbolCollisions++;
+            if ((symbols & instrumentId) != 0) symbolCollisions++;
             accounts |= account;
-            symbols |= symbol;
+            symbols |= instrumentId;
         }
         if (accountCollisions == 0 || symbolCollisions == 0)
             throw new IllegalStateException("owner optimization workload coverage missing");
@@ -168,7 +168,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private long positionMaker(int i) { return users.get(USERS+1+i); }
     private long maker(int i) { return users.get(USERS+1+SYMBOLS+i); }
     private long taker(int i) { return users.get(USERS+1+2*SYMBOLS+(i+1)%SYMBOLS); }
-    private String symbol(int i) { return "JMH-MIX-"+i+"-USDT"; }
+    private String instrumentId(int i) { return Integer.toString(10000 + i); }
     private long nextOrder() { return ++orderId; }
     private UUID nextRequest() { return new UUID(seed, ++requestId); }
 
@@ -179,15 +179,15 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         return (UNICODE_CLIENT_IDS && (id & 15) == 0 ? "客户😀-" : "mixed-") + id;
     }
 
-    static PlaceOrderCommand order(long id,String symbol,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
-        return new PlaceOrderCommand(id,symbol,side,price,quantity,false,CoreMarginMode.CROSS,
+    static PlaceOrderCommand order(long id,String instrumentId,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
+        return new PlaceOrderCommand(id,instrumentId,side,price,quantity,false,CoreMarginMode.CROSS,
                 CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,expectedClientOrderId(id));
     }
 
     private void setup() {
         for(int i=0;i<SYMBOLS;i++) {
             send(CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand(symbol(i),ContractType.LINEAR_PERPETUAL.ordinal(),"MIX"+i,
+                    new RegisterInstrumentCommand(instrumentId(i),ContractType.LINEAR_PERPETUAL.ordinal(),"MIX"+i,
                             "USDT","USDT",1,1,1,100_000,50_000,0,0,0,-1,0)),1,null);
         }
         for(int i=0;i<SYMBOLS;i++) price(i,100);
@@ -205,7 +205,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             for (int n = 0; n < 3; n++) {
                 long id = nextOrder();
                 send(CoreMessageType.PLACE_ORDER, users.getFirst(), TradingCommandCodec.encodePlaceOrder(
-                        new PlaceOrderCommand(id, symbol(SYMBOLS-1), CoreOrderSide.SELL, 110, 1, true,
+                        new PlaceOrderCommand(id, instrumentId(SYMBOLS-1), CoreOrderSide.SELL, 110, 1, true,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, expectedClientOrderId(id))), 1, null);
             }
@@ -275,7 +275,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     private void cycle() {
-        // Complete any funding cut before trading the affected symbol; response-dependent pages
+        // Complete any funding cut before trading the affected instrumentId; response-dependent pages
         // are control work. Trading itself is an independently submitted FIFO command stream.
         for(int i=0;i<SYMBOLS;i++)while(fundingCursor[i]!=0)funding(i);
         long[][] quotes=new long[SYMBOLS][];
@@ -323,18 +323,18 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void publishPrice(int i, long value, long generatedAt) {
         mark[i]=value;markTime[i]=generatedAt;
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol(i),value,++markSequence[i],markTime[i])),1,null);
+                new ApplyMarkPriceCommand(instrumentId(i),value,++markSequence[i],markTime[i])),1,null);
     }
     private long place(int i,long user,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         refresh(i);long id=nextOrder();
-        send(CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(order(id,symbol(i),side,price,quantity,tif)),1,null);
+        send(CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(order(id,instrumentId(i),side,price,quantity,tif)),1,null);
         return id;
     }
     private long[] batch(int i,long user,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         refresh(i);var commands=new ArrayList<PlaceOrderCommand>(batchSize);long[] ids=new long[batchSize];
-        for(int n=0;n<batchSize;n++) { ids[n]=nextOrder();commands.add(order(ids[n],symbol(i),side,price,quantity,tif)); }
+        for(int n=0;n<batchSize;n++) { ids[n]=nextOrder();commands.add(order(ids[n],instrumentId(i),side,price,quantity,tif)); }
         send(CoreMessageType.PLACE_ORDER_BATCH,user,TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(commands)),batchSize,
-                r -> { long count=validateBatch(r,ids,user,symbol(i));if(measured)fills+=count; });
+                r -> { long count=validateBatch(r,ids,user,instrumentId(i));if(measured)fills+=count; });
         return ids;
     }
     private void cancel(long user,long id) { send(CoreMessageType.CANCEL_ORDER,user,TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(id)),1,null); }
@@ -367,8 +367,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                     || item.order().executedQuantitySteps() + item.order().remainingQuantitySteps() != item.order().quantitySteps()))
                 throw new IllegalStateException("mixed batch order state mismatch: " + item);
             if (item.order() != null && (expectedUser != 0 && item.order().userId() != expectedUser
-                    || expectedSymbol != null && !expectedSymbol.equals(item.order().symbol())))
-                throw new IllegalStateException("mixed batch Lane result account/symbol mismatch");
+                    || expectedSymbol != null && !expectedSymbol.equals(item.order().instrumentId())))
+                throw new IllegalStateException("mixed batch Lane result account/instrumentId mismatch");
             for(var execution:item.executions()) {
                 if (expectedUser != 0 && execution.takerUserId() != expectedUser)
                     throw new IllegalStateException("mixed batch execution account mismatch");
@@ -382,13 +382,13 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void funding(int i) {
         if(fundingComplete[i]) { fundingId[i]+=SYMBOLS;fundingComplete[i]=false; }
         var r=execute(CoreMessageType.APPLY_FUNDING,0,TradingCommandCodec.encodeApplyFunding(
-                new ApplyFundingCommand(fundingId[i],symbol(i),(i&1)==0?100_000:-100_000,fundingCursor[i],controlPageSize == 0 ? 64 : controlPageSize)));
+                new ApplyFundingCommand(fundingId[i],instrumentId(i),(i&1)==0?100_000:-100_000,fundingCursor[i],controlPageSize == 0 ? 64 : controlPageSize)));
         var progress=CoreFundingProgressCodec.decode(r.data());
         fundingCursor[i]=progress.nextCursorUserId();fundingComplete[i]=progress.complete();
     }
     private void trigger(int i) {
         refresh(i);long id=nextOrder();boolean loss=i==SYMBOLS-1;
-        var trigger=new CoreTriggerOrderStateView(id,ProductLine.LINEAR_PERPETUAL,taker(i),"mixed-trigger-"+id,"",symbol(i),
+        var trigger=new CoreTriggerOrderStateView(id,ProductLine.LINEAR_PERPETUAL,taker(i),"mixed-trigger-"+id,"",instrumentId(i),
                 CoreOrderSide.SELL,loss?CoreTriggerOrderType.STOP_LOSS:CoreTriggerOrderType.TAKE_PROFIT,
                 loss?CoreTriggerCondition.LESS_OR_EQUAL:CoreTriggerCondition.GREATER_OR_EQUAL,mark[i],
                 0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,110,1,CoreMarginMode.CROSS,CorePositionSide.NET,
@@ -436,7 +436,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         int cancellationPages = 0;
         while (true) {
             execute(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,0,TradingCommandCodec.encodeExecuteLiquidationBatch(
-                    new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.symbol(),
+                    new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.instrumentId(),
                             a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
                             liquidationCancellationBoundary ? 1 : ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,0,null,0)));
             cancellationPages++;
@@ -458,11 +458,11 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 new ResolveLiquidationCommand(a.liquidationId(),ResolveLiquidationCommand.Resolution.INSURANCE,coverage)));
         var adl=work(CoreLiquidationWorkView.Purpose.ADL).resolutions();
         if(adl.size()!=1)throw new IllegalStateException("ADL work missing: "+adl);
-        var p=user(positionMaker(SYMBOLS-1)).positions().stream().filter(x->x.symbol().equals(symbol(SYMBOLS-1))).findFirst().orElseThrow();
+        var p=user(positionMaker(SYMBOLS-1)).positions().stream().filter(x->x.instrumentId().equals(instrumentId(SYMBOLS-1))).findFirst().orElseThrow();
         long profit=p.entryPriceTicks()-1, deficit=adl.getFirst().deficitUnits();
         long quantity=Math.floorDiv(Math.addExact(deficit,profit-1),profit);
         execute(CoreMessageType.EXECUTE_ADL,0,TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(a.liquidationId(),
-                positionMaker(SYMBOLS-1),symbol(SYMBOLS-1),CoreMarginMode.CROSS,CorePositionSide.NET,
+                positionMaker(SYMBOLS-1),instrumentId(SYMBOLS-1),CoreMarginMode.CROSS,CorePositionSide.NET,
                 p.signedQuantitySteps(),p.entryPriceTicks(),adl.getFirst().triggerPriceSequence(),quantity,deficit)));
         if(!work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions().isEmpty()
                 || !work(CoreLiquidationWorkView.Purpose.ADL).resolutions().isEmpty()
@@ -571,8 +571,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             var state=user(retail(u));
             if(state.positions().size()!=1+u%5)throw new IllegalStateException("retail position count "+u);
             for(int p=0;p<1+u%5;p++) {
-                String symbol=symbol((u+p)%SYMBOLS);long quantity=1+((u+p)&3);
-                if(state.positions().stream().noneMatch(x->x.symbol().equals(symbol)&&x.signedQuantitySteps()==quantity))
+                String instrumentId=instrumentId((u+p)%SYMBOLS);long quantity=1+((u+p)&3);
+                if(state.positions().stream().noneMatch(x->x.instrumentId().equals(instrumentId)&&x.signedQuantitySteps()==quantity))
                     throw new IllegalStateException("retail position quantity "+u);
             }
             var orders=CoreStateQueryCodec.decodeOpenOrders(query(CoreMessageType.USER_OPEN_ORDERS_QUERY,retail(u),
@@ -591,12 +591,12 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         long expected = Math.addExact(expectedFunds(), sideLoad == null ? 0 : sideLoad.netDeposits());
         if(total!=expected||!lossCompleted)throw new IllegalStateException("mixed funds/lifecycle mismatch actual="+total+" expected="+expected);
         for(int i=0;i<SYMBOLS;i++)for(long id:new long[]{maker(i),taker(i)}) {
-            String instrument=symbol(i);
+            String instrument=instrumentId(i);
             var openOrders = CoreStateQueryCodec.decodeOpenOrders(query(CoreMessageType.USER_OPEN_ORDERS_QUERY,id,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrument,0,1))).data());
             if (!openOrders.orders().isEmpty()) throw new IllegalStateException("HFT committed order index retained terminal orders user="+id);
             var s=user(id);long expectedPosition=fillHeavy ? 0 : (id==maker(i)?-1:1)*totalCycles*batchSize;
-            long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
+            long actual=s.positions().stream().filter(p->p.instrumentId().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
             if(actual!=expectedPosition||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expectedPosition+" actual="+actual);
         }
         if(offered!=terminal||coreOffered!=coreTerminal||peak>window)throw new IllegalStateException("mixed terminal counters disagree");

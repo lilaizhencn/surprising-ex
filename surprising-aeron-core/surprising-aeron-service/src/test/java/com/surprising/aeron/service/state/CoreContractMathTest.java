@@ -21,7 +21,7 @@ class CoreContractMathTest {
     @Test
     void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("BTC-OPTION", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 2, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100));
@@ -35,7 +35,7 @@ class CoreContractMathTest {
     @Test
     void maintenanceMarginUsesTheInstrumentRiskBracketForCurrentNotional() {
         CoreInstrument instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("BTC-USDT",
+                new RegisterInstrumentCommand("1",
                         com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
@@ -58,7 +58,7 @@ class CoreContractMathTest {
     @Test
     void optionShortMarginUsesIndexForwardOtmAndCurrentPremium() {
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("BTC-OPTION", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100, 10_000_000, 10_000, 0, 1,
@@ -77,7 +77,7 @@ class CoreContractMathTest {
     @Test
     void putShortMarginUsesPutOtmDirectionAndMarkBasedMaintenanceFloor() {
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("BTC-PUT", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("7", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.PUT.ordinal(), 100, 10_000_000, 10_000, 0, 1,

@@ -42,11 +42,11 @@ class LocalTradingLifecycleLiveTest {
         List<String> symbols = new ArrayList<>();
         for (JsonNode strategy : makerBefore.path("strategies")) {
             assertThat(strategy.path("status").asText()).isEqualTo("RUNNING");
-            symbols.add(strategy.path("symbols").get(0).asText());
+            symbols.add(strategy.path("instrumentIds").get(0).asText());
         }
         assertThat(symbols).hasSize(20);
         Map<String, JsonNode> instruments = new HashMap<>();
-        for (String symbol : symbols) instruments.put(symbol, request("GET", BASE + "/api/v1/gateway/instrument/latest?symbol=" + symbol, null, null));
+        for (String instrumentId : symbols) instruments.put(instrumentId, request("GET", BASE + "/api/v1/gateway/instrument/latest?instrumentId=" + instrumentId, null, null));
         try (var executor = Executors.newFixedThreadPool(Integer.getInteger("live.concurrency", 10))) {
             List<Future<?>> tasks = new ArrayList<>();
             for (int i = 0; i < count; i++) {
@@ -56,8 +56,8 @@ class LocalTradingLifecycleLiveTest {
                     participants.add(user);
                     adjust(user, DEPOSIT, "deposit");
                     user.connect();
-                    String symbol = symbols.get(index % symbols.size());
-                    for (int cycle = 0; cycle < cycles; cycle++) exercise(user, symbol, instruments.get(symbol), cycle);
+                    String instrumentId = symbols.get(index % symbols.size());
+                    for (int cycle = 0; cycle < cycles; cycle++) exercise(user, instrumentId, instruments.get(instrumentId), cycle);
                     System.out.println("live-qa completed=" + completed.incrementAndGet() + "/" + count + " user=" + user.id);
                 }));
             }
@@ -86,8 +86,8 @@ class LocalTradingLifecycleLiveTest {
                     long orderId = fill.path("orderId").asLong();
                     JsonNode order = user.orders.get(orderId);
                     assertThat(order).as("execution belongs to submitted order").isNotNull();
-                    assertThat(event.path("symbol").asText()).isEqualTo(order.path("symbol").asText());
-                    JsonNode instrument = instruments.get(order.path("symbol").asText());
+                    assertThat(event.path("instrumentId").asText()).isEqualTo(order.path("instrumentId").asText());
+                    JsonNode instrument = instruments.get(order.path("instrumentId").asText());
                     BigInteger notional = BigInteger.valueOf(fill.path("priceTicks").asLong())
                             .multiply(BigInteger.valueOf(fill.path("quantitySteps").asLong()))
                             .multiply(BigInteger.valueOf(instrument.path("notionalMultiplierUnits").asLong()));
@@ -116,20 +116,20 @@ class LocalTradingLifecycleLiveTest {
         System.out.println("live-qa PASS report=" + output.toAbsolutePath());
     }
 
-    private void exercise(Participant user, String symbol, JsonNode instrument, int cycle) {
+    private void exercise(Participant user, String instrumentId, JsonNode instrument, int cycle) {
         long quantity = Math.max(1, instrument.path("minQuantitySteps").asLong());
-        JsonNode book = request("GET", BASE + "/api/v1/gateway/trading-market/orderbook?symbol=" + symbol + "&depth=50", null, user.token);
+        JsonNode book = request("GET", BASE + "/api/v1/gateway/trading-market/orderbook?instrumentId=" + instrumentId + "&depth=50", null, user.token);
         long bestBid = book.path("bids").get(0).path("priceTicks").asLong();
-        JsonNode resting = place(user, symbol, "BUY", false, "LIMIT", Math.max(1, bestBid * 995 / 1000), quantity, true);
+        JsonNode resting = place(user, instrumentId, "BUY", false, "LIMIT", Math.max(1, bestBid * 995 / 1000), quantity, true);
         assertThat(resting.path("status").asText()).isEqualTo("ACCEPTED");
         JsonNode canceled = orderResult(request("POST", BASE + "/api/v1/gateway/trading/cancel", Map.of("userId", user.id, "orderId", resting.path("orderId").asLong()), user.token));
         assertThat(canceled.path("status").asText()).isEqualTo("CANCELED");
         user.orders.put(canceled.path("orderId").asLong(), canceled);
         for (String side : List.of("BUY", "SELL")) {
-            JsonNode opened = place(user, symbol, side, false, "MARKET", 0, quantity, false);
-            assertThat(opened.path("status").asText()).as("open " + symbol).isEqualTo("FILLED");
-            JsonNode closed = place(user, symbol, side.equals("BUY") ? "SELL" : "BUY", true, "MARKET", 0, quantity, false);
-            assertThat(closed.path("status").asText()).as("close " + symbol).isEqualTo("FILLED");
+            JsonNode opened = place(user, instrumentId, side, false, "MARKET", 0, quantity, false);
+            assertThat(opened.path("status").asText()).as("open " + instrumentId).isEqualTo("FILLED");
+            JsonNode closed = place(user, instrumentId, side.equals("BUY") ? "SELL" : "BUY", true, "MARKET", 0, quantity, false);
+            assertThat(closed.path("status").asText()).as("close " + instrumentId).isEqualTo("FILLED");
         }
     }
 
@@ -142,14 +142,14 @@ class LocalTradingLifecycleLiveTest {
         adjust(user, DEPOSIT, "oco-deposit");
         user.connect();
         var evidence = new ArrayList<Map<String, Object>>();
-        String symbol = "BTC-USDT-SWAP";
-        var instrument = request("GET", BASE + "/api/v1/gateway/instrument/latest?symbol=" + symbol, null, null);
+        String instrumentId = "49";
+        var instrument = request("GET", BASE + "/api/v1/gateway/instrument/latest?instrumentId=" + instrumentId, null, null);
         try (var core = SurprisingAeronClient.connect(PRODUCT, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
             for (String openingSide : List.of("BUY", "SELL")) {
             for (boolean takeProfitWins : new boolean[]{true, false}) {
-                var opened = place(user, symbol, openingSide, false, "MARKET", 0, 1, false);
+                var opened = place(user, instrumentId, openingSide, false, "MARKET", 0, 1, false);
                 assertThat(opened.path("status").asText()).isEqualTo("FILLED");
-                var mark = request("GET", BASE + "/api/v1/gateway/price-mark/latest?symbol=" + symbol, null, null);
+                var mark = request("GET", BASE + "/api/v1/gateway/price-mark/latest?instrumentId=" + instrumentId, null, null);
                 long markTicks = mark.path("markPriceUnits").asLong() / instrument.path("priceTickUnits").asLong();
                 long direction = openingSide.equals("BUY") ? 1 : -1;
                 String group = run + "-oco-" + openingSide + "-" + takeProfitWins;
@@ -157,7 +157,7 @@ class LocalTradingLifecycleLiveTest {
                 for (boolean tp : new boolean[]{true, false}) {
                     var leg = new LinkedHashMap<String, Object>();
                     leg.put("userId", user.id); leg.put("clientTriggerOrderId", group + (tp ? "-tp" : "-sl"));
-                    leg.put("ocoGroupId", group); leg.put("symbol", symbol); leg.put("side", openingSide.equals("BUY") ? "SELL" : "BUY");
+                    leg.put("ocoGroupId", group); leg.put("instrumentId", instrumentId); leg.put("side", openingSide.equals("BUY") ? "SELL" : "BUY");
                     leg.put("triggerType", tp ? "TAKE_PROFIT" : "STOP_LOSS");
                     leg.put("triggerPriceTicks", tp ? markTicks + direction * (takeProfitWins ? -10_000 : 100_000)
                             : markTicks + direction * (takeProfitWins ? -100_000 : 10_000));
@@ -195,10 +195,10 @@ class LocalTradingLifecycleLiveTest {
         }
     }
 
-    private JsonNode place(Participant user, String symbol, String side, boolean reduce, String type, long price, long qty, boolean postOnly) {
+    private JsonNode place(Participant user, String instrumentId, String side, boolean reduce, String type, long price, long qty, boolean postOnly) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("userId", user.id); body.put("clientOrderId", run + "-" + UUID.randomUUID().toString().substring(0, 20));
-        body.put("symbol", symbol); body.put("side", side); body.put("orderType", type);
+        body.put("instrumentId", instrumentId); body.put("side", side); body.put("orderType", type);
         body.put("timeInForce", postOnly ? "GTX" : "IOC"); body.put("priceTicks", price); body.put("quantitySteps", qty);
         body.put("marginMode", "CROSS"); body.put("positionSide", "NET"); body.put("reduceOnly", reduce); body.put("postOnly", postOnly);
         JsonNode order = orderResult(request("POST", BASE + "/api/v1/gateway/trading", body, user.token));

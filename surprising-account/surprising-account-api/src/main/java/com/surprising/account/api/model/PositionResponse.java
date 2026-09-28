@@ -6,7 +6,7 @@ import java.time.Instant;
 
 public record PositionResponse(
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         long signedQuantitySteps,
@@ -20,23 +20,23 @@ public record PositionResponse(
     }
 
     public PositionResponse(long userId,
-                            String symbol,
+                            String instrumentId,
                             MarginMode marginMode,
                             long signedQuantitySteps,
                             long entryPriceTicks,
                             long realizedPnlUnits,
                             Instant updatedAt) {
-        this(userId, symbol, marginMode, PositionSide.NET, signedQuantitySteps, entryPriceTicks,
+        this(userId, instrumentId, marginMode, PositionSide.NET, signedQuantitySteps, entryPriceTicks,
                 realizedPnlUnits, updatedAt);
     }
 
     public PositionResponse(long userId,
-                            String symbol,
+                            String instrumentId,
                             long signedQuantitySteps,
                             long entryPriceTicks,
                             long realizedPnlUnits,
                             Instant updatedAt) {
-        this(userId, symbol, MarginMode.CROSS, PositionSide.NET, signedQuantitySteps, entryPriceTicks,
+        this(userId, instrumentId, MarginMode.CROSS, PositionSide.NET, signedQuantitySteps, entryPriceTicks,
                 realizedPnlUnits, updatedAt);
     }
 }

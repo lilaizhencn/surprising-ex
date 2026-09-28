@@ -86,7 +86,7 @@ public class AccountLaneCommitBenchmark {
             var userList = new java.util.ArrayList<Long>(accountLanes);
             var orderList = new java.util.ArrayList<Long>(accountLanes);
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];

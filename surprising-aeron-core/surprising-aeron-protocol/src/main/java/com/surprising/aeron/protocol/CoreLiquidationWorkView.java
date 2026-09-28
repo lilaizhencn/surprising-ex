@@ -40,13 +40,13 @@ public record CoreLiquidationWorkView(ProductLine productLine,
         }
     }
 
-    public record Resolution(long liquidationId, long userId, String symbol, String asset,
+    public record Resolution(long liquidationId, long userId, String instrumentId, String asset,
                              CoreMarginMode marginMode, CorePositionSide positionSide,
                              long triggerPriceSequence,
                              long signedQuantitySteps, long deficitUnits, long recommendedCoveredUnits,
                              Purpose purpose) {
         public Resolution {
-            if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
+            if (liquidationId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank()
                     || asset == null || asset.isBlank() || marginMode == null || positionSide == null
  || triggerPriceSequence <= 0 || signedQuantitySteps == 0
                     || deficitUnits <= 0 || recommendedCoveredUnits < 0 || recommendedCoveredUnits > deficitUnits

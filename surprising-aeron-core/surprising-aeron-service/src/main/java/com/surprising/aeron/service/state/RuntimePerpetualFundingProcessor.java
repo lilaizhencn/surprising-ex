@@ -61,7 +61,7 @@ public final class RuntimePerpetualFundingProcessor {
         if (!runtime.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
-        CoreInstrument instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -69,7 +69,7 @@ public final class RuntimePerpetualFundingProcessor {
                 || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "fixed-price clearance has stopped funding");
         }
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         MarkPriceRuntime mark = runtime.markPrice(symbolId);
         if (mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
@@ -285,7 +285,7 @@ public final class RuntimePerpetualFundingProcessor {
                             position.signedQuantitySteps(), markPriceTicks,
                             instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
                             instrument.settleScaleUnits());
-                    payments.add(new CoreFundingPaymentView(command.settlementId(), userId, instrument.symbol(),
+                    payments.add(new CoreFundingPaymentView(command.settlementId(), userId, instrument.instrumentId(),
                             position.marginMode(), position.positionSide(), instrument.settleAsset(),
                             position.signedQuantitySteps(), notional, command.fundingRatePpm(), amount));
                 }

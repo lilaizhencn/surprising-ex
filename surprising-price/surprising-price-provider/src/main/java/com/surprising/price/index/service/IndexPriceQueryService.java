@@ -20,17 +20,17 @@ public class IndexPriceQueryService {
         this.componentRepository = componentRepository;
     }
 
-    public List<IndexPriceResponse> history(String symbol, Instant startTime, Instant endTime, int limit) {
-        return tickRepository.history(symbol, startTime, endTime, limit).stream()
+    public List<IndexPriceResponse> history(String instrumentId, Instant startTime, Instant endTime, int limit) {
+        return tickRepository.history(instrumentId, startTime, endTime, limit).stream()
                 .map(tick -> new IndexPriceResponse(
-                        tick.symbol(),
+                        tick.instrumentId(),
                         tick.indexPrice(),
                         tick.sequence(),
                         tick.status(),
                         tick.componentCount(),
                         tick.validComponentCount(),
                         tick.eventTime(),
-                        componentRepository.find(tick.symbol(), tick.sequence())))
+                        componentRepository.find(tick.instrumentId(), tick.sequence())))
                 .toList();
     }
 }

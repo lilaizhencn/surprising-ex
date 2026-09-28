@@ -48,18 +48,18 @@ public class TradingFeeService {
         this.coreImporter = coreImporter;
     }
 
-    public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentChangeId) {
-        return effectiveFee(userId, symbol, instrumentChangeId, null);
+    public EffectiveTradingFeeResponse effectiveFee(long userId, String instrumentId, long instrumentChangeId) {
+        return effectiveFee(userId, instrumentId, instrumentChangeId, null);
     }
 
     public EffectiveTradingFeeResponse effectiveFee(long userId,
-                                                    String symbol,
+                                                    String instrumentId,
                                                     long instrumentChangeId,
                                                     ProductLine productLine) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String normalizedSymbol = normalizeSymbol(symbol);
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         long resolvedVersion = instrumentChangeId > 0 ? instrumentChangeId : currentVersion(normalizedSymbol);
         Instant now = Instant.now();
         OrderFeeSnapshot snapshot = (feeSnapshotLookup == null
@@ -84,7 +84,7 @@ public class TradingFeeService {
         FeeScheduleResponse previous = feeScheduleSnapshotCache == null ? null
                 : feeScheduleSnapshotCache.find(request.productLine(), feeScheduleId).orElse(null);
         FeeScheduleResponse response = new FeeScheduleResponse(feeScheduleId, request.productLine(), request.userId(),
-                normalizeOptionalSymbol(request.symbol()), request.makerFeeRatePpm(), request.takerFeeRatePpm(),
+                normalizeOptionalSymbol(request.instrumentId()), request.makerFeeRatePpm(), request.takerFeeRatePpm(),
                 request.sourceType() == null ? com.surprising.trading.api.model.FeeScheduleSourceType.USER_OVERRIDE
                         : request.sourceType(),
                 emptyToNull(request.tierCode()), request.reason().trim(),
@@ -117,7 +117,7 @@ public class TradingFeeService {
             return current;
         }
         FeeScheduleResponse response = new FeeScheduleResponse(current.feeScheduleId(), current.productLine(),
-                current.userId(), current.symbol(), current.makerFeeRatePpm(), current.takerFeeRatePpm(),
+                current.userId(), current.instrumentId(), current.makerFeeRatePpm(), current.takerFeeRatePpm(),
                 current.sourceType(), current.tierCode(), current.reason(), FeeScheduleStatus.DISABLED,
                 current.effectiveTime(), current.expireTime(), current.createdAt(), Instant.now());
         if (eventPublisher == null) {
@@ -143,45 +143,45 @@ public class TradingFeeService {
                 Integer.toHexString(schedules.hashCode()), schedules);
     }
 
-    public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
-        return querySchedules(currentProductLine(), userId, symbol, status, limit);
+    public FeeScheduleQueryResponse querySchedules(long userId, String instrumentId, FeeScheduleStatus status, int limit) {
+        return querySchedules(currentProductLine(), userId, instrumentId, status, limit);
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
                                                    long userId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                    FeeScheduleStatus status,
                                                    int limit) {
         requireCurrentProductLine(productLine);
-        return orderFeeRepository.querySchedules(productLine, userId, normalizeOptionalSymbol(symbol), status,
+        return orderFeeRepository.querySchedules(productLine, userId, normalizeOptionalSymbol(instrumentId), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit);
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                    FeeScheduleStatus status,
                                                    int limit,
                                                    String cursor,
                                                    String sort) {
-        return orderFeeRepository.querySchedulesPage(currentProductLine(), userId, normalizeOptionalSymbol(symbol),
+        return orderFeeRepository.querySchedulesPage(currentProductLine(), userId, normalizeOptionalSymbol(instrumentId),
                 status, limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
                                                    long userId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                    FeeScheduleStatus status,
                                                    int limit,
                                                    String cursor,
                                                    String sort) {
         requireCurrentProductLine(productLine);
-        return orderFeeRepository.querySchedulesPage(productLine, userId, normalizeOptionalSymbol(symbol), status,
+        return orderFeeRepository.querySchedulesPage(productLine, userId, normalizeOptionalSymbol(instrumentId), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
     }
 
-    private long currentVersion(String symbol) {
-        InstrumentRule rule = instrumentRuleLookup.currentRule(symbol)
-                .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
+    private long currentVersion(String instrumentId) {
+        InstrumentRule rule = instrumentRuleLookup.currentRule(instrumentId)
+                .orElseThrow(() -> new IllegalStateException("instrument not found: " + instrumentId));
         return rule.changeId();
     }
 
@@ -200,21 +200,21 @@ public class TradingFeeService {
         return properties.getKafka().getProductLine();
     }
 
-    private String normalizeSymbol(String symbol) {
-        String normalized = normalizeOptionalSymbol(symbol);
+    private String normalizeSymbol(String instrumentId) {
+        String normalized = normalizeOptionalSymbol(instrumentId);
         if (normalized == null) {
-            throw new IllegalArgumentException("symbol is required");
+            throw new IllegalArgumentException("instrumentId is required");
         }
         return normalized;
     }
 
-    private String normalizeOptionalSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
+    private String normalizeOptionalSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
             return null;
         }
-        String normalized = symbol.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase();
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

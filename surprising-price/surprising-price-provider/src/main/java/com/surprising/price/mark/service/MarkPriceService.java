@@ -77,10 +77,10 @@ public class MarkPriceService {
     }
 
     public void acceptIndexPrice(IndexPriceEvent event) {
-        if (event == null || event.symbol() == null || event.symbol().isBlank()) {
+        if (event == null || event.instrumentId() == null || event.instrumentId().isBlank()) {
             throw new IllegalArgumentException("index price event is required");
         }
-        indexPrices.compute(event.symbol(),
+        indexPrices.compute(event.instrumentId(),
                 (ignored, current) -> current == null || newer(event, current) ? event : current);
     }
 
@@ -101,7 +101,7 @@ public class MarkPriceService {
         requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
         try {
             PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "match trade");
             acceptTrade(publicTradeEventMapper.toPerpTradeEvent(event));
         } catch (Exception ex) {
             log.warn("Dropped invalid match trade payload: {}", ex.getMessage());
@@ -113,17 +113,17 @@ public class MarkPriceService {
     }
 
     void acceptBookTicker(PerpBookTickerEvent event) {
-        bookTickers.compute(event.symbol(), (symbol, current) -> current == null
+        bookTickers.compute(event.instrumentId(), (instrumentId, current) -> current == null
                 || event.sequence() > current.sequence()
                 || event.sequence() == current.sequence() && !event.eventTime().isBefore(current.eventTime())
                 ? event : current);
     }
 
     void acceptTrade(PerpTradeEvent event) {
-        if (event == null || event.symbol() == null || event.symbol().isBlank()) {
+        if (event == null || event.instrumentId() == null || event.instrumentId().isBlank()) {
             throw new IllegalArgumentException("trade event is required");
         }
-        trades.compute(event.symbol(),(symbol,current)->current==null || event.sequence()>current.sequence()
+        trades.compute(event.instrumentId(),(instrumentId,current)->current==null || event.sequence()>current.sequence()
                 || event.sequence()==current.sequence() && !event.tradeTime().isBefore(current.tradeTime())?event:current);
     }
 
@@ -137,78 +137,78 @@ public class MarkPriceService {
 
     void onFundingRate(String payload) {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> {
-            fundingRates.put(event.symbol(), event);
+            fundingRates.put(event.instrumentId(), event);
             if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.symbol(),event.symbol(),event.sequence(),event.eventTime(),event);
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event);
         });
     }
 
     public void publishMarkPrices() {
         Instant now = Instant.now();
-        for (String symbol : symbols()) {
+        for (String instrumentId : symbols()) {
             try {
-                publishSymbol(symbol, now);
+                publishSymbol(instrumentId, now);
             } catch (Exception ex) {
-                log.error("Failed to publish mark price for symbol={}", symbol, ex);
+                log.error("Failed to publish mark price for instrumentId={}", instrumentId, ex);
             }
         }
     }
 
-    private boolean publishSymbol(String symbol, Instant now) {
-        IndexPriceEvent index = indexPrices.get(symbol);
+    private boolean publishSymbol(String instrumentId, Instant now) {
+        IndexPriceEvent index = indexPrices.get(instrumentId);
         if (!fresh(index, now)) {
             return false;
         }
         MarkPriceEncoding encoding;
         try {
-            encoding = coordinationService.currentEncoding(symbol);
+            encoding = coordinationService.currentEncoding(instrumentId);
         } catch (IllegalStateException ex) {
             if (ex.getMessage() != null && ex.getMessage().startsWith("mark price encoding not found for ")) {
                 return false;
             }
             throw ex;
         }
-        PerpBookTickerEvent book = bookTickers.get(symbol);
+        PerpBookTickerEvent book = bookTickers.get(instrumentId);
         if (!fresh(book, now)) {
-            basisWindows.remove(symbol);
+            basisWindows.remove(instrumentId);
             book = null;
         }
-        PerpTradeEvent trade = trades.get(symbol);
+        PerpTradeEvent trade = trades.get(instrumentId);
         if (!usableLastTrade(trade, now)) trade = null;
-        if (!ownsSymbol(symbol)) {
+        if (!ownsSymbol(instrumentId)) {
             return false;
         }
 
         BigDecimal basisAverage = null;
         if (book != null) {
-            BasisWindow window = basisWindows.computeIfAbsent(symbol, ignored -> new BasisWindow());
+            BasisWindow window = basisWindows.computeIfAbsent(instrumentId, ignored -> new BasisWindow());
             window.add(now, markPriceCalculator.basis(index, book), properties.getCalculation().getBasisWindow());
             basisAverage = window.average(now, properties.getCalculation().getBasisWindow(),
                     properties.getCalculation().getScale());
         }
 
-        long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
-        MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
-                fundingRates.get(symbol), basisAverage, encoding, now);
+        long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, instrumentId);
+        MarkPriceEvent event = markPriceCalculator.calculate(instrumentId, sequence, index, book, trade,
+                fundingRates.get(instrumentId), basisAverage, encoding, now);
         latestMarkPriceCache.update(event);
         if (corePublisher != null) {
             corePublisher.publish(event);
         }
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
-                fundingRates.get(symbol), basisAverage,
+                fundingRates.get(instrumentId), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
-        kafkaTemplate.send(properties.priceEventsTopic(), symbol, PricePublishedEvent.mark(publication));
+        kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
         if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK,symbol,symbol,event.sequence(),event.eventTime(),event);
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
         return true;
     }
 
     /** 查询诊断读取既有权威输入，不维护另一份状态。 */
-    public MarketInputs inputs(String symbol) {
+    public MarketInputs inputs(String instrumentId) {
         Instant now = Instant.now();
-        var index = indexPrices.get(symbol);
-        var book = bookTickers.get(symbol);
-        var trade = trades.get(symbol);
+        var index = indexPrices.get(instrumentId);
+        var book = bookTickers.get(instrumentId);
+        var trade = trades.get(instrumentId);
         return new MarketInputs(index, book, trade, fresh(index, now), fresh(book, now), usableLastTrade(trade, now));
     }
 
@@ -243,11 +243,11 @@ public class MarkPriceService {
         return symbols;
     }
 
-    private boolean ownsSymbol(String symbol) {
+    private boolean ownsSymbol(String instrumentId) {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
-        return coordinationService.acquireLease(SEQUENCE_MODULE, symbol, nodeId,
+        return coordinationService.acquireLease(SEQUENCE_MODULE, instrumentId, nodeId,
                 properties.getCoordination().getLeaseDuration());
     }
 

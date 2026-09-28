@@ -11,7 +11,7 @@ import java.util.List;
  * a specific index value was produced at a specific time.</p>
  */
 public record IndexPriceEvent(
-        String symbol,
+        String instrumentId,
         BigDecimal indexPrice,
         long sequence,
         PriceStatus status,

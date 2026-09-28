@@ -33,16 +33,16 @@ public class IndexInstrumentConfigLoader {
         }
         return snapshotCache.current(productLine).stream()
                 .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING)
-                .filter(instrument -> properties.getRequiredSymbols().isEmpty()
-                        || properties.getRequiredSymbols().contains(instrument.symbol().toUpperCase(Locale.ROOT)))
+                .filter(instrument -> properties.getRequiredInstrumentIds().isEmpty()
+                        || properties.getRequiredInstrumentIds().contains(Integer.toString(instrument.instrumentId())))
                 .map(this::toSymbol)
-                .filter(symbol -> !symbol.getSources().isEmpty())
+                .filter(instrumentId -> !instrumentId.getSources().isEmpty())
                 .toList();
     }
 
     private IndexPriceProperties.SymbolConfig toSymbol(InstrumentResponse instrument) {
         IndexPriceProperties.SymbolConfig config = new IndexPriceProperties.SymbolConfig();
-        config.setSymbol(instrument.symbol());
+        config.setInstrumentId(Integer.toString(instrument.instrumentId()));
         config.setMinValidSources(instrument.minValidIndexSources());
         config.setSources(instrument.indexSources() == null ? List.of()
                 : instrument.indexSources().stream().filter(IndexSourceConfig::enabled).map(this::toSource).toList());

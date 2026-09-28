@@ -33,11 +33,11 @@ public class RecentTradeQueryService {
         this.mapper = mapper;
     }
 
-    public List<RecentTrade> recent(String symbol, int limit) {
-        if (symbol == null || !symbol.matches("[A-Za-z0-9][A-Za-z0-9-]{1,63}"))
-            throw new IllegalArgumentException("invalid symbol");
+    public List<RecentTrade> recent(String instrumentId, int limit) {
+        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId))
+            throw new IllegalArgumentException("invalid instrumentId");
         if (limit < 1 || limit > 50) throw new IllegalArgumentException("limit must be in [1,50]");
-        String normalized = symbol.toUpperCase(java.util.Locale.ROOT);
+        String normalized = instrumentId.toUpperCase(java.util.Locale.ROOT);
         Properties config = new Properties();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
         config.put(ConsumerConfig.GROUP_ID_CONFIG, "recent-trades-query-" + java.util.UUID.randomUUID());
@@ -74,6 +74,6 @@ public class RecentTradeQueryService {
         }
     }
 
-    public record RecentTrade(String tradeId, long sequence, String symbol, String side,
+    public record RecentTrade(String tradeId, long sequence, String instrumentId, String side,
                               BigDecimal price, BigDecimal quantity, long quantitySteps, Instant eventTime) {}
 }

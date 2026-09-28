@@ -41,7 +41,7 @@ class OrderValidatorTest {
     @Test
     void rejectsMarketOrderWithPriceTicks() {
         OrderValidator validator = new OrderValidator(lookup(tradingRule()));
-        var request = new PlaceOrderRequest(1001L, "c1", "BTC-USDT", OrderSide.BUY,
+        var request = new PlaceOrderRequest(1001L, "c1", "1", OrderSide.BUY,
                 OrderType.MARKET, TimeInForce.IOC, 1L, 10L, false, false);
 
         var result = validator.validate(request);
@@ -53,7 +53,7 @@ class OrderValidatorTest {
     @Test
     void rejectsGtcMarketOrder() {
         OrderValidator validator = new OrderValidator(lookup(tradingRule()));
-        var request = new PlaceOrderRequest(1001L, "c1", "BTC-USDT", OrderSide.BUY,
+        var request = new PlaceOrderRequest(1001L, "c1", "1", OrderSide.BUY,
                 OrderType.MARKET, TimeInForce.GTC, 0L, 10L, false, false);
 
         var result = validator.validate(request);
@@ -126,7 +126,7 @@ class OrderValidatorTest {
     @Test
     void rejectsSpotReduceOnlyOrderBeforePerpetualPositionValidation() {
         OrderValidator validator = new OrderValidator(lookup(spotRule()));
-        var request = new PlaceOrderRequest(1001L, "spot-reduce", "BTC-USDT", OrderSide.SELL,
+        var request = new PlaceOrderRequest(1001L, "spot-reduce", "1", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 1_000_000L, 10L, true, false);
 
         var result = validator.validate(request);
@@ -150,7 +150,7 @@ class OrderValidatorTest {
     @Test
     void rejectsMarketOrderWhenProtectedNotionalExceedsMaxLimit() {
         InstrumentRule rule = new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 1L,
                 "TRADING",
                 ContractType.LINEAR_PERPETUAL,
@@ -177,7 +177,7 @@ class OrderValidatorTest {
     @Test
     void rejectsLinearSellMarketOrderWhenUpperBoundNotionalExceedsMaxLimit() {
         InstrumentRule rule = new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 1L,
                 "TRADING",
                 ContractType.LINEAR_PERPETUAL,
@@ -204,7 +204,7 @@ class OrderValidatorTest {
     @Test
     void rejectsMarketOrderWhenLowerBoundNotionalIsBelowMinLimit() {
         InstrumentRule rule = new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 1L,
                 "TRADING",
                 ContractType.LINEAR_PERPETUAL,
@@ -329,7 +329,7 @@ class OrderValidatorTest {
     }
 
     private PlaceOrderRequest limit(OrderSide side, long priceTicks, long quantitySteps) {
-        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
+        return new PlaceOrderRequest(1001L, "c1", "1", side,
                 OrderType.LIMIT, TimeInForce.GTC, priceTicks, quantitySteps, false, false);
     }
 
@@ -338,12 +338,12 @@ class OrderValidatorTest {
     }
 
     private PlaceOrderRequest market(OrderSide side, long quantitySteps) {
-        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
+        return new PlaceOrderRequest(1001L, "c1", "1", side,
                 OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, false, false);
     }
 
     private PlaceOrderRequest reduceOnlyLimit(OrderSide side, long priceTicks, long quantitySteps) {
-        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
+        return new PlaceOrderRequest(1001L, "c1", "1", side,
                 OrderType.LIMIT, TimeInForce.GTC, priceTicks, quantitySteps, true, false);
     }
 
@@ -353,7 +353,7 @@ class OrderValidatorTest {
 
     private InstrumentRule ruleWithStatus(String status) {
         return new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 1L,
                 status,
                 ContractType.LINEAR_PERPETUAL,
@@ -373,7 +373,7 @@ class OrderValidatorTest {
 
     private InstrumentRule inverseRule() {
         return new InstrumentRule(
-                "BTC-USD",
+                "5",
                 2L,
                 "TRADING",
                 ContractType.INVERSE_PERPETUAL,
@@ -393,7 +393,7 @@ class OrderValidatorTest {
 
     private InstrumentRule deliveryRule(ContractType contractType) {
         return new InstrumentRule(
-                "BTC-USD-DELIVERY",
+                "53",
                 4L,
                 "TRADING",
                 contractType,
@@ -413,7 +413,7 @@ class OrderValidatorTest {
 
     private InstrumentRule spotRule() {
         return new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 3L,
                 "TRADING",
                 InstrumentType.SPOT,
@@ -438,7 +438,7 @@ class OrderValidatorTest {
 
     private InstrumentRule spotMarketRule() {
         return new InstrumentRule(
-                "BTC-USDT",
+                "1",
                 3L,
                 "TRADING",
                 InstrumentType.SPOT,
@@ -462,14 +462,14 @@ class OrderValidatorTest {
     }
 
     private InstrumentRuleLookup lookup(InstrumentRule rule) {
-        return symbol -> Optional.of(rule);
+        return instrumentId -> Optional.of(rule);
     }
 
     private OrderValidator validator(InstrumentRule rule, OptionalLong markPriceTicks, long maxSlippagePpm) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getRisk().setMarketMaxSlippagePpm(maxSlippagePpm);
         return new OrderValidator(lookup(rule), properties,
-                (symbol, instrumentChangeId, maxAgeMs) -> markPriceTicks);
+                (instrumentId, instrumentChangeId, maxAgeMs) -> markPriceTicks);
     }
 
     private OrderValidator limitPriceBandValidator(InstrumentRule rule,
@@ -479,6 +479,6 @@ class OrderValidatorTest {
         properties.getRisk().setLimitPriceProtectionEnabled(true);
         properties.getRisk().setLimitPriceBandPpm(limitPriceBandPpm);
         return new OrderValidator(lookup(rule), properties,
-                (symbol, instrumentChangeId, maxAgeMs) -> markPriceTicks);
+                (instrumentId, instrumentChangeId, maxAgeMs) -> markPriceTicks);
     }
 }

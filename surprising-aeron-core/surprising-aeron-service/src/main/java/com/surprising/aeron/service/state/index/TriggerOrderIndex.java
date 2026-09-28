@@ -38,8 +38,8 @@ public final class TriggerOrderIndex {
         rebuild(state);
     }
 
-    public Set<Long> ids(String symbol) {
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public Set<Long> ids(String instrumentId) {
+        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
     }
 
@@ -52,9 +52,9 @@ public final class TriggerOrderIndex {
         return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
     }
 
-    public Set<Long> ids(String symbol, CoreTriggerOrderStatus status) {
+    public Set<Long> ids(String instrumentId, CoreTriggerOrderStatus status) {
         Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.normalizeSymbol(symbol));
+                OrderReservation.requireInstrumentId(instrumentId));
         NavigableSet<Long> ids = byStatus == null ? null : byStatus.get(status);
         return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
     }
@@ -64,20 +64,20 @@ public final class TriggerOrderIndex {
         return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
     }
 
-    public long maxPendingId(String symbol) {
+    public long maxPendingId(String instrumentId) {
         Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.normalizeSymbol(symbol));
+                OrderReservation.requireInstrumentId(instrumentId));
         NavigableSet<Long> pending = byStatus == null ? null : byStatus.get(CoreTriggerOrderStatus.PENDING);
         return pending == null || pending.isEmpty() ? 0 : pending.last();
     }
 
-    public TriggerCandidatePage candidatesPage(String symbol, long markPriceTicks,
+    public TriggerCandidatePage candidatesPage(String instrumentId, long markPriceTicks,
                                                 int phase, long priceCursor, long orderCursor,
                                                 long upperTriggerId, int limit) {
         if (limit <= 0 || limit > 4_096) {
             throw new IllegalArgumentException("candidate page limit must be in [1,4096]");
         }
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         NavigableMapByPrice price = idsByPrice.get(normalized);
         if (price == null || upperTriggerId <= 0 || phase >= PHASE_COMPLETE) {
             return TriggerCandidatePage.emptyPage();
@@ -270,16 +270,16 @@ public final class TriggerOrderIndex {
         return Collections.unmodifiableNavigableSet(result);
     }
 
-    public Set<Long> ids(long userId, String symbol, CoreMarginMode marginMode, CorePositionSide positionSide) {
+    public Set<Long> ids(long userId, String instrumentId, CoreMarginMode marginMode, CorePositionSide positionSide) {
         NavigableSet<Long> ids = idsByPosition.get(new TriggerPositionKey(userId,
-                OrderReservation.normalizeSymbol(symbol), marginMode, positionSide));
+                OrderReservation.requireInstrumentId(instrumentId), marginMode, positionSide));
         return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
     }
 
     public NavigableSet<Long> ocoSiblings(CoreTriggerOrderState order) {
         if (order.ocoGroupId().isEmpty()) return Collections.emptyNavigableSet();
         NavigableSet<Long> ids = idsByOco.get(new TriggerOcoKey(order.userId(),
-                OrderReservation.normalizeSymbol(order.symbol()), order.marginMode(), order.positionSide(),
+                OrderReservation.requireInstrumentId(order.instrumentId()), order.marginMode(), order.positionSide(),
                 order.ocoGroupId()));
         return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
     }
@@ -327,27 +327,27 @@ public final class TriggerOrderIndex {
 
     private void add(CoreTriggerOrderState order) {
         long userId = order.userId();
-        String symbol = order.symbol();
+        String instrumentId = order.instrumentId();
         long id = order.triggerOrderId();
         valuesById.put(id, order);
         allIds.add(id);
-        idsBySymbol.computeIfAbsent(OrderReservation.normalizeSymbol(symbol), ignored -> new TreeSet<>()).add(id);
-        idsBySymbolStatus.computeIfAbsent(OrderReservation.normalizeSymbol(symbol), ignored -> new java.util.EnumMap<>(CoreTriggerOrderStatus.class))
+        idsBySymbol.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId), ignored -> new TreeSet<>()).add(id);
+        idsBySymbolStatus.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId), ignored -> new java.util.EnumMap<>(CoreTriggerOrderStatus.class))
                 .computeIfAbsent(order.status(), ignored -> new TreeSet<>()).add(id);
         idsByStatus.computeIfAbsent(order.status(), ignored -> new TreeSet<>()).add(id);
         idsByUser.computeIfAbsent(userId, ignored -> new TreeSet<>()).add(id);
         idsByPosition.computeIfAbsent(new TriggerPositionKey(userId,
-                OrderReservation.normalizeSymbol(symbol), order.marginMode(), order.positionSide()),
+                OrderReservation.requireInstrumentId(instrumentId), order.marginMode(), order.positionSide()),
                 ignored -> new TreeSet<>()).add(id);
         if (order.status() == CoreTriggerOrderStatus.PENDING && !order.ocoGroupId().isEmpty()) {
-            idsByOco.computeIfAbsent(new TriggerOcoKey(userId, OrderReservation.normalizeSymbol(symbol),
+            idsByOco.computeIfAbsent(new TriggerOcoKey(userId, OrderReservation.requireInstrumentId(instrumentId),
                     order.marginMode(), order.positionSide(), order.ocoGroupId()), ignored -> new TreeSet<>()).add(id);
         }
         if (order.status() == CoreTriggerOrderStatus.PENDING) {
             if (order.expiresAtEpochMillis() > 0) {
                 idsByExpiry.computeIfAbsent(order.expiresAtEpochMillis(), ignored -> new TreeSet<>()).add(id);
             }
-            NavigableMapByPrice price = idsByPrice.computeIfAbsent(OrderReservation.normalizeSymbol(symbol),
+            NavigableMapByPrice price = idsByPrice.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId),
                     ignored -> new NavigableMapByPrice());
             if (order.triggerType() == CoreTriggerOrderType.TRAILING_STOP) {
                 indexTrailing(price, order);
@@ -364,28 +364,28 @@ public final class TriggerOrderIndex {
     private void remove(CoreTriggerOrderState order, long id) {
         valuesById.remove(id);
         long userId = order.userId();
-        String symbol = order.symbol();
+        String instrumentId = order.instrumentId();
         allIds.remove(id);
         NavigableSet<Long> userIds = idsByUser.get(userId);
         if (userIds != null) {
             userIds.remove(id);
             if (userIds.isEmpty()) idsByUser.remove(userId);
         }
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (ids != null) {
             ids.remove(id);
-            if (ids.isEmpty()) idsBySymbol.remove(OrderReservation.normalizeSymbol(symbol));
+            if (ids.isEmpty()) idsBySymbol.remove(OrderReservation.requireInstrumentId(instrumentId));
         }
 
         Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.normalizeSymbol(symbol));
+                OrderReservation.requireInstrumentId(instrumentId));
         if (byStatus != null) {
             NavigableSet<Long> statusIds = byStatus.get(order.status());
             if (statusIds != null) {
                 statusIds.remove(id);
                 if (statusIds.isEmpty()) byStatus.remove(order.status());
             }
-            if (byStatus.isEmpty()) idsBySymbolStatus.remove(OrderReservation.normalizeSymbol(symbol));
+            if (byStatus.isEmpty()) idsBySymbolStatus.remove(OrderReservation.requireInstrumentId(instrumentId));
         }
         NavigableSet<Long> statusIds = idsByStatus.get(order.status());
         if (statusIds != null) {
@@ -394,14 +394,14 @@ public final class TriggerOrderIndex {
         }
 
         TriggerPositionKey positionKey = new TriggerPositionKey(userId,
-                OrderReservation.normalizeSymbol(symbol), order.marginMode(), order.positionSide());
+                OrderReservation.requireInstrumentId(instrumentId), order.marginMode(), order.positionSide());
         NavigableSet<Long> positionIds = idsByPosition.get(positionKey);
         if (positionIds != null) {
             positionIds.remove(id);
             if (positionIds.isEmpty()) idsByPosition.remove(positionKey);
         }
         if (!order.ocoGroupId().isEmpty()) {
-            TriggerOcoKey ocoKey = new TriggerOcoKey(userId, OrderReservation.normalizeSymbol(symbol),
+            TriggerOcoKey ocoKey = new TriggerOcoKey(userId, OrderReservation.requireInstrumentId(instrumentId),
                     order.marginMode(), order.positionSide(), order.ocoGroupId());
             NavigableSet<Long> ocoIds = idsByOco.get(ocoKey);
             if (ocoIds != null) {
@@ -416,7 +416,7 @@ public final class TriggerOrderIndex {
                 if (expiryIds.isEmpty()) idsByExpiry.remove(order.expiresAtEpochMillis());
             }
         }
-        NavigableMapByPrice price = idsByPrice.get(OrderReservation.normalizeSymbol(symbol));
+        NavigableMapByPrice price = idsByPrice.get(OrderReservation.requireInstrumentId(instrumentId));
         if (price == null) return;
         removeTrailing(price, order, id);
         if (order.triggerPriceTicks() > 0) {
@@ -432,7 +432,7 @@ public final class TriggerOrderIndex {
         if (price.greaterOrEqual.isEmpty() && price.lessOrEqual.isEmpty()
                 && price.trailingGreaterOrEqual.isEmpty() && price.trailingLessOrEqual.isEmpty()
                 && price.trailingAlways.isEmpty()) {
-            idsByPrice.remove(OrderReservation.normalizeSymbol(symbol));
+            idsByPrice.remove(OrderReservation.requireInstrumentId(instrumentId));
         }
     }
 
@@ -494,11 +494,11 @@ public final class TriggerOrderIndex {
         if (ids.isEmpty()) map.remove(price);
     }
 
-    private record TriggerPositionKey(long userId, String symbol, CoreMarginMode marginMode,
+    private record TriggerPositionKey(long userId, String instrumentId, CoreMarginMode marginMode,
                                       CorePositionSide positionSide) {
     }
 
-    private record TriggerOcoKey(long userId, String symbol, CoreMarginMode marginMode,
+    private record TriggerOcoKey(long userId, String instrumentId, CoreMarginMode marginMode,
                                  CorePositionSide positionSide, String groupId) {
     }
 

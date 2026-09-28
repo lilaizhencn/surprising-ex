@@ -21,11 +21,11 @@ public class AdminTriggerOrderRequestService {
         this.triggerOrderService = triggerOrderService;
     }
 
-    public TriggerOrderQueryResponse orders(String adminUserId, String productLineHeader, String productLineValue, Long userId, String symbol, String status, Long triggerOrderId, int limit, String cursor, String sort) {
+    public TriggerOrderQueryResponse orders(String adminUserId, String productLineHeader, String productLineValue, Long userId, String instrumentId, String status, Long triggerOrderId, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return triggerOrderService.adminOrders(userId, symbol, status, triggerOrderId, limit, cursor, sort, productLine);
+            return triggerOrderService.adminOrders(userId, instrumentId, status, triggerOrderId, limit, cursor, sort, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

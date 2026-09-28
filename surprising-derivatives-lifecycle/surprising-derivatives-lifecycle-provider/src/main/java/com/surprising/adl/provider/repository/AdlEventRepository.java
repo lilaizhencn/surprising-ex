@@ -30,7 +30,7 @@ public class AdlEventRepository {
                                 long coveredUnits, long remainingDeficitUnits, Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO adl_events (
-                    event_id, account_type, deficit_user_id, target_user_id, asset, symbol,
+                    event_id, account_type, deficit_user_id, target_user_id, asset, instrument_id,
                     target_side, target_position_side, closed_quantity_steps,
                     entry_price_ticks, mark_price_ticks, requested_deficit_units,
                     realized_profit_units, covered_units, remaining_deficit_units,
@@ -38,7 +38,7 @@ public class AdlEventRepository {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AERON_ADL_COVERAGE', ?)
                 ON CONFLICT (event_id) DO NOTHING
                 """, eventId, accountType, liquidation.userId(), candidate.userId(), liquidation.asset(),
-                candidate.symbol(), candidate.signedQuantitySteps() > 0 ? "LONG" : "SHORT",
+                candidate.instrumentId(), candidate.signedQuantitySteps() > 0 ? "LONG" : "SHORT",
                 candidate.positionSide().name(), closeSteps, candidate.entryPriceTicks(),
                 candidate.markPriceTicks(), liquidation.deficitUnits(), realizedProfitUnits, coveredUnits,
                 remainingDeficitUnits, candidate.priorityScorePpm(), Timestamp.from(now));
@@ -48,7 +48,7 @@ public class AdlEventRepository {
     public AdminCursorPage.CursorPage<AdlEventResponse> page(String accountType,
                                                              Long userId,
                                                              String asset,
-                                                             String symbol,
+                                                             String instrumentId,
                                                              int limit,
                                                              String cursor,
                                                              String sort) {
@@ -66,8 +66,8 @@ public class AdlEventRepository {
         args.add(userId);
         args.add(asset);
         args.add(asset);
-        args.add(symbol);
-        args.add(symbol);
+        args.add(instrumentId);
+        args.add(instrumentId);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         String sql = """
@@ -76,7 +76,7 @@ public class AdlEventRepository {
                  WHERE account_type = ?
                    AND (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
                  ORDER BY created_at %s, event_id %s
                  LIMIT ?
@@ -92,7 +92,7 @@ public class AdlEventRepository {
                 rs.getLong("deficit_user_id"),
                 rs.getLong("target_user_id"),
                 rs.getString("asset"),
-                rs.getString("symbol"),
+                rs.getString("instrument_id"),
                 AdlSide.valueOf(rs.getString("target_side")),
                 PositionSide.fromNullableDbValue(rs.getString("target_position_side")),
                 rs.getLong("closed_quantity_steps"),

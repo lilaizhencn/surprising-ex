@@ -30,10 +30,10 @@ class PublicTradeEventMapperTest {
         PublicTradeEventMapper mapper = new PublicTradeEventMapper(
                 new MarkPriceEncodingService(properties, cache, audit));
 
-        var trade = mapper.toPerpTradeEvent(new PublicTradeEvent("trade-8", 42L, "BTC-USDT",
+        var trade = mapper.toPerpTradeEvent(new PublicTradeEvent("trade-8", 42L, "1",
                 OrderSide.BUY, 12_345L, 2_000_001L, now, "trace-8"));
 
-        assertThat(trade.symbol()).isEqualTo("BTC-USDT");
+        assertThat(trade.instrumentId()).isEqualTo("1");
         assertThat(trade.tradeId()).isEqualTo("trade-8");
         assertThat(trade.sequence()).isEqualTo(42L);
         assertThat(trade.tradeTime()).isEqualTo(now);
@@ -44,12 +44,12 @@ class PublicTradeEventMapperTest {
 
     private InstrumentResponse instrument(long version, long priceTickUnits, long quantityStepUnits) {
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
-        return new InstrumentResponse("BTC-USDT", version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+        return new InstrumentResponse(1, 3, 1, 1, 3, "1", version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, quantityStepUnits,
                 1L, 1_000_000L, 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"),
                 true, true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                10_000_000L, 3, null, null, null, null, null, null, null,
+                10_000_000L, 3, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }

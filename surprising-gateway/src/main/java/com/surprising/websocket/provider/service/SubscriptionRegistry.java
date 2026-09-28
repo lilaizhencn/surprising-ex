@@ -157,7 +157,7 @@ public class SubscriptionRegistry {
         fanoutBatches.increment();
         fanoutMessages.add(payloads.size());
         sendBatch(topic, topic, payloads, eventTime);
-        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
+        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
             sendBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, payloads, eventTime);
         }
     }
@@ -170,7 +170,7 @@ public class SubscriptionRegistry {
         fanoutBatches.increment();
         fanoutMessages.add(events.size());
         sendTimedBatch(topic, topic, events);
-        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
+        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
             sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, events);
         }
     }
@@ -320,8 +320,8 @@ public class SubscriptionRegistry {
         }
     }
 
-    public SubscriptionTopic publicTopic(WsChannel channel, String symbol) {
-        return new SubscriptionTopic(channel, symbol, null, null);
+    public SubscriptionTopic publicTopic(WsChannel channel, String instrumentId) {
+        return new SubscriptionTopic(channel, instrumentId, null, null);
     }
 
     private static final class ChannelAccumulator {

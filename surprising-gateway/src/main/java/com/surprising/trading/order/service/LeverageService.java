@@ -37,9 +37,9 @@ public class LeverageService {
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String symbol = normalizeSymbol(request.symbol());
+        String instrumentId = normalizeSymbol(request.instrumentId());
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
-        InstrumentRule rule = tradingRule(symbol);
+        InstrumentRule rule = tradingRule(instrumentId);
         ProductLine productLine = productLine(rule, request.productLine());
         if (request.leveragePpm() < MIN_LEVERAGE_PPM) {
             throw new IllegalArgumentException("leveragePpm must be at least 1x");
@@ -51,23 +51,23 @@ public class LeverageService {
         // A rejected attempt must not poison a later retry after open exposure has been cleared.
         UUID commandId = UUID.randomUUID();
         aeron.command(CoreMessageType.UPDATE_LEVERAGE, commandId, request.userId(),
-                TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(symbol,
+                TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(instrumentId,
                         CoreMarginMode.valueOf(marginMode.name()), request.leveragePpm())));
-        return new LeverageSettingResponse(request.userId(), productLine, symbol, marginMode,
+        return new LeverageSettingResponse(request.userId(), productLine, instrumentId, marginMode,
                 request.leveragePpm(), rule.maxLeveragePpm(),
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(request.leveragePpm()),
                 "USER", updatedAt);
     }
 
-    public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode) {
-        return get(userId, symbol, marginMode, null);
+    public LeverageSettingResponse get(long userId, String instrumentId, MarginMode marginMode) {
+        return get(userId, instrumentId, marginMode, null);
     }
 
-    public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode, ProductLine productLine) {
+    public LeverageSettingResponse get(long userId, String instrumentId, MarginMode marginMode, ProductLine productLine) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String normalizedSymbol = normalizeSymbol(symbol);
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         InstrumentRule rule = tradingRule(normalizedSymbol);
         ProductLine resolvedProductLine = productLine(rule, productLine);
@@ -79,11 +79,11 @@ public class LeverageService {
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(configured.leveragePpm()), "USER", Instant.EPOCH);
     }
 
-    private InstrumentRule tradingRule(String symbol) {
-        InstrumentRule rule = instrumentRuleLookup.currentRule(symbol)
-                .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
+    private InstrumentRule tradingRule(String instrumentId) {
+        InstrumentRule rule = instrumentRuleLookup.currentRule(instrumentId)
+                .orElseThrow(() -> new IllegalStateException("instrument not found: " + instrumentId));
         if (!"TRADING".equals(rule.status())) {
-            throw new IllegalStateException("instrument is not trading: " + symbol);
+            throw new IllegalStateException("instrument is not trading: " + instrumentId);
         }
         return rule;
     }
@@ -99,24 +99,24 @@ public class LeverageService {
     /** 快照中没有用户覆盖时使用当前 Instrument 规则计算默认杠杆。 */
     private LeverageSettingResponse instrumentDefault(long userId,
                                                        ProductLine productLine,
-                                                       String symbol,
+                                                       String instrumentId,
                                                        MarginMode marginMode,
                                                        InstrumentRule rule) {
         long leveragePpm = Math.min(OrderLeverageMath.leveragePpmFromInitialMarginRate(
                 rule.initialMarginRatePpm()), rule.maxLeveragePpm());
         long effectiveRate = Math.max(rule.initialMarginRatePpm(),
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(leveragePpm));
-        return new LeverageSettingResponse(userId, productLine, symbol, marginMode, leveragePpm,
+        return new LeverageSettingResponse(userId, productLine, instrumentId, marginMode, leveragePpm,
                 rule.maxLeveragePpm(), effectiveRate, "INSTRUMENT_DEFAULT", Instant.EPOCH);
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase();
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

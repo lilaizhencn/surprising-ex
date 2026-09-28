@@ -16,14 +16,14 @@ public class IndexPriceTickRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO price_index_ticks (
-                symbol, sequence, index_price, status, component_count, valid_component_count,
+                instrument_id, sequence, index_price, status, component_count, valid_component_count,
                 total_configured_weight, event_time
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, sequence) DO NOTHING
+            ON CONFLICT (instrument_id, sequence) DO NOTHING
             """;
     private static final String DELETE_SQL = """
             DELETE FROM price_index_ticks
-             WHERE symbol = ?
+             WHERE instrument_id = ?
                AND sequence = ?
             """;
 
@@ -41,7 +41,7 @@ public class IndexPriceTickRepository {
             @Override
             public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
                 IndexPriceEvent event = events.get(index);
-                statement.setString(1, event.symbol());
+                statement.setString(1, event.instrumentId());
                 statement.setLong(2, event.sequence());
                 statement.setBigDecimal(3, event.indexPrice());
                 statement.setString(4, event.status().name());
@@ -58,25 +58,25 @@ public class IndexPriceTickRepository {
         });
     }
 
-    public List<IndexPriceTick> history(String symbol, Instant startTime, Instant endTime, int limit) {
+    public List<IndexPriceTick> history(String instrumentId, Instant startTime, Instant endTime, int limit) {
         return jdbcTemplate.query("""
-                SELECT symbol, sequence, index_price, status, component_count, valid_component_count, event_time
+                SELECT instrument_id, sequence, index_price, status, component_count, valid_component_count, event_time
                   FROM price_index_ticks
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                    AND event_time >= ?
                    AND event_time < ?
                    AND index_price IS NOT NULL
                  ORDER BY event_time ASC
                  LIMIT ?
                 """, (rs, rowNum) -> new IndexPriceTick(
-                        rs.getString("symbol"),
+                        rs.getString("instrument_id"),
                         rs.getLong("sequence"),
                         rs.getBigDecimal("index_price"),
                         PriceStatus.valueOf(rs.getString("status")),
                         rs.getInt("component_count"),
                         rs.getInt("valid_component_count"),
                         rs.getTimestamp("event_time").toInstant()),
-                symbol, Timestamp.from(startTime), Timestamp.from(endTime), limit);
+                instrumentId, Timestamp.from(startTime), Timestamp.from(endTime), limit);
     }
 
     public List<TickKey> findExpiredForDeletion(Instant cutoff, int limit) {
@@ -84,14 +84,14 @@ public class IndexPriceTickRepository {
             return List.of();
         }
         return jdbcTemplate.query("""
-                SELECT symbol, sequence
+                SELECT instrument_id, sequence
                   FROM price_index_ticks
                  WHERE event_time < ?
-                 ORDER BY event_time ASC, symbol ASC, sequence ASC
+                 ORDER BY event_time ASC, instrument_id ASC, sequence ASC
                  LIMIT ?
                    FOR UPDATE SKIP LOCKED
                 """, (rs, rowNum) -> new TickKey(
-                rs.getString("symbol"),
+                rs.getString("instrument_id"),
                 rs.getLong("sequence")), Timestamp.from(cutoff), limit);
     }
 
@@ -119,7 +119,7 @@ public class IndexPriceTickRepository {
         @Override
         public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
             TickKey key = keys.get(index);
-            statement.setString(1, key.symbol());
+            statement.setString(1, key.instrumentId());
             statement.setLong(2, key.sequence());
         }
 
@@ -129,7 +129,7 @@ public class IndexPriceTickRepository {
         }
     }
 
-    public record IndexPriceTick(String symbol,
+    public record IndexPriceTick(String instrumentId,
                                  long sequence,
                                  java.math.BigDecimal indexPrice,
                                  PriceStatus status,
@@ -138,6 +138,6 @@ public class IndexPriceTickRepository {
                                  Instant eventTime) {
     }
 
-    public record TickKey(String symbol, long sequence) {
+    public record TickKey(String instrumentId, long sequence) {
     }
 }

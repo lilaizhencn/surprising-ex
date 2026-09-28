@@ -15,7 +15,7 @@ class InstrumentSeedCoreContractTest {
         load.setAccessible(true);
         int total=0;
         for(var line:ProductLine.values()) {
-            var rows=(List<?>)load.invoke(null,System.getenv("INSTRUMENT_SEED_TEST_JDBC_URL"),"maintenance","",line);
+            var rows=(List<?>)load.invoke(null,System.getenv("INSTRUMENT_SEED_TEST_JDBC_URL"),System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"),line);
             assertThat(rows.size()).isBetween(1,512);
             for(var row:rows) {
                 var accessor=row.getClass().getDeclaredMethod("command"); accessor.setAccessible(true);

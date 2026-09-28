@@ -4,6 +4,7 @@ import java.time.Instant;
 import com.surprising.product.api.ProductLine;
 
 public record InstrumentEvent(
+        int instrumentId,
         String symbol,
         long changeId,
         InstrumentStatus status,
@@ -14,6 +15,7 @@ public record InstrumentEvent(
         long sequence) {
 
     public InstrumentEvent {
+        if (instrumentId <= 0) throw new IllegalArgumentException("instrumentId must be positive");
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
         }

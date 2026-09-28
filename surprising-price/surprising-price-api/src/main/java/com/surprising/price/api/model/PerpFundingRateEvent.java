@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 public record PerpFundingRateEvent(
-        @NotBlank String symbol,
+        @NotBlank String instrumentId,
         @NotNull BigDecimal fundingRate,
         @NotNull Instant nextFundingTime,
         int fundingIntervalHours,

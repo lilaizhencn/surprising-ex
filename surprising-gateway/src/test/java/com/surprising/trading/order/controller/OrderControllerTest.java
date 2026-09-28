@@ -30,9 +30,9 @@ class OrderControllerTest {
     void oversizedProjectionResponseIsTypedAndCarriesContinuationCursor() {
         OrderService orderService = mock(OrderService.class);
         String continuation = "eyJvcmRlciI6MTIzfQ";
-        when(orderService.openOrders(1001L, "BTC-USDT", 10, null, null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
+        when(orderService.openOrders(1001L, "1", 10, null, null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
-        assertThatThrownBy(() -> controller.openOrders(1001L, "BTC-USDT", 10, null, null)).isInstanceOf(ResponseStatusException.class).satisfies(throwable -> {
+        assertThatThrownBy(() -> controller.openOrders(1001L, "1", 10, null, null)).isInstanceOf(ResponseStatusException.class).satisfies(throwable -> {
             ResponseStatusException response = (ResponseStatusException) throwable;
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
             assertThat(response.getReason()).contains("PROJECTION_RESPONSE_TOO_LARGE", continuation);
@@ -43,7 +43,7 @@ class OrderControllerTest {
     void mapsConflictBackpressureAndUnknownSeparately() {
         OrderService orderService = mock(OrderService.class);
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-1", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-1", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("TERMINAL", "NONE"));
         assertThat(controller.place(request).toCompletableFuture().join().getStatusCode()).isEqualTo(HttpStatus.OK);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("TERMINAL", "IDEMPOTENCY_CONFLICT"));
@@ -66,7 +66,7 @@ class OrderControllerTest {
         OrderService orderService = mock(OrderService.class);
         when(orderService.placeCommandAsync(any())).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("core rejected order")));
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
-        assertThatThrownBy(() -> controller.place(new PlaceOrderRequest(1001L, "client-async-failure", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join()).satisfies(throwable -> assertThat(responseStatus(throwable).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        assertThatThrownBy(() -> controller.place(new PlaceOrderRequest(1001L, "client-async-failure", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join()).satisfies(throwable -> assertThat(responseStatus(throwable).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     @ParameterizedTest
@@ -75,7 +75,7 @@ class OrderControllerTest {
         OrderService orderService = mock(OrderService.class);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", code));
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
-        ResponseEntity<OrderCommandReceipt> response = controller.place(new PlaceOrderRequest(1001L, "client-1", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join();
+        ResponseEntity<OrderCommandReceipt> response = controller.place(new PlaceOrderRequest(1001L, "client-1", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getBody().code()).isEqualTo(code);
         assertThat(response.getBody().commandResultUrl()).isNull();
@@ -100,7 +100,7 @@ class OrderControllerTest {
     void mapsMatchingPendingAdmissionAndQueryToAcceptedWithOriginalCommandIdentity() {
         OrderService orderService = mock(OrderService.class);
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-pending", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-pending", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
         UUID commandId = UUID.fromString("33333333-3333-3333-3333-333333333333");
         OrderCommandReceipt pending = receipt("MATCHING_PENDING", "MATCHING_PENDING", commandId);
         when(orderService.placeCommandAsync(any())).thenReturn(CompletableFuture.completedFuture(pending));

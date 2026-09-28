@@ -41,7 +41,7 @@ class RuntimeDerivativeMatchProcessorTest {
         CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100)),
-                Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
+                Map.of(11L, taker, 12L, maker), Map.of(instrument.instrumentId(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
@@ -63,7 +63,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200), 8L, user(8, maker, 100)),
                 Map.of(11L, taker, 12L, maker),
-                Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -83,7 +83,7 @@ class RuntimeDerivativeMatchProcessorTest {
         CoreUserState unrelated = CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 99);
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100), 99L, unrelated),
-                Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
+                Map.of(11L, taker, 12L, maker), Map.of(instrument.instrumentId(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
@@ -105,7 +105,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200), 8L, user(8, makerOne, 100), 9L, user(9, makerTwo, 100)),
                 Map.of(11L, taker, 12L, makerOne, 13L, makerTwo),
-                Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(
                 trade(12, 8, 100, 1, true, false),
                 trade(13, 9, 100, 1, true, true));
@@ -142,7 +142,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 false, CoreOrderType.MARKET, CoreTimeInForce.IOC);
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200)), Map.of(11L, taker),
-                Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", List.of());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
@@ -157,7 +157,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 liveInstrument());
         state = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 773_022, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("1", 773_022, 1, 1_700_000_000_000L));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 10_000_000_000L));
         state = reducer.adjustBalance(state, 8, new BalanceAdjustmentCommand("USDT", 2_000_000_000_000L));
         PlaceOrderCommand open = marketOrder(11, CoreOrderSide.BUY, false, 788_640);
@@ -189,7 +189,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState readyToClose = state;
         TradingCoreState boundaryFill = reducer.applyMatches(readyToClose, 14, "BTC", "USDT",
                 List.of(trade(13, 8, 773_022, 1, true, true)));
-        assertThat(boundaryFill.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+        assertThat(boundaryFill.user(7).positions().get("1").signedQuantitySteps()).isZero();
 
         List<MatcherEvent> betterFill = List.of(trade(13, 8, 773_332, 1, true, true));
         long availableBeforeClose = readyToClose.user(7).balances().get("USDT").availableUnits();
@@ -200,7 +200,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 .isEqualTo(new AssetBalance("USDT", 77_360_405_000L, 0));
 
         TradingCoreState closed = reducer.applyMatches(readyToClose, 14, "BTC", "USDT", betterFill);
-        assertThat(closed.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+        assertThat(closed.user(7).positions().get("1").signedQuantitySteps()).isZero();
         assertThat(closed.user(7).reservations().get(14L).reservedUnits()).isEqualTo(3_903_765_000L);
         assertThat(closed.user(7).reservations().get(14L).remainingUnits()).isZero();
         assertThat(closed.user(7).balances().get("USDT"))
@@ -219,15 +219,15 @@ class RuntimeDerivativeMatchProcessorTest {
         CoreInstrument instrument = instrument();
         CoreOrderState taker = order(11, 7, CoreOrderSide.SELL, quantity);
         CoreOrderState maker = order(12, 8, CoreOrderSide.BUY, quantity);
-        CorePositionState position = new CorePositionState("BTC-USDT", "USDT", 2, 100, 200, 0, 20);
+        CorePositionState position = new CorePositionState("1", "USDT", 2, 100, 200, 0, 20);
         CoreUserState takerUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 20 + takerReservation)),
-                Map.of(11L, OrderReservation.create(11, "BTC-USDT",
+                Map.of(11L, OrderReservation.create(11, "1",
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", takerReservation, quantity)),
                 Map.of(position.key(), position));
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, takerUser, 8L, user(8, maker, 300)), Map.of(11L, taker, 12L, maker),
-                Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
         List<MatcherEvent> matches = List.of(trade(12, 8, 120, quantity, true, true));
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -246,7 +246,7 @@ class RuntimeDerivativeMatchProcessorTest {
     }
 
     private static CoreUserState user(long userId, CoreOrderState order, long reservedUnits) {
-        OrderReservation reservation = OrderReservation.create(order.orderId(), order.symbol(),
+        OrderReservation reservation = OrderReservation.create(order.orderId(), order.instrumentId(),
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits,
                 order.quantitySteps());
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
@@ -260,7 +260,7 @@ class RuntimeDerivativeMatchProcessorTest {
 
     private static CoreOrderState order(long orderId, long userId, CoreOrderSide side, long quantity,
                                         boolean reduceOnly, CoreOrderType orderType, CoreTimeInForce timeInForce) {
-        return new CoreOrderState(orderId, ProductLine.LINEAR_PERPETUAL, userId, "BTC-USDT",
+        return new CoreOrderState(orderId, ProductLine.LINEAR_PERPETUAL, userId, "1",
                 side, orderType == CoreOrderType.MARKET ? 0 : 100, quantity, 0, quantity, reduceOnly,
                 CoreMarginMode.CROSS, CorePositionSide.NET, orderType, timeInForce, false, "", new UUID(0, orderId),
                 10_000, 10_000, CoreOrderStatus.OPEN, 1);
@@ -268,7 +268,7 @@ class RuntimeDerivativeMatchProcessorTest {
 
     private static CoreInstrument instrument() {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,
@@ -277,7 +277,7 @@ class RuntimeDerivativeMatchProcessorTest {
     }
 
     private static RegisterInstrumentCommand liveInstrument() {
-        return new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 10_000_000L, 10_000_000L, 100_000_000L,
                         10_000L, 5_000L, 0, 500L, 0, -1, 0,
                         100_000_000L, 1_000_000_000_000_000L, 1_000_000L, 25_000_000_000_000L,
@@ -287,11 +287,11 @@ class RuntimeDerivativeMatchProcessorTest {
 
     private static PlaceOrderCommand marketOrder(long orderId, CoreOrderSide side,
                                                   boolean reduceOnly, long matchingPriceTicks) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", side, 0, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "order-" + orderId);
+        return new PlaceOrderCommand(orderId, "1", side, 0, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "order-" + orderId);
     }
 
     private static PlaceOrderCommand limitOrder(long orderId, CoreOrderSide side,
                                                  long priceTicks, boolean reduceOnly) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "order-" + orderId);
+        return new PlaceOrderCommand(orderId, "1", side, priceTicks, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "order-" + orderId);
     }
 }

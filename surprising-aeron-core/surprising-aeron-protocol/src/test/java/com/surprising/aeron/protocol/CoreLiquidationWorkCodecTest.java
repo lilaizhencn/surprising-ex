@@ -17,8 +17,8 @@ class CoreLiquidationWorkCodecTest {
         assertThat(CoreLiquidationWorkCodec.decodeQuery(CoreLiquidationWorkCodec.encodeQuery(query)))
                 .isEqualTo(query);
         CoreLiquidationWorkView work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
-                7, true, new CoreRiskScanContinuation("BTC-USDT", 19, 41), List.of(
-                new CoreLiquidationActionView(7, 11, "BTC-USDT", CoreMarginMode.ISOLATED,
+                7, true, new CoreRiskScanContinuation("1", 19, 41), List.of(
+                new CoreLiquidationActionView(7, 11, "1", CoreMarginMode.ISOLATED,
                         CorePositionSide.LONG, 19, 5, 5, 60_000, "ORDERED", 91)), List.of());
 
         assertThat(CoreLiquidationWorkCodec.decodeWork(CoreLiquidationWorkCodec.encodeWork(work))).isEqualTo(work);
@@ -28,7 +28,7 @@ class CoreLiquidationWorkCodecTest {
     void rejectsTruncatedAndTrailingWorkPayloads() {
         CoreLiquidationWorkView work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
                 7, true, null, List.of(
-                new CoreLiquidationActionView(7, 11, "BTC-USDT", CoreMarginMode.ISOLATED,
+                new CoreLiquidationActionView(7, 11, "1", CoreMarginMode.ISOLATED,
                         CorePositionSide.LONG, 19, 5, 5, 60_000, "PLANNED", 0)), List.of());
         byte[] encoded = CoreLiquidationWorkCodec.encodeWork(work);
 
@@ -55,7 +55,7 @@ class CoreLiquidationWorkCodecTest {
     @Test
     void roundTripsDeterministicInsuranceRecommendation() {
         var resolution = new CoreLiquidationWorkView.Resolution(
-                7, 11, "BTC-USDT", "USDT", CoreMarginMode.ISOLATED, CorePositionSide.LONG,
+                7, 11, "1", "USDT", CoreMarginMode.ISOLATED, CorePositionSide.LONG,
                 19, 5, 100, 37, CoreLiquidationWorkView.Purpose.INSURANCE);
         var work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
                 7, true, null, List.of(), List.of(resolution));

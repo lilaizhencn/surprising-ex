@@ -28,11 +28,11 @@ class InstrumentSingleTableRepositoryTest {
     void auditPreservesActorReasonAndBeforeAfterValues() {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         new InstrumentChangeLogRepository(jdbcTemplate).append(ProductLine.LINEAR_DELIVERY,
-                "BTC-USDT-260327", 4L, "operator-7", "maintenance", now,
+                1, "BTC-USDT-260327", 4L, "operator-7", "maintenance", now,
                 "{\"status\":\"TRADING\"}", "{\"status\":\"HALT\"}");
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).update(any(String.class), args.capture());
-        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", "BTC-USDT-260327", 4L,
+        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", 1, "BTC-USDT-260327", 4L,
                 "operator-7", "maintenance", Timestamp.from(now),
                 "{\"status\":\"TRADING\"}", "{\"status\":\"HALT\"}");
     }

@@ -5,7 +5,7 @@ public interface LaneOrderResultTarget {
     int resultCount();
     long resultOrderId(int index);
     long resultOriginalOrderId(int index);
-    void resultOrder(int index, OrderRuntime order, String symbol);
+    void resultOrder(int index, OrderRuntime order, String instrumentId);
 
     /** Batch PLACE targets may resolve unchanged orders directly from their owning Lane. */
     default boolean captureUnchangedResults() { return false; }
@@ -52,7 +52,7 @@ public interface LaneOrderResultTarget {
                 if (target.includeTerminalAfterImage() && changes.orders.containsKey(original))
                     order = changes.orders.get(original);
             }
-            target.resultOrder(i, order, order == null ? null : identities.symbol(order.symbolId()));
+            target.resultOrder(i, order, order == null ? null : identities.instrumentId(order.symbolId()));
         }
         if (target.captureUnchangedResults()) captureUnchanged(target, identities, lane);
         target.prepareResponse();
@@ -72,7 +72,7 @@ public interface LaneOrderResultTarget {
                 long original = target.resultOriginalOrderId(index);
                 if (original > 0) order = lane.orders.get(original);
             }
-            target.resultOrder(index, order, order == null ? null : identities.symbol(order.symbolId()));
+            target.resultOrder(index, order, order == null ? null : identities.instrumentId(order.symbolId()));
         }
     }
 }

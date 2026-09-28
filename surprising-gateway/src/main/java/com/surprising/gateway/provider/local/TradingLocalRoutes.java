@@ -93,8 +93,8 @@ public final class TradingLocalRoutes {
     private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELORDER = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/{orderId}/cancel");
     private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELPREVIEW = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/cancel-preview");
     private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELORDERS = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/cancel");
-    private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELBYSYMBOL = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/cancel-by-symbol");
-    private static final PathPattern INSTRUMENT_CORE_SYNC_CONTROLLER_STATE = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/instrument-sync/{symbol}");
+    private static final PathPattern ADMIN_ORDER_CONTROLLER_CANCELBYSYMBOL = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/cancel-by-instrument");
+    private static final PathPattern INSTRUMENT_CORE_SYNC_CONTROLLER_STATE = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/instrument-sync/{instrumentId}");
 
     private final com.surprising.trading.matching.service.MatchingMarketDataService marketDataService;
     private static final PathPattern ORDER_BOOK = PathPatternParser.defaultInstance.parse("/api/v1/trading/market/orderbook");
@@ -129,12 +129,12 @@ public final class TradingLocalRoutes {
 
     public Object invoke(LocalApiRequest r) {
         if (r.matches(HttpMethod.GET, ORDER_BOOK)) {
-            return marketDataService.orderBookSnapshot(r.query("symbol", String.class, null, true),
+            return marketDataService.orderBookSnapshot(r.query("instrumentId", String.class, null, true),
                     r.query("depth", int.class, "30", false));
         }
         if (r.matches(HttpMethod.GET, EFFECTIVE_FEE)) {
             return tradingFeeRequests.effective(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, true),
+                    r.query("instrumentId", String.class, null, true),
                     r.query("instrumentChangeId", long.class, "0", false),
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false));
@@ -146,7 +146,7 @@ public final class TradingLocalRoutes {
                     r.query("productLine", ProductLine.class, null, true));
         }
         if (r.matches(HttpMethod.GET, ADMIN_MAINTENANCE_CONTROLLER_PREVIEW)) {
-            return adminMaintenanceRequests.preview(r.query("symbol", String.class, null, true),
+            return adminMaintenanceRequests.preview(r.query("instrumentId", String.class, null, true),
                     r.query("userId", long.class, "0", false),
                     r.query("afterUserId", long.class, "0", false));
         }
@@ -164,7 +164,7 @@ public final class TradingLocalRoutes {
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false),
                     r.query("userId", Long.class, null, false),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false));
         }
         if (r.matches(HttpMethod.POST, TRIGGER_ORDER_CONTROLLER_CANCELOPEN)) {
@@ -202,7 +202,7 @@ public final class TradingLocalRoutes {
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false),
                     r.query("userId", Long.class, null, false),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("status", String.class, null, false),
                     r.query("triggerOrderId", Long.class, null, false),
                     r.query("limit", int.class, "100", false),
@@ -218,7 +218,7 @@ public final class TradingLocalRoutes {
             return tradingFeeRequests.query(r.query("userId", long.class, "0", false),
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("status", FeeScheduleStatus.class, null, false),
                     r.query("limit", int.class, "100", false),
                     r.query("cursor", String.class, null, false),
@@ -226,7 +226,7 @@ public final class TradingLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, TRIGGER_ORDER_CONTROLLER_OPENORDERS)) {
             return triggerOrderRequests.openOrders(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false),
                     r.query("cursor", String.class, null, false));
         }
@@ -261,14 +261,14 @@ public final class TradingLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, LEVERAGE_CONTROLLER_GET)) {
             return leverageRequests.get(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, true),
+                    r.query("instrumentId", String.class, null, true),
                     r.query("marginMode", MarginMode.class, null, false),
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false));
         }
         if (r.matches(HttpMethod.GET, ORDER_CONTROLLER_OPENALGOORDERS)) {
             return orderRequests.openAlgoOrders(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false));
         }
         if (r.matches(HttpMethod.POST, TRIGGER_ORDER_CONTROLLER_PLACE)) {
@@ -276,7 +276,7 @@ public final class TradingLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, ORDER_CONTROLLER_HISTORYORDERS)) {
             return orderRequests.historyOrders(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false),
                     r.query("orderId", Long.class, null, false),
                     r.query("startTime", Long.class, null, false),
@@ -298,7 +298,7 @@ public final class TradingLocalRoutes {
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false),
                     r.query("userId", Long.class, null, false),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("status", String.class, null, false),
                     r.query("orderId", Long.class, null, false),
                     r.query("limit", int.class, "100", false),
@@ -313,7 +313,7 @@ public final class TradingLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, ORDER_CONTROLLER_OPENORDERS)) {
             return orderRequests.openOrders(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, false),
+                    r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false),
                     r.query("cursor", String.class, null, false),
                     r.query("minExportSequence", Long.class, null, false));
@@ -346,7 +346,7 @@ public final class TradingLocalRoutes {
                     r.path("triggerOrderId", long.class));
         }
         if (r.matches(HttpMethod.GET, INSTRUMENT_CORE_SYNC_CONTROLLER_STATE)) {
-            return instrumentCoreSyncService.state(r.path("symbol", String.class),
+            return instrumentCoreSyncService.state(r.path("instrumentId", String.class),
                     r.query("productLine", ProductLine.class, null, true));
         }
         if (r.matches(HttpMethod.POST, ADMIN_MAINTENANCE_CONTROLLER_RETRY)) {

@@ -48,10 +48,10 @@ public final class TriggerOrderCommands {
     }
 
     public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
-        Integer symbolId = owner.identities().findSymbolId(command.symbol());
+        Integer symbolId = owner.identities().findSymbolId(command.instrumentId());
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
-        long upperId = owner.triggerOrderIndex().maxPendingId(command.symbol());
+        long upperId = owner.triggerOrderIndex().maxPendingId(command.instrumentId());
         RuntimeRiskStateTransitions.replaceScan(owner.runtimeState(),
                 scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, upperId, command.markPriceTicks(),
@@ -59,21 +59,21 @@ public final class TriggerOrderCommands {
     }
 
     /** One bounded page cursor; account mutations use the same permanent Lane tasks as explicit triggers. */
-    public java.util.function.BooleanSupplier pendingTriggerScan(String symbol, int maxWork) {
-        Integer symbolId = owner.identities().findSymbolId(symbol);
+    public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
+        Integer symbolId = owner.identities().findSymbolId(instrumentId);
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.triggerComplete()) return COMPLETE;
-        return reusableTriggerScan.prepare(symbol, scan,
+        return reusableTriggerScan.prepare(instrumentId, scan,
                 Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
     }
 
-    public void evaluatePendingTriggerScan(String symbol, int maxWork) {
-        var work = pendingTriggerScan(symbol, maxWork);
+    public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
+        var work = pendingTriggerScan(instrumentId, maxWork);
         if (!work.getAsBoolean()) throw new IllegalStateException("asynchronous trigger scan requires continuation");
     }
 
     private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
-        private String symbol;
+        private String instrumentId;
         private UUID commandId;
         private RiskScanRuntime scan;
         private int remaining;
@@ -86,11 +86,11 @@ public final class TriggerOrderCommands {
         PendingTriggerScan() {
         }
 
-        PendingTriggerScan prepare(String symbol, RiskScanRuntime scan, int remaining) {
-            this.symbol = symbol;
+        PendingTriggerScan prepare(String instrumentId, RiskScanRuntime scan, int remaining) {
+            this.instrumentId = instrumentId;
             this.scan = scan;
             this.remaining = remaining;
-            commandId = UUID.nameUUIDFromBytes((owner.productLine().name() + ":MARK_PRICE:" + symbol + ":"
+            commandId = UUID.nameUUIDFromBytes((owner.productLine().name() + ":MARK_PRICE:" + instrumentId + ":"
                     + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             candidate = 0;
             page = null;
@@ -118,7 +118,7 @@ public final class TriggerOrderCommands {
                         replaceRiskScan(scan);
                     }
                     if (remaining <= 0) return true;
-                        page = owner.triggerOrderIndex().candidatesPage(symbol, scan.triggerMarkPriceTicks(), scan.triggerPhase(),
+                        page = owner.triggerOrderIndex().candidatesPage(instrumentId, scan.triggerMarkPriceTicks(), scan.triggerPhase(),
                             scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(), remaining);
                 }
                 if (candidate == page.ids().size()) {
@@ -407,7 +407,7 @@ public final class TriggerOrderCommands {
         var trigger = owner.runtimeState().triggerOrder(triggerId);
         if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
         if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return null;
-        Integer symbolId = owner.identities().findSymbolId(trigger.symbol());
+        Integer symbolId = owner.identities().findSymbolId(trigger.instrumentId());
         var mark = symbolId == null ? null : owner.runtimeState().markPrice(symbolId);
         if (mark != null && (mark.priceSequence() != sequence || mark.markPriceTicks() != price
                 || !isTriggerConditionSatisfied(trigger, price)))
@@ -420,7 +420,7 @@ public final class TriggerOrderCommands {
         long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
         return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId(), owner.runtimeState()),
-                trigger.symbol(), trigger.side(), limit, trigger.quantitySteps(),
+                trigger.instrumentId(), trigger.side(), limit, trigger.quantitySteps(),
                 instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT,
                 trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(), false,
                 "TRIGGER:" + trigger.triggerOrderId());
@@ -514,7 +514,7 @@ public final class TriggerOrderCommands {
             var current = owner.runtimeState().algoOrder(algo.algoOrderId());
             if (current != null && current.userId() != message.header().userId())
                 throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
-            int symbolId = owner.identities().symbolId(algo.symbol());
+            int symbolId = owner.identities().symbolId(algo.instrumentId());
             owner.deferAlgoUpsert(message.header().userId(), algo, symbolId);
             return;
         }
@@ -535,7 +535,7 @@ public final class TriggerOrderCommands {
         var first = views.get(0).materializeCreation(clusterTimestamp);
         var second = views.get(1).materializeCreation(clusterTimestamp);
         RuntimeTriggerOrderStateTransitions.validateOcoPair(first, second);
-        var instrument = owner.runtimeState().instrument(first.symbol());
+        var instrument = owner.runtimeState().instrument(first.instrumentId());
         if (instrument != null) {
             instrument.requireOrderEnabled(first.orderType(), first.timeInForce(), false, false);
             instrument.requireOrderEnabled(second.orderType(), second.timeInForce(), false, false);
@@ -544,7 +544,7 @@ public final class TriggerOrderCommands {
             if (owner.terminalTriggerRetained(leg.triggerOrderId(), message.header().userId(), leg.clientTriggerOrderId()))
                 throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID", "terminal trigger identity is retained");
         }
-        int symbolId = owner.identities().symbolId(first.symbol());
+        int symbolId = owner.identities().symbolId(first.instrumentId());
         long positionKey = preparedTriggerPositionKey(message.header().userId(), first);
         boolean settled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
@@ -565,7 +565,7 @@ public final class TriggerOrderCommands {
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
-        var maintenanceInstrument = owner.runtimeState().instrument(trigger.symbol());
+        var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());
         if (maintenanceInstrument != null) {
             maintenanceInstrument.requireOrderEnabled(trigger.orderType(), trigger.timeInForce(), false, false);
         }
@@ -575,7 +575,7 @@ public final class TriggerOrderCommands {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "terminal trigger order identity is retained");
         }
-        int symbolId = owner.identities().symbolId(trigger.symbol());
+        int symbolId = owner.identities().symbolId(trigger.instrumentId());
         long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
         boolean instrumentSettled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
@@ -713,7 +713,7 @@ public final class TriggerOrderCommands {
             identity = order == null ? null : com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
                     owner.runtimeState(), owner.identities(), trigger.userId(), order);
             assetId = order == null ? 0 : owner.identities().assetId(order.reservationAsset());
-            openInterest = owner.openInterestIndex().openInterestSteps(trigger.symbol());
+            openInterest = owner.openInterestIndex().openInterestSteps(trigger.instrumentId());
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet()
                     : java.util.Collections.emptyNavigableSet();
@@ -786,13 +786,13 @@ public final class TriggerOrderCommands {
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
             var current = owner.runtimeState().position(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
-            String symbol = owner.identities().symbol(previous.symbolId());
+            String instrumentId = owner.identities().instrumentId(previous.symbolId());
             var previousMarginMode = previous.marginMode();
             for (long triggerOrderId : owner.triggerOrderIndex().ids(previous.userId())) {
                 var trigger = owner.runtimeState().triggerOrder(triggerOrderId);
                 if (trigger == null || trigger.status()
                         != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) continue;
-                if (!symbol.equals(trigger.symbol()) || trigger.positionSide() != previous.positionSide()
+                if (!instrumentId.equals(trigger.instrumentId()) || trigger.positionSide() != previous.positionSide()
                         || trigger.marginMode() != previousMarginMode) continue;
                 selected.accept(triggerOrderId);
             }

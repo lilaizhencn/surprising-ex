@@ -21,7 +21,7 @@ class SubscriptionRegistryMetricsTest {
         when(connection.id()).thenReturn("s-1");
         when(connection.authenticatedUserId()).thenReturn(1001L);
         registry.add(connection);
-        registry.subscribe(connection, new SubscriptionTopic(WsChannel.POSITIONS, "BTC-USDT", null, 1001L));
+        registry.subscribe(connection, new SubscriptionTopic(WsChannel.POSITIONS, "1", null, 1001L));
 
         var response = registry.metrics("7", "admin");
 

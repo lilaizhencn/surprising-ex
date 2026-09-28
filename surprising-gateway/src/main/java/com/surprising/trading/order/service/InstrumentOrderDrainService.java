@@ -41,11 +41,11 @@ public class InstrumentOrderDrainService {
                 || event.productLine() != properties.getKafka().getProductLine()) {
             return;
         }
-        algoOrderService.cancelLifecycleOrders(event.symbol(), BATCH_SIZE);
-        orderService.requestLifecycleCancellation(event.symbol(), BATCH_SIZE);
-        if (algoOrderService.hasLifecycleActiveOrders(event.symbol())
-                || orderService.hasLifecycleActiveOrders(event.symbol())) {
-            throw new IllegalStateException("订单尚未完成到期清理: " + event.symbol());
+        algoOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
+        orderService.requestLifecycleCancellation(Integer.toString(event.instrumentId()), BATCH_SIZE);
+        if (algoOrderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))
+                || orderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))) {
+            throw new IllegalStateException("订单尚未完成到期清理: " + Integer.toString(event.instrumentId()));
         }
         publishReady(event);
     }
@@ -54,17 +54,17 @@ public class InstrumentOrderDrainService {
         try {
             InstrumentLifecycleDrainEvent ready = new InstrumentLifecycleDrainEvent(
                     InstrumentLifecycleDrainEvent.CURRENT_SCHEMA_VERSION,
-                    event.symbol(),
+                    Integer.toString(event.instrumentId()),
                     event.changeId(),
                     properties.getKafka().getProductLine(),
                     InstrumentLifecycleDrainComponent.ORDER,
                     Instant.now());
             String payload = objectMapper.writeValueAsString(ready);
             kafkaTemplate.send(properties.getKafka().getInstrumentLifecycleDrainTopic(),
-                            event.symbol(), payload)
+                            Integer.toString(event.instrumentId()), payload)
                     .get(10, TimeUnit.SECONDS);
         } catch (Exception ex) {
-            throw new IllegalStateException("订单清理确认发布失败: " + event.symbol(), ex);
+            throw new IllegalStateException("订单清理确认发布失败: " + Integer.toString(event.instrumentId()), ex);
         }
     }
 }

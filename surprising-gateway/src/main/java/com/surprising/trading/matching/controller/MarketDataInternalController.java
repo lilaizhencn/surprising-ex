@@ -20,10 +20,10 @@ public class MarketDataInternalController {
     }
 
     @GetMapping(TradingApiPaths.MARKET_BASE_PATH + "/orderbook")
-    public OrderBookSnapshotResponse orderBook(@RequestParam("symbol") String symbol,
+    public OrderBookSnapshotResponse orderBook(@RequestParam("instrumentId") String instrumentId,
                                                @RequestParam(value = "depth", defaultValue = "30") int depth) {
         try {
-            return marketDataService.orderBookSnapshot(symbol, depth);
+            return marketDataService.orderBookSnapshot(instrumentId, depth);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

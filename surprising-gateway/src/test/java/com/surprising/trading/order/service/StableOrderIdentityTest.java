@@ -98,7 +98,7 @@ class StableOrderIdentityTest {
     }
 
     private static PlaceOrderRequest request() {
-        return new PlaceOrderRequest(1001, "stable-client", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT,
+        return new PlaceOrderRequest(1001, "stable-client", "1", OrderSide.BUY, OrderType.LIMIT,
                 TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET, false, false);
     }
 
@@ -108,7 +108,7 @@ class StableOrderIdentityTest {
 
     private static CoreResponse commandResponse(PlaceOrderCommand command, String clientOrderId) {
         CoreOrderStateView order = new CoreOrderStateView(command.orderId(), ProductLine.LINEAR_PERPETUAL,
-                1001, command.symbol(), command.side(), command.limitPriceTicks(),
+                1001, command.instrumentId(), command.side(), command.limitPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(), clientOrderId,
                 UUID.randomUUID(), -10, 25, 0, 1_000, 1_000, 1,

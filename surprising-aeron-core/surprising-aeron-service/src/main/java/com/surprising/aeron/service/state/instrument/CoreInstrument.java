@@ -15,11 +15,11 @@ import java.util.List;
 import java.util.Objects;
 
 public final class CoreInstrument {
-    private final String symbol;
+    private final String instrumentId;
     private volatile Configuration configuration;
     private volatile CoreInstrumentMaintenance maintenance;
 
-    public CoreInstrument(String symbol, ContractType contractType, String baseAsset,
+    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
             String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
             long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
             long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
@@ -27,7 +27,7 @@ public final class CoreInstrument {
             long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
             List<CoreRiskLimitBracket> riskLimitBrackets,
             CoreInstrumentMaintenance maintenance) {
-        this(symbol, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -35,7 +35,7 @@ public final class CoreInstrument {
                 true, true, true, 0b11, 0b1111);
     }
 
-    public CoreInstrument(String symbol, ContractType contractType, String baseAsset,
+    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
             String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
             long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
             long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
@@ -44,7 +44,7 @@ public final class CoreInstrument {
             List<CoreRiskLimitBracket> riskLimitBrackets, CoreInstrumentMaintenance maintenance,
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
             boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask) {
-        this.symbol = OrderReservation.normalizeSymbol(symbol);
+        this.instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         this.configuration = new Configuration(Objects.requireNonNull(contractType, "contractType"),
                 AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
                 AssetBalance.normalizeAsset(settleAsset), notionalMultiplierUnits, priceTickUnits,
@@ -58,14 +58,14 @@ public final class CoreInstrument {
         validate();
     }
 
-    public CoreInstrument(String symbol, ContractType contractType, String baseAsset,
+    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
             String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
             long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
             long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
             long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
             long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
             List<CoreRiskLimitBracket> riskLimitBrackets) {
-        this(symbol, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -73,10 +73,10 @@ public final class CoreInstrument {
                 CoreInstrumentMaintenance.TRADING);
     }
 
-    public String symbol() { return symbol; }
+    public String instrumentId() { return instrumentId; }
     public Configuration configuration() { return configuration; }
     public void updateConfiguration(CoreInstrument updated) {
-        if (updated == null || !symbol.equals(updated.symbol)) throw new IllegalArgumentException("instrument symbol mismatch");
+        if (updated == null || !instrumentId.equals(updated.instrumentId)) throw new IllegalArgumentException("instrument instrumentId mismatch");
         this.configuration = updated.configuration;
     }
     public void restoreConfiguration(Configuration configuration) { this.configuration = Objects.requireNonNull(configuration); }
@@ -211,19 +211,19 @@ public final class CoreInstrument {
     public boolean equals(Object other) {
         if (this == other) return true;
         if (!(other instanceof CoreInstrument that)) return false;
-        return symbol.equals(that.symbol) && configuration.equals(that.configuration)
+        return instrumentId.equals(that.instrumentId) && configuration.equals(that.configuration)
                 && maintenance.equals(that.maintenance);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(symbol, configuration);
+        return Objects.hash(instrumentId, configuration);
     }
 
     @Override
     public String toString() {
         Configuration current = configuration;
-        return "CoreInstrument[symbol=" + symbol + ", contractType=" + current.contractType()
+        return "CoreInstrument[instrumentId=" + instrumentId + ", contractType=" + current.contractType()
                 + ", baseAsset=" + current.baseAsset() + ", quoteAsset=" + current.quoteAsset()
                 + ", settleAsset=" + current.settleAsset() + ", maintenance=" + maintenance + ']';
     }
@@ -246,7 +246,7 @@ public final class CoreInstrument {
         } else if (command.optionTypeCode() != -1) {
             throw new CoreStateRejectedException("INVALID_OPTION_TYPE", "non-option must not set option type");
         }
-        return new CoreInstrument(command.symbol(), contractType,
+        return new CoreInstrument(command.instrumentId(), contractType,
                 command.baseAsset(), command.quoteAsset(), command.settleAsset(),
                 command.notionalMultiplierUnits(), command.priceTickUnits(), command.settleScaleUnits(),
                 command.initialMarginRatePpm(), command.maintenanceMarginRatePpm(),

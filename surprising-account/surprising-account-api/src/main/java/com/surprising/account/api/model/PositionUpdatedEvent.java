@@ -19,7 +19,7 @@ public record PositionUpdatedEvent(
         ProductLine productLine,
         long revision,
         long userId,
-        String symbol,
+        String instrumentId,
         long instrumentChangeId,
         MarginMode marginMode,
         PositionSide positionSide,
@@ -49,8 +49,8 @@ public record PositionUpdatedEvent(
         if (userId <= 0L) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
@@ -72,7 +72,7 @@ public record PositionUpdatedEvent(
                 revision,
                 productLine,
                 userId,
-                symbol,
+                instrumentId,
                 instrumentChangeId,
                 marginMode,
                 positionSide,

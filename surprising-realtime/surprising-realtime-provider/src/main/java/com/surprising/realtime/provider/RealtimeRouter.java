@@ -173,7 +173,7 @@ public final class RealtimeRouter implements AutoCloseable {
     private void route(Aeron aeron, RealtimeFrame f, long now,
             Map<RealtimeRoute, Map<String, String>> targets, List<List<RealtimeFrame>> ready) {
         if (f.kind() == RealtimeFrame.Kind.BOOK)
-            pendingBooks.remove(f.productLine() + ":" + f.symbol());
+            pendingBooks.remove(f.productLine() + ":" + f.instrumentId());
         if (dirtySources.remove(f.productLine())) {
             publishReady(aeron, ready, now, targets);
             resetSource(f.productLine());
@@ -300,12 +300,12 @@ public final class RealtimeRouter implements AutoCloseable {
         for (var entry : controls.entrySet()) {
             long bookOffset = bookOffsets.getOrDefault(entry.getKey(), 0L);
             // At most 80 book reads/sec, below Core's shared 100 snapshot reads/sec ceiling.
-            // Look ahead one symbol so exact page multiples do not add an empty refresh cycle.
+            // Look ahead one instrumentId so exact page multiples do not add an empty refresh cycle.
             var activeBooks = requests.books(entry.getKey(), now, bookOffset, 9);
             var symbols = activeBooks.stream().limit(8).toList();
             bookOffsets.put(entry.getKey(), activeBooks.size() <= 8 ? 0L : bookOffset + 8);
-            for (String symbol : symbols) {
-                String bookKey = entry.getKey() + ":" + symbol;
+            for (String instrumentId : symbols) {
+                String bookKey = entry.getKey() + ":" + instrumentId;
                 Long sentAt = pendingBooks.get(bookKey);
                 if (sentAt != null && now - sentAt < 2000) continue;
                 var book =
@@ -318,7 +318,7 @@ public final class RealtimeRouter implements AutoCloseable {
                                 now,
                                 java.util.concurrent.ThreadLocalRandom.current()
                                         .nextLong(1, Long.MAX_VALUE),
-                                symbol,
+                                instrumentId,
                                 "",
                                 new byte[0]);
                 if (entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(book))) > 0)

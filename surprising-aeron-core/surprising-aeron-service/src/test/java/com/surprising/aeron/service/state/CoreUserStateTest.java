@@ -68,7 +68,7 @@ class CoreUserStateTest {
         CoreUserState closed = reduced.transition(3, closedBalances, reduced.reservations(), closedPositions,
                 reduced.positionMode());
 
-        assertThat(reduced.positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(75);
+        assertThat(reduced.positions().get("1").positionMarginUnits()).isEqualTo(75);
         assertThat(reduced.balances().get("USDT").lockedUnits()).isEqualTo(75);
         assertThat(closed.positions()).isEmpty();
         assertThat(closed.balances().get("USDT").lockedUnits()).isZero();
@@ -132,7 +132,7 @@ class CoreUserStateTest {
         CoreUserState original = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 3,
                 Map.of("USDT", new AssetBalance("USDT", 700, 300)),
                 Map.of(11L, reservation(11, 100)),
-                Map.of("BTC-USDT", position(200)), CorePositionMode.ONE_WAY);
+                Map.of("1", position(200)), CorePositionMode.ONE_WAY);
         CoreUserState decoded = new CoreUserState(original.productLine(), original.userId(), original.revision(),
                 original.balances(), original.reservations(), original.positions(), original.positionMode());
 
@@ -147,12 +147,12 @@ class CoreUserStateTest {
     }
 
     private static OrderReservation reservation(long orderId, long units) {
-        return OrderReservation.create(orderId, "BTC-USDT", ReservationKind.DERIVATIVE_MARGIN,
+        return OrderReservation.create(orderId, "1", ReservationKind.DERIVATIVE_MARGIN,
                 "USDT", units, 1);
     }
 
     private static CorePositionState position(long marginUnits) {
-        return new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
+        return new CorePositionState("1", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
                 1, 100, 100, 0, marginUnits);
     }
 }

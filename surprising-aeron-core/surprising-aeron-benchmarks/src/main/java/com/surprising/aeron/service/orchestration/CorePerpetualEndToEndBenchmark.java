@@ -31,7 +31,7 @@ import java.util.UUID;
 @Slf4j
 public final class CorePerpetualEndToEndBenchmark {
 
-    private static final String SYMBOL = "BENCH-BTC-USDT";
+    private static final String SYMBOL = "13";
     private static final long MAKER_USER_ID = 1001L;
     private static final long TAKER_USER_ID = 1002L;
     private static final long BALANCE_UNITS = 1_000_000_000_000L;

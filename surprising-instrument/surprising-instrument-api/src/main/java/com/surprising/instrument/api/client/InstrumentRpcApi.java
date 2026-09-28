@@ -19,13 +19,9 @@ import org.springframework.web.bind.annotation.RequestParam;
         url = "${surprising.clients.instrument.base-url:http://localhost:9094}")
 public interface InstrumentRpcApi {
 
-    default InstrumentResponse latest(String symbol) {
-        return latest(symbol, null);
-    }
-
     @GetMapping("/latest")
-    InstrumentResponse latest(@RequestParam("symbol") @NotBlank String symbol,
-                              @RequestParam(value = "productLine", required = false) ProductLine productLine);
+    InstrumentResponse latest(@RequestParam("instrumentId") int instrumentId,
+                              @RequestParam("productLine") ProductLine productLine);
 
     default InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
         return list(null, type, status);
@@ -38,7 +34,7 @@ public interface InstrumentRpcApi {
 
     @GetMapping("/trade-encoding")
     com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(@RequestParam("productLine") ProductLine productLine,
-            @RequestParam("symbol") String symbol, @RequestParam("changeId") long changeId);
+            @RequestParam("instrumentId") int instrumentId, @RequestParam("changeId") long changeId);
 
     @GetMapping("/snapshot")
     InstrumentSnapshotResponse snapshot(@RequestParam("productLine") ProductLine productLine);

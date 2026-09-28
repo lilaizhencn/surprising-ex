@@ -14,7 +14,7 @@ public final class PerpetualFundingCommands {
 
     public void executeApplyFunding(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
-        Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId());
+        Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
         if (owner.asynchronousCommands()) {
             var work = RuntimePerpetualFundingProcessor.prepare(owner.reusableFundingWork(), command, indexedUserIds,
                     message.header().commandId(), owner.runtimeState(), owner.identities());

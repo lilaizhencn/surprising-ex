@@ -4,7 +4,7 @@ import java.util.List;
 
 public record AdminCancelOrdersPreviewResponse(
         Long userId,
-        String symbol,
+        String instrumentId,
         int matched,
         int sampleSize,
         long totalRemainingQuantitySteps,

@@ -124,9 +124,9 @@ final class DirectCommandSlot {
     RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
 
     void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId,
-            String symbol, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
+            String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        riskScanControl.prepare(owner, risk, symbolId, symbol, maxUsers, pendingBefore, startedAt,
+        riskScanControl.prepare(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
                 beforeRevision);
         controlWork = riskScanControl;
     }
@@ -336,19 +336,19 @@ final class DirectCommandSlot {
         private RiskCommandContext owner;
         private RiskScanCoordinator risk;
         private int symbolId;
-        private String symbol;
+        private String instrumentId;
         private int maxUsers;
         private int pendingBefore;
         private long startedAt;
         private long beforeRevision;
         private BooleanSupplier triggers;
 
-        void prepare(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String symbol,
+        void prepare(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String instrumentId,
                 int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
             this.owner = Objects.requireNonNull(owner);
             this.risk = risk;
             this.symbolId = symbolId;
-            this.symbol = Objects.requireNonNull(symbol);
+            this.instrumentId = Objects.requireNonNull(instrumentId);
             this.maxUsers = maxUsers;
             this.pendingBefore = pendingBefore;
             this.startedAt = startedAt;
@@ -356,7 +356,7 @@ final class DirectCommandSlot {
             this.triggers = null;
         }
         void clear() {
-            owner = null; risk = null; symbol = null; triggers = null;
+            owner = null; risk = null; instrumentId = null; triggers = null;
             symbolId = maxUsers = pendingBefore = 0; startedAt = beforeRevision = 0;
         }
 
@@ -368,10 +368,10 @@ final class DirectCommandSlot {
                 var completedScan = owner.runtimeState().riskScan(symbolId);
                 triggers = remaining > 0 && completedScan != null && completedScan.riskComplete()
                         && !completedScan.triggerComplete()
-                        ? owner.pendingTriggerScan(symbol, remaining) : COMPLETE_CONTROL;
+                        ? owner.pendingTriggerScan(instrumentId, remaining) : COMPLETE_CONTROL;
             }
             if (!triggers.getAsBoolean()) return false;
-            owner.logRiskScan("continuation", symbol, maxUsers, pendingBefore, startedAt);
+            owner.logRiskScan("continuation", instrumentId, maxUsers, pendingBefore, startedAt);
             return true;
         }
     }

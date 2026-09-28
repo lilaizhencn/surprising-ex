@@ -306,13 +306,13 @@ public class BinanceApiController {
         Map<String, Object> params = parameters(request, body);
         long userId = authenticate(request, "GET".equals(method) || "DELETE".equals(method) ? "READ" : "TRADE", body);
         String symbol = required(params, "symbol");
-        String backendSymbol = properties.getBinanceApi().backendSymbol(symbol);
+        String instrumentId = properties.getBinanceApi().backendInstrumentId(symbol, productLine(request));
         if ("POST".equals(method)) {
             GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("userId", userId);
             payload.put("clientOrderId", first(params, "newClientOrderId", "clientOrderId"));
-            payload.put("symbol", backendSymbol);
+            payload.put("instrumentId", instrumentId);
             payload.put("side", required(params, "side").toUpperCase(Locale.ROOT));
             String type = required(params, "type").toUpperCase(Locale.ROOT);
             payload.put("orderType", type);
@@ -352,7 +352,7 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> orders(HttpServletRequest request, long userId, boolean openOnly) {
         String symbol = request.getParameter("symbol");
         String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
-        if (symbol != null && !symbol.isBlank()) query += "&symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
+        if (symbol != null && !symbol.isBlank()) query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
         ResponseEntity<byte[]> response = proxy("trading", "/open", request, null, userId, query, true);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
@@ -360,8 +360,8 @@ public class BinanceApiController {
         Object rows = payload.get("orders");
         if (rows instanceof List<?> list) {
             for (Object row : list) {
-                result.add(orderView(mapValue(row), symbol == null ? stringValue(mapValue(row).get("symbol")) : symbol,
-                        properties.getBinanceApi().scale(symbol == null ? stringValue(mapValue(row).get("symbol")) : symbol)));
+                result.add(orderView(mapValue(row), symbol == null ? properties.getBinanceApi().externalSymbol(stringValue(mapValue(row).get("instrumentId")), productLine(request)) : symbol,
+                        properties.getBinanceApi().scale(symbol == null ? properties.getBinanceApi().externalSymbol(stringValue(mapValue(row).get("instrumentId")), productLine(request)) : symbol)));
             }
         }
         return json(HttpStatus.OK, result);
@@ -371,7 +371,7 @@ public class BinanceApiController {
         String symbol = request.getParameter("symbol");
         String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
         if (symbol != null && !symbol.isBlank()) {
-            query += "&symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
+            query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
         }
         for (String parameter : List.of("orderId", "startTime", "endTime")) {
             String value = request.getParameter(parameter);
@@ -386,7 +386,7 @@ public class BinanceApiController {
             for (Object row : list) {
                 Map<String, Object> value = mapValue(row);
                 String rowSymbol = symbol == null || symbol.isBlank()
-                        ? stringValue(value.get("symbol")) : symbol;
+                        ? properties.getBinanceApi().externalSymbol(stringValue(value.get("instrumentId")), productLine(request)) : symbol;
                 result.add(orderView(value, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
             }
         }
@@ -424,7 +424,7 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> depth(HttpServletRequest request, byte[] body) {
         String symbol = requiredParameter(request, "symbol");
         int limit = capped(request.getParameter("limit"));
-        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol)) + "&depth=" + limit;
+        String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))) + "&depth=" + limit;
         ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query, false);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
@@ -437,7 +437,7 @@ public class BinanceApiController {
 
     private ResponseEntity<byte[]> bookTicker(HttpServletRequest request) {
         String symbol = requiredParameter(request, "symbol");
-        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol))
+        String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)))
                 + "&depth=5";
         ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query, false);
         if (response.getStatusCode().isError()) return response;
@@ -451,6 +451,17 @@ public class BinanceApiController {
                 "bidQty", decimalString(number(bid.get("quantitySteps")), scale.getQuantityScale()),
                 "askPrice", decimalString(number(ask.get("priceTicks")), scale.getPriceScale()),
                 "askQty", decimalString(number(ask.get("quantitySteps")), scale.getQuantityScale())));
+    }
+
+    private com.surprising.product.api.ProductLine productLine(HttpServletRequest request) {
+        String explicit = request.getHeader("X-Product-Line");
+        if (explicit == null || explicit.isBlank()) explicit = request.getParameter("productLine");
+        if (explicit != null && !explicit.isBlank()) return com.surprising.product.api.ProductLine.valueOf(explicit);
+        String path = request.getRequestURI();
+        if (path.startsWith("/fapi/")) return com.surprising.product.api.ProductLine.LINEAR_PERPETUAL;
+        if (path.startsWith("/dapi/")) return com.surprising.product.api.ProductLine.INVERSE_PERPETUAL;
+        if (path.startsWith("/eapi/")) return com.surprising.product.api.ProductLine.OPTION;
+        return com.surprising.product.api.ProductLine.SPOT;
     }
 
     private ResponseEntity<byte[]> proxy(String service, String suffix, HttpServletRequest request,

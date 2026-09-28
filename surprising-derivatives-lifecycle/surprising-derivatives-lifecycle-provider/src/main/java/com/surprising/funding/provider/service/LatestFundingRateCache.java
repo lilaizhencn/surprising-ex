@@ -33,11 +33,11 @@ public class LatestFundingRateCache {
 
     public boolean update(FundingRateResponse rate) {
         validate(rate, clock.instant());
-        String symbol = normalizeSymbol(rate.symbol());
-        FundingRateResponse normalized = new FundingRateResponse(symbol, rate.sequence(), rate.fundingRatePpm(),
+        String instrumentId = normalizeSymbol(rate.instrumentId());
+        FundingRateResponse normalized = new FundingRateResponse(instrumentId, rate.sequence(), rate.fundingRatePpm(),
                 rate.premiumRatePpm(), rate.interestRatePpm(), rate.fundingTime(), rate.fundingIntervalHours(),
                 rate.status(), rate.eventTime());
-        FundingRateKey key = new FundingRateKey(symbol, rate.fundingTime());
+        FundingRateKey key = new FundingRateKey(instrumentId, rate.fundingTime());
         FundingRateResponse updated = ratesByFundingTime.compute(key, (ignored, current) ->
                 current == null || newer(normalized, current) ? normalized : current);
         return updated == normalized;
@@ -48,21 +48,21 @@ public class LatestFundingRateCache {
             throw new IllegalArgumentException("funding rate event is required");
         }
         long fundingRatePpm = event.fundingRate().movePointRight(6).longValueExact();
-        return update(new FundingRateResponse(event.symbol(), event.sequence(), fundingRatePpm, 0L, 0L,
+        return update(new FundingRateResponse(event.instrumentId(), event.sequence(), fundingRatePpm, 0L, 0L,
                 event.nextFundingTime(), event.fundingIntervalHours(), "PREDICTED", event.eventTime()));
     }
 
-    public FundingRateResponse requireFresh(String symbol) {
-        String normalizedSymbol = normalizeSymbol(symbol);
+    public FundingRateResponse requireFresh(String instrumentId) {
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         FundingRateResponse rate = ratesByFundingTime.entrySet().stream()
-                .filter(entry -> entry.getKey().symbol().equals(normalizedSymbol))
+                .filter(entry -> entry.getKey().instrumentId().equals(normalizedSymbol))
                 .map(java.util.Map.Entry::getValue)
                 .max(Comparator.comparing(FundingRateResponse::fundingTime)
                         .thenComparing(FundingRateResponse::sequence)
                         .thenComparing(FundingRateResponse::eventTime))
                 .orElse(null);
         if (rate == null || !fresh(rate, clock.instant())) {
-            throw new StaleFundingRateException("funding rate unavailable or stale: " + symbol);
+            throw new StaleFundingRateException("funding rate unavailable or stale: " + instrumentId);
         }
         return rate;
     }
@@ -71,13 +71,13 @@ public class LatestFundingRateCache {
         return ratesByFundingTime.values().stream()
                 .filter(rate -> rate.fundingTime() != null && !rate.fundingTime().isAfter(now))
                 .sorted(Comparator.comparing(FundingRateResponse::fundingTime)
-                        .thenComparing(FundingRateResponse::symbol))
+                        .thenComparing(FundingRateResponse::instrumentId))
                 .toList();
     }
 
     public void removeIfCurrent(FundingRateResponse rate) {
         if (rate != null) {
-            ratesByFundingTime.remove(new FundingRateKey(normalizeSymbol(rate.symbol()), rate.fundingTime()), rate);
+            ratesByFundingTime.remove(new FundingRateKey(normalizeSymbol(rate.instrumentId()), rate.fundingTime()), rate);
         }
     }
 
@@ -101,20 +101,20 @@ public class LatestFundingRateCache {
         if (rate.eventTime().isAfter(now.plusSeconds(1))) {
             throw new IllegalArgumentException("funding rate eventTime is in the future: " + rate.eventTime());
         }
-        normalizeSymbol(rate.symbol());
+        normalizeSymbol(rate.instrumentId());
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }
 
-    private record FundingRateKey(String symbol, Instant fundingTime) {
+    private record FundingRateKey(String instrumentId, Instant fundingTime) {
     }
 }

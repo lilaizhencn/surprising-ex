@@ -22,12 +22,12 @@ final class RuntimeTestStateTransitions {
     TradingCoreState registerInstrument(TradingCoreState before, RegisterInstrumentCommand command) {
         var instrument = com.surprising.aeron.service.state.instrument.CoreInstrument.from(
                 before.productLine(), command);
-        if (before.instruments().containsKey(instrument.symbol())) {
+        if (before.instruments().containsKey(instrument.instrumentId())) {
             throw new com.surprising.aeron.service.exception.CoreStateRejectedException(
                     "INVALID_COMMAND", "instrument is already registered");
         }
         var instruments = new java.util.HashMap<>(before.instruments());
-        instruments.put(instrument.symbol(), instrument);
+        instruments.put(instrument.instrumentId(), instrument);
         return new TradingCoreState(before.productLine(), Math.incrementExact(before.revision()),
                 before.users(), before.orders(), instruments, before.riskState(), before.treasuryState(),
                 before.leverages(), before.algoOrders(), before.cancelAllAfterTimers(),

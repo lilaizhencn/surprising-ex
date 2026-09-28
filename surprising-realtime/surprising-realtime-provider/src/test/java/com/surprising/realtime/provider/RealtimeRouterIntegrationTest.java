@@ -118,7 +118,7 @@ class RealtimeRouterIntegrationTest {
                         System.currentTimeMillis() + 30000);
                 // Initial offers can precede UDP image establishment. Independent public updates
                 // establish both images.
-                var publicRoute = new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "BTCUSDT");
+                var publicRoute = new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "1");
                 routes.register(publicRoute, nodeA, System.currentTimeMillis() + 30000);
                 routes.register(publicRoute, nodeB, System.currentTimeMillis() + 30000);
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -131,7 +131,7 @@ class RealtimeRouterIntegrationTest {
                                     1,
                                     0,
                                     0,
-                                    "BTCUSDT",
+                                    "1",
                                     "",
                                     new byte[] {'{', '}'}));
                     if (System.nanoTime() > deadline)
@@ -143,31 +143,31 @@ class RealtimeRouterIntegrationTest {
                 // A burst spans several 256-frame drains. Every event remains ordered and
                 // reaches only its subscribed node; pipelining must not coalesce trade-like events.
                 for (int i = 0; i < 20; i++)
-                    routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "PAIR" + i),
+                    routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "MARK", Integer.toString(10000 + i)),
                             i % 2 == 0 ? nodeA : nodeB, System.currentTimeMillis() + 30000);
                 long burstDrops = router.dropped();
                 for (int i = 0; i < 1024; i++)
                     assertThat(router.offer(frame(RealtimeFrame.Kind.MARK, 0, 1000 + i, 0, 0,
-                            "PAIR" + (i % 20), "", new byte[] {'{', '}'}))).isTrue();
+                            Integer.toString(10000 + i % 20), "", new byte[] {'{', '}'}))).isTrue();
                 await(() -> receivedA.stream().filter(f -> f.sequence() >= 1000).count() == 512
                         && receivedB.stream().filter(f -> f.sequence() >= 1000).count() == 512);
                 var burstA = receivedA.stream().filter(f -> f.sequence() >= 1000).toList();
                 var burstB = receivedB.stream().filter(f -> f.sequence() >= 1000).toList();
-                assertThat(burstA).allMatch(f -> Integer.parseInt(f.symbol().substring(4)) % 2 == 0);
-                assertThat(burstB).allMatch(f -> Integer.parseInt(f.symbol().substring(4)) % 2 == 1);
+                assertThat(burstA).allMatch(f -> Integer.parseInt(f.instrumentId()) % 2 == 0);
+                assertThat(burstB).allMatch(f -> Integer.parseInt(f.instrumentId()) % 2 == 1);
                 assertThat(burstA.stream().map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
                 assertThat(burstB.stream().map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
                 assertThat(router.dropped()).isEqualTo(burstDrops);
                 receivedA.clear(); receivedB.clear();
                 long droppedBefore = router.dropped();
                 assertThat(router.offer(frame(RealtimeFrame.Kind.CANDLE, 0, 9, 0, 0,
-                        "BTCUSDT", "1m", new byte[17 * 1024 * 1024]))).isFalse();
+                        "1", "1m", new byte[17 * 1024 * 1024]))).isFalse();
                 assertThat(router.dropped()).isEqualTo(droppedBefore + 1);
                 // Candle aggregation is in this process: feed the same bounded queue directly.
-                routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "CANDLE", "BTCUSDT"),
+                routes.register(new RealtimeRoute(ProductLine.SPOT, 0, "CANDLE", "1"),
                         nodeA, System.currentTimeMillis() + 30000);
                 assertThat(router.offer(frame(RealtimeFrame.Kind.CANDLE, 0, 10, 0, 0,
-                        "BTCUSDT", "1m", new byte[] {'{', '}'}))).isTrue();
+                        "1", "1m", new byte[] {'{', '}'}))).isTrue();
                 await(() -> receivedA.stream().anyMatch(f -> f.kind() == RealtimeFrame.Kind.CANDLE));
                 assertThat(receivedB).noneMatch(f -> f.kind() == RealtimeFrame.Kind.CANDLE);
                 receivedA.clear(); receivedB.clear();
@@ -231,15 +231,15 @@ class RealtimeRouterIntegrationTest {
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);
                 var bookRequests = new ValkeySnapshotRequests(redis);
                 for (int i = 0; i < 20; i++)
-                    bookRequests.renewBook(ProductLine.SPOT, "PAIR" + i, System.currentTimeMillis() + 30000);
+                    bookRequests.renewBook(ProductLine.SPOT, Integer.toString(10000 + i), System.currentTimeMillis() + 30000);
                 await(() -> control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST)
-                        .map(RealtimeFrame::symbol).distinct().count() == 20);
+                        .map(RealtimeFrame::instrumentId).distinct().count() == 20);
                 assertThat(control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST))
                         .allMatch(f -> f.productLine() == ProductLine.SPOT && f.userId() == 0);
-                // No duplicate query for a symbol while its first answer is outstanding.
+                // No duplicate query for a instrumentId while its first answer is outstanding.
                 Thread.sleep(400);
                 assertThat(control.stream().filter(f -> f.kind() == RealtimeFrame.Kind.BOOK_REQUEST)
-                        .map(RealtimeFrame::symbol).toList()).hasSize(20).doesNotHaveDuplicates();
+                        .map(RealtimeFrame::instrumentId).toList()).hasSize(20).doesNotHaveDuplicates();
                 assertThat(router.failures()).isZero();
                 // The optional router control client must never invoke Aeron's process-exit
                 // handler when its MediaDriver disappears.
@@ -325,7 +325,7 @@ class RealtimeRouterIntegrationTest {
             long seq,
             int ordinal,
             long id,
-            String symbol,
+            String instrumentId,
             String entity,
             byte[] data) {
         return new RealtimeFrame(
@@ -336,7 +336,7 @@ class RealtimeRouterIntegrationTest {
                 ordinal,
                 System.currentTimeMillis(),
                 id,
-                symbol,
+                instrumentId,
                 entity,
                 data);
     }

@@ -82,7 +82,7 @@ public class TriggerOrderService {
                 normalized.clientTriggerOrderId());
         CoreTriggerOrderStateView view = new CoreTriggerOrderStateView(
                 triggerOrderId, productLine, normalized.userId(), normalized.clientTriggerOrderId(),
-                emptyToNull(normalized.ocoGroupId()), normalized.symbol(),
+                emptyToNull(normalized.ocoGroupId()), normalized.instrumentId(),
                 CoreOrderSide.valueOf(normalized.side().name()),
                 CoreTriggerOrderType.valueOf(normalized.triggerType().name()),
                 CoreTriggerCondition.valueOf(triggerCondition(normalized.side(), normalized.triggerType()).name()),
@@ -143,7 +143,7 @@ public class TriggerOrderService {
         var b = stopLoss.view();
         if (a.triggerType() != CoreTriggerOrderType.TAKE_PROFIT || b.triggerType() != CoreTriggerOrderType.STOP_LOSS
                 || a.ocoGroupId().isBlank() || !a.ocoGroupId().equals(b.ocoGroupId())
-                || a.userId() != b.userId() || !a.symbol().equals(b.symbol())
+                || a.userId() != b.userId() || !a.instrumentId().equals(b.instrumentId())
                 || a.side() != b.side() || a.marginMode() != b.marginMode() || a.positionSide() != b.positionSide()
                 || a.quantitySteps() != b.quantitySteps() || a.triggerOrderId() == b.triggerOrderId()
                 || (a.side() == CoreOrderSide.SELL ? a.triggerPriceTicks() <= b.triggerPriceTicks()
@@ -256,9 +256,9 @@ public class TriggerOrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String symbol = request.symbol() == null || request.symbol().isBlank()
-                ? null : normalizeSymbol(request.symbol());
-        List<CoreTriggerOrderStateView> orders = aeronGateway.openOrders(request.userId(), symbol, 0, limit);
+        String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
+                ? null : normalizeSymbol(request.instrumentId());
+        List<CoreTriggerOrderStateView> orders = aeronGateway.openOrders(request.userId(), instrumentId, 0, limit);
         List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
         for (int i = 0; i < orders.size(); i++) {
             try {
@@ -271,22 +271,22 @@ public class TriggerOrderService {
         return triggerBatchResponse(results);
     }
 
-    public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit) {
-        return openOrders(userId, symbol, limit, null);
+    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
+        return openOrders(userId, instrumentId, limit, null);
     }
 
-    public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
+    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         long before = decodeOpenTriggerCursor(cursor);
         List<CoreTriggerOrderStateView> states=realtimeQueries==null ? aeronGateway.openOrders(userId,normalizedSymbol,before,limit+1)
                 : realtimeQueries.require(currentProductLine(),userId,null).triggerOrders().stream()
-                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.symbol()))
+                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->before==0 || v.triggerOrderId()<before)
                 .sorted(java.util.Comparator.comparingLong(CoreTriggerOrderStateView::triggerOrderId).reversed()).limit(limit+1).toList();
         List<TriggerOrderResponse> values=states.stream().map(TriggerOrderAeronGateway::response).toList();
@@ -298,17 +298,17 @@ public class TriggerOrderService {
                 "createdAt.desc", limit);
     }
 
-    public TriggerOrderQueryResponse adminOrders(Long userId, String symbol, String status,
+    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
                                                  Long triggerOrderId, int limit) {
-        return adminOrders(userId, symbol, status, triggerOrderId, limit, null, null, null);
+        return adminOrders(userId, instrumentId, status, triggerOrderId, limit, null, null, null);
     }
 
-    public TriggerOrderQueryResponse adminOrders(Long userId, String symbol, String status,
+    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
                                                  Long triggerOrderId, int limit, String cursor, String sort) {
-        return adminOrders(userId, symbol, status, triggerOrderId, limit, cursor, sort, null);
+        return adminOrders(userId, instrumentId, status, triggerOrderId, limit, cursor, sort, null);
     }
 
-    public TriggerOrderQueryResponse adminOrders(Long userId, String symbol, String status,
+    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
                                                  Long triggerOrderId, int limit, String cursor, String sort,
                                                  ProductLine productLine) {
         if (userId != null && userId <= 0) throw new IllegalArgumentException("userId must be positive");
@@ -318,7 +318,7 @@ public class TriggerOrderService {
         if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
         ProductLine effective = productLine == null ? currentProductLine() : productLine;
         if (effective != currentProductLine()) throw new IllegalArgumentException("product line does not match provider");
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         CoreTriggerOrderStatus normalizedStatus = status == null || status.isBlank() ? null
                 : CoreTriggerOrderStatus.valueOf(status.trim().toUpperCase());
         long before = decodeOpenTriggerCursor(cursor);
@@ -365,27 +365,27 @@ public class TriggerOrderService {
         });
     }
 
-    private void scanAeronOpenOrders(long userId, String symbol, String operation,
+    private void scanAeronOpenOrders(long userId, String instrumentId, String operation,
                                      CoreTriggerOrderStatus status,
                                      Consumer<List<CoreTriggerOrderStateView>> pageConsumer) {
         int pageSize = Math.min(1000, Math.max(1, properties.getExecution().getTriggerBatchSize()));
         int maxPages = Math.min(256, Math.max(1, properties.getExecution().getMaxTriggerScanPages()));
         long before = 0;
         for (int pageNumber = 1; pageNumber <= maxPages; pageNumber++) {
-            List<CoreTriggerOrderStateView> page = aeronGateway.openOrders(userId, symbol, before, pageSize, status);
+            List<CoreTriggerOrderStateView> page = aeronGateway.openOrders(userId, instrumentId, before, pageSize, status);
             if (page.isEmpty()) return;
             pageConsumer.accept(page);
             long nextBefore = page.getLast().triggerOrderId();
             if (page.size() < pageSize) return;
             if (nextBefore <= 0 || (before != 0 && nextBefore >= before)) {
-                log.error("Non-monotonic Aeron trigger cursor operation={} symbol={} before={} nextBefore={}",
-                        operation, symbol, before, nextBefore);
+                log.error("Non-monotonic Aeron trigger cursor operation={} instrumentId={} before={} nextBefore={}",
+                        operation, instrumentId, before, nextBefore);
                 return;
             }
             before = nextBefore;
         }
-        log.warn("Aeron trigger scan reached page bound operation={} userId={} symbol={} pageSize={} maxPages={}",
-                operation, userId, symbol, pageSize, maxPages);
+        log.warn("Aeron trigger scan reached page bound operation={} userId={} instrumentId={} pageSize={} maxPages={}",
+                operation, userId, instrumentId, pageSize, maxPages);
     }
 
     static String encodeOpenTriggerCursor(long triggerOrderId) {
@@ -425,7 +425,7 @@ public class TriggerOrderService {
         if (request.expiresAt() != null && !request.expiresAt().isAfter(Instant.now())) {
             throw new IllegalArgumentException("expiresAt must be in the future");
         }
-        return new PlaceTriggerOrderRequest(request.userId(), clientId, ocoId, normalizeSymbol(request.symbol()),
+        return new PlaceTriggerOrderRequest(request.userId(), clientId, ocoId, normalizeSymbol(request.instrumentId()),
                 request.side(), request.triggerType(), request.triggerPriceTicks(), request.activationPriceTicks(),
                 request.callbackRatePpm(), request.orderType(), request.timeInForce(), request.priceTicks(),
                 request.quantitySteps(), MarginMode.defaultIfNull(request.marginMode()),
@@ -504,10 +504,10 @@ public class TriggerOrderService {
         if (size < 1 || size > max) throw new IllegalArgumentException(field + " size must be in [1, " + max + "]");
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("symbol is required");
-        String normalized = symbol.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) throw new IllegalArgumentException("invalid symbol: " + symbol);
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("instrumentId is required");
+        String normalized = instrumentId.trim().toUpperCase();
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         return normalized;
     }
 

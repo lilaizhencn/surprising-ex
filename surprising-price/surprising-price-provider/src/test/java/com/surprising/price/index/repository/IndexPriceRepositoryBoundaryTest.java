@@ -40,7 +40,7 @@ class IndexPriceRepositoryBoundaryTest {
         assertThat(sql.getValue()).contains("price_index_ticks").contains("ON CONFLICT");
         PreparedStatement statement = mock(PreparedStatement.class);
         setter.getValue().setValues(statement, 0);
-        verify(statement).setString(1, "BTC-USDT");
+        verify(statement).setString(1, "1");
         verify(statement).setLong(2, 7L);
         verify(statement).setTimestamp(8, Timestamp.from(event().eventTime()));
     }
@@ -50,7 +50,7 @@ class IndexPriceRepositoryBoundaryTest {
         IndexPriceTickRepository ticks = mock(IndexPriceTickRepository.class);
         IndexPriceComponentRepository components = mock(IndexPriceComponentRepository.class);
         Instant cutoff = Instant.parse("2026-07-14T00:00:00Z");
-        List<TickKey> keys = List.of(new TickKey("BTC-USDT", 7L));
+        List<TickKey> keys = List.of(new TickKey("1", 7L));
         when(ticks.findExpiredForDeletion(cutoff, 100)).thenReturn(keys);
         when(ticks.deleteByKeys(keys)).thenReturn(1);
         IndexPriceAuditService service = new IndexPriceAuditService(ticks, components);
@@ -69,7 +69,7 @@ class IndexPriceRepositoryBoundaryTest {
                 .thenReturn(new int[] {1});
         IndexPriceTickRepository repository = new IndexPriceTickRepository(jdbcTemplate);
 
-        repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
+        repository.deleteByKeys(List.of(new TickKey("1", 7L)));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).batchUpdate(sql.capture(), any(BatchPreparedStatementSetter.class));
@@ -85,7 +85,7 @@ class IndexPriceRepositoryBoundaryTest {
                 .thenReturn(new int[] {1});
         IndexPriceComponentRepository repository = new IndexPriceComponentRepository(jdbcTemplate);
 
-        repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
+        repository.deleteByKeys(List.of(new TickKey("1", 7L)));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).batchUpdate(sql.capture(), any(BatchPreparedStatementSetter.class));
@@ -103,7 +103,7 @@ class IndexPriceRepositoryBoundaryTest {
                 .thenReturn(results);
         IndexPriceComponentRepository repository = new IndexPriceComponentRepository(jdbcTemplate);
         List<TickKey> keys = java.util.stream.LongStream.range(0, 1_000)
-                .mapToObj(sequence -> new TickKey("BTC-USDT", sequence))
+                .mapToObj(sequence -> new TickKey("1", sequence))
                 .toList();
 
         assertThat(repository.deleteByKeys(keys)).isEqualTo(1_000);
@@ -111,16 +111,16 @@ class IndexPriceRepositoryBoundaryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<BatchPreparedStatementSetter> setter = ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
         verify(jdbcTemplate, times(1)).batchUpdate(sql.capture(), setter.capture());
-        assertThat(sql.getValue()).doesNotContain(" IN (").contains("symbol = ?").contains("sequence = ?");
+        assertThat(sql.getValue()).doesNotContain(" IN (").contains("instrument_id = ?").contains("sequence = ?");
         assertThat(setter.getValue().getBatchSize()).isEqualTo(1_000);
         PreparedStatement statement = mock(PreparedStatement.class);
         setter.getValue().setValues(statement, 999);
-        verify(statement).setString(1, "BTC-USDT");
+        verify(statement).setString(1, "1");
         verify(statement).setLong(2, 999L);
     }
 
     private static IndexPriceEvent event() {
-        return new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 7, PriceStatus.HEALTHY,
+        return new IndexPriceEvent("1", new BigDecimal("100"), 7, PriceStatus.HEALTHY,
                 3, 3, BigDecimal.valueOf(3), Instant.parse("2026-07-17T00:00:00Z"), List.of());
     }
 }

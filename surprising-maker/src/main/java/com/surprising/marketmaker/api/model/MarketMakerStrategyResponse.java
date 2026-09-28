@@ -7,7 +7,7 @@ import java.util.List;
 public record MarketMakerStrategyResponse(
         String strategyId,
         ProductLine productLine,
-        List<String> symbols,
+        List<String> instrumentIds,
         List<Long> accountIds,
         MarketMakerStrategyStatus status,
         boolean configuredEnabled,
@@ -22,7 +22,7 @@ public record MarketMakerStrategyResponse(
         Instant lastCycleTime) {
 
     public MarketMakerStrategyResponse(String strategyId,
-                                       List<String> symbols,
+                                       List<String> instrumentIds,
                                        List<Long> accountIds,
                                        MarketMakerStrategyStatus status,
                                        boolean configuredEnabled,
@@ -35,7 +35,7 @@ public record MarketMakerStrategyResponse(
                                        String lastTraceId,
                                        String lastError,
                                        Instant lastCycleTime) {
-        this(strategyId, ProductLine.LINEAR_PERPETUAL, symbols, accountIds, status, configuredEnabled,
+        this(strategyId, ProductLine.LINEAR_PERPETUAL, instrumentIds, accountIds, status, configuredEnabled,
                 runtimePaused, cycleSequence, submittedOrders, canceledOrders, rejectedOrders, skippedCycles,
                 lastTraceId, lastError, lastCycleTime);
     }

@@ -13,7 +13,7 @@ public record AccountLedgerEntryResponse(
         String reason,
         Long tradeId,
         Long orderId,
-        String symbol,
+        String instrumentId,
         Long feeRatePpm,
         Instant createdAt) {
 }

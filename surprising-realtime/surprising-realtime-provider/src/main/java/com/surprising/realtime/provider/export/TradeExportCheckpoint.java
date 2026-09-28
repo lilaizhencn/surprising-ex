@@ -7,7 +7,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.security.*;
 
-/** Atomic local recovery state, written only after Kafka acknowledgement. */
+/** Atomic local recovery state, written only after order projection commit and Kafka acknowledgement. */
 record TradeExportCheckpoint(
         ProductLine product, long logPosition, long tradeSequence, byte[] snapshot) {
     private static final int MAGIC = 0x54584331;

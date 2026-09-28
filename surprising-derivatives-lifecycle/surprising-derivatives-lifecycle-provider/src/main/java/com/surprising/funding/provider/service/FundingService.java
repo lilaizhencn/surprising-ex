@@ -76,16 +76,16 @@ public class FundingService {
         if (!properties.getCalculation().isEnabled()) return;
         Instant now = Instant.now();
         for (var input : rateInputRepository.find(properties.getCalculation().getMaxMarkAge())) {
-            if (!ownsSymbol(input.symbol())) continue;
-            long sequence = sequenceRepository.next(input.symbol());
+            if (!ownsSymbol(input.instrumentId())) continue;
+            long sequence = sequenceRepository.next(input.instrumentId());
             long rawRate = Math.addExact(input.interestRatePpm(), input.premiumRatePpm());
             long fundingRate = FundingMath.clampRate(rawRate, input.fundingRateFloorPpm(), input.fundingRateCapPpm());
             Instant fundingTime = FundingTime.nextFundingTime(now, input.fundingIntervalHours());
-            FundingRateResponse rate = new FundingRateResponse(input.symbol(), sequence, fundingRate,
+            FundingRateResponse rate = new FundingRateResponse(input.instrumentId(), sequence, fundingRate,
                     input.premiumRatePpm(), input.interestRatePpm(), fundingTime, input.fundingIntervalHours(),
                     "PREDICTED", now);
             latestFundingRateCache.update(rate);
-            kafkaTemplate.send(properties.getKafka().getFundingRateTopic(), rate.symbol(), fundingRateEvent(rate));
+            kafkaTemplate.send(properties.getKafka().getFundingRateTopic(), rate.instrumentId(), fundingRateEvent(rate));
         }
     }
 
@@ -103,11 +103,11 @@ public class FundingService {
         for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now).stream()
                 .limit(properties.getSettlement().getBatchSize()).toList()) {
             dueRates++;
-            if (!ownsSymbol(rate.symbol())) continue;
+            if (!ownsSymbol(rate.instrumentId())) continue;
             try {
                 var gateResponse = aeron.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(),
                         com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
-                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(rate.symbol(), 0, 1)));
+                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(rate.instrumentId(), 0, 1)));
                 if (gateResponse == null || gateResponse.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
                     throw new IllegalStateException("Aeron maintenance state unavailable");
                 }
@@ -119,9 +119,9 @@ public class FundingService {
                 if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT) continue;
                 FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
                 String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
-                        + rate.symbol() + ':' + settlement.settlementId();
+                        + rate.instrumentId() + ':' + settlement.settlementId();
                 long cursor = 0;
-                CoreFundingProgressView persisted = decodeProgressOrQuery(rate.symbol(), settlement, null);
+                CoreFundingProgressView persisted = decodeProgressOrQuery(rate.instrumentId(), settlement, null);
                 if (persisted != null && persisted.complete()
                         && persisted.settlementId() == settlement.settlementId()) {
                     rateRepository.saveFinal(rate);
@@ -137,10 +137,10 @@ public class FundingService {
                             .getBytes(StandardCharsets.UTF_8));
                     CoreResponse response = aeron.commandWithResponse(CoreMessageType.APPLY_FUNDING, commandId,
                             TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                    settlement.settlementId(), rate.symbol(), rate.fundingRatePpm(),
+                                    settlement.settlementId(), rate.instrumentId(), rate.fundingRatePpm(),
                                     cursor, ApplyFundingCommand.DEFAULT_MAX_USERS)));
                     pages++;
-                    CoreFundingProgressView progress = decodeProgressOrQuery(rate.symbol(), settlement, response);
+                    CoreFundingProgressView progress = decodeProgressOrQuery(rate.instrumentId(), settlement, response);
                     if (progress == null) {
                         throw new IllegalStateException("Aeron funding progress is required");
                     }
@@ -159,22 +159,22 @@ public class FundingService {
                 settledRates++;
             } catch (Exception exception) {
                 failedRates++;
-                log.error("Aeron funding settlement failed symbol={} fundingTime={}: {}",
-                        rate.symbol(), rate.fundingTime(), exception.getMessage(), exception);
+                log.error("Aeron funding settlement failed instrumentId={} fundingTime={}: {}",
+                        rate.instrumentId(), rate.fundingTime(), exception.getMessage(), exception);
             }
         }
         return new SettlementCycle(true, dueRates, settledRates, pages, failedRates);
     }
 
     private CoreFundingProgressView decodeProgressOrQuery(
-            String symbol,
+            String instrumentId,
             FundingSettlementRepository.CoreSettlement settlement,
             CoreResponse response) {
         CoreResponse effective = response;
         if (effective == null || effective.data().length == 0) {
             try {
                 effective = aeron.query(CoreMessageType.FUNDING_PROGRESS_QUERY, UUID.randomUUID(),
-                        com.surprising.aeron.protocol.CoreStateQueryCodec.encodeFundingProgressQuery(symbol));
+                        com.surprising.aeron.protocol.CoreStateQueryCodec.encodeFundingProgressQuery(instrumentId));
             } catch (RuntimeException exception) {
                 return null;
             }
@@ -191,55 +191,55 @@ public class FundingService {
         return progress;
     }
 
-    public FundingRateResponse latestRate(String symbol) {
-        return latestFundingRateCache.requireFresh(normalizeSymbol(symbol));
+    public FundingRateResponse latestRate(String instrumentId) {
+        return latestFundingRateCache.requireFresh(normalizeSymbol(instrumentId));
     }
 
-    public FundingRateQueryResponse rateHistory(String symbol, int limit) {
-        return rateHistory(symbol, limit, null, null);
+    public FundingRateQueryResponse rateHistory(String instrumentId, int limit) {
+        return rateHistory(instrumentId, limit, null, null);
     }
 
-    public FundingRateQueryResponse rateHistory(String symbol, int limit, String cursor, String sort) {
+    public FundingRateQueryResponse rateHistory(String instrumentId, int limit, String cursor, String sort) {
         int capped = normalizeLimit(limit);
-        var page = rateRepository.historyPage(normalizeSymbol(symbol), capped, cursor, sort);
+        var page = rateRepository.historyPage(normalizeSymbol(instrumentId), capped, cursor, sort);
         return new FundingRateQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    public FundingSettlementResponse latestSettlement(String symbol) {
-        return settlementRepository.latestCore(normalizeSymbol(symbol))
-                .orElseThrow(() -> new java.util.NoSuchElementException("funding settlement not found for symbol: " + symbol));
+    public FundingSettlementResponse latestSettlement(String instrumentId) {
+        return settlementRepository.latestCore(normalizeSymbol(instrumentId))
+                .orElseThrow(() -> new java.util.NoSuchElementException("funding settlement not found for instrumentId: " + instrumentId));
     }
 
-    public FundingPaymentQueryResponse payments(long userId, String symbol, int limit) {
-        return payments(userId, symbol, limit, null, null);
+    public FundingPaymentQueryResponse payments(long userId, String instrumentId, int limit) {
+        return payments(userId, instrumentId, limit, null, null);
     }
 
-    public FundingPaymentQueryResponse payments(long userId, String symbol, int limit, String cursor, String sort) {
+    public FundingPaymentQueryResponse payments(long userId, String instrumentId, int limit, String cursor, String sort) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         int capped = normalizeLimit(limit);
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         var page = paymentRepository.corePage(userId, normalizedSymbol, capped, cursor, sort);
         return new FundingPaymentQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    private boolean ownsSymbol(String symbol) {
+    private boolean ownsSymbol(String instrumentId) {
         return !properties.getCoordination().isEnabled()
-                || leaseRepository.acquire(symbol, nodeId, properties.getCoordination().getLeaseDuration());
+                || leaseRepository.acquire(instrumentId, nodeId, properties.getCoordination().getLeaseDuration());
     }
 
     private PerpFundingRateEvent fundingRateEvent(FundingRateResponse rate) {
-        return new PerpFundingRateEvent(rate.symbol(),
+        return new PerpFundingRateEvent(rate.instrumentId(),
                 new BigDecimal(FundingTime.rateDecimalString(rate.fundingRatePpm())), rate.fundingTime(),
                 rate.fundingIntervalHours(), rate.sequence(), rate.eventTime());
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("symbol is required");
-        String normalized = symbol.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("instrumentId is required");
+        String normalized = instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

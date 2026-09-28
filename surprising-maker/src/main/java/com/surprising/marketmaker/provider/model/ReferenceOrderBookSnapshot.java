@@ -6,17 +6,17 @@ import java.util.List;
 public record ReferenceOrderBookSnapshot(
         String source,
         String transport,
-        String symbol,
+        String instrumentId,
         List<ReferenceOrderBookLevel> bids,
         List<ReferenceOrderBookLevel> asks,
         Instant receivedAt) {
 
     public ReferenceOrderBookSnapshot(String source,
-                                      String symbol,
+                                      String instrumentId,
                                       List<ReferenceOrderBookLevel> bids,
                                       List<ReferenceOrderBookLevel> asks,
                                       Instant receivedAt) {
-        this(source, "REST", symbol, bids, asks, receivedAt);
+        this(source, "REST", instrumentId, bids, asks, receivedAt);
     }
 
     public ReferenceOrderBookSnapshot {

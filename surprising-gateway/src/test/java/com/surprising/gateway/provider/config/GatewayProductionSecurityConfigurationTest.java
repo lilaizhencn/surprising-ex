@@ -61,7 +61,6 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
         wallet.setSpotAccountBaseUrl("https://account.example.com");
-        wallet.setAssetScales(Map.of("USDT", 6L));
         wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");

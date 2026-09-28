@@ -32,12 +32,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
     /**
      * The production window keeps at most a few hundred active orders per process
      * in the hot turnover path.  Starting the primitive maps at this bound avoids
-     * repeated rehash/copy cycles when a fixed 128-symbol workload warms up.
+     * repeated rehash/copy cycles when a fixed 128-instrumentId workload warms up.
      * Maps still grow normally for larger deployments.
      */
     private static final int INITIAL_INDEX_CAPACITY = 256;
     private static final int INITIAL_USER_INDEX_CAPACITY = 64;
-    /** Symbol buckets are usually short-lived in the 128-symbol turnover workload. */
+    /** Symbol buckets are usually short-lived in the 128-instrumentId turnover workload. */
     private static final int INITIAL_SYMBOL_INDEX_CAPACITY = 8;
     private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
     private static final LongIterator EMPTY_ITERATOR = new LongIterator() {
@@ -64,13 +64,13 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
      */
     public static final class IndexedOrder {
         OrderRuntime order;
-        String symbol;
-        IndexedOrder(OrderRuntime order, String symbol) { reset(order, symbol); }
-        void reset(OrderRuntime order, String symbol) { this.order = order; this.symbol = symbol; }
-        void clear() { order = null; symbol = null; }
+        String instrumentId;
+        IndexedOrder(OrderRuntime order, String instrumentId) { reset(order, instrumentId); }
+        void reset(OrderRuntime order, String instrumentId) { this.order = order; this.instrumentId = instrumentId; }
+        void clear() { order = null; instrumentId = null; }
         public long orderId() { return order.orderId(); }
         public long userId() { return order.userId(); }
-        public String symbol() { return symbol; }
+        public String instrumentId() { return instrumentId; }
         /** Existing runtime value for the Owner's cancel handoff; no second map lookup. */
         public OrderRuntime runtime() { return order; }
         com.surprising.aeron.protocol.CoreOrderSide side() { return order.side(); }
@@ -79,7 +79,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         boolean reduceOnly() { return order.reduceOnly(); }
         com.surprising.aeron.protocol.CorePositionSide positionSide() { return order.positionSide(); }
         com.surprising.aeron.protocol.CoreMarginMode marginMode() { return order.marginMode(); }
-        CoreOrderState snapshot() { return RuntimeStateMaterializer.orderSnapshot(order, symbol); }
+        CoreOrderState snapshot() { return RuntimeStateMaterializer.orderSnapshot(order, instrumentId); }
     }
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
@@ -113,14 +113,14 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return ids == null ? EMPTY_IDS : descending(idsArray(ids));
     }
 
-    public NavigableSet<Long> ids(String symbol) {
-        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public NavigableSet<Long> ids(String instrumentId) {
+        LongHashSet ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return ids == null ? EMPTY_IDS : descending(idsArray(ids));
     }
 
-    public int count(String symbol) {
-        LongHashSet ids = symbol == null ? null : idsBySymbol.get(symbol);
-        if (ids == null) ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public int count(String instrumentId) {
+        LongHashSet ids = instrumentId == null ? null : idsBySymbol.get(instrumentId);
+        if (ids == null) ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return ids == null ? 0 : ids.size();
     }
 
@@ -150,12 +150,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     public String activeOrderSymbol(long orderId) {
         IndexedOrder entry = ordersById.get(orderId);
-        return entry == null ? null : entry.symbol;
+        return entry == null ? null : entry.instrumentId;
     }
 
-    public NavigableSet<Long> ids(long userId, String symbol) {
+    public NavigableSet<Long> ids(long userId, String instrumentId) {
         LongHashSet userIds = idsByUser.get(userId);
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (userIds == null || symbolIds == null) return EMPTY_IDS;
         LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
         LongHashSet filter = source == userIds ? symbolIds : userIds;
@@ -168,9 +168,9 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
      * Owner-only, unordered primitive intersection. Consume before mutating this index.
      * Each caller owns its cursor; nested inspections do not overwrite shared scratch.
      */
-    public LongIterator matchingIds(long userId, String symbol) {
+    public LongIterator matchingIds(long userId, String instrumentId) {
         LongHashSet userIds = idsByUser.get(userId);
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (userIds == null || symbolIds == null) return EMPTY_ITERATOR;
         LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
         LongHashSet filter = source == userIds ? symbolIds : userIds;
@@ -197,9 +197,9 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
     }
 
     /** Primitive deterministic intersection for callers requiring a materialized sorted result. */
-    public long[] sortedIds(long userId, String symbol) {
+    public long[] sortedIds(long userId, String instrumentId) {
         LongHashSet userIds = idsByUser.get(userId);
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (userIds == null || symbolIds == null) return new long[0];
         LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
         LongHashSet filter = source == userIds ? symbolIds : userIds;
@@ -216,12 +216,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
     }
 
     /**
-     * Primitive descending symbol index for settlement/query cursors.  The public {@link #ids(String)}
+     * Primitive descending instrumentId index for settlement/query cursors.  The public {@link #ids(String)}
      * method is retained for compatibility, but callers on a runtime path should not create a
      * boxed {@code TreeSet<Long>} just to iterate the same index.
      */
-    public long[] sortedIdsDescending(String symbol) {
-        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public long[] sortedIdsDescending(String instrumentId) {
+        LongHashSet ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return sortedDescending(ids);
     }
 
@@ -230,10 +230,10 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return sortedDescending(idsByUser.get(userId));
     }
 
-    public long pendingQuantity(long userId, String symbol,
+    public long pendingQuantity(long userId, String instrumentId,
                                 com.surprising.aeron.protocol.CorePositionSide positionSide,
                                 com.surprising.aeron.protocol.CoreOrderSide side) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet ids = idsByUser.get(userId);
         if (ids == null) return 0;
         long total = 0;
@@ -241,7 +241,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         while (iterator.hasNext()) {
             long orderId = iterator.nextValue();
             IndexedOrder order = ordersById.get(orderId);
-            if (order != null && !order.reduceOnly() && order.symbol().equals(normalized)
+            if (order != null && !order.reduceOnly() && order.instrumentId().equals(normalized)
                     && order.positionSide() == positionSide && order.side() == side) {
                 total = Math.addExact(total, order.remainingQuantitySteps());
             }
@@ -251,11 +251,11 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     @Override
     public AdmissionSummary inspect(
-            long userId, String symbol,
+            long userId, String instrumentId,
             com.surprising.aeron.protocol.CorePositionSide positionSide,
             com.surprising.aeron.protocol.CoreOrderSide side,
             com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet ids = idsByUser.get(userId);
         if (ids == null) return admissionSummary.set(0, 0, 0);
         long pendingQuantity = 0;
@@ -264,7 +264,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         var iterator = ids.iterator();
         while (iterator.hasNext()) {
             IndexedOrder order = ordersById.get(iterator.nextValue());
-            if (order == null || !order.symbol().equals(normalized)) continue;
+            if (order == null || !order.instrumentId().equals(normalized)) continue;
             if (order.reduceOnly() && order.side() == side) {
                 reduceOnlyQuantity = Math.addExact(
                         reduceOnlyQuantity, order.remainingQuantitySteps());
@@ -280,9 +280,9 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return admissionSummary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
     }
 
-    public long reduceOnlyQuantity(long userId, String symbol,
+    public long reduceOnlyQuantity(long userId, String instrumentId,
                                    com.surprising.aeron.protocol.CoreOrderSide side) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet ids = idsByUser.get(userId);
         if (ids == null) return 0;
         long total = 0;
@@ -290,7 +290,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         while (iterator.hasNext()) {
             long orderId = iterator.nextValue();
             IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.reduceOnly() && order.symbol().equals(normalized)
+            if (order != null && order.reduceOnly() && order.instrumentId().equals(normalized)
                     && order.side() == side) {
                 total = Math.addExact(total, order.remainingQuantitySteps());
             }
@@ -298,17 +298,17 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return total;
     }
 
-    public boolean hasDifferentMarginMode(long userId, String symbol,
+    public boolean hasDifferentMarginMode(long userId, String instrumentId,
                                           com.surprising.aeron.protocol.CorePositionSide positionSide,
                                           com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet ids = idsByUser.get(userId);
         if (ids == null) return false;
         var iterator = ids.iterator();
         while (iterator.hasNext()) {
             long orderId = iterator.nextValue();
             IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.symbol().equals(normalized)
+            if (order != null && order.instrumentId().equals(normalized)
                     && order.positionSide() == positionSide && order.marginMode() != marginMode) {
                 return true;
             }
@@ -316,10 +316,10 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return false;
     }
 
-    public int marginModeCount(long userId, String symbol,
+    public int marginModeCount(long userId, String instrumentId,
                                com.surprising.aeron.protocol.CorePositionSide positionSide,
                                com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet ids = idsByUser.get(userId);
         if (ids == null) return 0;
         int count = 0;
@@ -327,7 +327,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         while (iterator.hasNext()) {
             long orderId = iterator.nextValue();
             IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.symbol().equals(normalized)
+            if (order != null && order.instrumentId().equals(normalized)
                     && order.positionSide() == positionSide && order.marginMode() == marginMode) {
                 count = Math.incrementExact(count);
             }
@@ -335,11 +335,11 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return count;
     }
 
-    public Page page(long userId, String symbol, long beforeOrderId, int limit) {
+    public Page page(long userId, String instrumentId, long beforeOrderId, int limit) {
         if (beforeOrderId < 0 || limit < 1 || limit > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("invalid active-order page");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : OrderReservation.requireInstrumentId(instrumentId);
         LongHashSet source;
         Long2ObjectHashMap<IndexedOrder>.KeyIterator allOrders = null;
         LongHashSet filter = null;
@@ -412,16 +412,16 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     public void apply(long orderId, OrderRuntime after, RuntimeIdentityRegistry identities) {
         OrderRuntime current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
-        applyRuntime(orderId, current, current == null ? null : identities.symbol(current.symbolId()));
+        applyRuntime(orderId, current, current == null ? null : identities.instrumentId(current.symbolId()));
     }
 
-    private void applyRuntime(long orderId, OrderRuntime current, String symbol) {
+    private void applyRuntime(long orderId, OrderRuntime current, String instrumentId) {
         if (current == null) {
             // Removal already returns the old entry; do not probe the same order twice.
             IndexedOrder previous = ordersById.remove(orderId);
             if (previous != null) {
                 remove(idsByUser, previous.userId(), orderId);
-                remove(idsBySymbol, previous.symbol(), orderId);
+                remove(idsBySymbol, previous.instrumentId(), orderId);
                 previous.clear();
                 RECYCLED_ORDERS.get().addFirst(previous);
             }
@@ -430,8 +430,8 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         IndexedOrder previous = ordersById.get(orderId);
         if (previous == null) {
             IndexedOrder entry = RECYCLED_ORDERS.get().pollFirst();
-            if (entry == null) entry = new IndexedOrder(current, symbol);
-            else entry.reset(current, symbol);
+            if (entry == null) entry = new IndexedOrder(current, instrumentId);
+            else entry.reset(current, instrumentId);
             add(entry);
             return;
         }
@@ -439,12 +439,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
             remove(idsByUser, previous.userId(), orderId);
             add(idsByUser, current.userId(), orderId);
         }
-        if (!previous.symbol.equals(symbol)) {
-            remove(idsBySymbol, previous.symbol, orderId);
-            add(idsBySymbol, symbol, orderId);
+        if (!previous.instrumentId.equals(instrumentId)) {
+            remove(idsBySymbol, previous.instrumentId, orderId);
+            add(idsBySymbol, instrumentId, orderId);
         }
         previous.order = current;
-        previous.symbol = symbol;
+        previous.instrumentId = instrumentId;
     }
 
     public void rebuild(TradingCoreState state) {
@@ -454,12 +454,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
                 .forEach(order -> {
-                    CoreInstrument instrument = state.instruments().get(order.symbol());
+                    CoreInstrument instrument = state.instruments().get(order.instrumentId());
                     if (instrument == null) {
-                        throw new IllegalStateException("instrument is not registered: " + order.symbol());
+                        throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
                     }
                     applyRuntime(order.orderId(), RuntimeStateProjector.toRuntimeOrder(
-                            order, recoveryIdentities, instrument), order.symbol());
+                            order, recoveryIdentities, instrument), order.instrumentId());
                 });
     }
 
@@ -483,7 +483,7 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
             idsByUser.put(order.userId(), userIds);
         }
         userIds.add(order.orderId());
-        idsBySymbol.computeIfAbsent(order.symbol(), ignored ->
+        idsBySymbol.computeIfAbsent(order.instrumentId(), ignored ->
                 new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
     }
 

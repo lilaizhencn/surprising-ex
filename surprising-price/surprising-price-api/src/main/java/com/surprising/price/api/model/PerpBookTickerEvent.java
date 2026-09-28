@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 public record PerpBookTickerEvent(
-        @NotBlank String symbol,
+        @NotBlank String instrumentId,
         @NotNull @Positive BigDecimal bestBidPrice,
         @NotNull @Positive BigDecimal bestAskPrice,
         @PositiveOrZero long sequence,

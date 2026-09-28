@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 
 class MatcherSettlementPlanTest {
     private static final CoreInstrument INSTRUMENT = new CoreInstrument(
-            "BTC-USDT", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
+            "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
             1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
             10_000_000, Long.MAX_VALUE, 0, 1,
             List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
@@ -26,14 +26,14 @@ class MatcherSettlementPlanTest {
     void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            var original = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectCancellation(1, original, id, 0, identities, 10, 20);
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
-                    symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
+                    instrumentId, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
             assertThat(event.complete()).isTrue();
             assertThat(event.plan().orderCount()).isZero();
@@ -49,10 +49,10 @@ class MatcherSettlementPlanTest {
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (var runtime = new TradingRuntimeState(topology)) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(taker);
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectMatcherSettlement(1, 15, taker, null, 1, id, 0,
@@ -63,7 +63,7 @@ class MatcherSettlementPlanTest {
             boolean[] routeReleased = {false};
             event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
             event.beginMatcherPublication();
-            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1,
                     List.of()), 1, 1, 2, 11, 1, 0);
             assertThat(event.resultPrepared()).isTrue();
             assertThat(event.ready()).isFalse();
@@ -98,13 +98,13 @@ class MatcherSettlementPlanTest {
     void sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             var instrument = instrument();
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument);
-            var maker = order(10, 20, symbol, CoreOrderSide.SELL, 5);
-            var first = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            var second = order(12, 22, symbol, CoreOrderSide.BUY, 3);
+            var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 5);
+            var first = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
+            var second = order(12, 22, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(maker); runtime.putOrder(first); runtime.putOrder(second);
             var scratch = new MatcherSettlementPlan.BatchValidationScratch();
             assertThat(MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
@@ -121,14 +121,14 @@ class MatcherSettlementPlanTest {
     @Test
     void reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState() {
         try (var runtime = new TradingRuntimeState()) {
-            var identities = new RuntimeIdentityRegistry(); int symbol = identities.symbolId("BTC-USDT");
+            var identities = new RuntimeIdentityRegistry(); int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0); runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,5));
-            var taker = order(11,21,symbol,CoreOrderSide.BUY,3); runtime.putOrder(taker);
+            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,5));
+            var taker = order(11,21,instrumentId,CoreOrderSide.BUY,3); runtime.putOrder(taker);
             var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
             assertThat(MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot)).isSameAs(slot);
             slot.clearReferences(); scratch.clear();
-            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,1));
+            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,1));
             assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
         }
@@ -138,12 +138,12 @@ class MatcherSettlementPlanTest {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION,1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
         try (var runtime = new TradingRuntimeState(topology)) {
-            var identities = new RuntimeIdentityRegistry(); int symbol = identities.symbolId("BTC-USDT");
+            var identities = new RuntimeIdentityRegistry(); int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL,0); runtime.registerInstrument(instrument());
             long takerUser = 21;
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
-            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,20));
-            var taker = order(11,takerUser,symbol,CoreOrderSide.BUY,20); runtime.putOrder(taker);
+            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,20));
+            var taker = order(11,takerUser,instrumentId,CoreOrderSide.BUY,20); runtime.putOrder(taker);
             var events = new java.util.ArrayList<exchange.core2.core.common.MatcherResult.MatcherEvent>();
             for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
             var deep = new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
@@ -165,7 +165,7 @@ class MatcherSettlementPlanTest {
     void smallerBatchReusesCapacityAndIgnoresStaleTailPlans() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             var instrument = instrument();
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument);
@@ -191,11 +191,11 @@ class MatcherSettlementPlanTest {
     void singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
-            runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
+            runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
+            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
             var slot = new MatcherSettlementPlan();
             assertThat(MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
                     fill(3), runtime, identities)).isSameAs(slot);
@@ -225,11 +225,11 @@ class MatcherSettlementPlanTest {
     void singleItemBatchBuilderUsesThePooledTargetForInitialIdentity() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
-            runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
+            runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
+            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
             var slot = new MatcherSettlementPlan();
             var result = fill(3);
             assertThat(MatcherSettlementPlan.buildSingleInto(slot, 1, 11, 21,
@@ -258,10 +258,10 @@ class MatcherSettlementPlanTest {
     void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
+            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
             var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
                     new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
                             1, 1, 2, 11, 1, 1, 1, 0,
@@ -281,11 +281,11 @@ class MatcherSettlementPlanTest {
     void singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
-            int symbol = identities.symbolId("BTC-USDT");
+            int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            var maker = order(10, 20, symbol, CoreOrderSide.SELL, 3);
-            var taker = order(11, 21, symbol, CoreOrderSide.BUY, 5);
+            var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 3);
+            var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 5);
             runtime.putOrder(maker); runtime.putOrder(taker);
             var slot = new MatcherSettlementPlan();
             assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
@@ -303,8 +303,8 @@ class MatcherSettlementPlanTest {
         }
     }
 
-    private static OrderRuntime order(long id,long user,int symbol,CoreOrderSide side,long qty) {
-        return new OrderRuntime(id,user,symbol,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
+    private static OrderRuntime order(long id,long user,int instrumentId,CoreOrderSide side,long qty) {
+        return new OrderRuntime(id,user,instrumentId,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                 CoreOrderType.LIMIT,CoreTimeInForce.GTC,0,0,qty,0,qty,false);
     }
     private static CoreMatchingResult fill(long quantity) { return fill(quantity, 1); }
@@ -314,9 +314,9 @@ class MatcherSettlementPlanTest {
                 List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false)),
                 new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(sequence);
     }
-    private static MatcherResult nativeResult(CommandResultCode code, int symbol, long sequence,
+    private static MatcherResult nativeResult(CommandResultCode code, int instrumentId, long sequence,
                                                List<MatcherResult.MatcherEvent> events) {
-        return new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, symbol,
+        return new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, instrumentId,
                 100, 1, 100, OrderAction.BID, OrderType.GTC, 21, 1_000, 0,
                 code, events, new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }

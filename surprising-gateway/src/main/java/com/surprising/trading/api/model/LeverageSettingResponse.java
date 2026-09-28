@@ -7,7 +7,7 @@ import java.util.Objects;
 public record LeverageSettingResponse(
         long userId,
         ProductLine productLine,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         long leveragePpm,
         long maxLeveragePpm,

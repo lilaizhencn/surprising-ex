@@ -25,7 +25,7 @@ public final class FeeScheduleSnapshotCache {
 
     private static final Comparator<FeeScheduleResponse> EFFECTIVE_ORDER =
             Comparator.comparingInt((FeeScheduleResponse value) -> sourcePriority(value.sourceType()))
-                    .thenComparingInt(value -> value.symbol() == null ? 1 : 0)
+                    .thenComparingInt(value -> value.instrumentId() == null ? 1 : 0)
                     .thenComparing(FeeScheduleResponse::effectiveTime,
                             Comparator.nullsLast(Comparator.reverseOrder()))
                     .thenComparing(Comparator.comparingLong(FeeScheduleResponse::feeScheduleId).reversed());
@@ -114,16 +114,16 @@ public final class FeeScheduleSnapshotCache {
     /** 返回当前时间适用的用户费率计划；没有覆盖时返回空值，由调用方回退到 Instrument 默认费率。 */
     public Optional<FeeScheduleResponse> effective(ProductLine productLine,
                                                    long userId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                    Instant now) {
-        if (!initialized(productLine) || userId <= 0 || symbol == null || symbol.isBlank()) {
+        if (!initialized(productLine) || userId <= 0 || instrumentId == null || instrumentId.isBlank()) {
             return Optional.empty();
         }
-        String normalizedSymbol = normalize(symbol);
+        String normalizedSymbol = normalize(instrumentId);
         Instant effectiveAt = now == null ? Instant.now() : now;
         return state.get().schedules().values().stream()
                 .filter(value -> value.productLine() == productLine && value.userId() == userId
-                        && (value.symbol() == null || normalizedSymbol.equals(normalize(value.symbol())))
+                        && (value.instrumentId() == null || normalizedSymbol.equals(normalize(value.instrumentId())))
                         && value.status() == FeeScheduleStatus.ACTIVE
                         && (value.effectiveTime() == null || !value.effectiveTime().isAfter(effectiveAt))
                         && (value.expireTime() == null || value.expireTime().isAfter(effectiveAt)))
@@ -133,7 +133,7 @@ public final class FeeScheduleSnapshotCache {
 
     private static FeeScheduleResponse immutable(FeeScheduleResponse value) {
         return new FeeScheduleResponse(value.feeScheduleId(), value.productLine(), value.userId(),
-                value.symbol() == null ? null : normalize(value.symbol()), value.makerFeeRatePpm(),
+                value.instrumentId() == null ? null : normalize(value.instrumentId()), value.makerFeeRatePpm(),
                 value.takerFeeRatePpm(), value.sourceType(), value.tierCode(), value.reason(), value.status(),
                 value.effectiveTime(), value.expireTime(), value.createdAt(), value.updatedAt());
     }

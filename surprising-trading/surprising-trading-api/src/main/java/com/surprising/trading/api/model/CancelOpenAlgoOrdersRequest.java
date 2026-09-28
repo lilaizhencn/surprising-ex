@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Size;
 
 public record CancelOpenAlgoOrdersRequest(
         @Positive long userId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         AlgoOrderType algoType,
         @Min(1) @Max(1000) Integer limit) {
 }

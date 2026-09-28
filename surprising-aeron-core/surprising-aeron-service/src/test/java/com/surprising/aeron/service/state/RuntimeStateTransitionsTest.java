@@ -102,7 +102,7 @@ class RuntimeStateTransitionsTest {
     void upsertsInstrumentDirectlyInRuntime() {
         TradingCoreState before = TradingCoreState.empty(ProductLine.SPOT);
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(
-                "BTC-USDT", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+                "1", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
         TradingCoreState expected = new RuntimeTestStateTransitions().registerInstrument(before, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -132,10 +132,10 @@ class RuntimeStateTransitionsTest {
         RuntimeTestStateTransitions reference = new RuntimeTestStateTransitions();
         TradingCoreState before = reference.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0));
-        UpdateLeverageCommand command = new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000);
+        UpdateLeverageCommand command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000);
         TradingCoreState expected = reference.updateLeverage(before, 7, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);

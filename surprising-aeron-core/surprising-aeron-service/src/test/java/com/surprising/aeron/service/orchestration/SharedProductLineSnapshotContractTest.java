@@ -38,7 +38,7 @@ class SharedProductLineSnapshotContractTest {
 
     private static final long USER_ID = 701;
     private static final long BALANCE_UNITS = 20_000;
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)

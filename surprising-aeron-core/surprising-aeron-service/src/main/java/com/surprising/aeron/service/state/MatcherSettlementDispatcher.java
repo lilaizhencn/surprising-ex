@@ -31,7 +31,7 @@ final class MatcherSettlementDispatcher {
             storage.admittedOrders[index] = order;
             int prior = storage.metadataSlots.getIfAbsent(order.symbolId(), -1);
             if (prior < 0) {
-                CoreInstrument instrument = owner.instrument(identities.symbol(order.symbolId()));
+                CoreInstrument instrument = owner.instrument(identities.instrumentId(order.symbolId()));
                 if (instrument == null || instrument != order.instrument())
                     throw new IllegalStateException("direct settlement instrument changed");
                 storage.instruments[index] = instrument;
@@ -62,7 +62,7 @@ final class MatcherSettlementDispatcher {
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
         MatcherSettlementEvent.BatchStorage storage = event.batchStorage(1);
-        CoreInstrument instrument = owner.instrument(identities.symbol(resolved.symbolId()));
+        CoreInstrument instrument = owner.instrument(identities.instrumentId(resolved.symbolId()));
         if (instrument == null || instrument != resolved.instrument()) {
             throw new IllegalStateException("direct settlement instrument changed");
         }
@@ -352,7 +352,7 @@ final class MatcherSettlementDispatcher {
                 if (taker == null) throw new IllegalStateException("taker order is missing");
                 int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
                 if (slot < 0) {
-                    CoreInstrument instrument = owner.instrument(identities.symbol(taker.symbolId()));
+                    CoreInstrument instrument = owner.instrument(identities.instrumentId(taker.symbolId()));
                     if (instrument == null) throw new IllegalStateException("match instrument is missing");
                     instruments[index] = instrument;
                     baseAssetIds[index] = identities.assetId(instrument.baseAsset());

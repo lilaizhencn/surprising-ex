@@ -31,7 +31,8 @@ class InstrumentInitializationConfigurationTest {
     void onlyOrderSnapshotLoadsAndPreservesProductAndScales(ProductLine line) {
         var instruments = mock(InstrumentService.class);
         var row = mock(InstrumentResponse.class);
-        when(row.symbol()).thenReturn("BTC-USDT");
+        when(row.symbol()).thenReturn("1");
+        org.mockito.Mockito.when(row.instrumentId()).thenReturn(1);
         when(row.contractType()).thenReturn(Arrays.stream(ContractType.values())
                 .filter(type -> type.productLine() == line).findFirst().orElseThrow());
         when(row.changeId()).thenReturn(1L);
@@ -45,7 +46,7 @@ class InstrumentInitializationConfigurationTest {
                     .doesNotHaveBean("instrumentSnapshotInitializer");
             var cache = ctx.getBean(InstrumentSnapshotCache.class);
             assertThat(cache.ready(line)).isTrue();
-            assertThat(cache.current(line, "BTC-USDT")).isPresent();
+            assertThat(cache.current(line, 1)).isPresent();
             assertThat(cache.scale(line, "USDT")).contains(100000000L);
             verify(instruments, times(1)).snapshot(line);
             verifyNoMoreInteractions(instruments);

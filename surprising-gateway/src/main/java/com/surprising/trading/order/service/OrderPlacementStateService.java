@@ -25,22 +25,22 @@ public class OrderPlacementStateService {
         return PositionMode.valueOf(state.positionMode().name());
     }
 
-    public boolean positionMarginModeConflict(ProductLine line, long userId, String symbol, MarginMode marginMode) {
+    public boolean positionMarginModeConflict(ProductLine line, long userId, String instrumentId, MarginMode marginMode) {
         if (line == ProductLine.SPOT) return false;
         MarginMode normalized = MarginMode.defaultIfNull(marginMode);
         return state(line, userId).positions().stream()
-                .filter(position -> position.symbol().equalsIgnoreCase(symbol))
+                .filter(position -> position.instrumentId().equalsIgnoreCase(instrumentId))
                 .filter(position -> position.signedQuantitySteps() != 0)
                 .anyMatch(position -> !position.marginMode().name().equals(normalized.name()));
     }
 
-    public Optional<ReduceOnlyPosition> position(ProductLine line, long userId, String symbol,
+    public Optional<ReduceOnlyPosition> position(ProductLine line, long userId, String instrumentId,
                                                  MarginMode mode, PositionSide side) {
         if (line == ProductLine.SPOT) return Optional.empty();
-        return position(state(line, userId), symbol, mode, side);
+        return position(state(line, userId), instrumentId, mode, side);
     }
 
-    public ReduceOnlyPosition requireClosePosition(ProductLine line, long userId, String symbol,
+    public ReduceOnlyPosition requireClosePosition(ProductLine line, long userId, String instrumentId,
                                                    MarginMode mode, PositionSide side) {
         if (line == ProductLine.SPOT) throw new IllegalStateException("open position not found");
         CoreUserStateView state = state(line, userId);
@@ -48,16 +48,16 @@ public class OrderPlacementStateService {
                 && !PositionSide.defaultIfNull(side).isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
-        return position(state, symbol, mode, side)
+        return position(state, instrumentId, mode, side)
                 .orElseThrow(() -> new IllegalStateException("open position not found"));
     }
 
-    private static Optional<ReduceOnlyPosition> position(CoreUserStateView state, String symbol,
+    private static Optional<ReduceOnlyPosition> position(CoreUserStateView state, String instrumentId,
                                                         MarginMode mode, PositionSide side) {
         MarginMode normalizedMode = MarginMode.defaultIfNull(mode);
         PositionSide normalizedSide = PositionSide.defaultIfNull(side);
         return state.positions().stream()
-                .filter(position -> position.symbol().equalsIgnoreCase(symbol))
+                .filter(position -> position.instrumentId().equalsIgnoreCase(instrumentId))
                 .filter(position -> position.marginMode().name().equals(normalizedMode.name()))
                 .filter(position -> position.positionSide().name().equals(normalizedSide.name()))
                 .filter(position -> position.signedQuantitySteps() != 0)

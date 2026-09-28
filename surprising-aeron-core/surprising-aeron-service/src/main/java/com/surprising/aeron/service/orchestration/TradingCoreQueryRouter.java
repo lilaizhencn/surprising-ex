@@ -52,11 +52,11 @@ final class TradingCoreQueryRouter {
         if (message.header().messageType() == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
             try {
                 var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
-                var instrument = runtime.runtimeState.instrument(query.symbol());
+                var instrument = runtime.runtimeState.instrument(query.instrumentId());
                 if (instrument == null) return runtime.rejected(CoreResultCode.ENTITY_NOT_FOUND);
                 var users = new java.util.ArrayList<Long>(query.limit());
                 boolean more = false;
-                for (long userId : runtime.positionUserIndex.usersAfter(query.symbol(), query.afterUserId())) {
+                for (long userId : runtime.positionUserIndex.usersAfter(query.instrumentId(), query.afterUserId())) {
                     if (users.size() == query.limit()) { more = true; break; }
                     users.add(userId);
                 }
@@ -135,7 +135,7 @@ final class TradingCoreQueryRouter {
                 var query = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payloadUnsafe());
                 long beforeOrderId = query.beforeOrderId() == 0 ? Long.MAX_VALUE : query.beforeOrderId();
                 long requestedUserId = message.header().userId();
-                var page = runtime.activeOrderIndex.page(requestedUserId, query.symbol(), beforeOrderId, query.limit());
+                var page = runtime.activeOrderIndex.page(requestedUserId, query.instrumentId(), beforeOrderId, query.limit());
                 var orders = page.orderIds().stream()
                         .map(orderId -> com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
                                 runtime.runtimeState, runtime.identities, orderId))
@@ -157,15 +157,15 @@ final class TradingCoreQueryRouter {
                 long before = query.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : query.beforeTriggerOrderId();
                 Iterable<Long> source = query.expiresBeforeEpochMillis() > 0
                         ? runtime.triggerOrderIndex.expired(query.expiresBeforeEpochMillis(), query.limit())
-                        : query.symbol().isEmpty()
+                        : query.instrumentId().isEmpty()
                         ? (query.status() != null
                         ? runtime.triggerOrderIndex.ids(query.status())
                         : message.header().userId() == 0 ? runtime.triggerOrderIndex.ids()
                         : runtime.triggerOrderIndex.ids(message.header().userId()))
-                        : (query.status() == null ? runtime.triggerOrderIndex.ids(query.symbol())
-                        : runtime.triggerOrderIndex.ids(query.symbol(), query.status()));
+                        : (query.status() == null ? runtime.triggerOrderIndex.ids(query.instrumentId())
+                        : runtime.triggerOrderIndex.ids(query.instrumentId(), query.status()));
                 var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.triggerOrders(
-                        runtime.runtimeState, source, message.header().userId(), query.symbol(), query.status(),
+                        runtime.runtimeState, source, message.header().userId(), query.instrumentId(), query.status(),
                         query.triggerOrderId(), before,
                         message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,
                         query.limit());
@@ -207,9 +207,9 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.FUNDING_PROGRESS_QUERY) {
             try {
-                String symbol = CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
+                String instrumentId = CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
                 CoreFundingProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
-                        .fundingProgress(runtime.runtimeState, runtime.identities, symbol);
+                        .fundingProgress(runtime.runtimeState, runtime.identities, instrumentId);
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreFundingProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
@@ -219,9 +219,9 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) {
             try {
-                String symbol = CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
+                String instrumentId = CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
                 CoreSettlementProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
-                        .settlementProgress(runtime.runtimeState, runtime.identities, symbol);
+                        .settlementProgress(runtime.runtimeState, runtime.identities, instrumentId);
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
                         CoreSettlementProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
@@ -279,7 +279,7 @@ final class TradingCoreQueryRouter {
                 var query = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeQuery(message.payloadUnsafe());
                 var algoIds = query.algoOrderId() != 0
                         ? List.of(query.algoOrderId())
-                        : runtime.algoOrderIndex.query(query.userId(), query.symbol(), query.dueAtEpochMillis(),
+                        : runtime.algoOrderIndex.query(query.userId(), query.instrumentId(), query.dueAtEpochMillis(),
                                 query.limit(), runtime.runtimeState::algoOrder);
                 var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.algoOrders(
                         runtime.runtimeState, algoIds);
@@ -336,7 +336,7 @@ final class TradingCoreQueryRouter {
                         runtime.identities, message.header().userId(), command, clusterTimestamp);
                 long reservedUnits = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                         runtime.runtimeState, runtime.identities, message.header().userId(), resolved,
-                        runtime.openInterestIndex.openInterestSteps(command.symbol()), runtime.activeOrderIndex);
+                        runtime.openInterestIndex.openInterestSteps(command.instrumentId()), runtime.activeOrderIndex);
                 var view = new com.surprising.aeron.protocol.CoreOrderPreflightView(
                         resolved.reservationAsset(), reservedUnits);
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,

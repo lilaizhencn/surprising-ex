@@ -21,11 +21,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 public interface IndexPriceRpcApi {
 
     @GetMapping("/latest")
-    IndexPriceResponse latestIndexPrice(@RequestParam("symbol") @NotBlank String symbol);
+    IndexPriceResponse latestIndexPrice(@RequestParam("instrumentId") @NotBlank String instrumentId);
 
     @GetMapping("/history")
     IndexPriceQueryResponse history(
-            @RequestParam("symbol") @NotBlank String symbol,
+            @RequestParam("instrumentId") @NotBlank String instrumentId,
             @RequestParam("startTime") @NotNull @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
             @RequestParam("endTime") @NotNull @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime,
             @RequestParam(value = "limit", defaultValue = "500") @Min(1) @Max(5000) int limit);

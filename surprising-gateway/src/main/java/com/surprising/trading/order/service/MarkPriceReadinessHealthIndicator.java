@@ -22,9 +22,9 @@ public class MarkPriceReadinessHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        List<String> requiredSymbols = properties.getRequiredSymbols();
+        List<String> requiredSymbols = properties.getRequiredInstrumentIds();
         List<String> missingSymbols = requiredSymbols.stream()
-                .filter(symbol -> cache.fresh(symbol).isEmpty())
+                .filter(instrumentId -> cache.fresh(instrumentId).isEmpty())
                 .toList();
         ProductLine productLine = properties.getProductLine();
         boolean ready = missingSymbols.isEmpty();

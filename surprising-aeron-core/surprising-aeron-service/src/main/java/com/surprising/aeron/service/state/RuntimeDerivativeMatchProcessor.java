@@ -40,7 +40,7 @@ public final class RuntimeDerivativeMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return runtime;
         }
-        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
         if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
@@ -86,7 +86,7 @@ public final class RuntimeDerivativeMatchProcessor {
                                    TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
         validateMatches(runtime, taker, matches);
-        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
         identities.positionKey(taker.userId(), instrument, taker.positionSide());
         for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             MatcherEvent match = matches.get(matchIndex);
@@ -267,11 +267,11 @@ public final class RuntimeDerivativeMatchProcessor {
                 if (leverageByUser.containsKey(order.userId())) {
                     leverage = leverageByUser.get(order.userId());
                 } else {
-                    Long configured = runtime.leverage(order.userId(), instrument.symbol(), order.marginMode());
+                    Long configured = runtime.leverage(order.userId(), instrument.instrumentId(), order.marginMode());
                     leverage = configured == null ? instrument.maxLeveragePpm() : configured;
                     leverageByUser.put(order.userId(), leverage);
                 }
-                long key = identities.preparedPositionKey(order.userId(), instrument.symbol(), order.positionSide());
+                long key = identities.preparedPositionKey(order.userId(), instrument.instrumentId(), order.positionSide());
                 cursor = free.pollFirst();
                 if (cursor == null) cursor = new RuntimeDerivativeFillCalculator.FillCursor();
                 RuntimeDerivativeFillCalculator.begin(cursor, runtime, instrument, order, key,
@@ -367,10 +367,10 @@ public final class RuntimeDerivativeMatchProcessor {
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
-        Long configuredLeverage = runtime.leverage(order.userId(), instrument.symbol(), order.marginMode());
+        Long configuredLeverage = runtime.leverage(order.userId(), instrument.instrumentId(), order.marginMode());
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
-                identities.preparedPositionKey(order.userId(), instrument.symbol(), order.positionSide()),
+                identities.preparedPositionKey(order.userId(), instrument.instrumentId(), order.positionSide()),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
     }
 

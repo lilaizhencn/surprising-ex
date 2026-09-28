@@ -32,8 +32,8 @@ public class FundingRateKafkaConsumer {
     public void onFundingRate(ConsumerRecord<String, String> record) {
         try {
             PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
-            if (record.key() == null || !record.key().equals(event.symbol())) {
-                throw new IllegalArgumentException("funding rate Kafka key must match payload symbol");
+            if (record.key() == null || !record.key().equals(event.instrumentId())) {
+                throw new IllegalArgumentException("funding rate Kafka key must match payload instrumentId");
             }
             cache.update(event);
         } catch (Exception ex) {

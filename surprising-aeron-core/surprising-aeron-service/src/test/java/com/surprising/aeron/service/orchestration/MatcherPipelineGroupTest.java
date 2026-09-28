@@ -99,12 +99,12 @@ class MatcherPipelineGroupTest {
         MatcherPipelineGroup pipelines = pipelines(4, 16, false, 1, 2);
         try {
             pipelines.start(adapter::activateShard);
-            String firstSymbol = "SYMBOL-0";
+            String firstSymbol = "39";
             int firstShard = adapter.matcherShardId(firstSymbol);
             String secondSymbol = null;
             int secondShard = -1;
             for (int index = 1; index < 1_000; index++) {
-                String candidate = "SYMBOL-" + index;
+                String candidate = Integer.toString(100 + index);
                 int candidateShard = adapter.matcherShardId(candidate);
                 if (candidateShard != firstShard) {
                     secondSymbol = candidate;
@@ -171,8 +171,8 @@ class MatcherPipelineGroupTest {
         return new MatcherPipelineGroup(shards, capacity, start, contexts);
     }
 
-    private static CoreMatchingOrder order(long orderId, String symbol) {
-        return new CoreMatchingOrder(orderId, symbol, CoreOrderSide.BUY,
+    private static CoreMatchingOrder order(long orderId, String instrumentId) {
+        return new CoreMatchingOrder(orderId, instrumentId, CoreOrderSide.BUY,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 1);
     }
 

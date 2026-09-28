@@ -34,7 +34,7 @@ class IndexPriceServiceTest {
     void publishesCompleteIndexSnapshotToTheProductSpecificTopicWithoutSynchronouslyWritingAuditTables() {
         IndexPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        IndexPriceProperties.SymbolConfig symbol = symbol("BTC-USDT-260925-70000-C");
+        IndexPriceProperties.SymbolConfig instrumentId = instrumentId("45");
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
@@ -45,10 +45,10 @@ class IndexPriceServiceTest {
         MarkPriceService markPriceService = mock(MarkPriceService.class);
         Instant now = Instant.now();
 
-        when(configService.symbols()).thenReturn(List.of(symbol));
-        when(sequenceRepository.next("price-index", "BTC-USDT-260925-70000-C")).thenReturn(77L);
-        for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
-            when(latestQuoteStore.latest("BTC-USDT-260925-70000-C", source)).thenReturn(Optional.empty());
+        when(configService.symbols()).thenReturn(List.of(instrumentId));
+        when(sequenceRepository.next("price-index", "45")).thenReturn(77L);
+        for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
+            when(latestQuoteStore.latest("45", source)).thenReturn(Optional.empty());
             when(spotPriceClient.fetch(source)).thenReturn(CompletableFuture.completedFuture(
                     quote(source.getName(), source.getSourceSymbol(), now)));
         }
@@ -61,15 +61,15 @@ class IndexPriceServiceTest {
         service.pollAndPublish();
 
         verify(kafkaTemplate).send(eq("surprising.option.price.events.v1"),
-                eq("BTC-USDT-260925-70000-C"), any(PricePublishedEvent.class));
+                eq("45"), any(PricePublishedEvent.class));
         verify(markPriceService).acceptIndexPrice(any(IndexPriceEvent.class));
     }
 
     @Test
     void doesNotFallbackToRestWhenAConfiguredPublicWebSocketQuoteIsMissing() {
         IndexPriceProperties properties = properties();
-        IndexPriceProperties.SymbolConfig symbol = symbol("BTC-USDT");
-        symbol.getSources().forEach(source -> source.setWebsocketEnabled(true));
+        IndexPriceProperties.SymbolConfig instrumentId = instrumentId("1");
+        instrumentId.getSources().forEach(source -> source.setWebsocketEnabled(true));
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
@@ -79,10 +79,10 @@ class IndexPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceService markPriceService = mock(MarkPriceService.class);
 
-        when(configService.symbols()).thenReturn(List.of(symbol));
-        when(sequenceRepository.next("price-index", "BTC-USDT")).thenReturn(1L);
-        for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
-            when(latestQuoteStore.latest("BTC-USDT", source)).thenReturn(Optional.empty());
+        when(configService.symbols()).thenReturn(List.of(instrumentId));
+        when(sequenceRepository.next("price-index", "1")).thenReturn(1L);
+        for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
+            when(latestQuoteStore.latest("1", source)).thenReturn(Optional.empty());
         }
 
         new IndexPriceService(properties, configService, spotPriceClient, latestQuoteStore,
@@ -96,8 +96,8 @@ class IndexPriceServiceTest {
     void onlyUsesRestFallbackWhenItIsExplicitlyEnabled() {
         IndexPriceProperties properties = properties();
         properties.getWebSocket().setRestFallbackEnabled(true);
-        IndexPriceProperties.SymbolConfig symbol = symbol("BTC-USDT");
-        symbol.getSources().forEach(source -> source.setWebsocketEnabled(true));
+        IndexPriceProperties.SymbolConfig instrumentId = instrumentId("1");
+        instrumentId.getSources().forEach(source -> source.setWebsocketEnabled(true));
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
@@ -108,10 +108,10 @@ class IndexPriceServiceTest {
         MarkPriceService markPriceService = mock(MarkPriceService.class);
         Instant now = Instant.now();
 
-        when(configService.symbols()).thenReturn(List.of(symbol));
-        when(sequenceRepository.next("price-index", "BTC-USDT")).thenReturn(1L);
-        for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
-            when(latestQuoteStore.latest("BTC-USDT", source)).thenReturn(Optional.empty());
+        when(configService.symbols()).thenReturn(List.of(instrumentId));
+        when(sequenceRepository.next("price-index", "1")).thenReturn(1L);
+        for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
+            when(latestQuoteStore.latest("1", source)).thenReturn(Optional.empty());
             when(spotPriceClient.fetch(source)).thenReturn(CompletableFuture.completedFuture(
                     quote(source.getName(), source.getSourceSymbol(), now)));
         }
@@ -120,7 +120,7 @@ class IndexPriceServiceTest {
                 new IndexPriceCalculator(properties), leaseRepository, sequenceRepository, latestIndexPriceCache,
                 kafkaTemplate, markPriceService).pollAndPublish();
 
-        verify(spotPriceClient).fetch(symbol.getSources().getFirst());
+        verify(spotPriceClient).fetch(instrumentId.getSources().getFirst());
         ArgumentCaptor<IndexPriceEvent> eventCaptor = ArgumentCaptor.forClass(IndexPriceEvent.class);
         verify(latestIndexPriceCache).update(eventCaptor.capture());
         assertThat(eventCaptor.getValue().components())
@@ -134,9 +134,9 @@ class IndexPriceServiceTest {
         return properties;
     }
 
-    private IndexPriceProperties.SymbolConfig symbol(String symbol) {
+    private IndexPriceProperties.SymbolConfig instrumentId(String instrumentId) {
         IndexPriceProperties.SymbolConfig config = new IndexPriceProperties.SymbolConfig();
-        config.setSymbol(symbol);
+        config.setInstrumentId(instrumentId);
         config.setMinValidSources(3);
         config.setSources(List.of(source("BINANCE"), source("OKX"), source("BYBIT")));
         return config;

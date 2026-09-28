@@ -20,9 +20,9 @@ public class MatchingMarketDataService {
         this.aeronGateway = aeronGateway;
     }
 
-    public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int depth) {
-        CoreOrderBookView book = aeronGateway.orderBook(new CoreOrderBookQuery(symbol, depth));
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
+    public OrderBookSnapshotResponse orderBookSnapshot(String instrumentId, int depth) {
+        CoreOrderBookView book = aeronGateway.orderBook(new CoreOrderBookQuery(instrumentId, depth));
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
         List<OrderBookLevel> bids = book.levels().stream()
                 .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)
                 .map(MatchingMarketDataService::toLevel)

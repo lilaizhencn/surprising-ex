@@ -33,7 +33,7 @@ class QuotePlannerTest {
         strategy.setBaseQuantitySteps(1000L);
         var quoting = quoting();
         quoting.setQuantityVariationPpm(800_000L);
-        var reference = new ReferenceOrderBookSnapshot("source", "BTC-USDT",
+        var reference = new ReferenceOrderBookSnapshot("source", "1",
                 List.of(new ReferenceOrderBookLevel(49_990L, 1000L)),
                 List.of(new ReferenceOrderBookLevel(50_010L, 1000L)), Instant.now());
         var spec = instrument();
@@ -175,7 +175,7 @@ class QuotePlannerTest {
 
     @Test
     void mirrorsReferenceMarketDistancesAndQuantitiesWhenAvailable() {
-        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "BTC-USDT",
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "1",
                 List.of(new ReferenceOrderBookLevel(49_990L, 3L),
                         new ReferenceOrderBookLevel(49_970L, 4L)),
                 List.of(new ReferenceOrderBookLevel(50_020L, 7L),
@@ -215,7 +215,7 @@ class QuotePlannerTest {
 
     @Test
     void capsReferenceMarketQuantityAtStrategyBaseQuantity() {
-        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "BTC-USDT",
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "1",
                 List.of(new ReferenceOrderBookLevel(49_990L, 40L)),
                 List.of(new ReferenceOrderBookLevel(50_020L, 70L)),
                 Instant.parse("2026-01-01T00:00:00Z"));
@@ -234,7 +234,7 @@ class QuotePlannerTest {
         MarketMakerProperties.Quoting quoting = quoting();
         quoting.setLevelSpacingTicks(1L);
         quoting.setMaxPriceDeviationPpm(50_000L);
-        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "BTC-USDT",
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "1",
                 List.of(new ReferenceOrderBookLevel(49_995L, 1L), new ReferenceOrderBookLevel(49_990L, 1L)),
                 List.of(new ReferenceOrderBookLevel(50_005L, 1L), new ReferenceOrderBookLevel(50_010L, 1L)),
                 Instant.parse("2026-01-01T00:00:00Z"));
@@ -298,9 +298,9 @@ class QuotePlannerTest {
 
     private MarketMakerProperties.Strategy strategy() {
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
-        strategy.setStrategyId("btc-usdt-mm-a");
+        strategy.setStrategyId("47");
         strategy.setAccountIds(List.of(900001L));
-        strategy.setSymbols(List.of("BTC-USDT"));
+        strategy.setInstrumentIds(List.of("1"));
         strategy.setBaseQuantitySteps(10L);
         strategy.setOrderLevels(2);
         return strategy;
@@ -328,28 +328,28 @@ class QuotePlannerTest {
 
     private InstrumentResponse instrument(long priceTickUnits) {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-        return new InstrumentResponse("BTC-USDT", 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+        return new InstrumentResponse(1, 3, 1, 1, 3, "1", 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                10_000_000L, 3, null, null, null, null, null, null, null,
+                10_000_000L, 3, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 
     private InstrumentResponse spotInstrument() {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-        return new InstrumentResponse("BTC-USDT", 1L, InstrumentType.SPOT, ContractType.SPOT,
+        return new InstrumentResponse(1, 3, 1, 1, 3, "1", 1L, InstrumentType.SPOT, ContractType.SPOT,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                10_000_000L, 3, null, null, null, null, null, null, null,
+                10_000_000L, 3, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 
     private OrderBookSnapshotResponse orderBook(long bid, long ask) {
-        return new OrderBookSnapshotResponse("BTC-USDT", 1L, 20,
+        return new OrderBookSnapshotResponse("1", 1L, 20,
                 List.of(new OrderBookLevel(bid, 100L, 1L)),
                 List.of(new OrderBookLevel(ask, 100L, 1L)),
                 Instant.parse("2026-01-01T00:00:00Z"));
@@ -357,7 +357,7 @@ class QuotePlannerTest {
 
     private MarkPriceResponse mark(long markPriceUnits) {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-        return new MarkPriceResponse("BTC-USDT", BigDecimal.valueOf(50_000L), markPriceUnits,
+        return new MarkPriceResponse("1", BigDecimal.valueOf(50_000L), markPriceUnits,
                 BigDecimal.valueOf(50_000L), BigDecimal.valueOf(50_000L), BigDecimal.valueOf(50_000L),
                 BigDecimal.valueOf(50_000L), BigDecimal.valueOf(49_990L), BigDecimal.valueOf(50_010L),
                 BigDecimal.ZERO, now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,

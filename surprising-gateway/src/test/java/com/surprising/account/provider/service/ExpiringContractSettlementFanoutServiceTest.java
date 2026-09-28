@@ -40,7 +40,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         AccountProperties properties = properties(ProductLine.LINEAR_DELIVERY);
         var service = new ExpiringContractSettlementFanoutService(aeron, properties);
-        var event = new DeliverySettlementEvent("BTC-USDT-260327", 4, ContractType.LINEAR_DELIVERY,
+        var event = new DeliverySettlementEvent("51", 4, ContractType.LINEAR_DELIVERY,
                 100, SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
                 InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
         stubCompleted(aeron);
@@ -51,7 +51,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         verify(aeron).command(eq(CoreMessageType.SETTLE_INSTRUMENT), org.mockito.ArgumentMatchers.any(),
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
-                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "BTC-USDT-260327", 100, 0));
+                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "51", 100, 0));
     }
 
     @Test
@@ -59,7 +59,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         AccountProperties properties = properties(ProductLine.OPTION);
         var service = new ExpiringContractSettlementFanoutService(aeron, properties);
-        var event = new OptionExerciseEvent("BTC-USDT-260925-70000-C", 6, "BTC-USDT", 70_000_000,
+        var event = new OptionExerciseEvent("45", 6, "1", com.surprising.product.api.ProductLine.SPOT, 70_000_000,
                 71_000_000, 1_000, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
                 InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
@@ -72,7 +72,7 @@ class ExpiringContractSettlementFanoutServiceTest {
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
                 new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(),
-                        "BTC-USDT-260925-70000-C", 71_000_000, 1_000));
+                        "45", 71_000_000, 1_000));
     }
 
     @Test
@@ -80,7 +80,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         AccountProperties properties = properties(ProductLine.LINEAR_DELIVERY);
         var service = new ExpiringContractSettlementFanoutService(aeron, properties);
-        var event = new DeliverySettlementEvent("BTC-USDT-260327", 4, ContractType.LINEAR_DELIVERY,
+        var event = new DeliverySettlementEvent("51", 4, ContractType.LINEAR_DELIVERY,
                 100, SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
                 InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
         long settlementId = SETTLEMENT_TIME.toEpochMilli();
@@ -175,7 +175,7 @@ class ExpiringContractSettlementFanoutServiceTest {
     }
 
     private static DeliverySettlementEvent event() {
-        return new DeliverySettlementEvent("BTC-USDT-260327", 4, ContractType.LINEAR_DELIVERY,
+        return new DeliverySettlementEvent("51", 4, ContractType.LINEAR_DELIVERY,
                 100, SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
                 InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
     }

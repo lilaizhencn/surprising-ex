@@ -277,14 +277,14 @@ public record TradingCoreState(
         }
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey().userId());
-            hash = CoreStateHash.mix(hash, entry.getKey().symbol());
+            hash = CoreStateHash.mix(hash, entry.getKey().instrumentId());
             hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
         for (CoreAlgoOrderState algo : algoOrders.values()) {
             if (algo.terminal()) continue;
             hash = CoreStateHash.mix(hash, algo.algoOrderId()); hash = CoreStateHash.mix(hash, algo.userId());
-            hash = CoreStateHash.mix(hash, algo.symbol()); hash = CoreStateHash.mix(hash, algo.statusCode());
+            hash = CoreStateHash.mix(hash, algo.instrumentId()); hash = CoreStateHash.mix(hash, algo.statusCode());
             hash = CoreStateHash.mix(hash, algo.updatedAtEpochMillis()); hash = CoreStateHash.mix(hash, algo.revision());
             for (long childOrderId : algo.childOrderIds()) hash = CoreStateHash.mix(hash, childOrderId);
         }
@@ -303,7 +303,7 @@ public record TradingCoreState(
             if (!trigger.status().open()) continue;
             hash = CoreStateHash.mix(hash, trigger.triggerOrderId());
             hash = CoreStateHash.mix(hash, trigger.userId());
-            hash = CoreStateHash.mix(hash, trigger.symbol());
+            hash = CoreStateHash.mix(hash, trigger.instrumentId());
             hash = CoreStateHash.mix(hash, trigger.side().wireCode());
             hash = CoreStateHash.mix(hash, trigger.triggerType().ordinal());
             hash = CoreStateHash.mix(hash, trigger.triggerCondition().ordinal());
@@ -318,7 +318,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, trigger.revision());
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
-            hash = CoreStateHash.mix(hash, mark.symbol());
+            hash = CoreStateHash.mix(hash, mark.instrumentId());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
             hash = CoreStateHash.mix(hash, mark.indexPriceTicks());
             hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
@@ -327,7 +327,7 @@ public record TradingCoreState(
         }
         for (CoreRiskSnapshot risk : riskState.snapshots().values()) {
             hash = CoreStateHash.mix(hash, risk.userId());
-            hash = CoreStateHash.mix(hash, risk.symbol());
+            hash = CoreStateHash.mix(hash, risk.instrumentId());
             hash = CoreStateHash.mix(hash, risk.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, risk.priceSequence());
             hash = CoreStateHash.mix(hash, risk.equityUnits());
@@ -340,7 +340,7 @@ public record TradingCoreState(
             if (liquidation.terminal()) continue;
             hash = CoreStateHash.mix(hash, liquidation.liquidationId());
             hash = CoreStateHash.mix(hash, liquidation.userId());
-            hash = CoreStateHash.mix(hash, liquidation.symbol());
+            hash = CoreStateHash.mix(hash, liquidation.instrumentId());
             hash = CoreStateHash.mix(hash, liquidation.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
@@ -354,7 +354,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.nextCancelOrderId());
         }
         for (CoreRiskState.RiskScan scan : riskState.scans().values()) {
-            hash = CoreStateHash.mix(hash, scan.symbol());
+            hash = CoreStateHash.mix(hash, scan.instrumentId());
             hash = CoreStateHash.mix(hash, scan.priceSequence());
             hash = CoreStateHash.mix(hash, scan.scanStartPriceSequence());
             hash = CoreStateHash.mix(hash, scan.lastUserId());
@@ -470,7 +470,7 @@ public record TradingCoreState(
         long hash = hashUser(CoreStateHash.start(), user);
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
             if (entry.getKey().userId() != userId) continue;
-            hash = CoreStateHash.mix(hash, entry.getKey().symbol());
+            hash = CoreStateHash.mix(hash, entry.getKey().instrumentId());
             hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
@@ -623,7 +623,7 @@ public record TradingCoreState(
         for (OrderReservation reservation : user.reservations().values()) {
             if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
-            hash = CoreStateHash.mix(hash, reservation.symbol());
+            hash = CoreStateHash.mix(hash, reservation.instrumentId());
             hash = CoreStateHash.mix(hash, reservation.kind().wireCode());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -632,7 +632,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, reservation.orderQuantitySteps());
         }
         for (CorePositionState position : user.positions().values()) {
-            hash = CoreStateHash.mix(hash, position.symbol());
+            hash = CoreStateHash.mix(hash, position.instrumentId());
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
@@ -649,7 +649,7 @@ public record TradingCoreState(
         long hash = CoreStateHash.mix(initial, order.orderId());
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
-        hash = CoreStateHash.mix(hash, order.symbol());
+        hash = CoreStateHash.mix(hash, order.instrumentId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());

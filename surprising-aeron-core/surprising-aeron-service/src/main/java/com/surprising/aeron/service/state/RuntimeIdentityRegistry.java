@@ -33,7 +33,7 @@ public final class RuntimeIdentityRegistry {
         }
     }
 
-    // Asset/symbol forward and allocation indexes are owner-only. Monotonic asset/symbol
+    // Asset/instrumentId forward and allocation indexes are owner-only. Monotonic asset/instrumentId
     // dictionaries use volatile array publication; releasable client/position
     // identities remain concurrent for asynchronous Core Fact materializers.
     private final Map<String, Integer> assetIds = new HashMap<>();
@@ -200,11 +200,11 @@ public final class RuntimeIdentityRegistry {
         return asset;
     }
 
-    public int symbolId(String symbol) {
+    public int symbolId(String instrumentId) {
         assertOwner();
-        Integer known = symbolIds.get(symbol);
+        Integer known = symbolIds.get(instrumentId);
         if (known != null) return known;
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         Integer existing = symbolIds.get(normalized);
         if (existing != null) return existing;
         int id = nextSymbolId++;
@@ -214,22 +214,22 @@ public final class RuntimeIdentityRegistry {
         return id;
     }
 
-    public Integer findSymbolId(String symbol) {
+    public Integer findSymbolId(String instrumentId) {
         assertOwner();
-        Integer known = symbolIds.get(symbol);
+        Integer known = symbolIds.get(instrumentId);
         if (known != null) return known;
-        return symbolIds.get(OrderReservation.normalizeSymbol(symbol));
+        return symbolIds.get(OrderReservation.requireInstrumentId(instrumentId));
     }
 
-    public String symbol(int symbolId) {
+    public String instrumentId(int symbolId) {
         return preparedSymbol(symbolId);
     }
 
     String preparedSymbol(int symbolId) {
         String[] current = symbols;
-        String symbol = symbolId < 0 || symbolId >= current.length ? null : current[symbolId];
-        if (symbol == null) throw new IllegalArgumentException("unknown runtime symbol id: " + symbolId);
-        return symbol;
+        String instrumentId = symbolId < 0 || symbolId >= current.length ? null : current[symbolId];
+        if (instrumentId == null) throw new IllegalArgumentException("unknown runtime instrumentId id: " + symbolId);
+        return instrumentId;
     }
 
     public long clientKey(long userId, String clientOrderId) {
@@ -340,7 +340,7 @@ public final class RuntimeIdentityRegistry {
                 || instrument == null || side == null) {
             throw new IllegalStateException("position identity crossed account Lane");
         }
-        return findPositionKeyValue(userId, instrument.symbol(), side);
+        return findPositionKeyValue(userId, instrument.instrumentId(), side);
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -410,28 +410,28 @@ public final class RuntimeIdentityRegistry {
         if (instrument == null) {
             throw new IllegalArgumentException("invalid position identity");
         }
-        return positionKey(userId, instrument.symbol(), side);
+        return positionKey(userId, instrument.instrumentId(), side);
     }
 
-    public long positionKey(long userId, String symbol, CorePositionSide side) {
+    public long positionKey(long userId, String instrumentId, CorePositionSide side) {
         assertOwner();
-        if (userId <= 0 || symbol == null || symbol.isBlank() || side == null) {
+        if (userId <= 0 || instrumentId == null || instrumentId.isBlank() || side == null) {
             throw new IllegalArgumentException("invalid position identity");
         }
-        long key = positionIdentityKey(userId, symbol, side);
+        long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry existing = positionEntry(key);
         if (existing != null) {
             if (existing.identity.userId() != userId
-                    || !positionNameEquals(existing.identity.positionKey(), symbol, side)) {
+                    || !positionNameEquals(existing.identity.positionKey(), instrumentId, side)) {
                 throw new IllegalStateException("deterministic position identity collision");
             }
             return key;
         }
-        String name = side == CorePositionSide.NET ? symbol : symbol + ':' + side.name();
+        String name = side == CorePositionSide.NET ? instrumentId : instrumentId + ':' + side.name();
         PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
         PositionEntry collision = positions.putIfAbsent(new PositionMapKey(key), created);
         if (collision != null && (collision.identity.userId() != userId
-                || !positionNameEquals(collision.identity.positionKey(), symbol, side))) {
+                || !positionNameEquals(collision.identity.positionKey(), instrumentId, side))) {
             throw new IllegalStateException("deterministic position identity collision");
         }
         PositionEntry retained = collision == null ? created : collision;
@@ -479,24 +479,24 @@ public final class RuntimeIdentityRegistry {
      * publication of the identity; existing entries are checked directly from
      * their deterministic key and stored immutable name.
      */
-    long retainPositionInLane(AccountLaneState lane, long userId, String symbol,
+    long retainPositionInLane(AccountLaneState lane, long userId, String instrumentId,
                               CorePositionSide side) {
         lane.assertOwner();
         if (clientTopology.accountLaneId(userId) != lane.laneId()
-                || symbol == null || symbol.isBlank() || side == null) {
+                || instrumentId == null || instrumentId.isBlank() || side == null) {
             throw new IllegalArgumentException("position identity belongs to another Lane");
         }
-        long key = positionIdentityKey(userId, symbol, side);
+        long key = positionIdentityKey(userId, instrumentId, side);
         while (true) {
             PositionEntry entry = positionEntry(key);
             if (entry == null) {
-                String name = side == CorePositionSide.NET ? symbol : symbol + ':' + side.name();
+                String name = side == CorePositionSide.NET ? instrumentId : instrumentId + ':' + side.name();
                 PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
                 entry = positions.putIfAbsent(new PositionMapKey(key), created);
                 if (entry == null) entry = created;
             }
             if (entry.identity.userId() != userId
-                    || !positionNameEquals(entry.identity.positionKey(), symbol, side)) {
+                    || !positionNameEquals(entry.identity.positionKey(), instrumentId, side)) {
                 throw new IllegalStateException("deterministic position identity collision");
             }
             int uses = entry.get();
@@ -537,14 +537,14 @@ public final class RuntimeIdentityRegistry {
     public long findPositionKeyValue(long userId, CoreInstrument instrument, CorePositionSide side) {
         assertOwner();
         if (userId <= 0 || instrument == null || side == null) return 0;
-        return findPositionKeyValue(userId, instrument.symbol(), side);
+        return findPositionKeyValue(userId, instrument.instrumentId(), side);
     }
 
-    private long findPositionKeyValue(long userId, String symbol, CorePositionSide side) {
-        long key = positionIdentityKey(userId, symbol, side);
+    private long findPositionKeyValue(long userId, String instrumentId, CorePositionSide side) {
+        long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry entry = positionEntry(key);
         return entry != null && entry.identity.userId() == userId
-                && positionNameEquals(entry.identity.positionKey(), symbol, side) ? key : 0;
+                && positionNameEquals(entry.identity.positionKey(), instrumentId, side) ? key : 0;
     }
 
     public long positionCheckpoint() {
@@ -582,12 +582,12 @@ public final class RuntimeIdentityRegistry {
 
     static long positionIdentityKey(long userId, String name) { return deterministicKey(userId, name); }
 
-    static long positionIdentityKey(long userId, String symbol, CorePositionSide side) {
-        if (side == CorePositionSide.NET) return deterministicKey(userId, symbol);
+    static long positionIdentityKey(long userId, String instrumentId, CorePositionSide side) {
+        if (side == CorePositionSide.NET) return deterministicKey(userId, instrumentId);
         long hash = 0xcbf29ce484222325L;
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE)
             hash = hashByte(hash, (int) (userId >>> shift & 0xffL));
-        hash = hashUtf8(hash, symbol);
+        hash = hashUtf8(hash, instrumentId);
         hash = hashByte(hash, ':');
         String sideName = side.name();
         for (int i = 0; i < sideName.length(); i++) hash = hashByte(hash, sideName.charAt(i));
@@ -601,23 +601,23 @@ public final class RuntimeIdentityRegistry {
         return key;
     }
 
-    long preparedPositionKey(long userId, String symbol, CorePositionSide side) {
-        long key = positionIdentityKey(userId, symbol, side);
+    long preparedPositionKey(long userId, String instrumentId, CorePositionSide side) {
+        long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry entry = positionEntry(key);
         if (entry == null || entry.identity.userId() != userId
-                || !positionNameEquals(entry.identity.positionKey(), symbol, side)) {
+                || !positionNameEquals(entry.identity.positionKey(), instrumentId, side)) {
             throw new IllegalStateException("position identity was not prepared by the Sequencer");
         }
         return key;
     }
 
-    private static boolean positionNameEquals(String actual, String symbol, CorePositionSide side) {
-        if (side == CorePositionSide.NET) return actual.equals(symbol);
+    private static boolean positionNameEquals(String actual, String instrumentId, CorePositionSide side) {
+        if (side == CorePositionSide.NET) return actual.equals(instrumentId);
         String sideName = side.name();
-        int prefixLength = symbol.length();
+        int prefixLength = instrumentId.length();
         if (actual.length() != prefixLength + 1 + sideName.length()
                 || actual.charAt(prefixLength) != ':') return false;
-        if (!actual.regionMatches(0, symbol, 0, prefixLength)) return false;
+        if (!actual.regionMatches(0, instrumentId, 0, prefixLength)) return false;
         return actual.regionMatches(prefixLength + 1, sideName, 0, sideName.length());
     }
 

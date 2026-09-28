@@ -33,7 +33,7 @@ public final class CoreTriggerOrderCodec {
         writer.longValue(state.triggerOrderId());
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
-        writer.text(state.clientTriggerOrderId()); writer.text(state.ocoGroupId()); writer.text(state.symbol());
+        writer.text(state.clientTriggerOrderId()); writer.text(state.ocoGroupId()); writer.text(state.instrumentId());
         writer.intValue(state.side().wireCode()); writer.intValue(state.triggerType().ordinal());
         writer.intValue(state.triggerCondition().ordinal()); writer.longValue(state.triggerPriceTicks());
         writer.longValue(state.activationPriceTicks()); writer.longValue(state.callbackRatePpm());
@@ -55,7 +55,7 @@ public final class CoreTriggerOrderCodec {
         if (state == null) throw new IllegalArgumentException("trigger state is required");
         long length = Integer.BYTES + Long.BYTES + Integer.BYTES + Long.BYTES;
         length = Math.addExact(length, textLength(state.clientTriggerOrderId())
-                + textLength(state.ocoGroupId()) + textLength(state.symbol()));
+                + textLength(state.ocoGroupId()) + textLength(state.instrumentId()));
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 6L);
         length = Math.addExact(length, Integer.BYTES * 2L + Long.BYTES * 2L);
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 3L);
@@ -119,7 +119,7 @@ public final class CoreTriggerOrderCodec {
 
     public static byte[] encodeQuery(CoreTriggerOrderQuery query) {
         Writer writer = new Writer(); writer.intValue(QUERY_VERSION); writer.longValue(query.triggerOrderId());
-        writer.text(query.symbol()); writer.longValue(query.beforeTriggerOrderId()); writer.intValue(query.limit());
+        writer.text(query.instrumentId()); writer.longValue(query.beforeTriggerOrderId()); writer.intValue(query.limit());
         writer.intValue(query.status() == null ? 0 : query.status().ordinal() + 1);
         writer.longValue(query.expiresBeforeEpochMillis());
         return writer.bytes();

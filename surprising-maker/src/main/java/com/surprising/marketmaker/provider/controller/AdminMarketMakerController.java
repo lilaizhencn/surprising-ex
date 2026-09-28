@@ -71,7 +71,7 @@ public class AdminMarketMakerController {
             @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
             @RequestParam(value = "productLine", required = false) String productLineValue,
             @RequestParam(value = "strategyId", required = false) String strategyId,
-            @RequestParam(value = "symbol", required = false) String symbol,
+            @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "accountId", required = false) Long accountId,
             @RequestParam(value = "eventType", required = false) String eventType,
             @RequestParam(value = "limit", defaultValue = "200") int limit,
@@ -79,7 +79,7 @@ public class AdminMarketMakerController {
             @RequestParam(value = "sort", required = false) String sort) {
         requireAdmin(adminUserId);
         return marketMakerService.runLogs(productLine(productLineValue, productLineHeader),
-                strategyId, symbol, accountId, eventType, limit, cursor, sort);
+                strategyId, instrumentId, accountId, eventType, limit, cursor, sort);
     }
 
     @GetMapping("/strategies/{strategyId}/config")
@@ -151,7 +151,7 @@ public class AdminMarketMakerController {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             MarketMakerRunRequest safeRequest = request == null
                     ? new MarketMakerRunRequest(null, null, productLine)
-                    : new MarketMakerRunRequest(request.strategyId(), request.symbol(),
+                    : new MarketMakerRunRequest(request.strategyId(), request.instrumentId(),
                     request.productLine() == null ? productLine : request.productLine());
             return marketMakerService.runOnce(safeRequest);
         } catch (IllegalArgumentException ex) {

@@ -62,12 +62,12 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
                 properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "BTC-USDT-260925-70000-C",
+        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "45",
                 OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null, eventTime, "trace-order-topic");
 
         assertThatThrownBy(() -> consumer.onOrderEvent(new ConsumerRecord<>(
                 "surprising.linear-delivery.order.events.v1", 0, 0L,
-                "BTC-USDT-260925-70000-C", objectMapper.writeValueAsString(event))))
+                "45", objectMapper.writeValueAsString(event))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to fanout order event")
                 .hasRootCauseMessage("order event topic must match current product line: expected="
@@ -81,17 +81,17 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        PerpFundingRateEvent event = new PerpFundingRateEvent("BTC-USDT", new BigDecimal("0.000100"),
+        PerpFundingRateEvent event = new PerpFundingRateEvent("1", new BigDecimal("0.000100"),
                 eventTime.plusSeconds(3600), 8, 9L, eventTime);
 
         consumer.onFundingRate(new ConsumerRecord<>("surprising.linear-perp.funding.rate.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "1", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.FUNDING_RATE);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().instrumentId()).isEqualTo("1");
         assertThat(payload.getValue()).isEqualTo(event);
     }
 
@@ -102,10 +102,10 @@ class KafkaFanoutConsumerTest {
         MarkPriceEvent event = markPriceEvent(Instant.now());
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
+                "1", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
         ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
-        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null,
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
         assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
@@ -116,14 +116,14 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("50000"), 9L,
+        IndexPriceEvent event = new IndexPriceEvent("1", new BigDecimal("50000"), 9L,
                 PriceStatus.HEALTHY, 2, 2, BigDecimal.valueOf(2), eventTime, List.of());
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.index(event))));
+                "1", objectMapper.writeValueAsString(PricePublishedEvent.index(event))));
 
         ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
-        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null,
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
         assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
@@ -136,14 +136,14 @@ class KafkaFanoutConsumerTest {
         MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
+                "1", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
         verifyNoInteractions(registry);
     }
 
     private MarkPriceEvent markPriceEvent(Instant eventTime) {
         BigDecimal price = new BigDecimal("50000");
-        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L, 5_000_000L, 50_000L,
+        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "1", 1L, 5_000_000L, 50_000L,
                 price, price, null, price, price, price, new BigDecimal("49990"), new BigDecimal("50010"),
                 BigDecimal.ZERO, eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("49000"), new BigDecimal("51000"), 1L, PriceStatus.HEALTHY,
@@ -151,7 +151,7 @@ class KafkaFanoutConsumerTest {
     }
 
     private MarkPricePublishedEvent markPricePublication(MarkPriceEvent event) {
-        IndexPriceEvent indexInput = new IndexPriceEvent(event.symbol(), event.indexPrice(), event.sequence(),
+        IndexPriceEvent indexInput = new IndexPriceEvent(event.instrumentId(), event.indexPrice(), event.sequence(),
                 PriceStatus.HEALTHY, 0, 0, BigDecimal.ZERO, event.eventTime(), List.of());
         return new MarkPricePublishedEvent(event, indexInput, null, null, null,
                 event.basisAverage(), event.basisWindowSeconds(), event.eventTime());
@@ -173,11 +173,11 @@ class KafkaFanoutConsumerTest {
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry, org.mockito.Mockito.times(2)).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.ORDERS);
-        assertThat(topic.getAllValues().get(0).symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getAllValues().get(0).instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
         assertThat(topic.getAllValues().get(0).userId()).isEqualTo(1001L);
         assertThat(payload.getAllValues().get(0)).isEqualTo(event);
         assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
-        assertThat(topic.getAllValues().get(1).symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getAllValues().get(1).instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
         assertThat(topic.getAllValues().get(1).userId()).isEqualTo(1001L);
         ExecutionReportEvent report = (ExecutionReportEvent) payload.getAllValues().get(1);
         assertThat(report.reportType()).isEqualTo("ORDER_EVENT");
@@ -194,7 +194,7 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         TriggerOrderResponse order = new TriggerOrderResponse(
-                501L, 1001L, "sl-1", null, "BTC-USDT", OrderSide.SELL,
+                501L, 1001L, "sl-1", null, "1", OrderSide.SELL,
                 TriggerOrderType.STOP_LOSS, TriggerCondition.LESS_OR_EQUAL,
                 60_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, TriggerOrderStatus.CANCELED, null, null, null,
@@ -203,13 +203,13 @@ class KafkaFanoutConsumerTest {
                 701L, ProductLine.LINEAR_PERPETUAL, order, eventTime, "trace-trigger");
 
         consumer.onTriggerOrderEvent(new ConsumerRecord<>("surprising.linear-perp.trigger-order.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "1", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.TRIGGER_ORDERS);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().instrumentId()).isEqualTo("1");
         assertThat(topic.getValue().userId()).isEqualTo(1001L);
         assertThat(payload.getValue()).isEqualTo(event);
     }
@@ -229,7 +229,7 @@ class KafkaFanoutConsumerTest {
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ACCOUNT_RISK);
-        assertThat(topic.getValue().symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getValue().instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
         assertThat(topic.getValue().userId()).isEqualTo(1001L);
         assertThat(payload.getValue()).isEqualTo(event);
     }
@@ -257,7 +257,7 @@ class KafkaFanoutConsumerTest {
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         PositionUpdatedEvent event = new PositionUpdatedEvent(
                 PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 91L, 2L, ProductLine.LINEAR_PERPETUAL,
-                7L, 1001L, "BTC-USDT", 1L, MarginMode.CROSS, PositionSide.LONG,
+                7L, 1001L, "1", 1L, MarginMode.CROSS, PositionSide.LONG,
                 10L, 65_000L, 650_000L, 0L, "USDT", 100_000L,
                 eventTime, eventTime, eventTime, "trace-position-1");
 
@@ -268,7 +268,7 @@ class KafkaFanoutConsumerTest {
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.POSITIONS);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().instrumentId()).isEqualTo("1");
         assertThat(topic.getValue().userId()).isEqualTo(1001L);
         assertThat(payload.getValue()).isEqualTo(event);
         assertThat(((PositionUpdatedEvent) payload.getValue()).positionSide()).isEqualTo(PositionSide.LONG);
@@ -279,18 +279,18 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(2L, 10L, 1001L, "BTC-USDT",
+        RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(2L, 10L, 1001L, "1",
                 MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT", -10L, 65_000L, 67_000L, 670_000L,
                 -20_000L, 100_000L, 0L, 95_238L, RiskStatus.NORMAL, eventTime, "trace-risk-position-1");
 
         consumer.onPositionRisk(new ConsumerRecord<>("surprising.linear-perp.risk.position.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "1", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.POSITION_RISK);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().instrumentId()).isEqualTo("1");
         assertThat(topic.getValue().userId()).isEqualTo(1001L);
         assertThat(payload.getValue()).isEqualTo(event);
         assertThat(((RiskPositionUpdatedEvent) payload.getValue()).positionSide()).isEqualTo(PositionSide.SHORT);

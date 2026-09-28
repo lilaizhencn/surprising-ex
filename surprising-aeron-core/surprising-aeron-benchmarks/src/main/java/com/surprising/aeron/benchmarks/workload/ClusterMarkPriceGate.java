@@ -3,7 +3,7 @@ package com.surprising.aeron.benchmarks.workload;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.LongFunction;
 
-/** Shares only an in-progress update for a symbol; completed updates expire by source timestamp. */
+/** Shares only an in-progress update for a instrumentId; completed updates expire by source timestamp. */
 final class ClusterMarkPriceGate {
     private CompletableFuture<Void> pending;
     private long publishedMillis;

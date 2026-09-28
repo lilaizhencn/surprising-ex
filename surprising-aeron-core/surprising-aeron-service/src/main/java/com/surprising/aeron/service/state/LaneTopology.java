@@ -63,7 +63,7 @@ public record LaneTopology(
         return stableSymbolId & matcherShardMask;
     }
 
-    /** 账户资金的唯一写入方；禁止把 symbol、marginMode 或 matcherShard 加入账户路由。 */
+    /** 账户资金的唯一写入方；禁止把 instrumentId、marginMode 或 matcherShard 加入账户路由。 */
     public int accountLaneId(long userId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         return (int) (mix64(userId ^ accountLaneSeed) & (accountLaneCount - 1L));

@@ -20,7 +20,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         : TradingCoreRuntime.fromSnapshot(product, snapshot);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
-        capture.tradesOnly(true);
+        capture.ordersAndTradesOnly(true);
     }
 
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
@@ -46,16 +46,22 @@ public final class CommittedTradeReplay implements AutoCloseable {
             if (outbox.droppedBatches() != dropped || capture.failures() != failures)
                 throw new IllegalStateException(
                         "reliable replay event capture incomplete; checkpoint must not advance");
-            var trades = new ArrayList<RealtimeFrame>();
+            var changes = new ArrayList<RealtimeFrame>();
             byte[] encoded;
             while ((encoded = outbox.poll()) != null) {
                 var frame = RealtimeFrameCodec.decode(encoded);
-                if (frame.kind() == RealtimeFrame.Kind.TRADE) trades.add(frame);
+                if (frame.kind() == RealtimeFrame.Kind.TRADE || frame.kind() == RealtimeFrame.Kind.ORDER
+                        || frame.kind() == RealtimeFrame.Kind.EXECUTION)
+                    changes.add(frame);
             }
-            return List.copyOf(trades);
+            return List.copyOf(changes);
         } finally {
             capture.abort();
         }
+    }
+
+    public long exportSequence() {
+        return state.realtimeExportSequence();
     }
 
     public byte[] snapshot() {

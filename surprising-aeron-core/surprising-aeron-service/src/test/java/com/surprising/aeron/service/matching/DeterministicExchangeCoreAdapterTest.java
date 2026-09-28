@@ -36,24 +36,24 @@ class DeterministicExchangeCoreAdapterTest {
     void nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation() {
         try (var direct = new DeterministicExchangeCoreAdapter();
              var composed = new DeterministicExchangeCoreAdapter()) {
-            var order = new CoreMatchingOrder(901, "CANCEL-EVIDENCE", CoreOrderSide.BUY,
+            var order = new CoreMatchingOrder(901, "31", CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 10);
-            int shard = direct.matcherShardId(order.symbol());
-            int otherShard = composed.matcherShardId(order.symbol());
+            int shard = direct.matcherShardId(order.instrumentId());
+            int otherShard = composed.matcherShardId(order.instrumentId());
             var placement = new java.util.UUID(7, 1);
             direct.placeWithEvidence(shard, 1, placement, 1000, 7, order);
             composed.executeShardWithEvidenceSync(otherShard, 1, placement, 901, 1000,
                     () -> composed.place(7, order));
-            var taker = new CoreMatchingOrder(902, order.symbol(), CoreOrderSide.SELL,
+            var taker = new CoreMatchingOrder(902, order.instrumentId(), CoreOrderSide.SELL,
                     CoreOrderType.LIMIT, CoreTimeInForce.IOC, 90, 4);
             direct.placeWithEvidence(shard, 2, new java.util.UUID(8, 2), 2000, 8, taker);
             composed.executeShardWithEvidenceSync(otherShard, 2, new java.util.UUID(8, 2), 902, 2000,
                     () -> composed.place(8, taker));
             for (int sequence = 3; sequence <= 4; sequence++) {
                 var id = new java.util.UUID(7, sequence);
-                var actual = direct.cancelWithEvidence(shard, sequence, id, 901, sequence * 1000L, 7, order.symbol());
+                var actual = direct.cancelWithEvidence(shard, sequence, id, 901, sequence * 1000L, 7, order.instrumentId());
                 var expected = composed.executeShardWithEvidenceSync(otherShard, sequence, id, 901, sequence * 1000L,
-                        () -> composed.cancelForContinuation(7, 901, order.symbol()));
+                        () -> composed.cancelForContinuation(7, 901, order.instrumentId()));
                 assertThat(actual.accepted()).isEqualTo(sequence == 3);
                 assertThat(actual.accepted()).isEqualTo(expected.accepted());
                 assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
@@ -61,7 +61,7 @@ class DeterministicExchangeCoreAdapterTest {
                 assertEvidenceEqual(actual, expected);
                 assertThat(actual.matcherEvents()).isEqualTo(expected.matcherEvents());
             }
-            assertThat(direct.place(7, new CoreMatchingOrder(903, order.symbol(), CoreOrderSide.BUY,
+            assertThat(direct.place(7, new CoreMatchingOrder(903, order.instrumentId(), CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)).nativeMatcherResult().timestamp()).isZero();
         }
     }
@@ -70,7 +70,7 @@ class DeterministicExchangeCoreAdapterTest {
     void nativePlacementHonorsPoisonAndValidatesEvidenceBeforeMatching() {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
             var order = bid(901, 90);
-            int shard = adapter.matcherShardId(order.symbol());
+            int shard = adapter.matcherShardId(order.instrumentId());
             assertThatThrownBy(() -> adapter.placeWithEvidence(shard, 0, new java.util.UUID(0, 1),
                     1000, 7, order)).isInstanceOf(IllegalArgumentException.class);
             var placed = adapter.placeWithEvidence(shard, 1, new java.util.UUID(0, 1), 1000, 7, order);
@@ -89,12 +89,12 @@ class DeterministicExchangeCoreAdapterTest {
              var composed = new DeterministicExchangeCoreAdapter()) {
             CoreMatchingResult first = null;
             for (int i = 1; i <= 4; i++) {
-                var order = new CoreMatchingOrder(i, "EVIDENCE-USDT",
+                var order = new CoreMatchingOrder(i, "21",
                         i == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1);
                 var id = new java.util.UUID(7, i);
-                int shard = direct.matcherShardId(order.symbol());
-                int otherShard = composed.matcherShardId(order.symbol());
+                int shard = direct.matcherShardId(order.instrumentId());
+                int otherShard = composed.matcherShardId(order.instrumentId());
                 long user = i == 2 ? 8 : 7;
                 var actual = direct.placeWithEvidence(shard, i, id, 1000 + i, user, order);
                 var expected = composed.executeShardWithEvidenceSync(otherShard, i, id, i, 1000 + i,
@@ -109,7 +109,7 @@ class DeterministicExchangeCoreAdapterTest {
             }
             assertThat(first.nativeCoreSequence()).isEqualTo(1);
             assertThat(first.matcherEvents()).isEmpty();
-            assertThat(direct.place(7, new CoreMatchingOrder(5, "EVIDENCE-USDT", CoreOrderSide.BUY,
+            assertThat(direct.place(7, new CoreMatchingOrder(5, "21", CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)).nativeMatcherResult().timestamp()).isZero();
         }
     }
@@ -117,15 +117,15 @@ class DeterministicExchangeCoreAdapterTest {
     @Test
     void registeredSymbolLookupDoesNotAcquireRegistrationMonitor() throws Exception {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
-            int expected = adapter.matcherShardId("REGISTERED-USDT");
+            int expected = adapter.matcherShardId("22");
             synchronized (adapter) {
-                var result = CompletableFuture.supplyAsync(() -> adapter.matcherShardId("REGISTERED-USDT"));
+                var result = CompletableFuture.supplyAsync(() -> adapter.matcherShardId("22"));
                 assertThat(result.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(expected);
             }
             var calls = new ArrayList<CompletableFuture<Integer>>();
-            for (int i = 0; i < 32; i++) calls.add(CompletableFuture.supplyAsync(() -> adapter.matcherShardId("NEW-USDT")));
+            for (int i = 0; i < 32; i++) calls.add(CompletableFuture.supplyAsync(() -> adapter.matcherShardId("23")));
             for (var result : calls) assertThat(result.get(2, java.util.concurrent.TimeUnit.SECONDS))
-                    .isEqualTo(adapter.matcherShardId("NEW-USDT"));
+                    .isEqualTo(adapter.matcherShardId("23"));
         }
     }
 
@@ -135,10 +135,10 @@ class DeterministicExchangeCoreAdapterTest {
         String previous = System.getProperty("surprising.aeron.matching-engines");
         System.setProperty("surprising.aeron.matching-engines", "2");
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
-            String first = "BOOK-A", candidate = "BOOK-B";
+            String first = "25", candidate = "26";
             for (int attempt = 0; adapter.matcherShardId(first) == adapter.matcherShardId(candidate); attempt++) {
                 if (attempt == 128) throw new AssertionError("could not select a second partition");
-                candidate = "BOOK-" + attempt;
+                candidate = Integer.toString(100+attempt);
             }
             String second = candidate;
             CoreMatchingResult previousResult = null;
@@ -212,7 +212,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
             assertThat(adapter.placeAsync(7, ask(2, 110)).join().accepted()).isTrue();
 
-            CoreMatchingResult result = adapter.replaceOrderAsync(7, 1, "BTC-USDT", postOnlyBid(3, 120)).join();
+            CoreMatchingResult result = adapter.replaceOrderAsync(7, 1, "1", postOnlyBid(3, 120)).join();
 
             assertThat(result.accepted()).isFalse();
             assertThat(result.resultCode()).isNotEqualTo("SUCCESS");
@@ -226,7 +226,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(adapter.placeAsync(11, ask(101, 100)).join().accepted()).isTrue();
             assertThat(adapter.placeAsync(12, ask(102, 100)).join().accepted()).isTrue();
 
-            CoreMatchingOrder command = new CoreMatchingOrder(201, "BTC-USDT", CoreOrderSide.BUY,
+            CoreMatchingOrder command = new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 4);
             CoreMatchingResult result = adapter.executeWithEvidence(
                     3,
@@ -342,14 +342,14 @@ class DeterministicExchangeCoreAdapterTest {
     void singleSymbolBookQueryAndBootstrapUseSeparateScopes() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
-            assertThat(adapter.placeAsync(8, bid(2, "ETH-USDT", 200)).join().accepted()).isTrue();
+            assertThat(adapter.placeAsync(8, bid(2, "2", 200)).join().accepted()).isTrue();
 
-            assertThat(adapter.orderBookLevelsAsync("BTC-USDT", 30).join())
-                    .extracting(value -> value.symbol()).containsOnly("BTC-USDT");
+            assertThat(adapter.orderBookLevelsAsync("1", 30).join())
+                    .extracting(value -> value.instrumentId()).containsOnly("1");
             BookBootstrapSnapshot bootstrap = adapter.orderBookBootstrapAsync(30).join();
-            assertThat(bootstrap.symbols()).containsExactly("BTC-USDT", "ETH-USDT");
-            assertThat(bootstrap.levels()).extracting(value -> value.symbol())
-                    .containsExactly("BTC-USDT", "ETH-USDT");
+            assertThat(bootstrap.symbols()).containsExactly("1", "2");
+            assertThat(bootstrap.levels()).extracting(value -> value.instrumentId())
+                    .containsExactly("1", "2");
             assertThatThrownBy(() -> adapter.orderBookLevelsAsync("", 30).join())
                     .hasCauseInstanceOf(IllegalArgumentException.class);
         }
@@ -479,7 +479,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static CoreOrderState order(long orderId) {
-        return new CoreOrderState(orderId, ProductLine.SPOT, 7, "BTC-USDT",
+        return new CoreOrderState(orderId, ProductLine.SPOT, 7, "1",
                 CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
     }
 
@@ -488,31 +488,31 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static CoreMatchingOrder bid(long orderId, long priceTicks) {
-        return bid(orderId, "BTC-USDT", priceTicks);
+        return bid(orderId, "1", priceTicks);
     }
 
-    private static CoreMatchingOrder bid(long orderId, String symbol, long priceTicks) {
-        return new CoreMatchingOrder(orderId, symbol, CoreOrderSide.BUY, CoreOrderType.LIMIT,
+    private static CoreMatchingOrder bid(long orderId, String instrumentId, long priceTicks) {
+        return new CoreMatchingOrder(orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, priceTicks, 2);
     }
 
     private static CoreMatchingOrder ask(long orderId, long priceTicks) {
-        return new CoreMatchingOrder(orderId, "BTC-USDT", CoreOrderSide.SELL, CoreOrderType.LIMIT,
+        return new CoreMatchingOrder(orderId, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, priceTicks, 2);
     }
 
     private static CoreMatchingOrder postOnlyBid(long orderId, long priceTicks) {
-        return new CoreMatchingOrder(orderId, "BTC-USDT", CoreOrderSide.BUY, CoreOrderType.LIMIT,
+        return new CoreMatchingOrder(orderId, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTX, priceTicks, 2);
     }
 
     private static TradingCoreState stateWithOpenBid(long priceTicks) {
-        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT",
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
                 CoreOrderSide.BUY, priceTicks, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
-                Map.of("BTC-USDT", CoreInstrument.from(ProductLine.SPOT,
-                        new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                Map.of("1", CoreInstrument.from(ProductLine.SPOT,
+                        new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());

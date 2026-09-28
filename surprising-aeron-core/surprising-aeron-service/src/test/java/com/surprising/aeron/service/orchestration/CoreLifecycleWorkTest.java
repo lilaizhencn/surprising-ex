@@ -39,9 +39,9 @@ class CoreLifecycleWorkTest {
         restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, restored.snapshot());
 
         var funding = restored.apply(query(CoreMessageType.FUNDING_PROGRESS_QUERY,
-                CoreStateQueryCodec.encodeFundingProgressQuery("BTC-USDT")));
+                CoreStateQueryCodec.encodeFundingProgressQuery("1")));
         var settlement = restored.apply(query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY,
-                CoreStateQueryCodec.encodeSettlementProgressQuery("BTC-USDT")));
+                CoreStateQueryCodec.encodeSettlementProgressQuery("1")));
         assertThat(CoreFundingProgressCodec.decode(funding.data()).nextCursorUserId()).isEqualTo(41);
         assertThat(CoreSettlementProgressCodec.decode(settlement.data()).nextCursorOrderId()).isEqualTo(91);
 
@@ -88,7 +88,7 @@ class CoreLifecycleWorkTest {
     }
 
     private static TradingCoreRuntime stateWithLifecycleWork() {
-        CoreInstrument instrument = new CoreInstrument("BTC-USDT",
+        CoreInstrument instrument = new CoreInstrument("1",
                 ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, null, 0, 10_000_000, 1_000_000,
                 0, 1, List.of(new CoreRiskLimitBracket(1, 0, 1_000_000,
@@ -97,23 +97,23 @@ class CoreLifecycleWorkTest {
         var insurance = liquidation(2, 1002, 100, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         var adl = liquidation(3, 1003, 50, CoreLiquidationState.Status.ADL_REQUIRED);
         CoreRiskState risk = new CoreRiskState(
-                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 60_000, 9, 1_000)),
+                Map.of("1", new CoreMarkPriceState("1", 60_000, 9, 1_000)),
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 100, 0, 41,
+                Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 0, 41,
                         UUID.fromString("00000000-0000-0000-0000-000000000011"), 60_000, 9)),
-                Map.of("BTC-USDT", new CoreTreasuryState.LifecycleProgress(12, 60_000,
+                Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000,
                         0, false, 91, 0,
                         UUID.fromString("00000000-0000-0000-0000-000000000012"))));
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(), Map.of(), Map.of("BTC-USDT", instrument), risk, treasury);
+                Map.of(), Map.of(), Map.of("1", instrument), risk, treasury);
         return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
                 Map.of(), Map.of(), trading);
     }
 
     private static CoreLiquidationState liquidation(long id, long userId, long deficit,
                                                      CoreLiquidationState.Status status) {
-        return new CoreLiquidationState(id, userId, "BTC-USDT", CoreMarginMode.CROSS,
+        return new CoreLiquidationState(id, userId, "1", CoreMarginMode.CROSS,
                 CorePositionSide.NET, 9, 10, 10, deficit, status == CoreLiquidationState.Status.PLANNED ? 0 : 60_000,
                 status == CoreLiquidationState.Status.PLANNED ? 0 : 3_000, 0, status);
     }

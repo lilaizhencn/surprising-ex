@@ -327,11 +327,11 @@ final class MatchingCommandAdmission {
                 owner.identities, message.header().userId(), replacement, owner.currentClusterTimestamp);
         long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                 owner.runtimeState, owner.identities, message.header().userId(), resolved,
-                owner.openInterestIndex.openInterestSteps(replacement.symbol()), owner.activeOrderIndex, originalOrderId);
+                owner.openInterestIndex.openInterestSteps(replacement.instrumentId()), owner.activeOrderIndex, originalOrderId);
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         var user = owner.runtimeState.user(message.header().userId());
-        var matchingOrder = new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
+        var matchingOrder = new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(),
                 resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(),
                 resolved.quantitySteps());
         return new ResolvedMatchingAdmission(message.header().userId(), originalOrderId, order.revision(),
@@ -345,7 +345,7 @@ final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
         }
         PlaceOrderCommand child = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
-        var instrument = owner.runtimeState.instrument(child.symbol());
+        var instrument = owner.runtimeState.instrument(child.instrumentId());
         if (instrument != null) instrument.requireOrderEnabled(child);
         var order = owner.runtimeState.order(child.orderId());
         if (order == null || order.userId() != trigger.userId()) {
@@ -416,7 +416,7 @@ final class MatchingCommandAdmission {
             long excludedOrderId,
             long matchingPrice) {
         if (matchingPrice <= 0) throw new IllegalArgumentException("matching price must be positive");
-        var candidates = owner.activeOrderIndex.matchingIds(userId, placement.symbol());
+        var candidates = owner.activeOrderIndex.matchingIds(userId, placement.instrumentId());
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList cancellations = null;
         while (candidates.hasNext()) {
             long orderId = candidates.next();
@@ -446,8 +446,8 @@ final class MatchingCommandAdmission {
         if (!owner.productLine.isDerivative() || placement.reduceOnly()) return List.of();
         var user = owner.runtimeState.user(userId);
         if (user == null) return List.of();
-        String symbol = placement.symbol();
-        var instrument = owner.runtimeState.instrument(symbol);
+        String instrumentId = placement.instrumentId();
+        var instrument = owner.runtimeState.instrument(instrumentId);
         long runtimePositionKey = owner.identities.findPositionKeyValue(
                 userId, instrument, placement.positionSide());
         var position = runtimePositionKey == 0 ? null : owner.runtimeState.position(runtimePositionKey);
@@ -457,7 +457,7 @@ final class MatchingCommandAdmission {
             return List.of();
         }
         return PositionCloseCapacity.inspectRuntime(owner.runtimeState, owner.identities, userId,
-                symbol, placement.positionSide(), placement.side(), owner.activeOrderIndex, excludedOrderId)
+                instrumentId, placement.positionSide(), placement.side(), owner.activeOrderIndex, excludedOrderId)
                 .conflictsFor(placement.quantitySteps());
     }
 
@@ -494,7 +494,7 @@ final class MatchingCommandAdmission {
             var scan = owner.runtimeState.firstRiskIncompleteScan();
             var continuation = command.riskScanContinuation();
             if (scan == null
-                    || !owner.identities.symbol(scan.symbolId()).equals(continuation.symbol())
+                    || !owner.identities.instrumentId(scan.symbolId()).equals(continuation.instrumentId())
                     || scan.priceSequence() != continuation.priceSequence()
                     || scan.lastUserId() != continuation.lastUserId()) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "risk scan cursor does not match state");
@@ -511,7 +511,7 @@ final class MatchingCommandAdmission {
                     || liquidation.status() == CoreLiquidationState.Status.ADL_REQUIRED
                     || liquidation.status() == CoreLiquidationState.Status.CANCELED) continue;
             if (liquidation.userId() != action.userId()
-                    || !owner.runtimeLiquidationSymbol(liquidation).equals(action.symbol())
+                    || !owner.runtimeLiquidationSymbol(liquidation).equals(action.instrumentId())
                     || liquidation.triggerPriceSequence() != action.triggerPriceSequence()
                     || action.executionPriceTicks() <= 0) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "liquidation batch action does not match state");
@@ -554,14 +554,14 @@ final class MatchingCommandAdmission {
 
     void validatePendingSettlement(DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.settlement();
-        var instrument = owner.runtimeState.instrument(command.symbol());
+        var instrument = owner.runtimeState.instrument(command.instrumentId());
         if (instrument != null) ProductTradingRulesRegistry.forInstrument(instrument)
                 .validateLifecycleSettlement(instrument, command);
         if (instrument != null && !instrument.administrativeSettlement(command)
                 && instrument.expiryEpochMillis() > owner.currentClusterTimestamp) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument has not reached expiry");
         }
-        var progress = owner.runtimeLifecycleProgress(command.symbol());
+        var progress = owner.runtimeLifecycleProgress(command.instrumentId());
         if (progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
@@ -573,30 +573,30 @@ final class MatchingCommandAdmission {
                 || progress.nextCursorUserId() != command.cursorUserId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
-        TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.matchingFlow.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders());
+        TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         boolean orderPhase = progress == null || !progress.ordersComplete();
         if (orderPhase && !orderChunk.more()) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
-            owner.instrumentSettlement.addSettlementUsersToResult(command.symbol(), command.cursorUserId(), command.maxUsers());
+            owner.instrumentSettlement.addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         } else if (orderPhase) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
         } else {
             owner.resultBuilder.commandChangedOrderIds = List.of();
-            owner.instrumentSettlement.addSettlementUsersToResult(command.symbol(), command.cursorUserId(), command.maxUsers());
+            owner.instrumentSettlement.addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         }
     }
 
     void rejectLifecycleOverlap(CoreMessage message, CommandSlot.Operation operation,
                                         DecodedMatchingCommand decodedCommand) {
         LifecycleScope candidate = lifecycleScope(message, operation, decodedCommand);
-        if (candidate.symbol().isBlank()) return;
+        if (candidate.instrumentId().isBlank()) return;
         ensureLifecycleScopeAvailable(candidate);
     }
 
     void ensureLifecycleScopeAvailable(LifecycleScope candidate) {
-        if (candidate.symbol().isBlank()) return;
+        if (candidate.instrumentId().isBlank()) return;
         if (candidate.lifecycle()) {
             owner.pendingMatching.forEach(pending -> {
                 if (pendingLifecycleConflicts(candidate, pending)) {
@@ -612,7 +612,7 @@ final class MatchingCommandAdmission {
                 }
             }
         }
-        Integer candidateSymbolId = owner.identities.findSymbolId(candidate.symbol());
+        Integer candidateSymbolId = owner.identities.findSymbolId(candidate.instrumentId());
         if (candidateSymbolId != null && owner.runtimeState.treasury().fundingProgress(candidateSymbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
@@ -656,7 +656,7 @@ final class MatchingCommandAdmission {
             return conflicts(candidate, lifecycleScope(pending));
         }
         var batch = pending.decodedCommand().liquidationBatch();
-        return batch.actions().stream().map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
+        return batch.actions().stream().map(action -> new LifecycleScope(false, action.userId(), action.instrumentId(),
                         action.liquidationId(), true, false)).anyMatch(scope -> conflicts(candidate, scope));
     }
 
@@ -665,7 +665,7 @@ final class MatchingCommandAdmission {
             case LIQUIDATION, SETTLEMENT -> List.of(lifecycleScope(pending));
             case LIQUIDATION_BATCH -> pending.decodedCommand().liquidationBatch()
                     .actions().stream()
-                    .map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
+                    .map(action -> new LifecycleScope(false, action.userId(), action.instrumentId(),
                             action.liquidationId(), true, false))
                     .toList();
             default -> List.of();
@@ -683,7 +683,7 @@ final class MatchingCommandAdmission {
                         : new LifecycleScope(false, liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                                 liquidation.liquidationId(), true, false);
             }
-            case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().symbol(),
+            case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().instrumentId(),
                     decodedCommand.settlement().settlementId(), true, false);
             default -> new LifecycleScope(false, message.header().userId(),
                     matchingSymbol(message, operation, decodedCommand), 0, false, true);
@@ -693,57 +693,57 @@ final class MatchingCommandAdmission {
     LifecycleScope lifecycleScope(CommandSlot pending) {
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
             var action = pending.decodedCommand().liquidationBatch().actions().getFirst();
-            return new LifecycleScope(false, action.userId(), action.symbol(), action.liquidationId(), true, false);
+            return new LifecycleScope(false, action.userId(), action.instrumentId(), action.liquidationId(), true, false);
         }
         return lifecycleScope(pending.command(), pending.operation(), pending.decodedCommand());
     }
 
     static boolean conflicts(LifecycleScope left, LifecycleScope right) {
-        if (left.symbol().isBlank() || !left.symbol().equals(right.symbol())
+        if (left.instrumentId().isBlank() || !left.instrumentId().equals(right.instrumentId())
                 || (!left.lifecycle() && !right.lifecycle())) return false;
         return left.settlement() || right.settlement() || left.userId() == right.userId();
     }
 
-    record LifecycleScope(boolean settlement, long userId, String symbol, long lifecycleId,
+    record LifecycleScope(boolean settlement, long userId, String instrumentId, long lifecycleId,
                                   boolean lifecycle, boolean orderChanging) {
     }
 
     String matchingSymbol(CoreMessage message, CommandSlot.Operation operation,
                                   DecodedMatchingCommand decodedCommand) {
         return switch (operation) {
-            case PLACE -> decodedCommand.placeOrder().symbol();
+            case PLACE -> decodedCommand.placeOrder().instrumentId();
             case CANCEL -> {
                 var command = decodedCommand.cancelOrder();
                 var order = owner.runtimeState.order(command.orderId());
-                yield order == null ? "" : owner.identities.symbol(order.symbolId());
+                yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
             }
             case REPLACE, AMEND -> {
                 long orderId = operation == CommandSlot.Operation.REPLACE
                         ? decodedCommand.replaceOrder().originalOrderId()
                         : decodedCommand.amendOrder().originalOrderId();
                 var order = owner.runtimeState.order(orderId);
-                yield order == null ? "" : owner.identities.symbol(order.symbolId());
+                yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
             }
             case TRIGGER -> {
                 long[] execute = decodedCommand.trigger();
                 var trigger = owner.runtimeState.triggerOrder(execute[0]);
-                yield trigger == null ? "" : trigger.symbol();
+                yield trigger == null ? "" : trigger.instrumentId();
             }
             case LIQUIDATION, SETTLEMENT -> "";
             case LIQUIDATION_BATCH -> {
                 var batch = decodedCommand.liquidationBatch();
-                yield batch.actions().isEmpty() ? "" : batch.actions().getFirst().symbol();
+                yield batch.actions().isEmpty() ? "" : batch.actions().getFirst().instrumentId();
             }
         };
     }
 
     String pendingLifecycleSymbol(CommandSlot pending) {
         if (pending.operation() == CommandSlot.Operation.SETTLEMENT) {
-            return pending.decodedCommand().settlement().symbol();
+            return pending.decodedCommand().settlement().instrumentId();
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
             var batch = pending.decodedCommand().liquidationBatch();
-            return batch.actions().isEmpty() ? "" : batch.actions().getFirst().symbol();
+            return batch.actions().isEmpty() ? "" : batch.actions().getFirst().instrumentId();
         }
         var liquidation = owner.runtimeState.liquidation(
                 pending.decodedCommand().liquidation().liquidationId());

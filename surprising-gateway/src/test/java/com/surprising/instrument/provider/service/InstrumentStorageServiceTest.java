@@ -30,17 +30,18 @@ class InstrumentStorageServiceTest {
     @Test
     void latestAggregatesSingleTableRepositories() {
         InstrumentResponse core = mock(InstrumentResponse.class);
-        var key = new com.surprising.instrument.provider.repository.InstrumentKey(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
+        var key = new com.surprising.instrument.provider.repository.InstrumentKey(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, 1);
         RiskLimitBracket bracket = mock(RiskLimitBracket.class);
         IndexSourceConfig source = mock(IndexSourceConfig.class);
         when(core.symbol()).thenReturn("BTC-USDT");
+        org.mockito.Mockito.when(core.instrumentId()).thenReturn(1);
         when(core.changeId()).thenReturn(3L);
         when(core.contractType()).thenReturn(com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL);
-        when(instrumentRepository.current("BTC-USDT", null)).thenReturn(Optional.of(core));
+        when(instrumentRepository.current(1, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(core));
         when(riskBracketRepository.findAll(List.of(key))).thenReturn(Map.of(key, List.of(bracket)));
         when(indexSourceRepository.findAll(List.of(key))).thenReturn(Map.of(key, List.of(source)));
 
-        InstrumentResponse response = storageService.latest("BTC-USDT").orElseThrow();
+        InstrumentResponse response = storageService.latest(1, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL).orElseThrow();
 
         assertThat(response.symbol()).isEqualTo("BTC-USDT");
         assertThat(response.changeId()).isEqualTo(3L);

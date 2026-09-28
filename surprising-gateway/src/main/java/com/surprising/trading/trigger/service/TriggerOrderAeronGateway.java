@@ -70,29 +70,29 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                 userId, CoreTriggerOrderCodec.encodeList(legs)).data());
     }
 
-    public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit) {
-        return openOrders(userId, symbol, before, limit, null);
+    public List<CoreTriggerOrderStateView> openOrders(long userId, String instrumentId, long before, int limit) {
+        return openOrders(userId, instrumentId, before, limit, null);
     }
-    public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit,
+    public List<CoreTriggerOrderStateView> openOrders(long userId, String instrumentId, long before, int limit,
                                                        CoreTriggerOrderStatus status) {
-        return openOrders(userId, symbol, before, limit, status, 0);
+        return openOrders(userId, instrumentId, before, limit, status, 0);
     }
-    public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit,
+    public List<CoreTriggerOrderStateView> openOrders(long userId, String instrumentId, long before, int limit,
                                                        CoreTriggerOrderStatus status, long expiresBeforeEpochMillis) {
-        return query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, userId, 0, symbol, before, limit, status,
+        return query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, userId, 0, instrumentId, before, limit, status,
                 expiresBeforeEpochMillis);
     }
 
-    public List<CoreTriggerOrderStateView> query(long userId, long triggerOrderId, String symbol, long before,
+    public List<CoreTriggerOrderStateView> query(long userId, long triggerOrderId, String instrumentId, long before,
                                                   int limit, CoreTriggerOrderStatus status) {
-        return query(CoreMessageType.TRIGGER_ORDER_QUERY, userId, triggerOrderId, symbol, before, limit, status, 0);
+        return query(CoreMessageType.TRIGGER_ORDER_QUERY, userId, triggerOrderId, instrumentId, before, limit, status, 0);
     }
 
     private List<CoreTriggerOrderStateView> query(CoreMessageType messageType, long userId, long triggerOrderId,
-                                                   String symbol, long before, int limit,
+                                                   String instrumentId, long before, int limit,
                                                    CoreTriggerOrderStatus status, long expiresBeforeEpochMillis) {
         CoreResponse response = clients.query(messageType, UUID.randomUUID(), userId,
-                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerOrderId, symbol, before, limit,
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerOrderId, instrumentId, before, limit,
                         status, expiresBeforeEpochMillis)));
         requireOk(response);
         return CoreTriggerOrderCodec.decodeList(response.data());
@@ -142,7 +142,7 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     public static TriggerOrderResponse response(CoreTriggerOrderStateView value) {
         if (value == null) return null;
         return new TriggerOrderResponse(value.triggerOrderId(), value.userId(), empty(value.clientTriggerOrderId()), empty(value.ocoGroupId()),
-                value.symbol(), OrderSide.valueOf(value.side().name()), TriggerOrderType.valueOf(value.triggerType().name()),
+                value.instrumentId(), OrderSide.valueOf(value.side().name()), TriggerOrderType.valueOf(value.triggerType().name()),
                 TriggerCondition.valueOf(value.triggerCondition().name()), value.triggerPriceTicks(),
                 value.activationPriceTicks() == 0 ? null : value.activationPriceTicks(), value.callbackRatePpm() == 0 ? null : value.callbackRatePpm(),
                 value.highestPriceTicks() == 0 ? null : value.highestPriceTicks(), value.lowestPriceTicks() == 0 ? null : value.lowestPriceTicks(),

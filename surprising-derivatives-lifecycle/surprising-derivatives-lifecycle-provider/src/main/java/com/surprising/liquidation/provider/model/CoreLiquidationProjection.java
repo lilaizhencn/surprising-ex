@@ -7,7 +7,7 @@ import java.time.Instant;
 public record CoreLiquidationProjection(
         long liquidationId,
         long userId,
-        String symbol,
+        String instrumentId,
         String asset,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,

@@ -27,7 +27,7 @@ public final class RuntimeStateProjector {
         identities.bindClientLanes(runtime);
         runtime.replaceAuxiliaryState(source);
         source.instruments().values().forEach(instrument -> {
-            identities.symbolId(instrument.symbol());
+            identities.symbolId(instrument.instrumentId());
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());
@@ -40,8 +40,8 @@ public final class RuntimeStateProjector {
                     userId, reservation, identities)));
             user.positions().forEach((positionKey, position) -> runtime.putPosition(
                     identities.positionKey(userId, positionKey), new PositionRuntime(userId,
-                            identities.symbolId(position.symbol()), identities.assetId(position.marginAsset()),
-                            position.marginMode(), position.positionSide(), requireInstrument(source, position.symbol()),
+                            identities.symbolId(position.instrumentId()), identities.assetId(position.marginAsset()),
+                            position.marginMode(), position.positionSide(), requireInstrument(source, position.instrumentId()),
                             position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                             position.realizedPnlUnits(), position.positionMarginUnits())));
         });
@@ -63,43 +63,43 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setRoundingResidual(identities.assetId(asset), units));
         source.treasuryState().clearingPnlBalances().forEach((asset, units) ->
                 runtime.treasury().setClearingPnl(identities.assetId(asset), units));
-        source.treasuryState().fundingSettlements().forEach((symbol, settlementId) ->
-                runtime.treasury().setFundingSettlement(identities.symbolId(symbol), settlementId));
-        source.treasuryState().fundingProgress().forEach((symbol, progress) ->
-                runtime.treasury().setFundingProgress(identities.symbolId(symbol),
+        source.treasuryState().fundingSettlements().forEach((instrumentId, settlementId) ->
+                runtime.treasury().setFundingSettlement(identities.symbolId(instrumentId), settlementId));
+        source.treasuryState().fundingProgress().forEach((instrumentId, progress) ->
+                runtime.treasury().setFundingProgress(identities.symbolId(instrumentId),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
-                                requireInstrument(source, symbol), progress.fundingRatePpm(),
+                                requireInstrument(source, instrumentId), progress.fundingRatePpm(),
                                 progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId(),
                                 progress.markPriceTicks(), progress.priceSequence())));
-        source.treasuryState().lifecycleSettlements().forEach((symbol, settlementId) ->
-                runtime.treasury().setLifecycleSettlement(identities.symbolId(symbol), settlementId));
-        source.treasuryState().lifecycleProgress().forEach((symbol, progress) ->
-                runtime.treasury().setLifecycleProgress(identities.symbolId(symbol),
+        source.treasuryState().lifecycleSettlements().forEach((instrumentId, settlementId) ->
+                runtime.treasury().setLifecycleSettlement(identities.symbolId(instrumentId), settlementId));
+        source.treasuryState().lifecycleProgress().forEach((instrumentId, progress) ->
+                runtime.treasury().setLifecycleProgress(identities.symbolId(instrumentId),
                         new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
-                                requireInstrument(source, symbol), progress.settlementPriceTicks(),
+                                requireInstrument(source, instrumentId), progress.settlementPriceTicks(),
                                 progress.optionCashUnitsPerContract(), progress.ordersComplete(),
                                 progress.accountLaneId(), progress.nextCursorOrderId(),
                                 progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
         source.riskState().liquidations().forEach((liquidationId, liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
-                        identities.symbolId(liquidation.symbol()), liquidation.marginMode(),
-                        liquidation.positionSide(), requireInstrument(source, liquidation.symbol()),
+                        identities.symbolId(liquidation.instrumentId()), liquidation.marginMode(),
+                        liquidation.positionSide(), requireInstrument(source, liquidation.instrumentId()),
                         liquidation.triggerPriceSequence(), liquidation.signedQuantitySteps(),
                         liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
                         liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
                         liquidation.liquidationFeeUnits(), liquidation.status(),
                         liquidation.nextCancelOrderId())));
-        source.riskState().markPrices().forEach((symbol, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
-                identities.symbolId(symbol), requireInstrument(source, symbol), mark.markPriceTicks(),
+        source.riskState().markPrices().forEach((instrumentId, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
+                identities.symbolId(instrumentId), requireInstrument(source, instrumentId), mark.markPriceTicks(),
                 mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis())));
         source.riskState().snapshots().forEach((key, risk) -> runtime.putRiskSnapshot(
-                identities.positionKey(risk.userId(), positionKey(risk.symbol(), risk.positionSide())),
-                new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.symbol()), risk.positionSide(),
+                identities.positionKey(risk.userId(), positionKey(risk.instrumentId(), risk.positionSide())),
+                new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),
                         risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
                         risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status())));
-        source.riskState().scans().forEach((symbol, scan) -> runtime.putRiskScan(new RiskScanRuntime(
-                identities.symbolId(symbol), scan.accountLaneId(), scan.priceSequence(),
+        source.riskState().scans().forEach((instrumentId, scan) -> runtime.putRiskScan(new RiskScanRuntime(
+                identities.symbolId(instrumentId), scan.accountLaneId(), scan.priceSequence(),
                 scan.scanStartPriceSequence(), scan.lastUserId(),
                 scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
                 scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
@@ -110,7 +110,7 @@ public final class RuntimeStateProjector {
         runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
         runtime.setMarketRevision(source.riskState().marketRevision());
         source.orders().forEach((orderId, order) -> {
-            runtime.putOrder(toRuntimeOrder(order, identities, requireInstrument(source, order.symbol())));
+            runtime.putOrder(toRuntimeOrder(order, identities, requireInstrument(source, order.instrumentId())));
             if (!order.clientOrderId().isEmpty()) {
                 runtime.putClientOrder(order.userId(), identities.clientKey(order.userId(), order.clientOrderId()), orderId);
             }
@@ -138,7 +138,7 @@ public final class RuntimeStateProjector {
     public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
                                               CoreInstrument instrument) {
         return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
-                identities.symbolId(order.symbol()), instrument, order.side(), order.priceTicks(),
+                identities.symbolId(order.instrumentId()), instrument, order.side(), order.priceTicks(),
                 order.matchingPriceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
@@ -150,20 +150,20 @@ public final class RuntimeStateProjector {
 
     static ReservationRuntime toRuntimeReservation(long userId, OrderReservation reservation,
                                                     RuntimeIdentityRegistry identities) {
-        return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.symbol()),
+        return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.instrumentId()),
                 reservation.kind(), identities.assetId(reservation.asset()),
                 reservation.reservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                 reservation.orderQuantitySteps());
     }
 
-    private static String positionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+    private static String positionKey(String instrumentId, com.surprising.aeron.protocol.CorePositionSide side) {
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 
-    private static CoreInstrument requireInstrument(TradingCoreState source, String symbol) {
-        CoreInstrument instrument = source.instruments().get(OrderReservation.normalizeSymbol(symbol));
-        if (instrument == null) throw new IllegalStateException("instrument is not registered: " + symbol);
+    private static CoreInstrument requireInstrument(TradingCoreState source, String instrumentId) {
+        CoreInstrument instrument = source.instruments().get(OrderReservation.requireInstrumentId(instrumentId));
+        if (instrument == null) throw new IllegalStateException("instrument is not registered: " + instrumentId);
         return instrument;
     }
 }

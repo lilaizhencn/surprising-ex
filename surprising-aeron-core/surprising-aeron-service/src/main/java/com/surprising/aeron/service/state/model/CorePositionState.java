@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 
 public record CorePositionState(
-        String symbol,
+        String instrumentId,
         String marginAsset,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,
@@ -17,7 +17,7 @@ public record CorePositionState(
         long positionMarginUnits) {
 
     public CorePositionState {
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         marginAsset = AssetBalance.normalizeAsset(marginAsset);
         if (marginMode == null || positionSide == null || positionMarginUnits < 0) {
             throw new IllegalArgumentException("position margin must not be negative");
@@ -31,14 +31,14 @@ public record CorePositionState(
         }
     }
 
-    public CorePositionState(String symbol, String marginAsset,
+    public CorePositionState(String instrumentId, String marginAsset,
                              long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                              long realizedPnlUnits, long positionMarginUnits) {
-        this(symbol, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET,
+        this(instrumentId, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, realizedPnlUnits, positionMarginUnits);
     }
 
     public String key() {
-        return positionSide == CorePositionSide.NET ? symbol : symbol + ':' + positionSide.name();
+        return positionSide == CorePositionSide.NET ? instrumentId : instrumentId + ':' + positionSide.name();
     }
 }

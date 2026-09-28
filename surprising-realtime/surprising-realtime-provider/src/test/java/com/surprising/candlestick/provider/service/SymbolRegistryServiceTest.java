@@ -20,14 +20,14 @@ class SymbolRegistryServiceTest {
     void instrumentSnapshotIsTheOnlySymbolSource() {
         CandlestickProperties properties = new CandlestickProperties();
         InstrumentSnapshotCache cache = cache(ProductLine.LINEAR_PERPETUAL,
-                instrument("BTC-USDT", 2L, ContractType.LINEAR_PERPETUAL),
-                instrument("ETH-USDT", 3L, ContractType.LINEAR_PERPETUAL));
+                instrument("1", 2L, ContractType.LINEAR_PERPETUAL),
+                instrument("2", 3L, ContractType.LINEAR_PERPETUAL));
         SymbolRegistryService service = service(properties, cache);
 
         service.refresh();
 
-        assertThat(service.isEnabled("BTC-USDT")).isTrue();
-        assertThat(service.isEnabled("ETH-USDT")).isTrue();
+        assertThat(service.isEnabled("1")).isTrue();
+        assertThat(service.isEnabled("2")).isTrue();
     }
 
     @Test
@@ -36,23 +36,23 @@ class SymbolRegistryServiceTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         SymbolRegistryService service = service(properties,
                 cache(ProductLine.LINEAR_DELIVERY,
-                        instrument("BTC-USDT-20260925", 7L, ContractType.LINEAR_DELIVERY)));
+                        instrument("46", 7L, ContractType.LINEAR_DELIVERY)));
 
         service.refresh();
 
-        assertThat(service.isEnabled("BTC-USDT-20260925")).isTrue();
+        assertThat(service.isEnabled("46")).isTrue();
     }
 
     @Test
     void symbolsOutsideInstrumentSnapshotAreRejected() {
         CandlestickProperties properties = new CandlestickProperties();
         SymbolRegistryService service = service(properties, cache(ProductLine.LINEAR_PERPETUAL,
-                instrument("BTC-USDT", 2L, ContractType.LINEAR_PERPETUAL)));
+                instrument("1", 2L, ContractType.LINEAR_PERPETUAL)));
 
         service.refresh();
 
-        assertThat(service.isEnabled("BTC-USDT")).isTrue();
-        assertThat(service.isEnabled("ETH-USDT")).isFalse();
+        assertThat(service.isEnabled("1")).isTrue();
+        assertThat(service.isEnabled("2")).isFalse();
     }
 
     private SymbolRegistryService service(CandlestickProperties properties, InstrumentSnapshotCache cache) {
@@ -65,14 +65,14 @@ class SymbolRegistryServiceTest {
         return cache;
     }
 
-    private InstrumentResponse instrument(String symbol, long version, ContractType contractType) {
+    private InstrumentResponse instrument(String instrumentId, long version, ContractType contractType) {
         Instant now = Instant.parse("2026-07-31T00:00:00Z");
-        return new InstrumentResponse(symbol, version, InstrumentType.PERPETUAL, contractType,
+        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, InstrumentType.PERPETUAL, contractType,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                10_000_000L, 3, null, null, null, null, null, null, null,
+                10_000_000L, 3, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }

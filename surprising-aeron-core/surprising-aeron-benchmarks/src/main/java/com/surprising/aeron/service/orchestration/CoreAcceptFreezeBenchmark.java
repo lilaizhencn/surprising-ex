@@ -25,7 +25,7 @@ import java.util.UUID;
 @Slf4j
 public final class CoreAcceptFreezeBenchmark {
 
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
     private static final long USER_ID = 1001L;
     private static final long BALANCE_UNITS = 1_000_000_000_000L;
 

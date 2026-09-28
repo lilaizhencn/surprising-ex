@@ -17,24 +17,24 @@ public final class InstrumentSettlementCommands {
     }
 
     public void applySettlementChangedIds(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
-        var progress = owner.lifecycleProgress(command.symbol());
+        var progress = owner.lifecycleProgress(command.instrumentId());
         SettlementCommandContext.LifecycleOrderPage chunk = owner.settlementLifecycleOrders(
-                0, command.symbol(), command.cursorOrderId(), command.maxOrders());
+                0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         if (progress == null || !progress.ordersComplete()) {
             owner.setCommandChangedOrderIds(boxedOrderIds(chunk.orders()));
             owner.addChangedUsersFromOrders(chunk.orders());
             if (!chunk.more()) {
-                addSettlementUsersToResult(command.symbol(), command.cursorUserId(), command.maxUsers());
+                addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
             }
             return;
         }
         owner.setCommandChangedOrderIds(List.of());
-        addSettlementUsersToResult(command.symbol(), command.cursorUserId(), command.maxUsers());
+        addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
     }
 
-    public List<Long> settlementUsers(String symbol, long cursorUserId, int maxUsers) {
+    public List<Long> settlementUsers(String instrumentId, long cursorUserId, int maxUsers) {
         List<Long> selected = new ArrayList<>(Math.min(maxUsers, 64));
-        for (Long userId : owner.positionUserIndex().usersAfter(symbol, cursorUserId)) {
+        for (Long userId : owner.positionUserIndex().usersAfter(instrumentId, cursorUserId)) {
             if (userId == null || userId <= cursorUserId) continue;
             if (selected.size() == maxUsers) break;
             selected.add(userId);
@@ -43,15 +43,15 @@ public final class InstrumentSettlementCommands {
     }
 
     /** Primitive pagination for the command result path; keeps no boxed user page alive. */
-    public void addSettlementUsersToResult(String symbol, long cursorUserId, int maxUsers) {
+    public void addSettlementUsersToResult(String instrumentId, long cursorUserId, int maxUsers) {
         owner.beginChangedUsers();
         if (maxUsers <= 0) return;
-        long userId = owner.positionUserIndex().higherUserId(symbol, cursorUserId);
+        long userId = owner.positionUserIndex().higherUserId(instrumentId, cursorUserId);
         int count = 0;
         while (userId != 0 && count < maxUsers) {
             owner.addChangedUser(userId);
             count++;
-            userId = owner.positionUserIndex().higherUserId(symbol, userId);
+            userId = owner.positionUserIndex().higherUserId(instrumentId, userId);
         }
     }
 
@@ -59,7 +59,7 @@ public final class InstrumentSettlementCommands {
                                         UUID commandId) {
         long beforeRevision = owner.runtimeState().revision();
         owner.setCommandSettlementProgress(RuntimeLifecycleSettlement.applyRuntime(command,
-                owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId()), commandId,
+                owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()), commandId,
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities()));
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
     }
@@ -73,7 +73,7 @@ public final class InstrumentSettlementCommands {
             RuntimeLifecycleSettlementContinuation.SettlementWork reuse,
             com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
         return RuntimeLifecycleSettlementContinuation.prepare(reuse, command,
-                owner.positionUserIndex().usersAfter(command.symbol(), command.cursorUserId()), commandId,
+                owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()), commandId,
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
     }
 

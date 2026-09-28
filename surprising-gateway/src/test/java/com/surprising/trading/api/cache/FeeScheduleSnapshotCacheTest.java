@@ -20,12 +20,12 @@ class FeeScheduleSnapshotCacheTest {
     void riskOverrideWinsOverSymbolVipAndUserSymbolWinsOverUserGlobal() {
         FeeScheduleSnapshotCache cache = new FeeScheduleSnapshotCache();
         cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(
-                schedule(1L, "BTC-USDT", FeeScheduleSourceType.VIP, 100L, NOW.minusSeconds(10)),
+                schedule(1L, "1", FeeScheduleSourceType.VIP, 100L, NOW.minusSeconds(10)),
                 schedule(2L, null, FeeScheduleSourceType.RISK_OVERRIDE, 900L, NOW.minusSeconds(20)),
                 schedule(3L, null, FeeScheduleSourceType.USER_OVERRIDE, 300L, NOW.minusSeconds(30)),
-                schedule(4L, "BTC-USDT", FeeScheduleSourceType.USER_OVERRIDE, 200L, NOW.minusSeconds(40))));
+                schedule(4L, "1", FeeScheduleSourceType.USER_OVERRIDE, 200L, NOW.minusSeconds(40))));
 
-        assertThat(cache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", NOW))
+        assertThat(cache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "1", NOW))
                 .get()
                 .extracting(FeeScheduleResponse::feeScheduleId)
                 .isEqualTo(2L);
@@ -33,8 +33,8 @@ class FeeScheduleSnapshotCacheTest {
         FeeScheduleSnapshotCache userCache = new FeeScheduleSnapshotCache();
         userCache.replace(ProductLine.LINEAR_PERPETUAL, List.of(
                 schedule(5L, null, FeeScheduleSourceType.USER_OVERRIDE, 300L, NOW.minusSeconds(30)),
-                schedule(6L, "BTC-USDT", FeeScheduleSourceType.USER_OVERRIDE, 200L, NOW.minusSeconds(40))));
-        assertThat(userCache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", NOW))
+                schedule(6L, "1", FeeScheduleSourceType.USER_OVERRIDE, 200L, NOW.minusSeconds(40))));
+        assertThat(userCache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "1", NOW))
                 .get()
                 .extracting(FeeScheduleResponse::feeScheduleId)
                 .isEqualTo(6L);
@@ -44,18 +44,18 @@ class FeeScheduleSnapshotCacheTest {
     void expiredOrDisabledSchedulesAreNotEffective() {
         FeeScheduleSnapshotCache cache = new FeeScheduleSnapshotCache();
         cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(
-                schedule(7L, "BTC-USDT", FeeScheduleSourceType.USER_OVERRIDE, 200L,
+                schedule(7L, "1", FeeScheduleSourceType.USER_OVERRIDE, 200L,
                         NOW.minusSeconds(20), NOW.minusSeconds(1), FeeScheduleStatus.ACTIVE),
-                schedule(8L, "BTC-USDT", FeeScheduleSourceType.VIP, 100L,
+                schedule(8L, "1", FeeScheduleSourceType.VIP, 100L,
                         NOW.minusSeconds(20), null, FeeScheduleStatus.DISABLED)));
 
-        assertThat(cache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", NOW)).isEmpty();
+        assertThat(cache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "1", NOW)).isEmpty();
     }
 
     @Test
     void sameRevisionIsIdempotentButConflictingPayloadIsRejected() {
         FeeScheduleSnapshotCache cache = new FeeScheduleSnapshotCache();
-        FeeScheduleResponse initial = schedule(9L, "BTC-USDT", FeeScheduleSourceType.USER_OVERRIDE,
+        FeeScheduleResponse initial = schedule(9L, "1", FeeScheduleSourceType.USER_OVERRIDE,
                 200L, NOW);
         cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(initial));
 
@@ -65,7 +65,7 @@ class FeeScheduleSnapshotCacheTest {
         assertThat(cache.apply(duplicate)).isEqualTo(FeeScheduleSnapshotCache.ApplyResult.STALE);
 
         FeeScheduleResponse conflicting = new FeeScheduleResponse(
-                initial.feeScheduleId(), initial.productLine(), initial.userId(), initial.symbol(),
+                initial.feeScheduleId(), initial.productLine(), initial.userId(), initial.instrumentId(),
                 999L, initial.takerFeeRatePpm(), initial.sourceType(), initial.tierCode(), initial.reason(),
                 initial.status(), initial.effectiveTime(), initial.expireTime(), initial.createdAt(), initial.updatedAt());
         FeeScheduleEvent conflict = new FeeScheduleEvent(
@@ -75,21 +75,21 @@ class FeeScheduleSnapshotCacheTest {
     }
 
     private FeeScheduleResponse schedule(long id,
-                                         String symbol,
+                                         String instrumentId,
                                          FeeScheduleSourceType source,
                                          long maker,
                                          Instant effective) {
-        return schedule(id, symbol, source, maker, effective, null, FeeScheduleStatus.ACTIVE);
+        return schedule(id, instrumentId, source, maker, effective, null, FeeScheduleStatus.ACTIVE);
     }
 
     private FeeScheduleResponse schedule(long id,
-                                         String symbol,
+                                         String instrumentId,
                                          FeeScheduleSourceType source,
                                          long maker,
                                          Instant effective,
                                          Instant expire,
                                          FeeScheduleStatus status) {
-        return new FeeScheduleResponse(id, ProductLine.LINEAR_PERPETUAL, 1001L, symbol, maker, maker + 100,
+        return new FeeScheduleResponse(id, ProductLine.LINEAR_PERPETUAL, 1001L, instrumentId, maker, maker + 100,
                 source, null, "test", status, effective, expire, effective, effective);
     }
 }

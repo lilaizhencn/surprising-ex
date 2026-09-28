@@ -63,7 +63,7 @@ public final class ValkeyRouteDirectory {
         if (requested.isEmpty()) return Map.of();
         var exact = new LinkedHashSet<>(requested);
         for (var route : requested)
-            if (route.userId() == 0 && !route.symbol().equals("*"))
+            if (route.userId() == 0 && !route.instrumentId().equals("*"))
                 exact.add(new RealtimeRoute(route.productLine(), 0, route.channel(), "*"));
         var ordered = new ArrayList<>(exact);
         var memberships = redis.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
@@ -96,7 +96,7 @@ public final class ValkeyRouteDirectory {
             var targets = new LinkedHashMap<String, String>();
             for (String node : members.get(route))
                 if (liveNodes.containsKey(node)) targets.put(node, liveNodes.get(node));
-            if (route.userId() == 0 && !route.symbol().equals("*"))
+            if (route.userId() == 0 && !route.instrumentId().equals("*"))
                 for (String node : members.get(new RealtimeRoute(route.productLine(), 0, route.channel(), "*")))
                     if (liveNodes.containsKey(node)) targets.put(node, liveNodes.get(node));
             result.put(route, targets);

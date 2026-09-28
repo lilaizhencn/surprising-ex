@@ -30,7 +30,7 @@ final class RiskLaneProcessor {
         long userRevision = expectedUserRevision;
         while (remaining > 0) {
             UserRuntime user = progress.riskUserId() == 0
-                    ? nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.symbol(),
+                    ? nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.instrumentId(),
                     progress.accountLaneId(), progress.lastUserId())
                     : runtime.user(progress.riskUserId());
             if (user == null) {
@@ -54,7 +54,7 @@ final class RiskLaneProcessor {
             }
         }
         boolean complete = progress.riskUserId() == 0
-                && nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.symbol(),
+                && nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.instrumentId(),
                 progress.accountLaneId(), progress.lastUserId()) == null;
         return new Page(progress, maxWork - remaining, complete, creations, userRevision);
     }
@@ -286,10 +286,10 @@ final class RiskLaneProcessor {
     }
 
     private static UserRuntime nextUser(TradingRuntimeState runtime, PositionUserIndex positionUsers,
-                                        Iterable<Long> indexedUserIds, String symbol,
+                                        Iterable<Long> indexedUserIds, String instrumentId,
                                         int accountLaneId, long cursor) {
         if (positionUsers != null) {
-            long next = positionUsers.higherUserId(symbol, accountLaneId, cursor);
+            long next = positionUsers.higherUserId(instrumentId, accountLaneId, cursor);
             return next == 0 ? null : runtime.user(next);
         }
         if (indexedUserIds instanceof NavigableSet<?>) {

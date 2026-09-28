@@ -8,13 +8,13 @@ import java.time.Instant;
 /**
  * Mutable hot-state object stored in Kafka Streams RocksDB.
  *
- * <p>It keeps the full OHLCV snapshot for one {@code symbol + period + openTime}. The processor
+ * <p>It keeps the full OHLCV snapshot for one {@code instrumentId + period + openTime}. The processor
  * updates this object per accepted trade and later converts it to {@link CandleSnapshot} for
  * PostgreSQL upsert and realtime Kafka emission.</p>
  */
 public class CandleAccumulator {
 
-    private String symbol;
+    private String instrumentId;
     private String period;
     private Instant openTime;
     private Instant closeTime;
@@ -36,9 +36,9 @@ public class CandleAccumulator {
     /**
      * Creates an empty candle bucket. Prices are set only when the first trade arrives.
      */
-    public static CandleAccumulator create(String symbol, CandlePeriod period, Instant openTime) {
+    public static CandleAccumulator create(String instrumentId, CandlePeriod period, Instant openTime) {
         CandleAccumulator accumulator = new CandleAccumulator();
-        accumulator.symbol = symbol;
+        accumulator.instrumentId = instrumentId;
         accumulator.period = period.code();
         accumulator.openTime = openTime;
         accumulator.closeTime = period.closeTime(openTime);
@@ -53,17 +53,17 @@ public class CandleAccumulator {
      */
     public CandleSnapshot snapshot(Instant now, Integer sourcePartition, Long sourceOffset) {
         CandleStatus status = closeTime != null && !closeTime.isAfter(now) ? CandleStatus.CLOSED : CandleStatus.PARTIAL;
-        return new CandleSnapshot(symbol, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
+        return new CandleSnapshot(instrumentId, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
                 baseVolume, quoteVolume, tradeCount, firstTradeId, lastTradeId, firstSequence, lastSequence,
                 status, updatedAt, sourcePartition, sourceOffset);
     }
 
-    public String getSymbol() {
-        return symbol;
+    public String getInstrumentId() {
+        return instrumentId;
     }
 
-    public void setSymbol(String symbol) {
-        this.symbol = symbol;
+    public void setInstrumentId(String instrumentId) {
+        this.instrumentId = instrumentId;
     }
 
     public String getPeriod() {

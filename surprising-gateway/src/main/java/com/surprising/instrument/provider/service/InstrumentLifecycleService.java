@@ -41,7 +41,7 @@ public class InstrumentLifecycleService {
     private void markExpiredContractsSettling(Instant now, int batchSize) {
         for (InstrumentResponse instrument : storageService.expiringContractsDue(now, batchSize)) {
             try {
-                instrumentService.updateStatus(instrument.symbol(), InstrumentStatus.SETTLING);
+                instrumentService.updateStatus(instrument.instrumentId(), instrument.contractType().productLine(), InstrumentStatus.SETTLING);
             } catch (Exception ex) {
                 log.error("Failed to mark expired instrument settling: symbol={} version={}",
                         instrument.symbol(), instrument.changeId(), ex);
@@ -53,7 +53,7 @@ public class InstrumentLifecycleService {
         for (InstrumentResponse instrument : storageService.settlingContractsDue(now, batchSize)) {
             try {
                 if (!readinessService.isReady(
-                        instrument.contractType().productLine(), instrument.symbol(), instrument.lastChangeId())) {
+                        instrument.contractType().productLine(), Integer.toString(instrument.instrumentId()), instrument.lastChangeId())) {
                     continue;
                 }
                 // 结算价必须由唯一的人工/内部确认入口固化；定时任务只能推进到 SETTLING，

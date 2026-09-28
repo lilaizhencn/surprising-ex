@@ -32,14 +32,14 @@ public class SettlementSolvencyBenchmark {
         if (type.isPerpetual() && !"MAINTENANCE".equals(settlementTrigger)) throw new IllegalArgumentException("perpetual clearance requires MAINTENANCE");
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, productLine)) {
             h.execute(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("DEBT",
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("41",
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", asset, inverse ? 100 : 1,
                             1, inverse ? 100 : 1, 100_000, 50_000, 0, 0,
                             type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
-                            ? new ApplyMarkPriceCommand("DEBT", 100, 100, 100, 1, h.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand("DEBT", 100, 1, h.nextCommandTimestamp()))));
+                            ? new ApplyMarkPriceCommand("41", 100, 100, 100, 1, h.nextCommandTimestamp())
+                            : new ApplyMarkPriceCommand("41", 100, 1, h.nextCommandTimestamp()))));
             h.adjust(999, asset, 1_000_000_000L);
             order(h, 999, CoreOrderSide.BUY, 256, CoreMarginMode.CROSS);
             for (long user = 1000; user < 1256; user++) {
@@ -49,12 +49,12 @@ public class SettlementSolvencyBenchmark {
                 h.adjust(user, asset, -available);
             }
             var state = h.state().tradingState();
-            deficit = loss - state.user(1000).positions().get("DEBT").positionMarginUnits();
+            deficit = loss - state.user(1000).positions().get("41").positionMarginUnits();
             if (deficit <= 0) throw new IllegalStateException("fixture must be insolvent");
             makerOpening = state.user(999).totalUnits(asset);
             if ("MAINTENANCE".equals(settlementTrigger)) {
                 h.execute(h.command(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,CommandSource.OPERATIONS,0,
-                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("DEBT",0,
+                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("41",0,
                                 new CoreInstrumentMaintenance(11,CoreInstrumentMaintenance.Mode.SETTLEMENT,1000)))));
             }
             template = h.snapshotTemplate(4);
@@ -64,7 +64,7 @@ public class SettlementSolvencyBenchmark {
     private static void order(LinearPerpetualBenchmarkSupport.Harness h, long user, CoreOrderSide side,
                               long quantity, CoreMarginMode margin) {
         h.execute(h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, user,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "DEBT",
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "41",
                         side, 100, quantity, false, margin, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, false, ""))));
     }
@@ -78,7 +78,7 @@ public class SettlementSolvencyBenchmark {
     private CoreSettlementProgressView page(long cursor) {
         return CoreSettlementProgressCodec.decode(harness.execute(harness.command(CoreMessageType.SETTLE_INSTRUMENT,
                 CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeSettleInstrument(
-                        new SettleInstrumentCommand(11, "DEBT", 1000, 0, cursor, 16, 0, 16)))).data());
+                        new SettleInstrumentCommand(11, "41", 1000, 0, cursor, 16, 0, 16)))).data());
     }
 
     @Benchmark
@@ -91,7 +91,7 @@ public class SettlementSolvencyBenchmark {
                 || paused.requiredInsuranceUnits() != deficit * 15)
             throw new IllegalStateException("unfunded page did not pause atomically");
         if (recover && (harness.state().tradingState().user(999).totalUnits(asset) != makerOpening
-                || harness.state().tradingState().user(1000).positions().get("DEBT").signedQuantitySteps() != -1))
+                || harness.state().tradingState().user(1000).positions().get("41").signedQuantitySteps() != -1))
             throw new IllegalStateException("unfunded page mutated balances or positions");
         long partialInsurance = 0;
         if (recover) {
@@ -105,7 +105,7 @@ public class SettlementSolvencyBenchmark {
             var checkpoint = harness.snapshotTemplate(4);
             harness.close();
             harness = LinearPerpetualBenchmarkSupport.Harness.restore(checkpoint);
-            if (harness.state().tradingState().treasuryState().lifecycleProgress("DEBT").requiredInsuranceUnits()
+            if (harness.state().tradingState().treasuryState().lifecycleProgress("41").requiredInsuranceUnits()
                     != deficit * 15) throw new IllegalStateException("lost settlement debt on recovery");
             if (page(0).requiredInsuranceUnits() != deficit * 15)
                 throw new IllegalStateException("retry changed required insurance");

@@ -110,8 +110,8 @@ public class OrderInternalController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/open")
-    public AlgoOrderQueryResponse openAlgoOrders(@RequestParam("userId") long userId, @RequestParam(value = "symbol", required = false) String symbol, @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        return requests.openAlgoOrders(userId, symbol, limit);
+    public AlgoOrderQueryResponse openAlgoOrders(@RequestParam("userId") long userId, @RequestParam(value = "instrumentId", required = false) String instrumentId, @RequestParam(value = "limit", defaultValue = "100") int limit) {
+        return requests.openAlgoOrders(userId, instrumentId, limit);
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/{orderId}")
@@ -130,13 +130,13 @@ public class OrderInternalController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/open")
-    public OrderQueryResponse openOrders(@RequestParam("userId") long userId, @RequestParam(value = "symbol", required = false) String symbol, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        return requests.openOrders(userId, symbol, limit, cursor, minExportSequence);
+    public OrderQueryResponse openOrders(@RequestParam("userId") long userId, @RequestParam(value = "instrumentId", required = false) String instrumentId, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
+        return requests.openOrders(userId, instrumentId, limit, cursor, minExportSequence);
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/history")
-    public OrderQueryResponse historyOrders(@RequestParam("userId") long userId, @RequestParam(value = "symbol", required = false) String symbol, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "orderId", required = false) Long orderId, @RequestParam(value = "startTime", required = false) Long startTime, @RequestParam(value = "endTime", required = false) Long endTime, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        return requests.historyOrders(userId, symbol, limit, orderId, startTime, endTime, cursor, minExportSequence);
+    public OrderQueryResponse historyOrders(@RequestParam("userId") long userId, @RequestParam(value = "instrumentId", required = false) String instrumentId, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "orderId", required = false) Long orderId, @RequestParam(value = "startTime", required = false) Long startTime, @RequestParam(value = "endTime", required = false) Long endTime, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
+        return requests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence);
     }
 
     private final OrderRequestService requests;

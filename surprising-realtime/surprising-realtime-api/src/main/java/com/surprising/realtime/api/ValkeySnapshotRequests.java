@@ -37,10 +37,10 @@ public final class ValkeySnapshotRequests {
         redis.opsForZSet().add("rt:refresh:" + product.name(), Long.toString(user), expiresAt);
     }
 
-    public void renewBook(ProductLine product, String symbol, long expiresAt) {
-        if (!symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}"))
-            throw new IllegalArgumentException("invalid book symbol");
-        redis.opsForZSet().add("rt:books:" + product.name(), symbol, expiresAt);
+    public void renewBook(ProductLine product, String instrumentId, long expiresAt) {
+        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId))
+            throw new IllegalArgumentException("invalid book instrumentId");
+        redis.opsForZSet().add("rt:books:" + product.name(), instrumentId, expiresAt);
     }
 
     public Set<String> books(ProductLine product, long now, long offset, int limit) {

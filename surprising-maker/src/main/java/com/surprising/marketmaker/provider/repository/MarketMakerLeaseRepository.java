@@ -21,7 +21,7 @@ public class MarketMakerLeaseRepository implements MarketMakerLeaseCoordinator {
     @Override
     public boolean tryAcquire(ProductLine productLine,
                               String strategyId,
-                              String symbol,
+                              String instrumentId,
                               String ownerId,
                               Duration leaseDuration) {
         Instant now = Instant.now();
@@ -33,19 +33,19 @@ public class MarketMakerLeaseRepository implements MarketMakerLeaseCoordinator {
                        updated_at = ?
                  WHERE product_line = ?
                    AND strategy_id = ?
-                   AND symbol = ?
+                   AND instrument_id = ?
                    AND (owner_id = ? OR lease_until <= ?)
-                """, ownerId, Timestamp.from(leaseUntil), Timestamp.from(now), productLine.name(), strategyId, symbol, ownerId,
+                """, ownerId, Timestamp.from(leaseUntil), Timestamp.from(now), productLine.name(), strategyId, instrumentId, ownerId,
                 Timestamp.from(now));
         if (updated > 0) {
             return true;
         }
         int inserted = jdbcTemplate.update("""
                 INSERT INTO market_maker_strategy_leases (
-                    product_line, strategy_id, symbol, owner_id, lease_until, updated_at
+                    product_line, strategy_id, instrument_id, owner_id, lease_until, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (product_line, strategy_id, symbol) DO NOTHING
-                """, productLine.name(), strategyId, symbol, ownerId, Timestamp.from(leaseUntil), Timestamp.from(now));
+                ON CONFLICT (product_line, strategy_id, instrument_id) DO NOTHING
+                """, productLine.name(), strategyId, instrumentId, ownerId, Timestamp.from(leaseUntil), Timestamp.from(now));
         return inserted > 0;
     }
 }

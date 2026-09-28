@@ -27,25 +27,25 @@ public class ExpiringContractSettlementFanoutService {
     }
 
     public int fanout(DeliverySettlementEvent event) {
-        submit(event.symbol(), event.changeId(), event.settlementPriceTicks(), 0,
+        submit(event.instrumentId(), event.changeId(), event.settlementPriceTicks(), 0,
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;
     }
 
     public int fanout(OptionExerciseEvent event) {
-        submit(event.symbol(), event.changeId(), event.underlyingSettlementPriceUnits(),
+        submit(event.instrumentId(), event.changeId(), event.underlyingSettlementPriceUnits(),
                 event.cashSettlementUnitsPerContract(),
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;
     }
 
-    private void submit(String symbol, long version, long settlementPriceTicks,
+    private void submit(String instrumentId, long version, long settlementPriceTicks,
                         long optionCashUnitsPerContract, Instant settlementTime) {
         long settlementId = settlementTime.toEpochMilli();
-        String identity = properties.getKafka().getProductLine() + ":lifecycle:" + symbol.toUpperCase()
+        String identity = properties.getKafka().getProductLine() + ":lifecycle:" + instrumentId.toUpperCase()
                 + ':' + settlementId + ':' + UUID.randomUUID();
         long cursor = 0;
-        CoreSettlementProgressView persisted = decodeProgressOrQuery(symbol, settlementId, null);
+        CoreSettlementProgressView persisted = decodeProgressOrQuery(instrumentId, settlementId, null);
         if (persisted != null && persisted.complete() && persisted.settlementId() != 0) return;
         long orderCursor = 0;
         if (persisted != null && !persisted.complete()) {
@@ -57,11 +57,11 @@ public class ExpiringContractSettlementFanoutService {
                     .getBytes(StandardCharsets.UTF_8));
             CoreResponse response = aeron.command(CoreMessageType.SETTLE_INSTRUMENT, commandId, 0,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                            settlementId, symbol, settlementPriceTicks, optionCashUnitsPerContract,
+                            settlementId, instrumentId, settlementPriceTicks, optionCashUnitsPerContract,
                             cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS, orderCursor,
                             SettleInstrumentCommand.DEFAULT_MAX_ORDERS)));
             if (response == null) throw new IllegalStateException("Aeron settlement response missing");
-            CoreSettlementProgressView progress = decodeProgressOrQuery(symbol, settlementId, response);
+            CoreSettlementProgressView progress = decodeProgressOrQuery(instrumentId, settlementId, response);
             if (progress.complete()) return;
             if (progress.requiredInsuranceUnits() > 0) {
                 throw new IllegalStateException("settlement awaits insurance: required=" + progress.requiredInsuranceUnits());
@@ -82,7 +82,7 @@ public class ExpiringContractSettlementFanoutService {
         }
     }
 
-    private CoreSettlementProgressView decodeProgressOrQuery(String symbol, long settlementId,
+    private CoreSettlementProgressView decodeProgressOrQuery(String instrumentId, long settlementId,
                                                               CoreResponse response) {
         CoreResponse effective = response;
         if (response != null && response.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED) {
@@ -90,7 +90,7 @@ public class ExpiringContractSettlementFanoutService {
         }
         if (effective == null || effective.data().length == 0) {
             effective = aeron.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(),
-                    CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
+                    CoreStateQueryCodec.encodeSettlementProgressQuery(instrumentId));
         }
         if (effective == null || (effective.status() != com.surprising.aeron.protocol.ResponseStatus.OK
                 && effective.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED)
@@ -103,7 +103,7 @@ public class ExpiringContractSettlementFanoutService {
             if (response == null && progress.complete()) {
                 var gateResponse = aeron.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(),
                         com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
-                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(symbol, 0, 1)));
+                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(instrumentId, 0, 1)));
                 if (gateResponse == null || gateResponse.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
                     throw new IllegalStateException("Aeron maintenance state unavailable");
                 }

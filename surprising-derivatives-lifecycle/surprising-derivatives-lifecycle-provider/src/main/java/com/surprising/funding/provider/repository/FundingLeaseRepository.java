@@ -20,20 +20,20 @@ public class FundingLeaseRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public boolean acquire(String symbol, String ownerId, Duration leaseDuration) {
+    public boolean acquire(String instrumentId, String ownerId, Duration leaseDuration) {
         Instant now = Instant.now();
         Instant leaseUntil = now.plus(leaseDuration);
         return !jdbcTemplate.query("""
-                INSERT INTO price_symbol_leases (module, symbol, owner_id, lease_until, updated_at)
+                INSERT INTO price_symbol_leases (module, instrument_id, owner_id, lease_until, updated_at)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (module, symbol) DO UPDATE SET
+                ON CONFLICT (module, instrument_id) DO UPDATE SET
                     owner_id = EXCLUDED.owner_id,
                     lease_until = EXCLUDED.lease_until,
                     updated_at = EXCLUDED.updated_at
                 WHERE price_symbol_leases.owner_id = EXCLUDED.owner_id
                    OR price_symbol_leases.lease_until <= EXCLUDED.updated_at
                 RETURNING TRUE
-                """, (rs, rowNum) -> rs.getBoolean(1), RATE_MODULE, symbol, ownerId,
+                """, (rs, rowNum) -> rs.getBoolean(1), RATE_MODULE, instrumentId, ownerId,
                 Timestamp.from(leaseUntil), Timestamp.from(now)).isEmpty();
     }
 }

@@ -10,7 +10,7 @@ public record LiquidationFeeSettledEvent(
         long liquidationOrderId,
         long candidateId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         String accountType,
         String asset,
@@ -32,14 +32,14 @@ public record LiquidationFeeSettledEvent(
                                       long liquidationOrderId,
                                       long candidateId,
                                       long userId,
-                                      String symbol,
+                                      String instrumentId,
                                       MarginMode marginMode,
                                       String asset,
                                       long amountUnits,
                                       long feeRatePpm,
                                       Instant eventTime,
                                       String traceId) {
-        this(eventId, tradeId, orderId, liquidationOrderId, candidateId, userId, symbol, marginMode,
+        this(eventId, tradeId, orderId, liquidationOrderId, candidateId, userId, instrumentId, marginMode,
                 "USDT_PERPETUAL", asset, amountUnits, feeRatePpm, eventTime, traceId);
     }
 }

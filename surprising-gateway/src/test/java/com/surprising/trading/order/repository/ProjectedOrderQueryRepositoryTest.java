@@ -40,7 +40,7 @@ class ProjectedOrderQueryRepositoryTest {
 
         AeronOrderProjectionRepository repository = new AeronOrderProjectionRepository(jdbcTemplate,
                 new ProjectionWatermarkWaiter(jdbcTemplate), 1_048_576);
-        ProjectionReadResult result = repository.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1, 12L);
+        ProjectionReadResult result = repository.openOrders(ProductLine.SPOT, 1001L, "1", null, 1, 12L);
 
         assertThat(result.status()).isEqualTo(ProjectionReadResult.Status.OK);
         assertThat(result.orders()).hasSize(1);
@@ -94,12 +94,12 @@ class ProjectedOrderQueryRepositoryTest {
 
         AeronOrderProjectionRepository baseline = new AeronOrderProjectionRepository(jdbcTemplate,
                 new ProjectionWatermarkWaiter(jdbcTemplate), 4 * 1024 * 1024);
-        int oneRowBytes = baseline.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1, 12L)
+        int oneRowBytes = baseline.openOrders(ProductLine.SPOT, 1001L, "1", null, 1, 12L)
                 .encodedBytes();
         AeronOrderProjectionRepository bounded = new AeronOrderProjectionRepository(jdbcTemplate,
                 new ProjectionWatermarkWaiter(jdbcTemplate), oneRowBytes);
 
-        ProjectionReadResult result = bounded.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1000, 12L);
+        ProjectionReadResult result = bounded.openOrders(ProductLine.SPOT, 1001L, "1", null, 1000, 12L);
 
         assertThat(result.status()).isEqualTo(ProjectionReadResult.Status.OK);
         assertThat(result.orders()).hasSize(1);
@@ -121,12 +121,12 @@ class ProjectedOrderQueryRepositoryTest {
 
         AeronOrderProjectionRepository baseline = new AeronOrderProjectionRepository(jdbcTemplate,
                 new ProjectionWatermarkWaiter(jdbcTemplate), 4 * 1024 * 1024);
-        int oneRowBytes = baseline.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1, 12L)
+        int oneRowBytes = baseline.openOrders(ProductLine.SPOT, 1001L, "1", null, 1, 12L)
                 .encodedBytes();
         AeronOrderProjectionRepository bounded = new AeronOrderProjectionRepository(jdbcTemplate,
                 new ProjectionWatermarkWaiter(jdbcTemplate), oneRowBytes - 1);
 
-        ProjectionReadResult result = bounded.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1000, 12L);
+        ProjectionReadResult result = bounded.openOrders(ProductLine.SPOT, 1001L, "1", null, 1000, 12L);
 
         assertThat(result.status()).isEqualTo(ProjectionReadResult.Status.RESPONSE_TOO_LARGE);
         assertThat(result.orders()).isEmpty();
@@ -157,7 +157,7 @@ class ProjectedOrderQueryRepositoryTest {
     }
 
     private static byte[] rawOrder(long orderId) {
-        CoreOrderStateView view = new CoreOrderStateView(orderId, ProductLine.SPOT, 1001L, "BTC-USDT",
+        CoreOrderStateView view = new CoreOrderStateView(orderId, ProductLine.SPOT, 1001L, "1",
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 60_000L, 10L, 0L, 10L, false, "OPEN", 1L);
         return CoreStateQueryCodec.encodeOrderState(view);
     }

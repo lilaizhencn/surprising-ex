@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public final class ExchangeCoreConcurrentBenchmark {
 
-    private static final String SYMBOL = "BENCH-BTC-USDT";
+    private static final String SYMBOL = "13";
     private static final long USER_ID = 1001L;
 
     private ExchangeCoreConcurrentBenchmark() {

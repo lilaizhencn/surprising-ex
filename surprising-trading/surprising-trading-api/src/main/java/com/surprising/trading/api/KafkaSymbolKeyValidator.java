@@ -7,11 +7,11 @@ public final class KafkaSymbolKeyValidator {
 
     public static void requireMatchingSymbol(String kafkaKey, String payloadSymbol, String payloadType) {
         if (kafkaKey == null || kafkaKey.isBlank()) {
-            throw new SymbolKeyMismatchException(payloadType + " Kafka key is required for symbol partitioning");
+            throw new SymbolKeyMismatchException(payloadType + " Kafka key is required for instrumentId partitioning");
         }
         if (!kafkaKey.equals(payloadSymbol)) {
-            throw new SymbolKeyMismatchException(payloadType + " Kafka key must match payload symbol: key="
-                    + kafkaKey + " symbol=" + payloadSymbol);
+            throw new SymbolKeyMismatchException(payloadType + " Kafka key must match payload instrumentId: key="
+                    + kafkaKey + " instrumentId=" + payloadSymbol);
         }
     }
 

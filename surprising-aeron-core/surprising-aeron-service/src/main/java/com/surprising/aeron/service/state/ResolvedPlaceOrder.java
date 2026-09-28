@@ -96,7 +96,7 @@ public class ResolvedPlaceOrder {
     public long makerFeeRatePpm() { return makerFeeRatePpm; }
     public long takerFeeRatePpm() { return takerFeeRatePpm; }
     public long orderId() { return intent.orderId(); }
-    public String symbol() { return intent.symbol(); }
+    public String instrumentId() { return intent.instrumentId(); }
     public com.surprising.aeron.protocol.CoreOrderSide side() { return intent.side(); }
     public long limitPriceTicks() { return intent.limitPriceTicks(); }
     public long quantitySteps() { return intent.quantitySteps(); }

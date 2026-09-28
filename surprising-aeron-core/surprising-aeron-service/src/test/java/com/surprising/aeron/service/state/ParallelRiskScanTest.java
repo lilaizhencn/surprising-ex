@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.*;
 
 class ParallelRiskScanTest {
     private static final LaneTopology TOPOLOGY = LaneTopology.productionDefault();
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
 
     @Test
     void slowLaneDoesNotPreventOtherLanesFromValuingAndIdsIgnoreCompletionOrder() throws Exception {
@@ -123,12 +123,12 @@ class ParallelRiskScanTest {
     void closingAProfitablePositionBetweenPagesMustNotCountItsProfitTwice() {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("ETH-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("2", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         var users = new TreeMap<>(source.users());
         for (var user : source.users().values()) {
             var positions = new TreeMap<>(user.positions());
-            positions.put("ETH-USDT", new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+            positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
             users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
                     user.balances(), user.reservations(), positions));
@@ -137,7 +137,7 @@ class ParallelRiskScanTest {
                 source.instruments(), source.riskState(), source.treasuryState());
         var ids = new RuntimeIdentityRegistry();
         try (var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("ETH-USDT", 100, 1, 1_700_000_000_000L), runtime, ids);
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_000L), runtime, ids);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 120), runtime, ids);
             runtime.startAccountLanes();
             run(runtime, ids, new PositionUserIndex(source, ids, TOPOLOGY), TOPOLOGY.accountLaneCount());
@@ -153,7 +153,7 @@ class ParallelRiskScanTest {
             RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
                     ids.symbolId(SYMBOL), index, runtime, ids);
             var state = RuntimeStateMaterializer.materialize(runtime, ids);
-            assertThat(state.riskState().snapshots().get(userId + ":ETH-USDT").equityUnits()).isEqualTo(300);
+            assertThat(state.riskState().snapshots().get(userId + ":2").equityUnits()).isEqualTo(300);
         }
     }
 
@@ -161,12 +161,12 @@ class ParallelRiskScanTest {
     void anotherSymbolsPriceChangeInvalidatesPartialPortfolioEvenAfterSnapshot() {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("ETH-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("2", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         var users = new TreeMap<>(source.users());
         for (var user : source.users().values()) {
             var positions = new TreeMap<>(user.positions());
-            positions.put("ETH-USDT", new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+            positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
             users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
                     user.balances(), user.reservations(), positions));
@@ -176,11 +176,11 @@ class ParallelRiskScanTest {
         var ids = new RuntimeIdentityRegistry();
         try (var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("ETH-USDT", 100, 1, 1_700_000_000_001L), runtime, ids);
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), runtime, ids);
             var index = new PositionUserIndex(source, ids, TOPOLOGY);
             RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
-                    ids.symbolId("ETH-USDT"), index, runtime, ids);
-            assertThat(runtime.riskScan(ids.symbolId("ETH-USDT")).laneProgress())
+                    ids.symbolId("2"), index, runtime, ids);
+            assertThat(runtime.riskScan(ids.symbolId("2")).laneProgress())
                     .allMatch(cursor -> cursor.userId() > 0 && cursor.unrealizedPnlUnits() == 0);
             // ETH 扫描已经累计完两个持仓，此时 BTC 新价格只更新 BTC 扫描入口。
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
@@ -190,16 +190,16 @@ class ParallelRiskScanTest {
             var restoredIds = new RuntimeIdentityRegistry();
             try (var restored = RuntimeStateProjector.project(restoredState, restoredIds, TOPOLOGY)) {
                 var restoredIndex = new PositionUserIndex(restoredState, restoredIds, TOPOLOGY);
-                for (int page = 0; page < 8 && !runtime.riskScan(ids.symbolId("ETH-USDT")).riskComplete(); page++) {
+                for (int page = 0; page < 8 && !runtime.riskScan(ids.symbolId("2")).riskComplete(); page++) {
                     RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
-                            ids.symbolId("ETH-USDT"), index, runtime, ids);
+                            ids.symbolId("2"), index, runtime, ids);
                     RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
-                            restoredIds.symbolId("ETH-USDT"), restoredIndex, restored, restoredIds);
+                            restoredIds.symbolId("2"), restoredIndex, restored, restoredIds);
                     assertThat(RuntimeStateMaterializer.materialize(restored, restoredIds))
                             .isEqualTo(RuntimeStateMaterializer.materialize(runtime, ids));
                 }
                 var complete = RuntimeStateMaterializer.materialize(runtime, ids);
-                assertThat(runtime.riskScan(ids.symbolId("ETH-USDT")).riskComplete()).isTrue();
+                assertThat(runtime.riskScan(ids.symbolId("2")).riskComplete()).isTrue();
                 assertThat(complete.riskState().snapshots().values()).hasSize(2 * TOPOLOGY.accountLaneCount())
                         .allMatch(snapshot -> snapshot.equityUnits() == 300);
                 assertThat(complete.riskState().liquidations()).isEmpty();

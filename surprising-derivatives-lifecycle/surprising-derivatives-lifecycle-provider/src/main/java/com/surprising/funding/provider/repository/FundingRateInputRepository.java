@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 读取资金费率计算所需的当前合约参数。
  *
- * <p>费率计算直接使用本地不可变合约快照，并与同一批内存标记价按 symbol、version 精确匹配，
+ * <p>费率计算直接使用本地不可变合约快照，并与同一批内存标记价按 instrumentId、version 精确匹配，
  * 避免版本切换窗口产生旧价格配新参数或新价格配旧参数。该查询只服务在线资金费计算，不承担报表或运营查询。</p>
  */
 @Repository
@@ -55,7 +55,7 @@ public class FundingRateInputRepository {
         }
         List<FundingRateInput> result = new ArrayList<>(markPrices.size());
         for (MarkPriceEvent mark : markPrices) {
-            var instrument = snapshotCache.current(productLine, mark.symbol(), mark.instrumentChangeId()).orElse(null);
+            var instrument = snapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(mark.instrumentId()), mark.instrumentChangeId()).orElse(null);
             if (instrument == null || instrument.status() != InstrumentStatus.TRADING
                     || instrument.fundingIntervalHours() <= 0 || mark.markPrice() == null
                     || mark.indexPrice() == null
@@ -66,7 +66,7 @@ public class FundingRateInputRepository {
                     .multiply(java.math.BigDecimal.valueOf(1_000_000L))
                     .divide(mark.indexPrice(), 0, RoundingMode.HALF_UP)
                     .longValueExact();
-            result.add(new FundingRateInput(mark.symbol(), mark.sequence(), premium,
+            result.add(new FundingRateInput(mark.instrumentId(), mark.sequence(), premium,
                     instrument.interestRatePpm(), instrument.fundingRateFloorPpm(),
                     instrument.fundingRateCapPpm(), instrument.fundingIntervalHours(), mark.eventTime()));
         }

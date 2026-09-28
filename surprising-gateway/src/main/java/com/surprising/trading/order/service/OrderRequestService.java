@@ -198,9 +198,9 @@ public class OrderRequestService {
         }
     }
 
-    public AlgoOrderQueryResponse openAlgoOrders(long userId, String symbol, int limit) {
+    public AlgoOrderQueryResponse openAlgoOrders(long userId, String instrumentId, int limit) {
         try {
-            return algoOrderService.openOrders(userId, symbol, limit);
+            return algoOrderService.openOrders(userId, instrumentId, limit);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -242,9 +242,9 @@ public class OrderRequestService {
         }
     }
 
-    public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor, Long minExportSequence) {
+    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor, Long minExportSequence) {
         try {
-            return orderService.openOrders(userId, symbol, limit, cursor, minExportSequence);
+            return orderService.openOrders(userId, instrumentId, limit, cursor, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -254,9 +254,9 @@ public class OrderRequestService {
         }
     }
 
-    public OrderQueryResponse historyOrders(long userId, String symbol, int limit, Long orderId, Long startTime, Long endTime, String cursor, Long minExportSequence) {
+    public OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long orderId, Long startTime, Long endTime, String cursor, Long minExportSequence) {
         try {
-            return orderService.historyOrders(userId, symbol, limit, orderId, startTime, endTime, cursor, minExportSequence);
+            return orderService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {

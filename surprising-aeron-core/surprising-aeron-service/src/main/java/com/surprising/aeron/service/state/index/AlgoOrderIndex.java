@@ -37,17 +37,17 @@ public final class AlgoOrderIndex {
                 && idsByClient.containsKey(new AlgoClientKey(userId, clientAlgoOrderId));
     }
 
-    public List<Long> query(long userId, String symbol, long dueAtEpochMillis, int limit,
+    public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit,
                             Map<Long, CoreAlgoOrderState> values) {
-        return query(userId, symbol, dueAtEpochMillis, limit, values::get);
+        return query(userId, instrumentId, dueAtEpochMillis, limit, values::get);
     }
 
-    public List<Long> query(long userId, String symbol, long dueAtEpochMillis, int limit,
+    public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit,
                             LongFunction<CoreAlgoOrderState> lookup) {
         if (lookup == null) throw new IllegalArgumentException("algo order lookup is required");
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
-        String normalizedSymbol = symbol == null || symbol.isEmpty()
-                ? "" : OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isEmpty()
+                ? "" : OrderReservation.requireInstrumentId(instrumentId);
         NavigableSet<AlgoDueKey> candidates = candidateSet(userId, normalizedSymbol);
         if (candidates == null) candidates = allDue;
         NavigableSet<AlgoDueKey> dueCandidates = dueAtEpochMillis == 0
@@ -57,7 +57,7 @@ public final class AlgoOrderIndex {
         for (AlgoDueKey key : dueCandidates) {
             CoreAlgoOrderState value = lookup.apply(key.algoOrderId());
             if (value == null || (userId != 0 && value.userId() != userId)
-                    || (!normalizedSymbol.isEmpty() && !value.symbol().equals(normalizedSymbol))
+                    || (!normalizedSymbol.isEmpty() && !value.instrumentId().equals(normalizedSymbol))
                     || (dueAtEpochMillis != 0 && (value.nextSliceAtEpochMillis() == 0
                     || value.nextSliceAtEpochMillis() > dueAtEpochMillis))) {
                 continue;
@@ -83,9 +83,9 @@ public final class AlgoOrderIndex {
         state.algoOrders().values().forEach(this::add);
     }
 
-    private NavigableSet<AlgoDueKey> candidateSet(long userId, String symbol) {
+    private NavigableSet<AlgoDueKey> candidateSet(long userId, String instrumentId) {
         NavigableSet<AlgoDueKey> userSet = userId == 0 ? null : idsByUser.get(userId);
-        NavigableSet<AlgoDueKey> symbolSet = symbol.isEmpty() ? null : idsBySymbol.get(symbol);
+        NavigableSet<AlgoDueKey> symbolSet = instrumentId.isEmpty() ? null : idsBySymbol.get(instrumentId);
         if (userSet == null) return symbolSet;
         if (symbolSet == null) return userSet;
         NavigableSet<AlgoDueKey> smaller = userSet.size() <= symbolSet.size() ? userSet : symbolSet;
@@ -102,7 +102,7 @@ public final class AlgoOrderIndex {
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.add(key);
         idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
-        idsBySymbol.computeIfAbsent(value.symbol(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
+        idsBySymbol.computeIfAbsent(value.instrumentId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
         if (!value.clientAlgoOrderId().isEmpty()) {
             idsByClient.put(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()), value.algoOrderId());
         }
@@ -113,7 +113,7 @@ public final class AlgoOrderIndex {
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.remove(key);
         remove(idsByUser, value.userId(), key);
-        remove(idsBySymbol, value.symbol(), key);
+        remove(idsBySymbol, value.instrumentId(), key);
         if (!value.clientAlgoOrderId().isEmpty()) {
             idsByClient.remove(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()));
         }

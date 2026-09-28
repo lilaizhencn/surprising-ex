@@ -24,16 +24,16 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
     }
 
     @Override
-    public Optional<InstrumentRule> currentRule(String symbol) {
+    public Optional<InstrumentRule> currentRule(String instrumentId) {
         var productLine = properties.getKafka().getProductLine();
         if (!snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("下单合约 JVM 快照尚未就绪");
         }
-        return snapshotCache.current(productLine, symbol).map(this::toRule);
+        return snapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId)).map(this::toRule);
     }
 
     private InstrumentRule toRule(InstrumentResponse value) {
-        return new InstrumentRule(value.symbol(), value.changeId(), value.status().name(), value.instrumentType(),
+        return new InstrumentRule(Integer.toString(value.instrumentId()), value.changeId(), value.status().name(), value.instrumentType(),
                 value.contractType(), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
                 value.supportedOrderTypes() == null ? Set.of() : Set.copyOf(value.supportedOrderTypes()),
                 value.supportedTimeInForce() == null ? Set.of() : Set.copyOf(value.supportedTimeInForce()),

@@ -12,13 +12,13 @@ public interface RiskCommandContext extends CommandResultContext {
 
     int pendingRiskScanCount();
 
-    void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt);
+    void logRiskScan(String operation, String instrumentId, int batchSize, int pendingBefore, long startedAt);
 
     void initializeTriggerScan(ApplyMarkPriceCommand command);
 
-    BooleanSupplier pendingTriggerScan(String symbol, int maxWork);
+    BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork);
 
-    void evaluatePendingTriggerScan(String symbol, int maxWork);
+    void evaluatePendingTriggerScan(String instrumentId, int maxWork);
 
     RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers);
 }

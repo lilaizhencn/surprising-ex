@@ -26,11 +26,14 @@ final class CommittedTradeExporter {
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
+    private final CommittedOrderProjectionRepository orders;
 
-    CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers) {
+    CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
+            CommittedOrderProjectionRepository orders) {
         this.config = config;
         this.product = product;
         this.bootstrapServers = bootstrapServers;
+        this.orders = orders;
     }
 
     void run(java.util.concurrent.atomic.AtomicBoolean running, java.util.function.Consumer<Boolean> connected, long stopAfter) throws Exception {
@@ -162,6 +165,7 @@ final class CommittedTradeExporter {
                                 "archive gap at trade export checkpoint " + cursor);
                     long safeEnd = end;
                     var trades = new ArrayList<RealtimeFrame>();
+                    var orderChanges = new ArrayList<RealtimeFrame>();
                     int[] messages = {0};
                     long[] delivered = {cursor};
                     boolean[] partialMessage = {false};
@@ -188,21 +192,24 @@ final class CommittedTradeExporter {
                                                         "empty archived Core command");
                                             byte[] bytes = new byte[bodyLength];
                                             buffer.getBytes(bodyOffset, bytes);
-                                            trades.addAll(
-                                                    replay.apply(
-                                                            bytes,
-                                                            sessionHeader.timestamp(),
-                                                            header.position()));
+                                            for (var change : replay.apply(bytes, sessionHeader.timestamp(), header.position())) {
+                                                if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
+                                                else orderChanges.add(change);
+                                            }
                                             messages[0]++;
-                                            if (messages[0] >= 256 || trades.size() >= 4096) {
-                                                sink.publish(trades);
+                                            if (messages[0] >= 256 || trades.size() + orderChanges.size() >= 4096) {
+                                                orders.persist(product, orderChanges, replay.exportSequence());
+                        sink.publish(trades);
+                        orderChanges.clear();
                                                 trades.clear();
                                                 messages[0] = 0;
                                             }
                                         }
                                         delivered[0] = header.position();
                                         if (System.nanoTime() >= nextCheckpoint[0]) {
+                                            orders.persist(product, orderChanges, replay.exportSequence());
                                             sink.publish(trades);
+                                            orderChanges.clear();
                                             trades.clear();
                                             messages[0] = 0;
                                             try {
@@ -266,7 +273,9 @@ final class CommittedTradeExporter {
                         }
                         if (running.get() && image.position() != safeEnd)
                             throw new IllegalStateException("incomplete committed archive replay");
+                        orders.persist(product, orderChanges, replay.exportSequence());
                         sink.publish(trades);
+                        orderChanges.clear();
                         // A commit counter can stop at a fragment boundary. Resume from the last
                         // complete Cluster message, never from the middle of a fragmented command.
                         cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;

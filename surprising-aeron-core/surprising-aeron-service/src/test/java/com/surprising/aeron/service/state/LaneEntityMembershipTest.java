@@ -93,8 +93,8 @@ class LaneEntityMembershipTest {
         }
     }
 
-    private static PositionRuntime position(long user, int symbol, long quantity) {
-        return new PositionRuntime(user, symbol, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+    private static PositionRuntime position(long user, int instrumentId, long quantity) {
+        return new PositionRuntime(user, instrumentId, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), quantity, quantity == 0 ? 0 : 100,
                 Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10);
     }

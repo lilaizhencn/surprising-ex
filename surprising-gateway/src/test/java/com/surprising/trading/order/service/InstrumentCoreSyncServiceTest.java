@@ -30,21 +30,21 @@ class InstrumentCoreSyncServiceTest {
             });
             var service=new InstrumentCoreSyncService(cache,gateway,properties);
             cache.replace(line,List.of(row(line,1,InstrumentStatus.TRADING)),java.util.Map.of("BTC",1000L,"USDT",100_000_000L));
-            assertThat(service.state("BTC-USDT",line).state()).isEqualTo("PENDING");
+            assertThat(service.state("1",line).state()).isEqualTo("PENDING");
             service.reconcile();
-            assertThat(service.state("BTC-USDT",line).state()).isEqualTo("APPLIED");
+            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
             service.reconcile(); assertThat(sequence.get()).isEqualTo(1);
-            var startupInstrument=state.tradingState().instruments().get("BTC-USDT");
+            var startupInstrument=state.tradingState().instruments().get("1");
             var sealSequence=sequence.incrementAndGet();
             state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,993,sealSequence,0,
                     1_700_000_000_000L+sealSequence,sealSequence),CoreProtocol.probePayload(1)));
             var pause=row(line,2,InstrumentStatus.HALT);
-            cache.apply(new InstrumentEvent("BTC-USDT",2,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,Instant.now(),pause,line,2));
+            cache.apply(new InstrumentEvent(1, "1",2,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,Instant.now(),pause,line,2));
             service.reconcile();
             assertThat(sequence.get()).isEqualTo(sealSequence+1);
-            assertThat(service.state("BTC-USDT",line).state()).isEqualTo("APPLIED");
-            var updatedInstrument=state.tradingState().instruments().get("BTC-USDT");
+            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
+            var updatedInstrument=state.tradingState().instruments().get("1");
             assertThat(updatedInstrument).isSameAs(startupInstrument);
             assertThat(updatedInstrument.makerFeeRatePpm()).isEqualTo(2_000L);
             assertThat(updatedInstrument.instrumentStatus()).isEqualTo(InstrumentStatus.HALT);
@@ -53,28 +53,28 @@ class InstrumentCoreSyncServiceTest {
             var rejectedWhileHalted=state.apply(new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
                     11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(90,"BTC-USDT",CoreOrderSide.BUY,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(90,"1",CoreOrderSide.BUY,
                             1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC,false,"halted-order"))));
             assertThat(rejectedWhileHalted.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
 
             var switches=row(line,3,InstrumentStatus.TRADING);
             when(switches.marketOrderEnabled()).thenReturn(false);
-            cache.apply(new InstrumentEvent("BTC-USDT",3,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
+            cache.apply(new InstrumentEvent(1, "1",3,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
                     Instant.now(),switches,line,3));
             service.reconcile();
-            assertThat(service.state("BTC-USDT",line).state()).isEqualTo("APPLIED");
+            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
             assertThat(updatedInstrument.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
             assertThat(updatedInstrument.marketOrderEnabled()).isFalse();
             var rejectedMarket=state.apply(new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
                     11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91,"BTC-USDT",CoreOrderSide.BUY,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91,"1",CoreOrderSide.BUY,
                             0,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.MARKET,
                             CoreTimeInForce.IOC,false,"market-disabled"))));
             assertThat(rejectedMarket.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             try (var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(41))) {
-                var recovered=restored.tradingState().instruments().get("BTC-USDT");
+                var recovered=restored.tradingState().instruments().get("1");
                 assertThat(recovered.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
                 assertThat(recovered.marketOrderEnabled()).isFalse();
             }
@@ -83,7 +83,7 @@ class InstrumentCoreSyncServiceTest {
             when(restricted.marketOrderEnabled()).thenReturn(true);
             when(restricted.postOnlyEnabled()).thenReturn(false);
             when(restricted.reduceOnlyEnabled()).thenReturn(false);
-            cache.apply(new InstrumentEvent("BTC-USDT",4,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
+            cache.apply(new InstrumentEvent(1, "1",4,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
                     Instant.now(),restricted,line,4));
             service.reconcile();
             assertThat(updatedInstrument.postOnlyEnabled()).isFalse();
@@ -91,14 +91,14 @@ class InstrumentCoreSyncServiceTest {
             var rejectedPostOnly=state.apply(new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
                     11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92,"BTC-USDT",CoreOrderSide.BUY,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92,"1",CoreOrderSide.BUY,
                             1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
                             CoreTimeInForce.GTX,true,"post-only-disabled"))));
             assertThat(rejectedPostOnly.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             var rejectedReduceOnly=state.apply(new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
                     11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(93,"BTC-USDT",CoreOrderSide.SELL,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(93,"1",CoreOrderSide.SELL,
                             1,1,true,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC,false,"reduce-only-disabled"))));
             assertThat(rejectedReduceOnly.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
@@ -106,7 +106,8 @@ class InstrumentCoreSyncServiceTest {
     }
     private InstrumentResponse row(ProductLine line,long audit,InstrumentStatus status) {
         var v=mock(InstrumentResponse.class); var type=ContractType.valueOf(line.contractTypeCode());
-        when(v.symbol()).thenReturn("BTC-USDT"); when(v.changeId()).thenReturn(1L); when(v.lastChangeId()).thenReturn(audit);
+        when(v.symbol()).thenReturn("1");
+        org.mockito.Mockito.when(v.instrumentId()).thenReturn(1); when(v.changeId()).thenReturn(1L); when(v.lastChangeId()).thenReturn(audit);
         when(v.contractType()).thenReturn(type); when(v.baseAsset()).thenReturn("BTC"); when(v.quoteAsset()).thenReturn("USDT");
         when(v.settleAsset()).thenReturn(type.isInverse()?"BTC":"USDT"); when(v.notionalMultiplierUnits()).thenReturn(1L);
         when(v.priceTickUnits()).thenReturn(1L); when(v.initialMarginRatePpm()).thenReturn(100_000L);

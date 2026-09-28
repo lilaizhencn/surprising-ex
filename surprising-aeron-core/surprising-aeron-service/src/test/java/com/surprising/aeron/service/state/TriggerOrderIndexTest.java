@@ -127,7 +127,7 @@ class TriggerOrderIndexTest {
 
     private static CoreTriggerOrderState trigger(long id, long user, long price) {
         return new CoreTriggerOrderState(id, ProductLine.SPOT, user, "published-" + id, "",
-                "BTC-USDT", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY,
+                "1", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY,
                 CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.GREATER_OR_EQUAL, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
@@ -140,7 +140,7 @@ class TriggerOrderIndexTest {
         Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
         for (long id = 1; id <= 300; id++) {
             triggers.put(id, new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "",
-                    "BTC-USDT", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.SELL,
+                    "1", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.SELL,
                     CoreTriggerOrderType.TAKE_PROFIT,
                     CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0,
                     CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS,
@@ -162,14 +162,14 @@ class TriggerOrderIndexTest {
             assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();
         }
 
-        long upperId = index.maxPendingId("BTC-USDT");
+        long upperId = index.maxPendingId("1");
         int phase = TriggerOrderIndex.PHASE_GREATER_OR_EQUAL;
         long priceCursor = Long.MAX_VALUE;
         long orderCursor = Long.MAX_VALUE;
         LinkedHashSet<Long> ids = new LinkedHashSet<>();
         int pages = 0;
         while (phase < TriggerOrderIndex.PHASE_COMPLETE) {
-            TriggerOrderIndex.TriggerCandidatePage page = index.candidatesPage("BTC-USDT", 70_000, phase,
+            TriggerOrderIndex.TriggerCandidatePage page = index.candidatesPage("1", 70_000, phase,
                     priceCursor, orderCursor, upperId, 64);
             assertThat(page.ids()).hasSizeLessThanOrEqualTo(64);
             ids.addAll(page.ids());
@@ -208,8 +208,8 @@ class TriggerOrderIndexTest {
         long priceCursor = Long.MAX_VALUE;
         long orderCursor = Long.MAX_VALUE;
         while (phase < TriggerOrderIndex.PHASE_COMPLETE) {
-            TriggerOrderIndex.TriggerCandidatePage page = index.candidatesPage("BTC-USDT", markPrice,
-                    phase, priceCursor, orderCursor, index.maxPendingId("BTC-USDT"), 64);
+            TriggerOrderIndex.TriggerCandidatePage page = index.candidatesPage("1", markPrice,
+                    phase, priceCursor, orderCursor, index.maxPendingId("1"), 64);
             ids.addAll(page.ids());
             if (page.complete()) break;
             phase = page.nextPhase();
@@ -221,7 +221,7 @@ class TriggerOrderIndexTest {
 
     private static CoreTriggerOrderState trailing(long id, CoreOrderSide side, long activationPrice,
                                                   long callbackRate, long highest, long lowest, long activatedAt) {
-        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "", "BTC-USDT",
+        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "", "1",
                 CoreStateTestFixtures.runtimeInstrument(), side,
                 CoreTriggerOrderType.TRAILING_STOP, CoreTriggerCondition.GREATER_OR_EQUAL, 0,
                 activationPrice, callbackRate, highest, lowest, activatedAt, CoreOrderType.MARKET,

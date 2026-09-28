@@ -15,7 +15,7 @@ public record AlgoOrderRecord(
         ProductLine productLine,
         long userId,
         String clientAlgoOrderId,
-        String symbol,
+        String instrumentId,
         AlgoOrderType algoType,
         OrderSide side,
         long priceTicks,

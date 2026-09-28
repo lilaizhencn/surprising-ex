@@ -19,7 +19,7 @@ import org.springframework.stereotype.Repository;
 public class CandleQueryRepository {
 
     private static final String SELECT_COLUMNS = """
-            symbol, period, open_time, close_time,
+            instrument_id, period, open_time, close_time,
             open_price, high_price, low_price, close_price,
             base_volume, quote_volume, trade_count,
             first_trade_id, last_trade_id, first_sequence, last_sequence,
@@ -34,15 +34,15 @@ public class CandleQueryRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public List<CandleResponse> findRange(String symbol, String period, Instant startTime, Instant endTime, int limit) {
+    public List<CandleResponse> findRange(String instrumentId, String period, Instant startTime, Instant endTime, int limit) {
         CandlePeriod candlePeriod = CandlePeriod.fromCode(period);
         if (candlePeriod != CandlePeriod.M1) {
-            return findRollupRange(symbol, candlePeriod, startTime, endTime, limit);
+            return findRollupRange(instrumentId, candlePeriod, startTime, endTime, limit);
         }
         String sql = """
                 SELECT %s
                   FROM candlestick_candles
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                    AND period = ?
                    AND status = 'CLOSED'
                    AND open_time >= ?
@@ -50,29 +50,29 @@ public class CandleQueryRepository {
                  ORDER BY open_time ASC
                  LIMIT ?
                 """.formatted(SELECT_COLUMNS);
-        return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, symbol, period,
+        return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, instrumentId, period,
                 java.sql.Timestamp.from(startTime), java.sql.Timestamp.from(endTime), limit);
     }
 
-    public Optional<CandleResponse> findLatest(String symbol, String period) {
+    public Optional<CandleResponse> findLatest(String instrumentId, String period) {
         CandlePeriod candlePeriod = CandlePeriod.fromCode(period);
         if (candlePeriod != CandlePeriod.M1) {
-            return findLatestRollup(symbol, candlePeriod);
+            return findLatestRollup(instrumentId, candlePeriod);
         }
         String sql = """
                 SELECT %s
                   FROM candlestick_candles
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                    AND period = ?
                    AND status = 'CLOSED'
                  ORDER BY open_time DESC
                  LIMIT 1
                 """.formatted(SELECT_COLUMNS);
-        List<CandleResponse> rows = jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, symbol, period);
+        List<CandleResponse> rows = jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, instrumentId, period);
         return rows.stream().findFirst();
     }
 
-    private List<CandleResponse> findRollupRange(String symbol, CandlePeriod period,
+    private List<CandleResponse> findRollupRange(String instrumentId, CandlePeriod period,
                                                   Instant startTime, Instant endTime, int limit) {
         long bucketSeconds = period.duration().toSeconds();
         Instant inputStart = period.floor(startTime);
@@ -80,16 +80,16 @@ public class CandleQueryRepository {
         Instant inputEnd = endFloor.equals(endTime) ? endTime : endFloor.plus(period.duration());
         String sql = rollupSql("AND open_time >= ? AND open_time < ?",
                 "AND open_time >= ? AND open_time < ? ORDER BY open_time ASC LIMIT ?");
-        return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, bucketSeconds, bucketSeconds, symbol,
+        return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, bucketSeconds, bucketSeconds, instrumentId,
                 java.sql.Timestamp.from(inputStart), java.sql.Timestamp.from(inputEnd), period.code(),
                 bucketSeconds, java.sql.Timestamp.from(startTime), java.sql.Timestamp.from(endTime), limit);
     }
 
-    private Optional<CandleResponse> findLatestRollup(String symbol, CandlePeriod period) {
+    private Optional<CandleResponse> findLatestRollup(String instrumentId, CandlePeriod period) {
         long bucketSeconds = period.duration().toSeconds();
         String sql = rollupSql("", "ORDER BY open_time DESC LIMIT 1");
         List<CandleResponse> rows = jdbcTemplate.query(sql, CANDLE_ROW_MAPPER,
-                bucketSeconds, bucketSeconds, symbol, period.code(), bucketSeconds);
+                bucketSeconds, bucketSeconds, instrumentId, period.code(), bucketSeconds);
         return rows.stream().findFirst();
     }
 
@@ -98,12 +98,12 @@ public class CandleQueryRepository {
                 WITH bucketed AS (
                     SELECT *, to_timestamp(floor(extract(epoch FROM open_time) / ?) * ?) AS bucket_open
                       FROM candlestick_candles
-                     WHERE symbol = ?
+                     WHERE instrument_id = ?
                        AND period = '1m'
                        AND status = 'CLOSED'
                        %s
                 ), rollups AS (
-                    SELECT symbol,
+                    SELECT instrument_id,
                            ? AS period,
                            bucket_open AS open_time,
                            bucket_open + (? * interval '1 second') AS close_time,
@@ -125,7 +125,7 @@ public class CandleQueryRepository {
                            'CLOSED' AS status,
                            max(updated_at) AS updated_at
                       FROM bucketed
-                     GROUP BY symbol, bucket_open
+                     GROUP BY instrument_id, bucket_open
                 )
                 SELECT %s
                   FROM rollups
@@ -138,7 +138,7 @@ public class CandleQueryRepository {
         @Override
         public CandleResponse mapRow(ResultSet rs, int rowNum) throws SQLException {
             return new CandleResponse(
-                    rs.getString("symbol"),
+                    rs.getString("instrument_id"),
                     rs.getString("period"),
                     rs.getTimestamp("open_time").toInstant(),
                     rs.getTimestamp("close_time").toInstant(),

@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "5845585307000102010001004c000300"
+    private static final String CURRENT_GOLDEN = "5845585308000102010001004c000300"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"
@@ -35,7 +35,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("370972bb19df8fa9ca15f4e0bb94c7d52e2c59bfa63a757cb046223b40f32a09");
+                .isEqualTo("0eade47bc3ab8192eec285041e562c2e8703e54f1b8fdf9a84cd8084efbf06c1");
     }
 
     @Test

@@ -65,13 +65,13 @@ public final class ClusterFundsSmokeMain {
             submitApplied(client, command(productLine, sourceId + 1_000_000, seed, 1,
                     CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "BTC-USDT", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+                            "1", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
             submitApplied(client, command(productLine, sourceId, seed, userId, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", fundedUnits))));
             submitApplied(client, command(productLine, sourceId, seed + 1, userId, CoreMessageType.PLACE_ORDER,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
             var reserved = queryUser(client, productLine, sourceId, userId, seed + 2);
             var reservedBalance = reserved.balances().stream()
                     .filter(value -> value.asset().equals("USDT"))

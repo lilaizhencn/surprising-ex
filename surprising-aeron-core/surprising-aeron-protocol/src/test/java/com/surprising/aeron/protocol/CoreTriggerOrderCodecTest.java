@@ -11,7 +11,7 @@ class CoreTriggerOrderCodecTest {
     @Test
     void roundTripsTriggerOrderStateAndQueries() {
         CoreTriggerOrderStateView state = new CoreTriggerOrderStateView(501, ProductLine.LINEAR_PERPETUAL, 1001,
-                "tp-501", "oco-1", "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                "tp-501", "oco-1", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "追踪", 0, 0, 1_000, 1_000, 1,
@@ -21,7 +21,7 @@ class CoreTriggerOrderCodecTest {
                 .isEqualTo(CoreTriggerOrderCodec.encodeState(state).length);
         assertThat(CoreTriggerOrderCodec.decodeList(CoreTriggerOrderCodec.encodeList(List.of(state))))
                 .containsExactly(state);
-        CoreTriggerOrderQuery query = new CoreTriggerOrderQuery(0, "btc-usdt", 501, 10);
+        CoreTriggerOrderQuery query = new CoreTriggerOrderQuery(0, "1", 501, 10);
         assertThat(CoreTriggerOrderCodec.decodeQuery(CoreTriggerOrderCodec.encodeQuery(query))).isEqualTo(query);
         CoreTriggerOrderQuery expiryQuery = new CoreTriggerOrderQuery(0, "", 0, 10,
                 CoreTriggerOrderStatus.PENDING, 1_700_000_000_000L);
@@ -32,7 +32,7 @@ class CoreTriggerOrderCodecTest {
     @Test
     void rejectsTruncatedTriggerState() {
         CoreTriggerOrderStateView state = new CoreTriggerOrderStateView(501, ProductLine.LINEAR_PERPETUAL, 1001,
-                "", "", "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                "", "", "1", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.LESS_OR_EQUAL, 60_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1_000, 1_000, 1);
@@ -55,7 +55,7 @@ class CoreTriggerOrderCodecTest {
     @Test
     void materializesCreationTemplateWithClusterTime() {
         CoreTriggerOrderStateView template = new CoreTriggerOrderStateView(501,
-                ProductLine.LINEAR_PERPETUAL, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
+                ProductLine.LINEAR_PERPETUAL, 1001, "tp-501", "", "1", CoreOrderSide.SELL,
                 CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0,
                 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "command-id",

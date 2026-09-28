@@ -135,13 +135,13 @@ final class FundsReconciliation {
         }
         for (var position : state.positions()) {
             String asset = normalized(position.marginAsset(), "position asset");
-            String symbol = normalized(position.symbol(), "position symbol");
+            String instrumentId = normalized(position.instrumentId(), "position instrumentId");
             requireExpectedAsset(config, asset);
-            merge(actual, new StateKey(role, state.userId(), asset, symbol, Metric.POSITION_QUANTITY),
+            merge(actual, new StateKey(role, state.userId(), asset, instrumentId, Metric.POSITION_QUANTITY),
                     position.signedQuantitySteps());
-            merge(actual, new StateKey(role, state.userId(), asset, symbol, Metric.POSITION_MARGIN),
+            merge(actual, new StateKey(role, state.userId(), asset, instrumentId, Metric.POSITION_MARGIN),
                     position.positionMarginUnits());
-            merge(actual, new StateKey(role, state.userId(), asset, symbol, Metric.REALIZED_PNL),
+            merge(actual, new StateKey(role, state.userId(), asset, instrumentId, Metric.REALIZED_PNL),
                     position.realizedPnlUnits());
         }
         compareExact("account user=" + state.userId() + " role=" + role,
@@ -300,7 +300,7 @@ final class FundsReconciliation {
             long difference = Math.subtractExact(actualValue, expectedValue);
             if (difference != 0) {
                 throw new IllegalStateException(label + " metric=" + key.metric + " asset=" + key.asset
-                        + " symbol=" + key.symbol + " difference=" + difference);
+                        + " instrumentId=" + key.instrumentId + " difference=" + difference);
             }
         }
     }
@@ -434,7 +434,7 @@ final class FundsReconciliation {
         DONE
     }
 
-    record StateKey(Role role, long userId, String asset, String symbol, Metric metric)
+    record StateKey(Role role, long userId, String asset, String instrumentId, Metric metric)
             implements Comparable<StateKey> {
         static StateKey treasury(String asset, Metric metric) {
             return new StateKey(Role.TREASURY, 0, asset, "-", metric);
@@ -445,13 +445,13 @@ final class FundsReconciliation {
             int value = role.compareTo(other.role);
             if (value == 0) value = Long.compare(userId, other.userId);
             if (value == 0) value = asset.compareTo(other.asset);
-            if (value == 0) value = symbol.compareTo(other.symbol);
+            if (value == 0) value = instrumentId.compareTo(other.instrumentId);
             if (value == 0) value = metric.compareTo(other.metric);
             return value;
         }
 
         String encoded() {
-            return role + "|" + userId + "|" + asset + "|" + symbol + "|" + metric;
+            return role + "|" + userId + "|" + asset + "|" + instrumentId + "|" + metric;
         }
 
         static StateKey decode(String value) {
@@ -544,11 +544,11 @@ final class FundsReconciliation {
                     throw malformed(lineNumber, "invalid role/userId");
                 }
                 String asset = normalized(fields[3], "asset");
-                String symbol = fields[4].equals("-") ? "-" : normalized(fields[4], "symbol");
+                String instrumentId = fields[4].equals("-") ? "-" : normalized(fields[4], "instrumentId");
                 Metric metric = Metric.valueOf(fields[5].trim().toUpperCase(Locale.ROOT));
                 long delta = Long.parseLong(fields[6]);
-                validateMetric(role, symbol, metric, lineNumber);
-                merge(values, new StateKey(role, userId, asset, symbol, metric), delta);
+                validateMetric(role, instrumentId, metric, lineNumber);
+                merge(values, new StateKey(role, userId, asset, instrumentId, metric), delta);
             } catch (IllegalArgumentException exception) {
                 if (exception.getMessage() != null && exception.getMessage().startsWith("invalid ledger line")) {
                     throw exception;
@@ -557,13 +557,13 @@ final class FundsReconciliation {
             }
         }
 
-        private static void validateMetric(Role role, String symbol, Metric metric, int lineNumber) {
+        private static void validateMetric(Role role, String instrumentId, Metric metric, int lineNumber) {
             if (ACCOUNT_METRICS.contains(metric) && role == Role.TREASURY) {
                 throw malformed(lineNumber, "account metric requires USER or MAKER");
             }
             if ((metric == Metric.POSITION_QUANTITY || metric == Metric.POSITION_MARGIN
-                    || metric == Metric.REALIZED_PNL) == symbol.equals("-")) {
-                throw malformed(lineNumber, "position metrics require a symbol and other metrics require '-'");
+                    || metric == Metric.REALIZED_PNL) == instrumentId.equals("-")) {
+                throw malformed(lineNumber, "position metrics require a instrumentId and other metrics require '-'");
             }
             if ((TREASURY_METRICS.contains(metric) || metric == Metric.LIQUIDATION_INSURANCE
                     || metric == Metric.LIQUIDATION_ADL) && role != Role.TREASURY) {

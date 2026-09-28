@@ -115,7 +115,7 @@ public class OrderService {
     private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
         ProductLine productLine = currentProductLine();
         normalized = normalizePositionSemantics(normalized, productLine);
-        InstrumentRule instrument = orderValidator.currentRule(normalized.symbol()).orElse(null);
+        InstrumentRule instrument = orderValidator.currentRule(normalized.instrumentId()).orElse(null);
         ValidationResult validation = instrument == null
                 ? orderValidator.validate(normalized)
                 : orderValidator.validate(normalized, instrument);
@@ -223,12 +223,12 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String clientOrderId = normalizeClientOrderId(request.clientOrderId());
-        String symbol = normalizeSymbol(request.symbol());
+        String instrumentId = normalizeSymbol(request.instrumentId());
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
         ReduceOnlyPosition position = placementStateService.requireClosePosition(
-                productLine, request.userId(), symbol, marginMode, positionSide);
+                productLine, request.userId(), instrumentId, marginMode, positionSide);
         if (position.signedQuantitySteps() == 0L) {
             throw new IllegalStateException("open position not found");
         }
@@ -236,7 +236,7 @@ public class OrderService {
         PlaceOrderRequest closeOrder = new PlaceOrderRequest(
                 request.userId(),
                 clientOrderId,
-                symbol,
+                instrumentId,
                 closeSide,
                 OrderType.MARKET,
                 TimeInForce.IOC,
@@ -326,9 +326,9 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String symbol = request.symbol() == null || request.symbol().isBlank()
-                ? null : normalizeSymbol(request.symbol());
-        List<OrderResponse> open = activeOpenOrders(currentProductLine(), request.userId(), symbol, limit);
+        String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
+                ? null : normalizeSymbol(request.instrumentId());
+        List<OrderResponse> open = activeOpenOrders(currentProductLine(), request.userId(), instrumentId, limit);
         requireAeron();
         List<CancelOrderRequest> requests = open.stream()
                 .map(order -> new CancelOrderRequest(request.userId(), order.orderId()))
@@ -368,15 +368,15 @@ public class OrderService {
         return current;
     }
 
-    public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
-        return openOrders(userId, symbol, limit, null);
+    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
+        return openOrders(userId, instrumentId, limit, null);
     }
 
-    public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
-        return openOrders(userId, symbol, limit, cursor, null);
+    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
+        return openOrders(userId, instrumentId, limit, cursor, null);
     }
 
-    public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor,
+    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor,
                                          Long minExportSequence) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
@@ -384,11 +384,11 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         long beforeOrderId = decodeActiveOrderCursor(cursor);
         List<OrderResponse> orders = realtimeQueries==null ? requireAeron().openOrders(userId, normalizedSymbol, beforeOrderId, limit + 1)
                 : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
-                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.symbol()))
+                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->beforeOrderId==0 || v.orderId()<beforeOrderId)
                 .sorted(java.util.Comparator.comparingLong(com.surprising.aeron.protocol.CoreOrderStateView::orderId).reversed())
                 .limit(limit+1).map(AeronOrderCommandService::toOrder).toList();
@@ -399,25 +399,25 @@ public class OrderService {
         return new OrderQueryResponse(orders.size(), orders, nextCursor, hasMore, "createdAt.desc", limit);
     }
 
-    private List<OrderResponse> activeOpenOrders(ProductLine productLine, Long userId, String symbol,
+    private List<OrderResponse> activeOpenOrders(ProductLine productLine, Long userId, String instrumentId,
                                                  int limit) {
         if (productLine != currentProductLine()) {
             throw new IllegalArgumentException("product line does not match this order core");
         }
-        return requireAeron().openOrders(userId == null ? 0 : userId, symbol, 0, limit);
+        return requireAeron().openOrders(userId == null ? 0 : userId, instrumentId, 0, limit);
     }
 
     public OrderQueryResponse historyOrders(long userId,
-                                            String symbol,
+                                            String instrumentId,
                                             int limit,
                                             Long minimumOrderId,
                                             Long startTimeMillis,
                                             Long endTimeMillis) {
-        return historyOrders(userId, symbol, limit, minimumOrderId, startTimeMillis, endTimeMillis, null, null);
+        return historyOrders(userId, instrumentId, limit, minimumOrderId, startTimeMillis, endTimeMillis, null, null);
     }
 
     public OrderQueryResponse historyOrders(long userId,
-                                            String symbol,
+                                            String instrumentId,
                                             int limit,
                                             Long minimumOrderId,
                                             Long startTimeMillis,
@@ -438,28 +438,28 @@ public class OrderService {
         if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
             throw new IllegalArgumentException("startTime must not be after endTime");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return toQueryResponse(requireProjection().historyOrders(currentProductLine(), userId, normalizedSymbol,
                 limit, minimumOrderId, startTimeMillis, endTimeMillis, cursor, minExportSequence),
                 "createdAt.desc", limit);
     }
 
-    public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
-        return adminOrders(userId, symbol, status, orderId, limit, null, null, null);
+    public OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId, int limit) {
+        return adminOrders(userId, instrumentId, status, orderId, limit, null, null, null);
     }
 
     public OrderQueryResponse adminOrders(Long userId,
-                                          String symbol,
+                                          String instrumentId,
                                           String status,
                                           Long orderId,
                                           int limit,
                                           String cursor,
                                           String sort) {
-        return adminOrders(userId, symbol, status, orderId, limit, cursor, sort, null);
+        return adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort, null);
     }
 
     public OrderQueryResponse adminOrders(Long userId,
-                                          String symbol,
+                                          String instrumentId,
                                           String status,
                                           Long orderId,
                                           int limit,
@@ -475,7 +475,7 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         OrderStatus normalizedStatus = status == null || status.isBlank()
                 ? null
                 : OrderStatus.valueOf(status.trim().toUpperCase());
@@ -499,7 +499,7 @@ public class OrderService {
         requireAeron();
         OrderResponse canceled = aeronOrders.cancel(selected.userId(), selected.orderId());
         boolean requested = cancelSucceeded(canceled.status());
-        return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
+        return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.instrumentId(),
                 canceled.status(), requested, requested ? "cancel requested" : "order is already "
                 + canceled.status().name(), canceled);
     }
@@ -513,9 +513,9 @@ public class OrderService {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String symbol = request == null || request.symbol() == null || request.symbol().isBlank()
+        String instrumentId = request == null || request.instrumentId() == null || request.instrumentId().isBlank()
                 ? null
-                : normalizeSymbol(request.symbol());
+                : normalizeSymbol(request.instrumentId());
         int limit = request == null || request.limit() == null ? 100 : request.limit();
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
@@ -523,7 +523,7 @@ public class OrderService {
         String reason = adminCancelReason(request == null ? null : request.reason());
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
         requireCurrentProductLine(resolved);
-        List<OrderResponse> selected = activeOpenOrders(resolved, userId, symbol, limit);
+        List<OrderResponse> selected = activeOpenOrders(resolved, userId, instrumentId, limit);
         requireAeron();
         List<CancelOrderRequest> requests = selected.stream()
                 .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
@@ -536,7 +536,7 @@ public class OrderService {
                     boolean requested = item.success() && cancelSucceeded(order.status());
                     String message = requested ? "cancel completed"
                             : item.success() ? "order is already " + order.status().name() : item.message();
-                    return new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
+                    return new AdminCancelOrderResult(order.orderId(), order.userId(), order.instrumentId(),
                             order.status(), requested, message, order);
                 })
                 .toList();
@@ -544,19 +544,19 @@ public class OrderService {
         return new AdminCancelOrdersResponse(selected.size(), canceledCount, selected.size() - canceledCount, results);
     }
 
-    public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String symbol, int limit) {
-        return adminCancelPreview(userId, symbol, limit, null);
+    public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String instrumentId, int limit) {
+        return adminCancelPreview(userId, instrumentId, limit, null);
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(
-            Long userId, String symbol, int limit, ProductLine productLine) {
+            Long userId, String instrumentId, int limit, ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
         List<OrderResponse> orders = activeOpenOrders(resolvedProductLine, userId, normalizedSymbol, limit);
         long quantity = orders.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
@@ -573,16 +573,16 @@ public class OrderService {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
         }
-        String symbol = normalizeSymbol(request.symbol());
-        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, symbol, request.limit(), request.reason()),
+        String instrumentId = normalizeSymbol(request.instrumentId());
+        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, instrumentId, request.limit(), request.reason()),
                 productLine);
     }
 
     /**
      * 到期生命周期只发起撤单，最终状态仍由撮合结果驱动。
      */
-    public int requestLifecycleCancellation(String symbol, int limit) {
-        String normalizedSymbol = normalizeSymbol(symbol);
+    public int requestLifecycleCancellation(String instrumentId, int limit) {
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         List<OrderResponse> selected = requireAeron().lifecycleOpenOrders(normalizedSymbol, limit);
         List<CancelOrderRequest> requests = selected.stream()
                 .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
@@ -592,8 +592,8 @@ public class OrderService {
                 .count();
     }
 
-    public boolean hasLifecycleActiveOrders(String symbol) {
-        return !requireAeron().lifecycleOpenOrders(normalizeSymbol(symbol), 1).isEmpty();
+    public boolean hasLifecycleActiveOrders(String instrumentId) {
+        return !requireAeron().lifecycleOpenOrders(normalizeSymbol(instrumentId), 1).isEmpty();
     }
 
     private AeronOrderProjectionRepository requireProjection() {
@@ -757,13 +757,13 @@ public class OrderService {
             throw new IllegalArgumentException("priceTicks must be non-negative and quantitySteps must be positive");
         }
         String clientOrderId = normalizeClientOrderId(request.clientOrderId());
-        String symbol = normalizeSymbol(request.symbol());
-        long priceTicks = resolveLimitPrice(request, symbol);
+        String instrumentId = normalizeSymbol(request.instrumentId());
+        long priceTicks = resolveLimitPrice(request, instrumentId);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         return new PlaceOrderRequest(
                 request.userId(),
                 clientOrderId,
-                symbol,
+                instrumentId,
                 request.side(),
                 request.orderType(),
                 request.timeInForce(),
@@ -775,7 +775,7 @@ public class OrderService {
                 request.postOnly());
     }
 
-    private long resolveLimitPrice(PlaceOrderRequest request, String symbol) {
+    private long resolveLimitPrice(PlaceOrderRequest request, String instrumentId) {
         var mode = request.bboPriceMode();
         if (mode == null) return request.priceTicks();
         if (request.orderType() != OrderType.LIMIT || request.priceTicks() != 0) {
@@ -785,7 +785,7 @@ public class OrderService {
         boolean buyBook = (request.side() == OrderSide.BUY) == mode.sameSide();
         var bookSide = buyBook ? com.surprising.aeron.protocol.CoreOrderSide.BUY
                 : com.surprising.aeron.protocol.CoreOrderSide.SELL;
-        var book = bboOrderBook.orderBook(new com.surprising.aeron.protocol.CoreOrderBookQuery(symbol, mode.depth()));
+        var book = bboOrderBook.orderBook(new com.surprising.aeron.protocol.CoreOrderBookQuery(instrumentId, mode.depth()));
         // Core book views do not promise iteration order: rank distinct live price levels explicitly.
         var prices = book.levels().stream()
                 .filter(level -> level.side() == bookSide && level.quantitySteps() > 0 && level.priceTicks() > 0)
@@ -837,7 +837,7 @@ public class OrderService {
         return new PlaceOrderRequest(
                 request.userId(),
                 request.clientOrderId(),
-                request.symbol(),
+                request.instrumentId(),
                 request.side(),
                 request.orderType(),
                 request.timeInForce(),
@@ -849,13 +849,13 @@ public class OrderService {
                 request.postOnly());
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase();
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

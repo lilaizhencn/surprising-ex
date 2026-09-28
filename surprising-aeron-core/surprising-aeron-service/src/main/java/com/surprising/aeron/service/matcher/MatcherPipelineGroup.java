@@ -8,7 +8,7 @@ import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 /**
- * Partition-local synchronous matcher workers. A stable symbol route selects exactly one SPSC queue;
+ * Partition-local synchronous matcher workers. A stable instrumentId route selects exactly one SPSC queue;
  * completion lookup uses that route and never waits for another shard's queue head.
  */
 public final class MatcherPipelineGroup implements AutoCloseable {

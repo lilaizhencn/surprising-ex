@@ -33,22 +33,22 @@ public final class PositionUserIndex {
         rebuild(state, identities);
     }
 
-    public NavigableSet<Long> users(String symbol) {
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public NavigableSet<Long> users(String instrumentId) {
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (lanes == null) return Collections.emptyNavigableSet();
         TreeSet<Long> sorted = new TreeSet<>();
         for (LongArrayList users : lanes) users.forEach(sorted::add);
         return Collections.unmodifiableNavigableSet(sorted);
     }
 
-    public Long higherUser(String symbol, long cursorUserId) {
-        long higher = higherUserId(symbol, cursorUserId);
+    public Long higherUser(String instrumentId, long cursorUserId) {
+        long higher = higherUserId(instrumentId, cursorUserId);
         return higher == 0 ? null : higher;
     }
 
     /** Returns zero at end; the online risk path stays primitive and allocation-free. */
-    public long higherUserId(String symbol, long cursorUserId) {
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+    public long higherUserId(String instrumentId, long cursorUserId) {
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (lanes == null) return 0;
         long higher = 0;
         for (LongArrayList users : lanes) {
@@ -59,11 +59,11 @@ public final class PositionUserIndex {
     }
 
     /** Returns the next user owned by one Account Lane without inspecting other lanes. */
-    public long higherUserId(String symbol, int accountLaneId, long cursorUserId) {
+    public long higherUserId(String instrumentId, int accountLaneId, long cursorUserId) {
         if (accountLaneId < 0 || accountLaneId >= topology.accountLaneCount()) {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return lanes == null ? 0 : higherUserId(lanes[accountLaneId], cursorUserId);
     }
 
@@ -76,14 +76,14 @@ public final class PositionUserIndex {
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
         if (previous != null && current != null && previous.userId() == current.userId()
-                && previous.symbol().equals(current.symbol())) return;
+                && previous.instrumentId().equals(current.instrumentId())) return;
         if (previous != null) removePosition(previous);
         if (current != null) addPosition(current);
     }
 
     /** Bounded online pagination: merges existing primitive Lane indexes without a full TreeSet copy. */
-    public Iterable<Long> usersAfter(String symbol, long afterUserId) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+    public Iterable<Long> usersAfter(String instrumentId, long afterUserId) {
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         return () -> new java.util.Iterator<>() {
             private long next = higherUserId(normalized, afterUserId);
             public boolean hasNext() { return next != 0; }
@@ -114,39 +114,39 @@ public final class PositionUserIndex {
 
     private void addPosition(RuntimePositionIndexValue position) {
         LongIntHashMap counts = positionCountsBySymbol.computeIfAbsent(
-                position.symbol(), ignored -> new LongIntHashMap());
+                position.instrumentId(), ignored -> new LongIntHashMap());
         int count = counts.addToValue(position.userId(), 1);
-        if (count == 1) add(position.symbol(), position.userId());
+        if (count == 1) add(position.instrumentId(), position.userId());
     }
 
     private void removePosition(RuntimePositionIndexValue position) {
-        LongIntHashMap counts = positionCountsBySymbol.get(position.symbol());
+        LongIntHashMap counts = positionCountsBySymbol.get(position.instrumentId());
         if (counts == null) throw new IllegalStateException("position user count is missing");
         int count = counts.addToValue(position.userId(), -1);
         if (count == 0) {
             counts.removeKey(position.userId());
-            if (counts.isEmpty()) positionCountsBySymbol.remove(position.symbol());
-            remove(position.symbol(), position.userId());
+            if (counts.isEmpty()) positionCountsBySymbol.remove(position.instrumentId());
+            remove(position.instrumentId(), position.userId());
         } else if (count < 0) throw new IllegalStateException("negative position user count");
     }
 
-    private void add(String symbol, long userId) {
-        LongArrayList[] lanes = usersBySymbol.computeIfAbsent(symbol, ignored -> newLaneLists());
+    private void add(String instrumentId, long userId) {
+        LongArrayList[] lanes = usersBySymbol.computeIfAbsent(instrumentId, ignored -> newLaneLists());
         LongArrayList users = lanes[topology.accountLaneId(userId)];
         int index = users.binarySearch(userId);
         if (index >= 0) return;
         users.addAtIndex(-index - 1, userId);
     }
 
-    private void remove(String symbol, long userId) {
-        LongArrayList[] lanes = usersBySymbol.get(symbol);
+    private void remove(String instrumentId, long userId) {
+        LongArrayList[] lanes = usersBySymbol.get(instrumentId);
         if (lanes == null) return;
         LongArrayList users = lanes[topology.accountLaneId(userId)];
         int index = users.binarySearch(userId);
         if (index >= 0) users.removeAtIndex(index);
         boolean empty = true;
         for (LongArrayList lane : lanes) empty &= lane.isEmpty();
-        if (empty) usersBySymbol.remove(symbol);
+        if (empty) usersBySymbol.remove(instrumentId);
     }
 
     private LongArrayList[] newLaneLists() {

@@ -72,6 +72,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
         applicationContext.registerBean(CustodyWithdrawalRepository.class);
         applicationContext.registerBean(CustodyWithdrawalRefundService.class);
         applicationContext.registerBean(CustodyWithdrawalReconciliationService.class);
+        applicationContext.registerBean(com.surprising.asset.service.AssetConfigurationService.class,
+                () -> Mockito.mock(com.surprising.asset.service.AssetConfigurationService.class));
         applicationContext.registerBean(CustodyWithdrawalService.class);
         applicationContext.refresh();
         repository = applicationContext.getBean(CustodyWithdrawalRepository.class);

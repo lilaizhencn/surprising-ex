@@ -33,7 +33,7 @@ public class InstrumentLifecycleDrainConsumer {
             }
             InstrumentLifecycleDrainEvent event =
                     objectMapper.readValue(record.value(), InstrumentLifecycleDrainEvent.class);
-            if (!event.symbol().equals(record.key())) {
+            if (!event.instrumentId().equals(record.key())) {
                 throw new IllegalArgumentException("生命周期清理事件必须使用 symbol 作为 Kafka key");
             }
             readinessService.acknowledge(event);

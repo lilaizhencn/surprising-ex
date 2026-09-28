@@ -38,7 +38,7 @@ public class OwnerPublicationBenchmark {
     @Setup public void setup() {
         var instrument = com.surprising.aeron.service.state.instrument.CoreInstrument.from(
                 com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("BTC-USDT",
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
                         com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         for (int i = 0; i < users.length; i++) {

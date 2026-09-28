@@ -50,7 +50,8 @@ export RUNTIME_ROOT="$LOCAL_DIR/runtime" RUN_ID=local-perpetual POSTGRES_MODE=na
 export CORE_AERON_BASE_DIR="$LOCAL_DIR/core-driver" APP_AERON_DIR="$LOCAL_DIR/app-driver"
 export GATEWAY_PRODUCT_TRANSFER_ENABLED=false
 export LOCAL_SIMULATED_TRADES_ENABLED="${LOCAL_SIMULATED_TRADES_ENABLED:-${MANAGE_POSTGRES:-false}}"
-export PRICE_CONSUMER_REQUIRED_SYMBOLS="${PRICE_CONSUMER_REQUIRED_SYMBOLS:-$(paste -sd, "$ROOT/deployment/local-perpetual/symbols.txt")}"
+[[ ! -f "$LOCAL_DIR/market-ids.env" ]] || source "$LOCAL_DIR/market-ids.env"
+export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS MM_INSTRUMENT_ID
 export MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-1000}"
 export MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-50}"
 export MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL="${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:-100}"
@@ -135,7 +136,7 @@ case "$ACTION" in
     done
     # HTTP health alone does not prove the restarted Core has finished replay.
     curl --fail --silent --max-time 5 -H 'X-Product-Line: LINEAR_PERPETUAL' \
-      'http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT-SWAP&depth=1' \
+      "http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?instrumentId=$MM_INSTRUMENT_ID&depth=1" \
       >/dev/null || fail 'Core query unavailable: process may still be recovering; inspect core-node0.log'
     for name in postgres redis kafka frontend checkpoints; do
       if alive "$name"; then echo "$name=RUNNING"; else echo "$name=STOPPED_OR_EXTERNAL"; fi
@@ -203,7 +204,9 @@ else
   fi
   cp "$ROOT/deployment/local-perpetual/logback.xml" "$LOCAL_DIR/logback.xml"
   export LOGGING_CONFIG="file:$LOCAL_DIR/logback.xml"
-  cp "$ROOT/deployment/local-perpetual/application-local.yml" "$LOCAL_DIR/application-local.yml"
+  python3 "$ROOT/scripts/render-local-market-ids.py" "$LOCAL_DIR"
+  source "$LOCAL_DIR/market-ids.env"
+  export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS MM_INSTRUMENT_ID
   export SPRING_CONFIG_ADDITIONAL_LOCATION="file:$LOCAL_DIR/application-local.yml"
   if [[ "${MANAGE_REDIS:-false}" == true ]] && ! alive redis; then
     [[ "$VALKEY_HOST" == 127.0.0.1 ]] || fail 'managed Redis must bind localhost'
@@ -241,7 +244,8 @@ KAFKA
   wait_port "$POSTGRES_HOST" "$POSTGRES_PORT"
   wait_port "$VALKEY_HOST" "$VALKEY_PORT"
   wait_port "${KAFKA_BOOTSTRAP_SERVERS%:*}" "${KAFKA_BOOTSTRAP_SERVERS##*:}"
-  if [[ ! -f "$ROOT/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar" ]]; then build; fi
+  # Rebuild incrementally before staging; an existing JAR does not prove it matches this checkout.
+  build
   if [[ "$(uname)" == Darwin ]]; then start awake /bin/bash -c '/usr/bin/caffeinate -is & wait' "$LOCAL_DIR"; fi
   # launchd cannot reliably read a checkout under macOS Desktop privacy protection.
   # Stage exactly the built artifacts, keeping the same module-relative paths.

@@ -13,17 +13,17 @@ public class IndexPriceSequenceRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public long next(String module, String symbol) {
+    public long next(String module, String instrumentId) {
         Long sequence = jdbcTemplate.queryForObject("""
-                INSERT INTO price_symbol_sequences (module, symbol, sequence, updated_at)
+                INSERT INTO price_symbol_sequences (module, instrument_id, sequence, updated_at)
                 VALUES (?, ?, 1, now())
-                ON CONFLICT (module, symbol) DO UPDATE SET
+                ON CONFLICT (module, instrument_id) DO UPDATE SET
                     sequence = price_symbol_sequences.sequence + 1,
                     updated_at = now()
                 RETURNING sequence
-                """, Long.class, module, symbol);
+                """, Long.class, module, instrumentId);
         if (sequence == null) {
-            throw new IllegalStateException("Failed to allocate sequence for " + module + ":" + symbol);
+            throw new IllegalStateException("Failed to allocate sequence for " + module + ":" + instrumentId);
         }
         return sequence;
     }

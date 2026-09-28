@@ -44,7 +44,7 @@ public final class RuntimeOrderAdmission {
         String excludedSymbol = null;
         if (excludedOrderId != 0) {
             OrderRuntime excluded = runtime.order(excludedOrderId);
-            if (excluded != null) excludedSymbol = identities.symbol(excluded.symbolId());
+            if (excluded != null) excludedSymbol = identities.instrumentId(excluded.symbolId());
         }
         return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
                 excludedOrderId, identity.clientKey(), identity.symbolId(), identity.positionKey(),
@@ -101,7 +101,7 @@ public final class RuntimeOrderAdmission {
         if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrument instrument = runtime.instrument(order.symbol());
+        CoreInstrument instrument = runtime.instrument(order.instrumentId());
         if (instrument == null || instrument != order.instrument()) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }
@@ -117,13 +117,13 @@ public final class RuntimeOrderAdmission {
         PositionRuntime position = positionKey == 0 ? null : runtime.position(positionKey);
         OrderRuntime excluded = excludedOrderId == 0 ? null : runtime.order(excludedOrderId);
         if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
-                || !order.symbol().equals(excludedSymbol))) {
+                || !order.instrumentId().equals(excludedSymbol))) {
             throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
         }
         CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
                 ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
         AdmissionSummary admissionSummary = activeOrders.inspect(
-                userId, order.symbol(), order.positionSide(), order.side(), conflictingMode);
+                userId, order.instrumentId(), order.positionSide(), order.side(), conflictingMode);
         validatePositionIdentity(
                 positionMode, position, order, admissionSummary, conflictingMode, excluded);
         validateReduceOnly(runtime.productLine().isDerivative(), position, order,
@@ -255,7 +255,7 @@ public final class RuntimeOrderAdmission {
             TradingRuntimeState runtime, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
         if (!runtime.productLine().isDerivative()) return instrument.maxLeveragePpm();
-        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));
+        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.instrumentId(), order.marginMode()));
         return configured == null ? instrument.maxLeveragePpm() : configured;
     }
 

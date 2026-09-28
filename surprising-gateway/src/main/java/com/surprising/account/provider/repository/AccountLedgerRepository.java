@@ -53,7 +53,7 @@ public class AccountLedgerRepository {
         args.add(safeLimit + 1);
         List<AccountLedgerEntryResponse> rows = jdbcTemplate.query("""
                 SELECT entry_id, user_id, asset, amount_units, balance_after_units, reference_type,
-                       reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
+                       reference_id, reason, trade_id, order_id, instrument_id, fee_rate_ppm, created_at
                   FROM account_ledger_entries
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR asset = ?)
@@ -74,7 +74,7 @@ public class AccountLedgerRepository {
                         rs.getString("reason"),
                         nullableLong(rs, "trade_id"),
                         nullableLong(rs, "order_id"),
-                        rs.getString("symbol"),
+                        rs.getString("instrument_id"),
                         nullableLong(rs, "fee_rate_ppm"),
                         rs.getTimestamp("created_at").toInstant()), args.toArray());
         return AdminCursorPage.page(rows, safeLimit, sortSpec, AccountLedgerEntryResponse::createdAt,

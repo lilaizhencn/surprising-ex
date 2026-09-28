@@ -40,15 +40,15 @@ class InstrumentValidatorTest {
     @Test
     void rejectsSpotInstrumentWithPerpetualContractType() {
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
-                "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.LINEAR_PERPETUAL, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT"), List.of("GTC", "IOC"),
                 true, false, false, 1_000_000L, 1_000_000L,
                 1L, 200L, 500L, 1L,
                 0L, 1L, 1, 0L,
                 0L, 0L, 1L,
-                1, null, null, null, null, null, null, null,
+                1, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null, List.of(), List.of());
 
         assertThatThrownBy(() -> validator.validate(request))
@@ -59,15 +59,15 @@ class InstrumentValidatorTest {
     @Test
     void rejectsSpotInstrumentWithReduceOnlyEnabled() {
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
-                "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT"), List.of("GTC", "IOC"),
                 true, true, false, 1_000_000L, 1_000_000L,
                 1L, 200L, 500L, 1L,
                 0L, 1L, 0, 0L,
                 0L, 0L, 1L,
-                1, null, null, null, null, null, null, null,
+                1, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null, List.of(), List.of());
 
         assertThatThrownBy(() -> validator.validate(request))
@@ -117,7 +117,7 @@ class InstrumentValidatorTest {
     void rejectsOptionInstrumentWithoutStrikePrice() {
         InstrumentUpsertRequest request = expiringDerivativeRequest("BTC-USDT-260327-50000-C",
                 InstrumentType.OPTION, ContractType.VANILLA_OPTION, expiry(), expiry().plusSeconds(300),
-                "BTC-USDT", null, OptionType.CALL, ContractSettlementMethod.CASH);
+                "1", null, OptionType.CALL, ContractSettlementMethod.CASH);
 
         assertThatThrownBy(() -> validator.validate(request))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -127,15 +127,15 @@ class InstrumentValidatorTest {
     @Test
     void rejectsNonPerpetualFundingSettings() {
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
-                "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT"), List.of("GTC", "IOC"),
                 true, false, false, 1_000_000L, 1_000_000L,
                 1L, 200L, 500L, 1L,
                 0L, 1L, 8, 100L,
                 0L, 0L, 1L,
-                1, null, null, null, null, null, null, null,
+                1, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null, List.of(), List.of());
 
         assertThatThrownBy(() -> validator.validate(request))
@@ -145,15 +145,15 @@ class InstrumentValidatorTest {
 
     private InstrumentUpsertRequest request(List<IndexSourceConfig> sources, int minValidSources) {
         return new InstrumentUpsertRequest(
-                "BTC-USDT", InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT", InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT", "MARKET"), List.of("GTC", "IOC"),
                 true, true, true, 100_000_000L, 10_000L,
                 5_000L, 200L, 500L, 500_000_000_000_000L,
                 300_000L, 25_000_000_000_000L, 8, 100L,
                 3_000L, -3_000L, 1_000_000_000_000L,
-                minValidSources, null, null, null, null, null, null, null,
+                minValidSources, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null,
                 List.of(new RiskLimitBracket(1, 0L, 5_000_000_000_000L,
                         100_000_000L, 10_000L, 5_000L)),
@@ -162,15 +162,15 @@ class InstrumentValidatorTest {
 
     private InstrumentUpsertRequest spotRequest() {
         return new InstrumentUpsertRequest(
-                "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT-SPOT", InstrumentType.SPOT, ContractType.SPOT, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT"), List.of("GTC", "IOC"),
                 true, false, false, 1_000_000L, 1_000_000L,
                 1L, 200L, 500L, 1L,
                 0L, 1L, 0, 0L,
                 0L, 0L, 1L,
-                1, null, null, null, null, null, null, null,
+                1, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null, List.of(), List.of());
     }
 
@@ -183,7 +183,7 @@ class InstrumentValidatorTest {
     private InstrumentUpsertRequest optionRequest() {
         return expiringDerivativeRequest("BTC-USDT-260327-50000-C", InstrumentType.OPTION,
                 ContractType.VANILLA_OPTION, expiry(), expiry().plusSeconds(300),
-                "BTC-USDT", 50_000_000_000L, OptionType.CALL, ContractSettlementMethod.CASH);
+                "1", 50_000_000_000L, OptionType.CALL, ContractSettlementMethod.CASH);
     }
 
     private InstrumentUpsertRequest expiringDerivativeRequest(String symbol,
@@ -191,20 +191,20 @@ class InstrumentValidatorTest {
                                                               ContractType contractType,
                                                               Instant expiryTime,
                                                               Instant deliveryTime,
-                                                              String underlyingSymbol,
+                                                              String underlyingInstrumentId,
                                                               Long strikePriceUnits,
                                                               OptionType optionType,
                                                               ContractSettlementMethod settlementMethod) {
         return new InstrumentUpsertRequest(
-                symbol, instrumentType, contractType, "BTC", "USDT", "USDT",
-                1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, symbol, instrumentType, contractType, 3, 1, 1,
+                1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT", "MARKET"), List.of("GTC", "IOC"),
                 true, true, true, 100_000_000L, 10_000L,
                 5_000L, 200L, 500L, 500_000_000_000_000L,
                 300_000L, 25_000_000_000_000L, 0, 0L,
                 0L, 0L, 1_000_000_000_000L,
-                2, expiryTime, deliveryTime, underlyingSymbol, strikePriceUnits, optionType,
+                2, expiryTime, deliveryTime, underlyingInstrumentId, underlyingInstrumentId == null ? null : com.surprising.product.api.ProductLine.SPOT, strikePriceUnits, optionType,
                 optionType == null ? null : OptionExerciseStyle.EUROPEAN, settlementMethod,
                 InstrumentStatus.PRE_TRADING, null,
                 List.of(new RiskLimitBracket(1, 0L, 5_000_000_000_000L,

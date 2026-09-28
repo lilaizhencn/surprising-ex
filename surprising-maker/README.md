@@ -40,7 +40,7 @@ curl -X POST 'http://localhost:9096/api/v1/market-maker/strategies/btc-usdt-mm-a
 curl -X POST 'http://localhost:9096/api/v1/market-maker/run-once' \
   -H 'X-Trace-Id: trace-mm-manual-1' \
   -H 'Content-Type: application/json' \
-  -d '{"strategyId":"btc-usdt-mm-a","symbol":"BTC-USDT"}'
+  -d '{"strategyId":"btc-usdt-mm-a","instrumentId":"604"}'
 ```
 
 后台管理 API 使用独立 admin path，必须由 gateway 注入管理员身份头：
@@ -129,26 +129,26 @@ surprising:
       sources:
         - name: BINANCE_USDM
           enabled: true
-          symbol: BTC-USDT
+          instrument-id: "604"
           external-symbol: BTCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
-          symbol: BTC-USDT
+          instrument-id: "604"
           external-symbol: BTC-USDT-SWAP
-          url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
+          url: https://www.okx.com/api/v5/market/books?instId={externalSymbol}&sz=20
           parser: OKX_BOOKS
           websocket-url: wss://ws.okx.com:8443/ws/v5/public
           websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
           websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
           enabled: true
-          symbol: BTC-USDT
+          instrument-id: "604"
           external-symbol: BTCUSDT
-          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
+          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={externalSymbol}&limit=50
           parser: BYBIT_ORDERBOOK
           websocket-url: wss://stream.bybit.com/v5/public/linear
           websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
@@ -157,14 +157,14 @@ surprising:
       - strategy-id: btc-usdt-mm-a
         enabled: true
         account-ids: [900001, 900002]
-        symbols: [BTC-USDT]
+        instrument-ids: ["604"]
         base-quantity-steps: 10
         margin-mode: CROSS
 ```
 
 ## 报价机制
 
-每个 `strategyId + symbol` 的流程：
+每个 `strategyId + instrumentId` 的流程：
 
 1. 如果开启多节点协调，先在 PostgreSQL 的 `market_maker_strategy_leases` 获取租约。
 2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
@@ -181,7 +181,7 @@ surprising:
 
 ## 多节点部署
 
-可以多节点部署同一份配置。租约 key 是 `strategyId + symbol`，同一个策略的同一个合约同一时间只会由一个节点报价。生产环境建议配置稳定的 `node-id`，方便排查日志和租约。
+可以多节点部署同一份配置。租约 key 是 `strategyId + instrumentId`，同一个策略的同一个合约同一时间只会由一个节点报价。生产环境建议配置稳定的 `node-id`，方便排查日志和租约。
 
 如果要跑多个做市商账号，可以使用同一个策略的多个 `account-ids`，也可以拆成多个策略。不要让多个策略同时控制同一个账号和合约，除非库存上限已经按合并风险设计。
 

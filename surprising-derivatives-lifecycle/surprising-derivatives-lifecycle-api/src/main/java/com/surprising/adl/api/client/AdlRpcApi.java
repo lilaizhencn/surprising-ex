@@ -21,6 +21,6 @@ public interface AdlRpcApi {
     @GetMapping("/events")
     AdlEventQueryResponse events(@RequestParam(value = "userId", required = false) Long userId,
                                  @RequestParam(value = "asset", required = false) String asset,
-                                 @RequestParam(value = "symbol", required = false) String symbol,
+                                 @RequestParam(value = "instrumentId", required = false) String instrumentId,
                                  @RequestParam(value = "limit", defaultValue = "100") int limit);
 }

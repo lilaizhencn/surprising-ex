@@ -20,13 +20,13 @@ public final class RealtimeFrameCodec {
             throw new IllegalArgumentException("invalid realtime frame");
         }
         String entityId = Long.toString(order.orderId());
-        int symbolLength = CoreStateQueryCodec.utf8Length(order.symbol());
+        int symbolLength = CoreStateQueryCodec.utf8Length(order.instrumentId());
         int length = Math.addExact(64, Math.addExact(payloadLength, symbolLength + entityId.length()));
         if (length > MAX_FRAME_BYTES) throw new IllegalArgumentException("realtime frame too large");
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         output.putInt(MAGIC).putInt(1).putInt(order.productLine().ordinal()).putInt(RealtimeFrame.Kind.ORDER.ordinal());
         output.putLong(order.userId()).putLong(sequence).putInt(ordinal).putLong(timestamp).putLong(snapshotId);
-        CoreStateQueryCodec.putText(output, order.symbol(), false);
+        CoreStateQueryCodec.putText(output, order.instrumentId(), false);
         CoreStateQueryCodec.putText(output, entityId, false);
         output.putInt(payloadLength);
         CoreStateQueryCodec.writeOrderState(output, order);
@@ -34,7 +34,7 @@ public final class RealtimeFrameCodec {
     }
     public static byte[] encode(RealtimeFrame frame) {
         return encode(frame.productLine(), frame.kind(), frame.userId(), frame.sequence(), frame.ordinal(),
-                frame.timestamp(), frame.snapshotId(), frame.symbol(), frame.entityId(), frame.payloadUnsafe());
+                frame.timestamp(), frame.snapshotId(), frame.instrumentId(), frame.entityId(), frame.payloadUnsafe());
     }
 
     /** Copies the payload directly into the returned envelope, retaining no caller-owned data. */
@@ -45,16 +45,16 @@ public final class RealtimeFrameCodec {
                 || timestamp < 0 || snapshotId < 0 || symbolValue == null || entityId == null || payload == null) {
             throw new IllegalArgumentException("invalid realtime frame");
         }
-        byte[] symbol = symbolValue.getBytes(StandardCharsets.UTF_8);
+        byte[] instrumentId = symbolValue.getBytes(StandardCharsets.UTF_8);
         byte[] entity = entityId.getBytes(StandardCharsets.UTF_8);
-        int length = Math.addExact(64, Math.addExact(symbol.length, Math.addExact(entity.length, payload.length)));
-        if (symbol.length > 128 || entity.length > 256 || length > MAX_FRAME_BYTES)
+        int length = Math.addExact(64, Math.addExact(instrumentId.length, Math.addExact(entity.length, payload.length)));
+        if (instrumentId.length > 128 || entity.length > 256 || length > MAX_FRAME_BYTES)
             throw new IllegalArgumentException("realtime frame too large");
         ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         b.putInt(MAGIC).putInt(1).putInt(productLine.ordinal()).putInt(kind.ordinal());
         b.putLong(userId).putLong(sequence).putInt(ordinal);
         b.putLong(timestamp).putLong(snapshotId);
-        put(b, symbol); put(b, entity); put(b, payload);
+        put(b, instrumentId); put(b, entity); put(b, payload);
         return b.array();
     }
     public static RealtimeFrame decode(byte[] bytes) {
@@ -68,12 +68,12 @@ public final class RealtimeFrameCodec {
                 throw new IllegalArgumentException("invalid realtime identity");
             long user = b.getLong(), sequence = b.getLong(); int ordinal = b.getInt();
             long time = b.getLong(), snapshot = b.getLong();
-            String symbol = new String(get(b,128), StandardCharsets.UTF_8);
+            String instrumentId = new String(get(b,128), StandardCharsets.UTF_8);
             String entity = new String(get(b,256), StandardCharsets.UTF_8);
             byte[] payload = get(b, MAX_FRAME_BYTES);
             if (b.hasRemaining()) throw new IllegalArgumentException("trailing realtime bytes");
             return new RealtimeFrame(ProductLine.values()[product], RealtimeFrame.Kind.values()[kind], user,
-                    sequence, ordinal, time, snapshot, symbol, entity, payload);
+                    sequence, ordinal, time, snapshot, instrumentId, entity, payload);
         } catch (java.nio.BufferUnderflowException e) {
             throw new IllegalArgumentException("truncated realtime frame", e);
         }

@@ -27,8 +27,8 @@ public class InstrumentRepository {
 
     private static final String INSERT_INSTRUMENT_SQL = """
             INSERT INTO instruments (
-                symbol, change_id, last_change_id, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
-                contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
+                instrument_id, symbol, change_id, last_change_id, instrument_type, contract_type, base_asset_id, quote_asset_id, settle_asset_id,
+                contract_multiplier_ppm, contract_value_asset_id, price_tick_units, quantity_step_units,
                 min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
                 notional_multiplier_units,
                 price_precision, quantity_precision, supported_order_types, supported_time_in_force,
@@ -38,11 +38,11 @@ public class InstrumentRepository {
                 user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
                 funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
                 impact_notional_units, min_valid_index_sources,
-                expiry_time, delivery_time, underlying_symbol, strike_price_units,
+                expiry_time, delivery_time, underlying_instrument_id, underlying_product_line, strike_price_units,
                 option_type, option_exercise_style, settlement_method,
                 status, effective_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(contract_type,symbol) DO UPDATE SET change_id=EXCLUDED.change_id, last_change_id=EXCLUDED.last_change_id, instrument_type=EXCLUDED.instrument_type, base_asset=EXCLUDED.base_asset, quote_asset=EXCLUDED.quote_asset, settle_asset=EXCLUDED.settle_asset, contract_multiplier_ppm=EXCLUDED.contract_multiplier_ppm, contract_value_asset=EXCLUDED.contract_value_asset, price_tick_units=EXCLUDED.price_tick_units, quantity_step_units=EXCLUDED.quantity_step_units, min_quantity_steps=EXCLUDED.min_quantity_steps, max_quantity_steps=EXCLUDED.max_quantity_steps, min_notional_units=EXCLUDED.min_notional_units, max_notional_units=EXCLUDED.max_notional_units, notional_multiplier_units=EXCLUDED.notional_multiplier_units, price_precision=EXCLUDED.price_precision, quantity_precision=EXCLUDED.quantity_precision, supported_order_types=EXCLUDED.supported_order_types, supported_time_in_force=EXCLUDED.supported_time_in_force, post_only_enabled=EXCLUDED.post_only_enabled, reduce_only_enabled=EXCLUDED.reduce_only_enabled, market_order_enabled=EXCLUDED.market_order_enabled, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm, maker_fee_rate_ppm=EXCLUDED.maker_fee_rate_ppm, taker_fee_rate_ppm=EXCLUDED.taker_fee_rate_ppm, max_position_notional_units=EXCLUDED.max_position_notional_units, user_open_interest_limit_rate_ppm=EXCLUDED.user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units=EXCLUDED.user_open_interest_limit_floor_units, funding_interval_hours=EXCLUDED.funding_interval_hours, interest_rate_ppm=EXCLUDED.interest_rate_ppm, funding_rate_cap_ppm=EXCLUDED.funding_rate_cap_ppm, funding_rate_floor_ppm=EXCLUDED.funding_rate_floor_ppm, impact_notional_units=EXCLUDED.impact_notional_units, min_valid_index_sources=EXCLUDED.min_valid_index_sources, expiry_time=EXCLUDED.expiry_time, delivery_time=EXCLUDED.delivery_time, underlying_symbol=EXCLUDED.underlying_symbol, strike_price_units=EXCLUDED.strike_price_units, option_type=EXCLUDED.option_type, option_exercise_style=EXCLUDED.option_exercise_style, settlement_method=EXCLUDED.settlement_method, status=EXCLUDED.status, effective_time=EXCLUDED.effective_time, updated_at=EXCLUDED.updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(product_line,instrument_id) DO UPDATE SET symbol=EXCLUDED.symbol, change_id=EXCLUDED.change_id, last_change_id=EXCLUDED.last_change_id, instrument_type=EXCLUDED.instrument_type, base_asset_id=EXCLUDED.base_asset_id, quote_asset_id=EXCLUDED.quote_asset_id, settle_asset_id=EXCLUDED.settle_asset_id, contract_multiplier_ppm=EXCLUDED.contract_multiplier_ppm, contract_value_asset_id=EXCLUDED.contract_value_asset_id, price_tick_units=EXCLUDED.price_tick_units, quantity_step_units=EXCLUDED.quantity_step_units, min_quantity_steps=EXCLUDED.min_quantity_steps, max_quantity_steps=EXCLUDED.max_quantity_steps, min_notional_units=EXCLUDED.min_notional_units, max_notional_units=EXCLUDED.max_notional_units, notional_multiplier_units=EXCLUDED.notional_multiplier_units, price_precision=EXCLUDED.price_precision, quantity_precision=EXCLUDED.quantity_precision, supported_order_types=EXCLUDED.supported_order_types, supported_time_in_force=EXCLUDED.supported_time_in_force, post_only_enabled=EXCLUDED.post_only_enabled, reduce_only_enabled=EXCLUDED.reduce_only_enabled, market_order_enabled=EXCLUDED.market_order_enabled, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm, maker_fee_rate_ppm=EXCLUDED.maker_fee_rate_ppm, taker_fee_rate_ppm=EXCLUDED.taker_fee_rate_ppm, max_position_notional_units=EXCLUDED.max_position_notional_units, user_open_interest_limit_rate_ppm=EXCLUDED.user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units=EXCLUDED.user_open_interest_limit_floor_units, funding_interval_hours=EXCLUDED.funding_interval_hours, interest_rate_ppm=EXCLUDED.interest_rate_ppm, funding_rate_cap_ppm=EXCLUDED.funding_rate_cap_ppm, funding_rate_floor_ppm=EXCLUDED.funding_rate_floor_ppm, impact_notional_units=EXCLUDED.impact_notional_units, min_valid_index_sources=EXCLUDED.min_valid_index_sources, expiry_time=EXCLUDED.expiry_time, delivery_time=EXCLUDED.delivery_time, underlying_instrument_id=EXCLUDED.underlying_instrument_id, underlying_product_line=EXCLUDED.underlying_product_line, strike_price_units=EXCLUDED.strike_price_units, option_type=EXCLUDED.option_type, option_exercise_style=EXCLUDED.option_exercise_style, settlement_method=EXCLUDED.settlement_method, status=EXCLUDED.status, effective_time=EXCLUDED.effective_time, updated_at=EXCLUDED.updated_at
             """;
 
     private static final int MAX_PAGE_LIMIT = 1000;
@@ -62,12 +62,12 @@ public class InstrumentRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void saveCurrent(String symbol, long changeId, long lastChangeId, InstrumentUpsertRequest request, Instant now) {
+    public void saveCurrent(int instrumentId, String symbol, long changeId, long lastChangeId, InstrumentUpsertRequest request, Instant now) {
         Instant effectiveTime = request.effectiveTime() == null ? now : request.effectiveTime();
         jdbcTemplate.update(INSERT_INSTRUMENT_SQL,
-                symbol, changeId, lastChangeId, request.instrumentType().name(), request.contractType().name(),
-                asset(request.baseAsset()), asset(request.quoteAsset()), asset(request.settleAsset()),
-                request.contractMultiplierPpm(), asset(request.contractValueAsset()),
+                instrumentId, symbol, changeId, lastChangeId, request.instrumentType().name(), request.contractType().name(),
+                request.baseAssetId(), request.quoteAssetId(), request.settleAssetId(),
+                request.contractMultiplierPpm(), request.contractValueAssetId(),
                 request.priceTickUnits(), request.quantityStepUnits(), request.minQuantitySteps(),
                 request.maxQuantitySteps(), request.minNotionalUnits(), request.maxNotionalUnits(),
                 request.notionalMultiplierUnits(), request.pricePrecision(), request.quantityPrecision(),
@@ -79,17 +79,37 @@ public class InstrumentRepository {
                 request.fundingIntervalHours(), request.interestRatePpm(), request.fundingRateCapPpm(),
                 request.fundingRateFloorPpm(), request.impactNotionalUnits(), request.minValidIndexSources(),
                 timestampOrNull(request.expiryTime()), timestampOrNull(request.deliveryTime()),
-                symbolOrNull(request.underlyingSymbol()), request.strikePriceUnits(),
+                request.underlyingInstrumentId() == null ? null : com.surprising.product.api.InstrumentIds.parse(request.underlyingInstrumentId()), enumName(request.underlyingProductLine()), request.strikePriceUnits(),
                 enumName(request.optionType()), enumName(request.optionExerciseStyle()),
                 enumName(request.settlementMethod()),
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
     }
 
-    public Optional<InstrumentResponse> current(String symbol, ProductLine productLine) {
-        var rows = jdbcTemplate.query("SELECT * FROM instruments WHERE symbol=?" + (productLine == null ? "" : " AND contract_type=?"),
-                (rs,n)->toResponse(rs), productLine == null ? new Object[]{symbol} : new Object[]{symbol,productLine.contractTypeCode()});
-        if(rows.size()>1) throw new IllegalArgumentException("productLine is required for an ambiguous symbol");
-        return rows.stream().findFirst();
+    public Optional<Integer> firstTradingId(ProductLine line) {
+        if (line == null) throw new IllegalArgumentException("productLine is required");
+        return jdbcTemplate.query("SELECT instrument_id FROM instruments WHERE product_line=? AND status='TRADING' ORDER BY instrument_id LIMIT 1",
+                (rs, row) -> rs.getInt(1), line.name()).stream().findFirst();
+    }
+
+    public int nextInstrumentId() {
+        return jdbcTemplate.queryForObject("SELECT nextval('instrument_identity_sequence')", Integer.class);
+    }
+
+    public Optional<InstrumentResponse> current(int instrumentId, ProductLine productLine) {
+        if (instrumentId <= 0 || productLine == null) {
+            throw new IllegalArgumentException("productLine and positive instrumentId are required");
+        }
+        return jdbcTemplate.query("SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset FROM instruments i WHERE product_line=? AND instrument_id=?",
+                (rs,n)->toResponse(rs), productLine.name(), instrumentId).stream().findFirst();
+    }
+
+    public void lockForUpdate(int instrumentId, ProductLine productLine) {
+        if (productLine == null || instrumentId <= 0) {
+            throw new IllegalArgumentException("productLine and positive instrumentId are required");
+        }
+        var rows = jdbcTemplate.query("SELECT instrument_id FROM instruments WHERE product_line=? AND instrument_id=? FOR UPDATE",
+                (rs,n)->rs.getInt(1), productLine.name(), instrumentId);
+        if (rows.isEmpty()) throw new IllegalArgumentException("instrument not found in product line");
     }
 
     public List<InstrumentResponse> list(ProductLine productLine,
@@ -97,7 +117,7 @@ public class InstrumentRepository {
                                          InstrumentStatus status) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT i.*
+                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
                   FROM instruments i
                  WHERE 1 = 1
                 """);
@@ -119,8 +139,8 @@ public class InstrumentRepository {
             return List.of();
         }
         return jdbcTemplate.query("""
-                SELECT *
-                  FROM instruments
+                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
+                  FROM instruments i
                  WHERE contract_type = ?
                  ORDER BY symbol ASC
                 """, (rs, rowNum) -> toResponse(rs), productLine.contractTypeCode());
@@ -137,7 +157,7 @@ public class InstrumentRepository {
         InstrumentCursor decodedCursor = decodeInstrumentCursor(cursor);
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT i.*
+                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
                   FROM instruments i
                  WHERE 1 = 1
                 """);
@@ -166,7 +186,7 @@ public class InstrumentRepository {
                                                          int limit) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT i.*
+                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
                   FROM instruments i
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
                    AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
@@ -185,7 +205,7 @@ public class InstrumentRepository {
                                                          int limit) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT i.*
+                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
                   FROM instruments i
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
                    AND i.status = 'SETTLING'
@@ -207,7 +227,7 @@ public class InstrumentRepository {
         String symbol = rs.getString("symbol");
         long changeId = rs.getLong("change_id");
         return new InstrumentResponse(
-                symbol,
+                rs.getInt("instrument_id"), rs.getInt("base_asset_id"), rs.getInt("quote_asset_id"), rs.getInt("settle_asset_id"), rs.getInt("contract_value_asset_id"), symbol,
                 changeId,
                 InstrumentType.valueOf(rs.getString("instrument_type")),
                 ContractType.valueOf(rs.getString("contract_type")),
@@ -246,7 +266,7 @@ public class InstrumentRepository {
                 rs.getInt("min_valid_index_sources"),
                 instantOrNull(rs, "expiry_time"),
                 instantOrNull(rs, "delivery_time"),
-                rs.getString("underlying_symbol"),
+                rs.getString("underlying_instrument_id"), rs.getString("underlying_product_line") == null ? null : com.surprising.product.api.ProductLine.valueOf(rs.getString("underlying_product_line")),
                 longOrNull(rs, "strike_price_units"),
                 enumOrNull(rs, "option_type", OptionType.class),
                 enumOrNull(rs, "option_exercise_style", OptionExerciseStyle.class),

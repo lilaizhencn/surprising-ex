@@ -22,7 +22,7 @@ public final class CoreFeePolicySnapshotCodec {
         int length = Integer.BYTES * 2;
         for (CoreFeePolicyState policy : policies.values()) {
             length = Math.addExact(length, Math.addExact(FIXED_LENGTH,
-                    policy.symbol().getBytes(StandardCharsets.UTF_8).length));
+                    policy.instrumentId().getBytes(StandardCharsets.UTF_8).length));
         }
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(VERSION).putInt(policies.size());
@@ -46,14 +46,14 @@ public final class CoreFeePolicySnapshotCodec {
             long userId = buffer.getLong();
             int symbolLength = Short.toUnsignedInt(buffer.getShort());
             if (symbolLength > 64 || buffer.remaining() < symbolLength + TAIL_LENGTH) {
-                throw new ProtocolException("invalid fee policy snapshot symbol");
+                throw new ProtocolException("invalid fee policy snapshot instrumentId");
             }
-            byte[] symbol = new byte[symbolLength];
-            buffer.get(symbol);
+            byte[] instrumentId = new byte[symbolLength];
+            buffer.get(instrumentId);
             CoreFeePolicyState policy;
             try {
                 policy = new CoreFeePolicyState(policyId, revision, userId,
-                        new String(symbol, StandardCharsets.UTF_8), buffer.getLong(), buffer.getLong(),
+                        new String(instrumentId, StandardCharsets.UTF_8), buffer.getLong(), buffer.getLong(),
                         buffer.getInt(), readBoolean(buffer), buffer.getLong(), buffer.getLong());
             } catch (IllegalArgumentException exception) {
                 throw new ProtocolException(exception.getMessage());
@@ -67,9 +67,9 @@ public final class CoreFeePolicySnapshotCodec {
     }
 
     private static void write(ByteBuffer buffer, CoreFeePolicyState policy) {
-        byte[] symbol = policy.symbol().getBytes(StandardCharsets.UTF_8);
+        byte[] instrumentId = policy.instrumentId().getBytes(StandardCharsets.UTF_8);
         buffer.putLong(policy.policyId()).putLong(policy.policyRevision()).putLong(policy.userId())
-                .putShort((short) symbol.length).put(symbol)
+                .putShort((short) instrumentId.length).put(instrumentId)
                 .putLong(policy.makerFeeRatePpm()).putLong(policy.takerFeeRatePpm())
                 .putInt(policy.sourcePriority()).put((byte) (policy.active() ? 1 : 0))
                 .putLong(policy.effectiveFromEpochMillis()).putLong(policy.expireAtEpochMillis());

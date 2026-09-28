@@ -19,7 +19,7 @@ public record ExecuteLiquidationBatchCommand(
                                                           long liquidationFeeRatePpm, int maxRiskScanUsers) {
         if (work == null) throw new IllegalArgumentException("liquidation work is required");
         List<ExecuteLiquidationBatchAction> actions = work.actions().stream()
-                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
+                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.instrumentId(),
                         action.triggerPriceSequence(), action.markPriceTicks(),
                         action.cursorOrderId()))
                 .toList();

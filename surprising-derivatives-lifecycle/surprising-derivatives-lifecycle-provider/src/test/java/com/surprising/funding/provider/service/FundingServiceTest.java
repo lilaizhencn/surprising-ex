@@ -43,14 +43,14 @@ class FundingServiceTest {
         Fixture fixture = new Fixture(properties);
         when(fixture.rateInputRepository.find(properties.getCalculation().getMaxMarkAge()))
                 .thenReturn(List.of(rateInput()));
-        when(fixture.sequenceRepository.next("BTC-USDT")).thenReturn(11L);
+        when(fixture.sequenceRepository.next("1")).thenReturn(11L);
 
         fixture.service.publishRates();
 
         ArgumentCaptor<PerpFundingRateEvent> event = ArgumentCaptor.forClass(PerpFundingRateEvent.class);
-        verify(fixture.kafka).send(eq(properties.getKafka().getFundingRateTopic()), eq("BTC-USDT"), event.capture());
+        verify(fixture.kafka).send(eq(properties.getKafka().getFundingRateTopic()), eq("1"), event.capture());
         assertThat(event.getValue().fundingRate()).isEqualByComparingTo("0.000110");
-        assertThat(fixture.service.latestRate("btc-usdt").status()).isEqualTo("PREDICTED");
+        assertThat(fixture.service.latestRate("1").status()).isEqualTo("PREDICTED");
     }
 
     @Test
@@ -58,7 +58,7 @@ class FundingServiceTest {
         FundingProperties properties = new FundingProperties();
         Fixture fixture = new Fixture(properties);
         Instant fundingTime = Instant.parse("2026-08-13T12:00:00Z");
-        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+        FundingRateResponse due = new FundingRateResponse("1", 11, 100, 90, 10,
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         when(fixture.settlementRepository.reserveCore(due))
@@ -73,7 +73,7 @@ class FundingServiceTest {
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
         assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue())).isEqualTo(
-                new ApplyFundingCommand(fundingTime.toEpochMilli(), "BTC-USDT", 100));
+                new ApplyFundingCommand(fundingTime.toEpochMilli(), "1", 100));
         verify(fixture.rateRepository).saveFinal(due);
     }
 
@@ -82,7 +82,7 @@ class FundingServiceTest {
         FundingProperties properties = new FundingProperties();
         Fixture fixture = new Fixture(properties);
         Instant fundingTime = Instant.parse("2026-08-13T12:00:00Z");
-        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+        FundingRateResponse due = new FundingRateResponse("1", 11, 100, 90, 10,
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         long settlementId = fundingTime.toEpochMilli();
@@ -111,7 +111,7 @@ class FundingServiceTest {
         properties.getSettlement().setMaxPagesPerRun(2);
         Fixture fixture = new Fixture(properties);
         Instant fundingTime = Instant.parse("2026-08-13T12:00:00Z");
-        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+        FundingRateResponse due = new FundingRateResponse("1", 11, 100, 90, 10,
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         long settlementId = fundingTime.toEpochMilli();
@@ -144,7 +144,7 @@ class FundingServiceTest {
         FundingProperties properties = new FundingProperties();
         Fixture fixture = new Fixture(properties);
         Instant fundingTime = Instant.now().minusSeconds(1);
-        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+        FundingRateResponse due = new FundingRateResponse("1", 11, 100, 90, 10,
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         when(fixture.settlementRepository.reserveCore(due))
@@ -154,7 +154,7 @@ class FundingServiceTest {
 
         fixture.service.settleDueRates();
 
-        assertThat(fixture.service.latestRate("BTC-USDT")).isEqualTo(due);
+        assertThat(fixture.service.latestRate("1")).isEqualTo(due);
         verify(fixture.rateRepository, never()).saveFinal(any());
     }
 
@@ -173,7 +173,7 @@ class FundingServiceTest {
     @org.junit.jupiter.params.provider.EnumSource(value=com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.class,names={"SETTLEMENT","CLOSED"})
     void clearanceSuppressesNewFundingWithoutClaimingPayment(com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode mode) {
         var fixture=new Fixture(new FundingProperties());
-        var due=new FundingRateResponse("BTC-USDT",11,100,90,10,Instant.now().minusSeconds(1),8,"PREDICTED",Instant.now());
+        var due=new FundingRateResponse("1",11,100,90,10,Instant.now().minusSeconds(1),8,"PREDICTED",Instant.now());
         fixture.cache.update(due);
         when(fixture.aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
                 .thenReturn(maintenance(new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,100)));
@@ -190,7 +190,7 @@ class FundingServiceTest {
     }
 
     private static FundingRateInput rateInput() {
-        return new FundingRateInput("BTC-USDT", 0, 100, 10, -3_750, 3_750, 8, Instant.now());
+        return new FundingRateInput("1", 0, 100, 10, -3_750, 3_750, 8, Instant.now());
     }
 
     private static CoreResponse progress(long settlementId, long cursor) {

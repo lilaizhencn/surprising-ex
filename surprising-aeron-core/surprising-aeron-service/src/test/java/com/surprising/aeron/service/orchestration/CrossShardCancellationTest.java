@@ -23,8 +23,8 @@ class CrossShardCancellationTest {
         System.setProperty(property, "2");
         var release = new CountDownLatch(1);
         try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            String first = "SHARD0-USDT";
-            String second = "SHARD1-USDT";
+            String first = "37";
+            String second = "38";
             while (state.matchingAdapter.matcherShardId(first) == state.matchingAdapter.matcherShardId(second))
                 second = "X" + second;
             register(state, first);
@@ -80,32 +80,32 @@ class CrossShardCancellationTest {
         }
     }
 
-    private void register(TradingCoreRuntime state, String symbol) {
+    private void register(TradingCoreRuntime state, String instrumentId) {
         applied(state, command(CoreMessageType.REGISTER_INSTRUMENT, 0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
                         ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0))));
     }
 
-    private void seed(TradingCoreRuntime state, String symbol, long user, long order) {
-        applied(state, mark(symbol, 100, 1));
+    private void seed(TradingCoreRuntime state, String instrumentId, long user, long order) {
+        applied(state, mark(instrumentId, 100, 1));
         applied(state, command(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 110))));
         applied(state, command(CoreMessageType.ADJUST_BALANCE, user + 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
-        applied(state, place(user + 1, symbol, order + 1, CoreOrderSide.SELL, 100, 10));
-        applied(state, place(user, symbol, order + 2, CoreOrderSide.BUY, 100, 10));
-        applied(state, place(user, symbol, order + 3, CoreOrderSide.BUY, 1, 1));
+        applied(state, place(user + 1, instrumentId, order + 1, CoreOrderSide.SELL, 100, 10));
+        applied(state, place(user, instrumentId, order + 2, CoreOrderSide.BUY, 100, 10));
+        applied(state, place(user, instrumentId, order + 3, CoreOrderSide.BUY, 1, 1));
     }
 
-    private CoreMessage place(long user, String symbol, long order, CoreOrderSide side, long price, long quantity) {
+    private CoreMessage place(long user, String instrumentId, long order, CoreOrderSide side, long price, long quantity) {
         return command(CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(
-                new PlaceOrderCommand(order, symbol, side, price, quantity, false, CoreMarginMode.CROSS,
+                new PlaceOrderCommand(order, instrumentId, side, price, quantity, false, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "order-" + order)));
     }
-    private CoreMessage mark(String symbol, long price, long revision) {
+    private CoreMessage mark(String instrumentId, long price, long revision) {
         return command(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol, price, revision, TIME)));
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, price, revision, TIME)));
     }
     private CoreLiquidationWorkView work(TradingCoreRuntime state) {
         var query = command(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,

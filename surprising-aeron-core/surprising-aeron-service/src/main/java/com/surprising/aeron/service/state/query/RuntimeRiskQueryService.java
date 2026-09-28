@@ -24,7 +24,7 @@ public final class RuntimeRiskQueryService {
                     .thenComparing(Comparator.comparingLong(
                             CoreAdlCandidateView::unrealizedProfitUnits).reversed())
                     .thenComparingLong(CoreAdlCandidateView::userId)
-                    .thenComparing(CoreAdlCandidateView::symbol);
+                    .thenComparing(CoreAdlCandidateView::instrumentId);
 
     private static final long PPM = 1_000_000L;
 
@@ -54,22 +54,22 @@ public final class RuntimeRiskQueryService {
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
         }
         entries.sort(Comparator.comparingLong((RiskEntry entry) -> entry.risk().userId())
-                .thenComparing(entry -> identities.symbol(entry.risk().symbolId()))
+                .thenComparing(entry -> identities.instrumentId(entry.risk().symbolId()))
                 .thenComparingInt(entry -> entry.risk().positionSide().ordinal()));
         ArrayList<CoreRiskSnapshotView> result = new ArrayList<>(entries.size());
         for (RiskEntry entry : entries) {
             RiskSnapshotRuntime risk = entry.risk();
             PositionRuntime position = runtime.position(entry.positionKey());
             if (position == null || position.signedQuantitySteps() == 0) continue;
-            String symbol = identities.symbol(risk.symbolId());
-            CoreInstrument instrument = runtime.instrument(symbol);
+            String instrumentId = identities.instrumentId(risk.symbolId());
+            CoreInstrument instrument = runtime.instrument(instrumentId);
             MarkPriceRuntime mark = runtime.markPrice(risk.symbolId());
             if (instrument == null || mark == null) throw new IllegalStateException("risk query source is missing");
             long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
                     instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
                     instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
             long wallet = crossWalletBalance(runtime, identities, risk.userId(), instrument.settleAsset());
-            result.add(new CoreRiskSnapshotView(risk.userId(), symbol, position.marginMode(), risk.positionSide(),
+            result.add(new CoreRiskSnapshotView(risk.userId(), instrumentId, position.marginMode(), risk.positionSide(),
                     instrument.settleAsset(), position.signedQuantitySteps(),
                     position.entryPriceTicks(), mark.markPriceTicks(), notional, position.positionMarginUnits(),
                     risk.priceSequence(), wallet, risk.equityUnits(), risk.unrealizedPnlUnits(),
@@ -93,12 +93,12 @@ public final class RuntimeRiskQueryService {
                 throw new RuntimeOperationalQueryService.QueryTooLargeException();
             }
             String positionName = key.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? key.symbol() : key.symbol() + ':' + key.positionSide().name();
+                    ? key.instrumentId() : key.instrumentId() + ':' + key.positionSide().name();
             Long positionKey = identities.findPositionKey(key.userId(), positionName);
             PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
-            Integer symbolId = identities.findSymbolId(key.symbol());
+            Integer symbolId = identities.findSymbolId(key.instrumentId());
             MarkPriceRuntime mark = symbolId == null ? null : runtime.markPrice(symbolId);
-            CoreInstrument instrument = runtime.instrument(key.symbol());
+            CoreInstrument instrument = runtime.instrument(key.instrumentId());
             if (position == null || position.signedQuantitySteps() == 0
                     || !identities.asset(position.assetId()).equals(normalizedAsset)
                     || mark == null || instrument == null
@@ -117,7 +117,7 @@ public final class RuntimeRiskQueryService {
             long leverage = margin <= 0 ? Long.MAX_VALUE : ratio(notional, margin);
             long priority = multiplyDivideCapped(profitRate, leverage, PPM);
             CoreAdlCandidateView candidate = new CoreAdlCandidateView(
-                    key.userId(), key.symbol(), normalizedAsset, position.marginMode(),
+                    key.userId(), key.instrumentId(), normalizedAsset, position.marginMode(),
                     position.positionSide(), position.signedQuantitySteps(), position.entryPriceTicks(),
                     mark.markPriceTicks(), mark.priceSequence(), notional, profit, margin, profitRate, leverage,
                     priority);

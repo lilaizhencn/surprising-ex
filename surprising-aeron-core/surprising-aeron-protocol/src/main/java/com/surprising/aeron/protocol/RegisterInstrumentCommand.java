@@ -4,7 +4,7 @@ import java.math.BigInteger;
 import java.util.List;
 
 public record RegisterInstrumentCommand(
-        String symbol,
+        String instrumentId,
         int contractTypeCode,
         String baseAsset,
         String quoteAsset,
@@ -32,7 +32,8 @@ public record RegisterInstrumentCommand(
         int supportedTimeInForceMask) {
 
     public RegisterInstrumentCommand {
-        if (symbol == null || symbol.isBlank() || contractTypeCode < 0
+        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        if (instrumentId == null || instrumentId.isBlank() || contractTypeCode < 0
                 || baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0
                 || priceTickUnits <= 0 || settleScaleUnits <= 0 || initialMarginRatePpm <= 0
@@ -65,13 +66,13 @@ public record RegisterInstrumentCommand(
 
     /** Existing Core callers default to a tradable instrument with all Core order choices enabled. */
     public RegisterInstrumentCommand(
-            String symbol, int contractTypeCode, String baseAsset, String quoteAsset, String settleAsset,
+            String instrumentId, int contractTypeCode, String baseAsset, String quoteAsset, String settleAsset,
             long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
             long initialMarginRatePpm, long maintenanceMarginRatePpm, long makerFeeRatePpm,
             long takerFeeRatePpm, long expiryEpochMillis, int optionTypeCode, long strikePriceTicks,
             long maxLeveragePpm, long maxPositionNotionalUnits, long userOpenInterestLimitRatePpm,
             long userOpenInterestLimitFloorUnits, List<CoreRiskLimitBracket> riskLimitBrackets) {
-        this(symbol, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -80,11 +81,11 @@ public record RegisterInstrumentCommand(
     }
 
     public RegisterInstrumentCommand(
-            String symbol, int contractTypeCode, String baseAsset, String quoteAsset,
+            String instrumentId, int contractTypeCode, String baseAsset, String quoteAsset,
             String settleAsset, long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
             long initialMarginRatePpm, long maintenanceMarginRatePpm, long makerFeeRatePpm, long takerFeeRatePpm,
             long expiryEpochMillis, int optionTypeCode, long strikePriceTicks) {
-        this(symbol, contractTypeCode, baseAsset, quoteAsset, settleAsset,
+        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
                 maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode,
                 strikePriceTicks, leverageFromRate(initialMarginRatePpm), Long.MAX_VALUE, 0, Long.MAX_VALUE,

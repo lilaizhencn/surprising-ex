@@ -25,12 +25,12 @@ class MarkPriceCalculatorTest {
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 
         MarkPriceEvent event = calculator.calculate(
-                "BTC-USDT",
+                "1",
                 1,
-                new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY, 5, 5, BigDecimal.valueOf(5), now, List.of()),
-                new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("102.00"), 1, now),
-                new PerpTradeEvent("BTC-USDT", "t1", 1, now, new BigDecimal("101.00"), BigDecimal.ONE, "BUY"),
-                new PerpFundingRateEvent("BTC-USDT", BigDecimal.ZERO, now.plusSeconds(3600), 8, 1, now),
+                new IndexPriceEvent("1", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY, 5, 5, BigDecimal.valueOf(5), now, List.of()),
+                new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("102.00"), 1, now),
+                new PerpTradeEvent("1", "t1", 1, now, new BigDecimal("101.00"), BigDecimal.ONE, "BUY"),
+                new PerpFundingRateEvent("1", BigDecimal.ZERO, now.plusSeconds(3600), 8, 1, now),
                 BigDecimal.ONE,
                 new MarkPriceEncoding(7L, 100_000_000L, 1_000_000L, 100_000_000L, 1L),
                 now);
@@ -54,13 +54,13 @@ class MarkPriceCalculatorTest {
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 
         MarkPriceEvent event = calculator.calculate(
-                "BTC-USDT-260925",
+                "44",
                 1,
-                new IndexPriceEvent("BTC-USDT-260925", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
+                new IndexPriceEvent("44", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
                         5, 5, BigDecimal.valueOf(5), now, List.of()),
-                new PerpBookTickerEvent("BTC-USDT-260925", new BigDecimal("100.00"),
+                new PerpBookTickerEvent("44", new BigDecimal("100.00"),
                         new BigDecimal("100.00"), 1, now),
-                new PerpTradeEvent("BTC-USDT-260925", "t1", 1, now,
+                new PerpTradeEvent("44", "t1", 1, now,
                         new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
                 null,
                 BigDecimal.ZERO,
@@ -78,11 +78,11 @@ class MarkPriceCalculatorTest {
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 
         MarkPriceEvent event = calculator.calculate(
-                "BTC-USDT", 1,
-                new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
+                "1", 1,
+                new IndexPriceEvent("1", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
                         5, 5, BigDecimal.valueOf(5), now, List.of()),
-                new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("100.00"), 1, now),
-                new PerpTradeEvent("BTC-USDT", "t1", 1, now, new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
+                new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.00"), 1, now),
+                new PerpTradeEvent("1", "t1", 1, now, new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
                 null,
                 BigDecimal.ZERO,
                 new MarkPriceEncoding(1L, 100_000_000L, 1_000_000L, 100_000_000L, 1L),

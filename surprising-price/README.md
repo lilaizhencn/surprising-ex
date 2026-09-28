@@ -38,7 +38,7 @@ Kafka `MARK_PRICE` 分支；事件直接携带产品线、instrument 版本、qu
 
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 启动时通过内部聚合 RPC 加载本产品线
 完整 JVM 快照，运行中消费 `surprising.instrument.events.v1` 增量更新；`IndexInstrumentConfigLoader`
-只从本地快照读取合约正文、当前版本和指数源配置。指数服务不再支持 YAML 静态 symbol 或数据库兜底，
+只从本地快照读取合约正文、当前版本和指数源配置。指数服务不再支持 YAML 静态 instrumentId 或数据库兜底，
 快照未就绪时拒绝启动行情流量。
 
 标记价格编码遵循同一边界：当前版本、合约正文和报价资产精度统一由本地不可变快照读取。
@@ -49,7 +49,7 @@ Service 不包含 SQL，也不直接依赖 JDBC。
 
 ## 指数价格
 
-指数价格服务默认使用外部交易所 WebSocket 长连接接收 ticker，标准化价格，剔除过期源和异常源，重新归一化权重，然后为每个 symbol 发布一个公允指数价格。REST 只用于冷启动、WebSocket 缓存过期后的兜底，以及人工排障。
+指数价格服务默认使用外部交易所 WebSocket 长连接接收 ticker，标准化价格，剔除过期源和异常源，重新归一化权重，然后为每个 instrumentId 发布一个公允指数价格。REST 只用于冷启动、WebSocket 缓存过期后的兜底，以及人工排障。
 OKX 指数成分使用 `index-tickers` REST 接口和指数频道解析规则。`PRICE_INDEX_REST_FALLBACK_ENABLED=true` 可在外部 WS 暂时断线时启用原有 REST 兜底；生产默认保持关闭，启用时需控制抓取频率及有效源数量。
 
 默认外部源：
@@ -87,7 +87,7 @@ REST 速率只适合小规模测试或兜底。如果用 REST 作为主链路，
 requests_per_second = symbol_count * source_count / poll_interval_seconds
 ```
 
-例如 500 个 symbol、5 个外部源、1 秒刷新一次，就是 2500 req/s，主流交易所通常无法稳定承受，也容易触发限流或地区策略。因此生产默认使用 WebSocket：
+例如 500 个 instrumentId、5 个外部源、1 秒刷新一次，就是 2500 req/s，主流交易所通常无法稳定承受，也容易触发限流或地区策略。因此生产默认使用 WebSocket：
 
 - 按 `websocket-url` 复用连接，同一个交易所连接里发送多个订阅。
 - 收到的 ticker 写入内存最新价缓存，指数定时任务优先读取这个缓存。
@@ -167,10 +167,10 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 
 指数价格和标记价格 provider 都支持多节点部署。因为它们会主动发布价格，不能只依赖本地内存 sequence：
 
-- `price_symbol_leases` 保存 `module + symbol` 的发布租约。
-- `price_symbol_sequences` 保存 `module + symbol` 的全局递增 sequence。
+- `price_symbol_leases` 保存 `module + instrumentId` 的发布租约。
+- `price_symbol_sequences` 保存 `module + instrumentId` 的全局递增 sequence。
 - 节点启动后用 `coordination.node-id` 标识自己，默认取 `HOSTNAME`，没有时使用随机 ID。
-- 每次发布前先续租或抢占过期租约；抢不到租约的节点不发布这个 symbol。
+- 每次发布前先续租或抢占过期租约；抢不到租约的节点不发布这个 instrumentId。
 - sequence 由 PostgreSQL 原子分配，节点重启或 failover 后不会从 1 重新开始。
 - 默认 `lease-duration=15s`。节点宕机后，其他节点最长等待约一个租约周期后接管。
 
@@ -180,20 +180,20 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 - 多节点共享同一个 PostgreSQL，不要每个节点使用独立数据库。
 - `coordination.node-id` 在生产环境建议显式设置为 hostname 或 instance id。
 - `lease-duration` 要大于正常发布周期，通常为 `poll-delay-ms` 或 `publish-interval-ms` 的 5-20 倍。
-- 如果 PostgreSQL 不可用，价格服务不应继续发布，因为无法保证 sequence 和 symbol 所有权。
+- 如果 PostgreSQL 不可用，价格服务不应继续发布，因为无法保证 sequence 和 instrumentId 所有权。
 
 ## 关键配置
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `surprising.price.index.calculation.poll-delay-ms` | `1000` | `IndexPriceMaintenanceTask` 按固定频率启动指数价计算；单轮在下一次触发前完成时，每个已配置 symbol 约每秒发布一次。若单轮超过周期，实际间隔仍受计算耗时影响。 |
+| `surprising.price.index.calculation.poll-delay-ms` | `1000` | `IndexPriceMaintenanceTask` 按固定频率启动指数价计算；单轮在下一次触发前完成时，每个已配置 instrumentId 约每秒发布一次。若单轮超过周期，实际间隔仍受计算耗时影响。 |
 | `surprising.price.index.calculation.max-source-age` | `5s` | 外部源 ticker 最大可接受年龄。 |
 | `surprising.price.index.calculation.outlier-threshold` | `0.01` | 指数成分偏离中位数超过 1% 时剔除。 |
-| `surprising.price.index.calculation.min-valid-sources` | `3` | 每个 symbol 最少有效外部源数量。 |
+| `surprising.price.index.calculation.min-valid-sources` | `3` | 每个 instrumentId 最少有效外部源数量。 |
 | `surprising.price.index.web-socket.idle-timeout` | `20s` | 外部 WS 无任何帧超过该时间后重连。 |
 | `surprising.price.index.web-socket.refresh-delay-ms` | `30000` | 外部 WS 连接和订阅刷新周期。 |
 | `surprising.price.index.web-socket.reconnect-max-delay` | `30s` | 外部 WS 最大重连退避。 |
-| `surprising.price.index.coordination.lease-duration` | `15s` | 指数价格 symbol 租约时长。 |
+| `surprising.price.index.coordination.lease-duration` | `15s` | 指数价格 instrumentId 租约时长。 |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | 法币汇率刷新周期。 |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD 稳定币桥接刷新周期。 |
 | `surprising.price.mark.kafka.concurrency` | `2` | 每个节点的标记价格输入 Kafka listener 并发数。 |
@@ -202,22 +202,22 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.mark.calculation.basis-window` | `60s` | basis 移动平均窗口。 |
 | `surprising.price.mark.calculation.max-input-age` | `5s` | 指数和盘口的最大可接受年龄；真实最后成交超过该年龄会降级，不刷新其成交时间。 |
 | `surprising.price.mark.calculation.clamp-ratio` | `0.03` | 标记价格相对指数价格的保护带。 |
-| `surprising.price.mark.coordination.lease-duration` | `15s` | 标记价格 symbol 租约时长。 |
+| `surprising.price.mark.coordination.lease-duration` | `15s` | 标记价格 instrumentId 租约时长。 |
 
 ## 接口
 
 指数价格：
 
 ```http
-GET /api/v1/price/index/latest?symbol=BTC-USDT
-GET /api/v1/price/index/history?symbol=BTC-USDT&startTime=2026-06-30T10:00:00Z&endTime=2026-06-30T11:00:00Z&limit=500
+GET /api/v1/price/index/latest?instrumentId=604
+GET /api/v1/price/index/history?instrumentId=604&startTime=2026-06-30T10:00:00Z&endTime=2026-06-30T11:00:00Z&limit=500
 ```
 
 标记价格：
 
 ```http
-GET /api/v1/price/mark/latest?symbol=BTC-USDT
-GET /api/v1/price/mark/history?symbol=BTC-USDT&startTime=2026-06-30T10:00:00Z&endTime=2026-06-30T11:00:00Z&limit=500
+GET /api/v1/price/mark/latest?instrumentId=604
+GET /api/v1/price/mark/history?instrumentId=604&startTime=2026-06-30T10:00:00Z&endTime=2026-06-30T11:00:00Z&limit=500
 ```
 
 法币汇率：
@@ -231,12 +231,12 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 ## 生产注意事项
 
 - 每个 provider 至少部署 2 个实例。
-- 所有价格输入和输出 topic 都用 `symbol` 作为 Kafka key。
-- 优先使用一个共享 topic + 足够多 partition，不要按每个 symbol 建 topic。
+- 所有价格输入和输出 topic 都用 `instrumentId` 作为 Kafka key。
+- 优先使用一个共享 topic + 足够多 partition，不要按每个 instrumentId 建 topic。
 - 风控和强平服务不消费 Kafka 价格流，也不要各节点自己计算标记价格；它们只通过 Aeron Core 的
   `ApplyMarkPriceCommand`、风险快照和强平工作队列读取 Core 的权威结果。
 - 唯一的 `surprising.linear-perp.price.events.v1` 消息已经包含完整审计信封；审计 consumer 按
-  `symbol + sequence` 幂等重试数据库失败，不影响其它 consumer group。
+  `instrumentId + sequence` 幂等重试数据库失败，不影响其它 consumer group。
 - `price_mark_ticks` 使用普通非分区表和紧凑的时间 BRIN 索引，每分钟分批删除，只保留 3 天。
 - 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。
 - 标记价格输入 consumer 有意使用 `auto.offset.reset=latest`，因为新启动的 live mark calculator 不应该把旧输入快照重新计算成当前标记价格；但它仍然关闭 auto commit，使用 record ack 和 cooperative-sticky rebalance。
@@ -245,7 +245,7 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
   `/latest` 读取本地内存缓存，`/history` 才读取审计库。
 - USD 源必须声明 `quote-currency`、`target-quote-currency`、稳定币换算源和换算方向。
 - App 法币展示必须走本地 `price_exchange_rates` 缓存，不能每个用户请求实时打第三方 FX API。
-- 标记价格输入 topic 必须使用相同的 `symbol` key；建议相关 topic 使用相同 partition 数，降低跨节点输入错位概率。
+- 标记价格输入 topic 必须使用相同的 `instrumentId` key；建议相关 topic 使用相同 partition 数，降低跨节点输入错位概率。
 
 ## 故障排查
 
@@ -255,8 +255,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - WS 频繁重连：检查外部交易所 ping/pong、网络出口、`idle-timeout` 和 `reconnect-max-delay`。
 - USD 源权重变低：通常是 USDT/USD 换算源不可用，查看成分 reason 是否包含 `conversion failed`。
 - 法币换算 404：检查 `price_exchange_rates` 是否已刷新，或 FX rate 是否超过 `stale-after`。
-- 多节点只有一个节点发布某个 symbol：这是租约预期行为；查看 `price_symbol_leases` 的 `owner_id` 和 `lease_until`。
-- sequence 不连续：允许出现跳号，例如落库或发布前失败；但同一 `module + symbol` 不应回退。
+- 多节点只有一个节点发布某个 instrumentId：这是租约预期行为；查看 `price_symbol_leases` 的 `owner_id` 和 `lease_until`。
+- sequence 不连续：允许出现跳号，例如落库或发布前失败；但同一 `module + instrumentId` 不应回退。
 
 ## 验证
 
@@ -288,8 +288,8 @@ mvn -pl :surprising-price-provider -am spring-boot:run
 查询最新价格：
 
 ```bash
-curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
-curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
+curl 'http://localhost:9082/api/v1/price/index/latest?instrumentId=604'
+curl 'http://localhost:9082/api/v1/price/mark/latest?instrumentId=604'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 ```
 
@@ -329,6 +329,6 @@ BTC 实际指数响应已观测到 5/5 `HEALTHY`，Coinbase、Kraken 的 transpo
 - 用户确认的启动规则：有效且新鲜的外部指数存在，但真实双边盘口或成交不足时，使用 price1 = index × (1 + fundingRate × 剩余资金周期比例) 并施加原指数保护带，明确标为 DEGRADED。盘口、基差、成交等缺失字段为 null；不再创建 syntheticBookTicker/syntheticTrade。
 - 真实盘口与成交齐全后恢复三价格中位数。最后成交保留原时间，较旧成交或降级指数会降级状态；空盘/过期盘口清除旧基差窗口后进入启动规则。指数无效或过期则停止发布，latest 在缓存过期后返回 503。
 - 已有数据库先执行 [审计字段迁移](../docs/validation/mark-starting-inputs-20260927.sql)。仅 DEGRADED 允许缺失输入字段；正常状态必须有完整输入，原资金、仓位数据不变。
-- GET /api/v1/price/mark/inputs?symbol=... 提供实际输入与可用性诊断，直接读取原输入状态，便于区别缺少指数、盘口还是成交。
+- GET /api/v1/price/mark/inputs?instrumentId=... 提供实际输入与可用性诊断，直接读取原输入状态，便于区别缺少指数、盘口还是成交。
 - 仍由 `MarkPriceCalculator` 计算 funding 收敛价、指数加平均基差价及最后成交价的中位数；两价在市场均衡时可以相等，不人为制造价差。
 - 前端 latest 请求失败时清空对应 mark/index 展示，不继续把过期值作为当前值。核心资金/持仓/风控公式及账本没有改动。

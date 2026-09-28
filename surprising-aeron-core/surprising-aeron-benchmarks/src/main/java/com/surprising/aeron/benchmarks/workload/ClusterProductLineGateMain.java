@@ -37,7 +37,7 @@ import java.util.UUID;
 @Slf4j
 public final class ClusterProductLineGateMain {
 
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
     private static final long INITIAL_USER_UNITS = 1_000;
     private static final long LIQUIDATION_USER_UNITS = 180;
     private static final long MAKER_FEE_RATE_PPM = 1_000;
@@ -291,7 +291,7 @@ public final class ClusterProductLineGateMain {
     }
 
     private static void requirePosition(CoreUserStateView state, long expectedQuantity) {
-        long quantity = state.positions().stream().filter(value -> value.symbol().equals(SYMBOL))
+        long quantity = state.positions().stream().filter(value -> value.instrumentId().equals(SYMBOL))
                 .mapToLong(value -> value.signedQuantitySteps()).sum();
         if (quantity != expectedQuantity) {
             throw new IllegalStateException("position mismatch user=" + state.userId()

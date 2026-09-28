@@ -4,7 +4,7 @@ public record UpsertFeePolicyCommand(
         long policyId,
         long policyRevision,
         long userId,
-        String symbol,
+        String instrumentId,
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         int sourcePriority,
@@ -13,8 +13,8 @@ public record UpsertFeePolicyCommand(
         long expireAtEpochMillis) {
 
     public UpsertFeePolicyCommand {
-        symbol = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
-        if (policyId <= 0 || policyRevision <= 0 || userId <= 0 || symbol.length() > 64
+        instrumentId = instrumentId == null ? "" : instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+        if (policyId <= 0 || policyRevision <= 0 || userId <= 0 || instrumentId.length() > 64
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
                 || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000
                 || makerFeeRatePpm > takerFeeRatePpm || sourcePriority < 0

@@ -73,7 +73,7 @@ public class ClusteredBatchTradingBenchmark {
     public long laneCompletionContextHandoff(Workload workload, Counters counters) {
         return decodedBatchAdmissionAndSettlement(workload, counters);
     }
-    /** Shared non-crossing maker liquidity plus alternating-symbol batches exercises price scopes and prefix commits. */
+    /** Shared non-crossing maker liquidity plus alternating-instrumentId batches exercises price scopes and prefix commits. */
     @Benchmark
     public long priceScopedBatchWindows(Workload workload, Counters counters) {
         workload.runPriceScopedBatchWindows();
@@ -104,7 +104,7 @@ public class ClusteredBatchTradingBenchmark {
         return workload.terminal;
     }
     /** Cross-callback independent orders and cancellations. Cancellation scopes use the removed
-     * order's side/price, exercising range dependency checks without a whole-symbol drain.
+     * order's side/price, exercising range dependency checks without a whole-instrumentId drain.
      * Repeated rounds also exercise bounded publication-index turnover and receipt removal. */
     @Benchmark
     public long independentCommandWindows(Workload workload, Counters counters) {
@@ -129,7 +129,7 @@ public class ClusteredBatchTradingBenchmark {
 
     /**
      * Exercises ingress, repeated settlement polling, and existing-order admission scans.
-     * The maker accumulates same-symbol orders before taker/close waves, exercising STP and close capacity.
+     * The maker accumulates same-instrumentId orders before taker/close waves, exercising STP and close capacity.
      */
     @Benchmark
     public long decodedBatchAdmissionAndSettlement(Workload workload, Counters counters) {
@@ -533,20 +533,20 @@ public class ClusteredBatchTradingBenchmark {
             service.sessionOpened();
             ContractType type=ContractType.valueOf(productLine.contractTypeCode());
             settleAsset=type.isInverse()?"BTC":"USDT";
-            pipelineSymbolB = "JMH-PIPE-B-USDT";
-            String[] startupSymbols = {"JMH-PIPE-A-USDT", pipelineSymbolB, "JMH-BTC-USDT"};
-            for (String symbol : startupSymbols) {
+            pipelineSymbolB = "12";
+            String[] startupSymbols = {"11", pipelineSymbolB, "10"};
+            for (String instrumentId : startupSymbols) {
                 apply(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
+                        new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
                                 type.isInverse() ? 1000 : 1, 100_000, 50_000, 0, 0,
                                 type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
             }
             if (productLine.isDerivative()) {
-                for (String symbol : startupSymbols) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
+                for (String instrumentId : startupSymbols) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, 1_700_000_000_000L)
-                                : new ApplyMarkPriceCommand(symbol, 100, 1, 1_700_000_000_000L)));
+                                ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, 1_700_000_000_000L)
+                                : new ApplyMarkPriceCommand(instrumentId, 100, 1, 1_700_000_000_000L)));
             }
             for (int user = 0; user <= 256; user++) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_000 + user,
@@ -622,7 +622,7 @@ public class ClusteredBatchTradingBenchmark {
                 if(terminal-before!=1024 + riskCommands)throw new IllegalStateException("realtime trade terminal mismatch");
                 if(realtime) {
                     service.state().captureRealtimeSnapshot(1000,Math.max(1,sequence),sequence,1_700_000_000_000L);
-                    service.state().captureRealtimeBook("JMH-BTC-USDT",sequence,1_700_000_000_000L);
+                    service.state().captureRealtimeBook("10",sequence,1_700_000_000_000L);
                     long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
                     while(service.state().realtimeSnapshotPending() || service.state().realtimeBookPending()) {
                         service.state().pollRealtimeSnapshot();service.state().pollRealtimeBook();
@@ -638,9 +638,9 @@ public class ClusteredBatchTradingBenchmark {
             long priceSequence = sequence + 1;
             send(command(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand("JMH-BTC-USDT", 100, 100, 100,
+                            ? new ApplyMarkPriceCommand("10", 100, 100, 100,
                                     priceSequence, 1_700_000_000_000L)
-                            : new ApplyMarkPriceCommand("JMH-BTC-USDT", 100,
+                            : new ApplyMarkPriceCommand("10", 100,
                                     priceSequence, 1_700_000_000_000L))));
             drain();
             int rounds = 0;
@@ -649,7 +649,7 @@ public class ClusteredBatchTradingBenchmark {
                 var scan = service.state().runtimeState.firstRiskIncompleteScan();
                 if (batchRisk && scan != null) {
                     var continuation = new CoreRiskScanContinuation(
-                            service.state().identities.symbol(scan.symbolId()), scan.priceSequence(), scan.lastUserId());
+                            service.state().identities.instrumentId(scan.symbolId()), scan.priceSequence(), scan.lastUserId());
                     send(command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                             TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
                                     java.util.List.of(), 64, 0, continuation, 64))));
@@ -709,7 +709,7 @@ public class ClusteredBatchTradingBenchmark {
             long runtimeRevision = runtime.revision();
             long revision = before.revision() + 1;
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(9_000_000, 1000,
-                    "algo-lane-0", "JMH-BTC-USDT", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
+                    "algo-lane-0", "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
                     CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
                     0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
             long terminalBefore = terminal;
@@ -738,7 +738,7 @@ public class ClusteredBatchTradingBenchmark {
                     var current = service.state().runtimeState.algoOrder(id);
                     long revision = current == null ? 1 : current.revision() + 1;
                     var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(id, 1000 + i,
-                            "algo-lane-" + i, "JMH-BTC-USDT", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
+                            "algo-lane-" + i, "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
                             CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
                             0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
                     send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
@@ -756,7 +756,7 @@ public class ClusteredBatchTradingBenchmark {
                 for (int i = 0; i < 128; i++) {
                     var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
                             com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET,
-                            1000 + i, "JMH-BTC-USDT", 1000, 2000, 0, 0, 0, 1000);
+                            1000 + i, "10", 1000, 2000, 0, 0, 0, 1000);
                     send(command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 1000 + i,
                             com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
                 }
@@ -791,7 +791,7 @@ public class ClusteredBatchTradingBenchmark {
                             firstOrders[user] = orderId++;
                             var trigger = new com.surprising.aeron.service.state.model.CoreTriggerOrderState(
                                     firstOrders[user], productLine, 1_000 + user, "trigger-" + firstOrders[user], "",
-                                    "JMH-BTC-USDT", service.state().tradingState().instruments().get("JMH-BTC-USDT"),
+                                    "10", service.state().tradingState().instruments().get("10"),
                                     CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
@@ -900,9 +900,9 @@ public class ClusteredBatchTradingBenchmark {
                 for (int user = 0; user < 256; user++) {
                     long id = orderId++;
                     firstOrders[user] = id;
-                    String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
+                    String instrumentId = (user & 1) == 0 ? "11" : pipelineSymbolB;
                     send(command(CoreMessageType.PLACE_ORDER, 1_000 + user,
-                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, symbol,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, instrumentId,
                                     CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "pipeline-" + id))));
                 }
@@ -926,7 +926,7 @@ public class ClusteredBatchTradingBenchmark {
         public void runPriceScopedBatchWindows() {
             long first = orderId++;
             long second = orderId++;
-            String[] symbols = {"JMH-PIPE-A-USDT", pipelineSymbolB};
+            String[] symbols = {"11", pipelineSymbolB};
             singleResponses = true;
             try {
                 for (int i = 0; i < 2; i++) send(command(CoreMessageType.PLACE_ORDER, 1256,
@@ -952,11 +952,11 @@ public class ClusteredBatchTradingBenchmark {
                         1_000, 0, 0, 1_700_000_000_000L, sequence + 1, "", "", new byte[0]));
             for (int user = 0; user < 256; user++) {
                 firstOrders[user] = orderId;
-                String symbol = (sharedAccounts ? user < 128 : (user & 1) == 0) ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
+                String instrumentId = (sharedAccounts ? user < 128 : (user & 1) == 0) ? "11" : pipelineSymbolB;
                 var orders = new ArrayList<PlaceOrderCommand>(batchSize);
                 for (int item = 0; item < batchSize; item++) {
                     long id = orderId++;
-                    orders.add(new PlaceOrderCommand(id, symbol, CoreOrderSide.BUY, 90, 1,
+                    orders.add(new PlaceOrderCommand(id, instrumentId, CoreOrderSide.BUY, 90, 1,
                             false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "batch-window-" + id));
                 }
@@ -1083,7 +1083,7 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private PlaceOrderCommand order(long id, CoreOrderSide side, long price, long quantity) {
-            return new PlaceOrderCommand(id, "JMH-BTC-USDT", side, price, quantity, false,
+            return new PlaceOrderCommand(id, "10", side, price, quantity, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "cluster-batch-" + id);
         }

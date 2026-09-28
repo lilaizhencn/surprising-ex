@@ -36,8 +36,8 @@ class CoreProductLineArchitectureContractTest {
                     .isEqualTo(contractType.isDelivery() || contractType.isOption());
 
             TradingCoreState configured = reducer.registerInstrument(state, instrument(productLine));
-            assertThat(configured.instruments()).containsKey("BTC-USDT-" + productLine.name());
-            assertThat(configured.instruments().get("BTC-USDT-" + productLine.name()).contractType())
+            assertThat(configured.instruments()).containsKey("1");
+            assertThat(configured.instruments().get("1").contractType())
                     .isEqualTo(contractType);
         }
     }
@@ -105,7 +105,7 @@ class CoreProductLineArchitectureContractTest {
             CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();
             SettleInstrumentCommand command = new SettleInstrumentCommand(
-                    7, own.symbol(), 100, 0);
+                    7, own.instrumentId(), 100, 0);
 
             if (line.isDeliveryProduct()) {
                 rules.validateLifecycleSettlement(own, command);
@@ -122,7 +122,7 @@ class CoreProductLineArchitectureContractTest {
         boolean inverse = contractType.isInverse();
         boolean lifecycle = contractType.isDelivery() || contractType.isOption();
         return new RegisterInstrumentCommand(
-                "BTC-USDT-" + productLine.name(), contractType.ordinal(), "BTC",
+                "1", contractType.ordinal(), "BTC",
                 inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
                 inverse ? 100 : 1, 1, inverse ? 100 : 1,
                 100_000, 50_000, 100_000, 200_000,

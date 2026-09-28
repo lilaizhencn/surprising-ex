@@ -66,7 +66,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
             return;
         }
         Objects.requireNonNull(event.publishedAt(), "mark price publishedAt is required");
-        pendingBySymbol.merge(event.symbol(), event,
+        pendingBySymbol.merge(event.instrumentId(), event,
                 (current, candidate) -> candidate.sequence() > current.sequence() ? candidate : current);
         publishGeneration.incrementAndGet();
         scheduleDrain();
@@ -96,12 +96,12 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
                 if (clients != null) {
                     try {
                         if (!sendAsync(event) && shouldLogFailure()) {
-                            log.warn("Mark price remains pending symbol={} sequence={} pendingSymbols={}",
-                                    event.symbol(), event.sequence(), pendingBySymbol.size());
+                            log.warn("Mark price remains pending instrumentId={} sequence={} pendingSymbols={}",
+                                    event.instrumentId(), event.sequence(), pendingBySymbol.size());
                         }
                     } catch (RuntimeException exception) {
-                        log.error("Failed to send mark price to Aeron symbol={} sequence={}",
-                                event.symbol(), event.sequence(), exception);
+                        log.error("Failed to send mark price to Aeron instrumentId={} sequence={}",
+                                event.instrumentId(), event.sequence(), exception);
                     }
                     continue;
                 }
@@ -110,14 +110,14 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
                     sent = transport.trySend(event);
                 } catch (RuntimeException exception) {
                     sent = false;
-                    log.error("Failed to send mark price to Aeron symbol={} sequence={}",
-                            event.symbol(), event.sequence(), exception);
+                    log.error("Failed to send mark price to Aeron instrumentId={} sequence={}",
+                            event.instrumentId(), event.sequence(), exception);
                 }
                 if (sent) {
                     pendingBySymbol.remove(entry.getKey(), event);
                 } else if (shouldLogFailure()) {
-                    log.warn("Mark price remains pending symbol={} sequence={} pendingSymbols={}",
-                            event.symbol(), event.sequence(), pendingBySymbol.size());
+                    log.warn("Mark price remains pending instrumentId={} sequence={} pendingSymbols={}",
+                            event.instrumentId(), event.sequence(), pendingBySymbol.size());
                 }
             }
         } finally {
@@ -146,9 +146,9 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
         long publishedAt = Objects.requireNonNull(event.publishedAt(),
                 "mark price publishedAt is required").toEpochMilli();
         if (event.productLine() != com.surprising.product.api.ProductLine.OPTION) {
-            return new ApplyMarkPriceCommand(event.symbol(), event.markPriceTicks(), event.sequence(), publishedAt);
+            return new ApplyMarkPriceCommand(event.instrumentId(), event.markPriceTicks(), event.sequence(), publishedAt);
         }
-        return new ApplyMarkPriceCommand(event.symbol(), event.markPriceTicks(),
+        return new ApplyMarkPriceCommand(event.instrumentId(), event.markPriceTicks(),
                 priceTicks(event, event.indexPrice()), priceTicks(event, event.sameExpiryForwardPrice()),
                 event.sequence(), publishedAt);
     }
@@ -168,15 +168,15 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
             return;
         }
         if (result == AeronClientPool.TryCommandResult.SENT) {
-            pendingBySymbol.remove(event.symbol(), event);
+            pendingBySymbol.remove(event.instrumentId(), event);
         } else if (shouldLogFailure()) {
-            log.warn("Mark price Aeron admission failed symbol={} sequence={} result={}",
-                    event.symbol(), event.sequence(), result);
+            log.warn("Mark price Aeron admission failed instrumentId={} sequence={} result={}",
+                    event.instrumentId(), event.sequence(), result);
         }
     }
 
     private static UUID markPriceCommandId(MarkPriceEvent event) {
-        return UUID.nameUUIDFromBytes(("MARK_PRICE:" + event.symbol() + ':' + event.sequence())
+        return UUID.nameUUIDFromBytes(("MARK_PRICE:" + event.instrumentId() + ':' + event.sequence())
                 .getBytes(StandardCharsets.UTF_8));
     }
 

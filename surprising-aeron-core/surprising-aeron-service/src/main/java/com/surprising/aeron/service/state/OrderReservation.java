@@ -9,7 +9,7 @@ import java.util.Locale;
 /** Immutable reservation. Internal amount transitions retain already validated identity strings. */
 public final class OrderReservation {
     private final long orderId;
-    private final String symbol;
+    private final String instrumentId;
     private final ReservationKind kind;
     private final String asset;
     private final long reservedUnits;
@@ -17,13 +17,13 @@ public final class OrderReservation {
     private final long consumedUnits;
     private final long orderQuantitySteps;
 
-    public OrderReservation(long orderId, String symbol, ReservationKind kind,
+    public OrderReservation(long orderId, String instrumentId, ReservationKind kind,
                             String asset, long reservedUnits, long releasedUnits, long consumedUnits,
                             long orderQuantitySteps) {
         validateAmounts(orderId, kind, reservedUnits, releasedUnits, consumedUnits,
                 orderQuantitySteps);
         this.orderId = orderId;
-        this.symbol = normalizeSymbol(symbol);
+        this.instrumentId = requireInstrumentId(instrumentId);
         this.kind = kind;
         this.asset = AssetBalance.normalizeAsset(asset);
         this.reservedUnits = reservedUnits;
@@ -36,7 +36,7 @@ public final class OrderReservation {
         validateAmounts(previous.orderId, previous.kind, reservedUnits,
                 releasedUnits, consumedUnits, previous.orderQuantitySteps);
         orderId = previous.orderId;
-        symbol = previous.symbol;
+        instrumentId = previous.instrumentId;
         kind = previous.kind;
         asset = previous.asset;
         this.reservedUnits = reservedUnits;
@@ -56,7 +56,7 @@ public final class OrderReservation {
     }
 
     public long orderId() { return orderId; }
-    public String symbol() { return symbol; }
+    public String instrumentId() { return instrumentId; }
     public ReservationKind kind() { return kind; }
     public String asset() { return asset; }
     public long reservedUnits() { return reservedUnits; }
@@ -71,13 +71,13 @@ public final class OrderReservation {
                 && kind == value.kind && reservedUnits == value.reservedUnits
                 && releasedUnits == value.releasedUnits && consumedUnits == value.consumedUnits
                 && orderQuantitySteps == value.orderQuantitySteps
-                && symbol.equals(value.symbol) && asset.equals(value.asset);
+                && instrumentId.equals(value.instrumentId) && asset.equals(value.asset);
     }
 
     @Override
     public int hashCode() {
         int hash = Long.hashCode(orderId);
-        hash = 31 * hash + symbol.hashCode();
+        hash = 31 * hash + instrumentId.hashCode();
         hash = 31 * hash + kind.hashCode();
         hash = 31 * hash + asset.hashCode();
         hash = 31 * hash + Long.hashCode(reservedUnits);
@@ -88,7 +88,7 @@ public final class OrderReservation {
 
     @Override
     public String toString() {
-        return "OrderReservation[orderId=" + orderId + ", symbol=" + symbol
+        return "OrderReservation[orderId=" + orderId + ", instrumentId=" + instrumentId
                 + ", kind=" + kind + ", asset=" + asset
                 + ", reservedUnits=" + reservedUnits + ", releasedUnits=" + releasedUnits
                 + ", consumedUnits=" + consumedUnits + ", orderQuantitySteps=" + orderQuantitySteps + "]";
@@ -96,12 +96,12 @@ public final class OrderReservation {
 
     public static OrderReservation create(
             long orderId,
-            String symbol,
+            String instrumentId,
             ReservationKind kind,
             String asset,
             long reservedUnits,
             long orderQuantitySteps) {
-        return new OrderReservation(orderId, symbol, kind, asset,
+        return new OrderReservation(orderId, instrumentId, kind, asset,
                 reservedUnits, 0, 0, orderQuantitySteps);
     }
 
@@ -137,35 +137,8 @@ public final class OrderReservation {
         return new OrderReservation(this, newReservedUnits, releasedUnits, consumedUnits);
     }
 
-    public static String normalizeSymbol(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
-        }
-        String trimmed = value.trim();
-        if (validSymbol(trimmed)) return trimmed;
-        String normalized = trimmed.toUpperCase(Locale.ROOT);
-        if (!validSymbol(normalized)) {
-            throw new IllegalArgumentException("invalid symbol: " + value);
-        }
-        return normalized;
-    }
-
-    private static boolean validSymbol(String value) {
-        int length = value.length();
-        if (length < 2 || length > 64 || !isAsciiAlphaNumeric(value.charAt(0))) {
-            return false;
-        }
-        for (int index = 1; index < length; index++) {
-            char character = value.charAt(index);
-            if (!isAsciiAlphaNumeric(character) && character != '_' && character != '-') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean isAsciiAlphaNumeric(char character) {
-        return character >= 'A' && character <= 'Z'
-                || character >= '0' && character <= '9';
+    public static String requireInstrumentId(String value) {
+        com.surprising.product.api.InstrumentIds.parse(value);
+        return value;
     }
 }

@@ -73,11 +73,11 @@ class TradingRuntimeStateTest {
     @Test
     void leverageProbeReadsConfiguredValueWithoutChangingTheStoredKeyMap() {
         try (var state = new TradingRuntimeState()) {
-            state.putLeverage(new CoreLeverageKey(7, "BTC-USDT", CoreMarginMode.CROSS), 5_000_000L);
+            state.putLeverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS), 5_000_000L);
 
-            assertThat(state.leverage(7, "BTC-USDT", CoreMarginMode.CROSS)).isEqualTo(5_000_000L);
-            assertThat(state.leverage(7, "BTC-USDT", CoreMarginMode.ISOLATED)).isNull();
-            assertThat(state.leverage(new CoreLeverageKey(7, "BTC-USDT", CoreMarginMode.CROSS)))
+            assertThat(state.leverage(7, "1", CoreMarginMode.CROSS)).isEqualTo(5_000_000L);
+            assertThat(state.leverage(7, "1", CoreMarginMode.ISOLATED)).isNull();
+            assertThat(state.leverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS)))
                     .isEqualTo(5_000_000L);
         }
     }
@@ -988,9 +988,9 @@ class TradingRuntimeStateTest {
     void sameCommandPositionRemovalRetainsTypedOpenBeforeAndMarginMode() {
         TradingRuntimeState state = new TradingRuntimeState();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        int symbolId = identities.symbolId("BTC-USDT");
+        int symbolId = identities.symbolId("1");
         int assetId = identities.assetId("USDT");
-        long positionKey = identities.positionKey(7, "BTC-USDT:NET");
+        long positionKey = identities.positionKey(7, "1:NET");
         PositionRuntime open = new PositionRuntime(7, symbolId, assetId,
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED,
                 com.surprising.aeron.protocol.CorePositionSide.NET,

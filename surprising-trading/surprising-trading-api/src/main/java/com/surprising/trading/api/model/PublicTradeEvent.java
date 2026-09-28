@@ -6,7 +6,7 @@ import java.time.Instant;
 public record PublicTradeEvent(
         String tradeId,
         long sequence,
-        String symbol,
+        String instrumentId,
         OrderSide takerSide,
         long priceTicks,
         long quantitySteps,

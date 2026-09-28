@@ -49,18 +49,18 @@ class AdminMarketMakerControllerTest {
         MarketMakerService service = mock(MarketMakerService.class);
         MarketMakerRunLogQueryResponse response = new MarketMakerRunLogQueryResponse(Instant.EPOCH, List.of());
         when(service.runLogs(ProductLine.LINEAR_PERPETUAL,
-                "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+                "47", "1", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc"))
                 .thenReturn(response);
         AdminMarketMakerController controller = new AdminMarketMakerController(service);
 
         MarketMakerRunLogQueryResponse result = controller.strategyLogs(
-                "1001", "linear-perp", null, "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+                "1001", "linear-perp", null, "47", "1", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc");
 
         assertThat(result).isSameAs(response);
         verify(service).runLogs(ProductLine.LINEAR_PERPETUAL,
-                "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+                "47", "1", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc");
     }
 

@@ -16,15 +16,15 @@ public class InstrumentIndexSourceRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO instrument_index_sources (
-                symbol, product_line, source, enabled, base_url, path, source_symbol, parser,
+                instrument_id, product_line, source, enabled, base_url, path, source_symbol, parser,
                 quote_currency, target_quote_currency, conversion_base_url, conversion_path,
                 conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
                 websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-    public void delete(com.surprising.product.api.ProductLine line, String symbol) {
-        jdbcTemplate.update("DELETE FROM instrument_index_sources WHERE product_line=? AND symbol=?",line.name(),symbol);
+    public void delete(com.surprising.product.api.ProductLine line, int instrumentId) {
+        jdbcTemplate.update("DELETE FROM instrument_index_sources WHERE product_line=? AND instrument_id=?",line.name(),instrumentId);
     }
 
     private final JdbcTemplate jdbcTemplate;
@@ -33,7 +33,7 @@ public class InstrumentIndexSourceRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insertBatch(com.surprising.product.api.ProductLine productLine, String symbol, List<IndexSourceConfig> sources) {
+    public void insertBatch(com.surprising.product.api.ProductLine productLine, int instrumentId, List<IndexSourceConfig> sources) {
         if (sources == null || sources.isEmpty()) {
             return;
         }
@@ -41,7 +41,7 @@ public class InstrumentIndexSourceRepository {
             @Override
             public void setValues(PreparedStatement ps, int index) throws java.sql.SQLException {
                 IndexSourceConfig source = sources.get(index);
-                ps.setString(1, symbol);
+                ps.setInt(1, instrumentId);
                 ps.setString(2, productLine.name());
                 ps.setString(3, source.source());
                 ps.setBoolean(4, source.enabled());
@@ -80,10 +80,10 @@ public class InstrumentIndexSourceRepository {
         List<IndexSourceRow> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM instrument_index_sources
-                 WHERE (symbol, product_line) IN (%s)
-                 ORDER BY symbol, product_line, source
+                 WHERE (instrument_id, product_line) IN (%s)
+                 ORDER BY instrument_id, product_line, source
                 """.formatted(tuplePredicate), (rs, rowNum) -> new IndexSourceRow(
-                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getString("symbol")),
+                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getInt("instrument_id")),
                 new IndexSourceConfig(
                         rs.getString("source"),
                         rs.getBoolean("enabled"),
@@ -118,7 +118,7 @@ public class InstrumentIndexSourceRepository {
             }
             sql.append("(?, ?)");
             InstrumentKey key = keys.get(index);
-            args.add(key.symbol());
+            args.add(key.instrumentId());
             args.add(key.productLine().name());
         }
         return sql.toString();

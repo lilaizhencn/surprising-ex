@@ -95,7 +95,7 @@ public class ExternalSpotWebSocketManager {
                         session.webSocket.get() != null,
                         Math.max(0L, now - session.lastFrameEpochMillis.get()),
                         session.reconnectAttempts.get(), session.sources().stream()
-                                .map(source -> new WebSocketSourceHealth(source.symbol(), source.source().getName(),
+                                .map(source -> new WebSocketSourceHealth(source.instrumentId(), source.source().getName(),
                                         "PUBLIC_WEBSOCKET"))
                                 .toList()))
                 .toList();
@@ -115,11 +115,11 @@ public class ExternalSpotWebSocketManager {
 
     private Map<String, List<TrackedSource>> groupedSources() {
         Map<String, List<TrackedSource>> grouped = new LinkedHashMap<>();
-        for (IndexPriceProperties.SymbolConfig symbol : indexInstrumentConfigService.symbols()) {
-            for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
+        for (IndexPriceProperties.SymbolConfig instrumentId : indexInstrumentConfigService.symbols()) {
+            for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
                 if (source.isEnabled() && source.isWebsocketEnabled() && hasText(source.getWebsocketUrl())) {
                     grouped.computeIfAbsent(source.getWebsocketUrl(), ignored -> new ArrayList<>())
-                            .add(new TrackedSource(symbol.getSymbol(), source));
+                            .add(new TrackedSource(instrumentId.getInstrumentId(), source));
                 }
             }
         }
@@ -208,7 +208,7 @@ public class ExternalSpotWebSocketManager {
             if (now - session.lastFrameEpochMillis.get() > idleTimeoutMs) {
                 scheduleReconnect(session, "idle timeout");
             } else if (!session.sources().isEmpty() && session.sources().stream().allMatch(source ->
-                    latestSourceQuoteStore.latest(source.symbol(), source.source())
+                    latestSourceQuoteStore.latest(source.instrumentId(), source.source())
                             .map(quote -> !freshQuote(quote, Instant.ofEpochMilli(now))).orElse(false))) {
                 // 收到积压旧帧也会刷新 lastFrame，不能据此认为行情仍然有效。
                 scheduleReconnect(session, "source quotes stale despite incoming frames");
@@ -223,7 +223,7 @@ public class ExternalSpotWebSocketManager {
             Optional<SourceQuote> quote = externalSpotPriceClient.parseWebSocketPayload(
                     trackedSource.source(), payload, receivedAt);
             if (quote.isPresent() && quote.get().healthy()) {
-                latestSourceQuoteStore.put(trackedSource.symbol(), trackedSource.source(), quote.get());
+                latestSourceQuoteStore.put(trackedSource.instrumentId(), trackedSource.source(), quote.get());
                 matched |= freshQuote(quote.get(), receivedAt);
             }
         }
@@ -342,7 +342,7 @@ public class ExternalSpotWebSocketManager {
         }
     }
 
-    private record TrackedSource(String symbol, IndexPriceProperties.SourceConfig source) {
+    private record TrackedSource(String instrumentId, IndexPriceProperties.SourceConfig source) {
     }
 
     public record WebSocketHealth(String url, int sourceCount, boolean connected,
@@ -350,6 +350,6 @@ public class ExternalSpotWebSocketManager {
                                   List<WebSocketSourceHealth> sources) {
     }
 
-    public record WebSocketSourceHealth(String symbol, String exchange, String transport) {
+    public record WebSocketSourceHealth(String instrumentId, String exchange, String transport) {
     }
 }

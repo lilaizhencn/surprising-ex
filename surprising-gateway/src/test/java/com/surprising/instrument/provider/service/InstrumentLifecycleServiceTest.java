@@ -33,16 +33,16 @@ class InstrumentLifecycleServiceTest {
         InstrumentResponse settling = option("BTC-USDT-260327-50000-C", InstrumentStatus.SETTLING);
         when(storageService.expiringContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(expired));
         when(storageService.settlingContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(settling));
-        when(instrumentService.updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING)).thenReturn(expired);
+        when(instrumentService.updateStatus(1, ProductLine.LINEAR_DELIVERY, InstrumentStatus.SETTLING)).thenReturn(expired);
         when(readinessService.isReady(
-                ProductLine.OPTION, "BTC-USDT-260327-50000-C", 2L)).thenReturn(true);
+                ProductLine.OPTION, "1", 2L)).thenReturn(true);
 
         new InstrumentLifecycleService(storageService, instrumentService, readinessService, properties)
                 .advanceLifecycle();
 
-        verify(instrumentService).updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING);
+        verify(instrumentService).updateStatus(1, ProductLine.LINEAR_DELIVERY, InstrumentStatus.SETTLING);
         // 定时任务只能确认排水条件，结算价确认和 CLOSED 事件必须走唯一管理入口。
-        verify(instrumentService, never()).closeForSettlement("BTC-USDT-260327-50000-C");
+        verify(instrumentService, never()).closeForSettlement(1);
     }
 
     @Test
@@ -72,12 +72,12 @@ class InstrumentLifecycleServiceTest {
         when(storageService.expiringContractsDue(any(Instant.class), eq(100))).thenReturn(List.of());
         when(storageService.settlingContractsDue(any(Instant.class), eq(100))).thenReturn(List.of(settling));
         when(readinessService.isReady(
-                ProductLine.LINEAR_DELIVERY, "BTC-USDT-260327", 2L)).thenReturn(false);
+                ProductLine.LINEAR_DELIVERY, "1", 2L)).thenReturn(false);
 
         new InstrumentLifecycleService(storageService, instrumentService, readinessService, properties)
                 .advanceLifecycle();
 
-        verify(instrumentService, never()).closeForSettlement("BTC-USDT-260327");
+        verify(instrumentService, never()).closeForSettlement(1);
     }
 
     private InstrumentResponse delivery(String symbol, InstrumentStatus status) {
@@ -87,19 +87,19 @@ class InstrumentLifecycleServiceTest {
 
     private InstrumentResponse option(String symbol, InstrumentStatus status) {
         return response(symbol, InstrumentType.OPTION, ContractType.VANILLA_OPTION,
-                "BTC-USDT", 50_000_000_000L, OptionType.CALL, status);
+                "1", 50_000_000_000L, OptionType.CALL, status);
     }
 
     private InstrumentResponse response(String symbol,
                                         InstrumentType instrumentType,
                                         ContractType contractType,
-                                        String underlyingSymbol,
+                                        String underlyingInstrumentId,
                                         Long strikePriceUnits,
                                         OptionType optionType,
                                         InstrumentStatus status) {
         Instant now = Instant.parse("2026-03-27T08:05:00Z");
         return new InstrumentResponse(
-                symbol,
+                1, 3, 1, 1, 1, symbol,
                 2L,
                 instrumentType,
                 contractType,
@@ -138,7 +138,7 @@ class InstrumentLifecycleServiceTest {
                 2,
                 Instant.parse("2026-03-27T08:00:00Z"),
                 Instant.parse("2026-03-27T08:05:00Z"),
-                underlyingSymbol,
+                underlyingInstrumentId, underlyingInstrumentId == null ? null : com.surprising.product.api.ProductLine.SPOT,
                 strikePriceUnits,
                 optionType,
                 optionType == null ? null : OptionExerciseStyle.EUROPEAN,

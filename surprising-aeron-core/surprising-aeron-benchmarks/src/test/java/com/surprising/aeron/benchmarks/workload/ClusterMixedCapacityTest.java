@@ -36,13 +36,13 @@ class ClusterMixedCapacityTest {
     @Test void laneResultCannotCarryAnotherAccountsExecution() {
         var item = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,null,
                 List.of(new CoreExecutionView(10,11,7,8,101,1)));
-        assertThat(ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},7,"BTC-USDT")).isOne();
-        assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},9,"BTC-USDT"))
+        assertThat(ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},7,"1")).isOne();
+        assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},9,"1"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("account mismatch");
     }
     @Test void cancelResponseMustNotResurrectAnOrderRetiredByTheLane() {
         var order = new CoreOrderStateView(10, com.surprising.product.api.ProductLine.SPOT, 7,
-                "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+                "1", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
         var stale = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,order,List.of());
         assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(stale),new long[]{10},7,null,true))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("removed order");
@@ -81,7 +81,7 @@ class ClusterMixedCapacityTest {
 
     @Test void batchOrderCursorMustNotReuseAnotherItemsIdentity() {
         var order = new CoreOrderStateView(11, com.surprising.product.api.ProductLine.SPOT, 1,
-                "BTC-USDT", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+                "1", CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
         var item = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, order, List.of());
         assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item), new long[]{10}))

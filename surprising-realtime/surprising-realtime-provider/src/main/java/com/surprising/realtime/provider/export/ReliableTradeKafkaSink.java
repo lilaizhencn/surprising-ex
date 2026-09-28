@@ -52,7 +52,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                         new PublicTradeEvent(
                                 frame.entityId(),
                                 Math.incrementExact(tradeSequence),
-                                frame.symbol(),
+                                frame.instrumentId(),
                                 OrderSide.valueOf(CoreOrderSide.values()[side].name()),
                                 price,
                                 quantity,
@@ -61,7 +61,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                 tradeSequence = event.sequence();
                 producer.send(
                         new ProducerRecord<>(
-                                topic, frame.symbol(), mapper.writeValueAsString(event)));
+                                topic, frame.instrumentId(), mapper.writeValueAsString(event)));
             }
             producer.commitTransaction();
         } catch (RuntimeException failure) {

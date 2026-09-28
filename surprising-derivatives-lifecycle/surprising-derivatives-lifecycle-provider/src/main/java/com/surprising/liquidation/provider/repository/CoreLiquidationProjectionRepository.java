@@ -26,7 +26,7 @@ public class CoreLiquidationProjectionRepository {
         String operator = descending ? "<" : ">";
         String direction = descending ? "DESC" : "ASC";
         StringBuilder sql = new StringBuilder("""
-                SELECT liquidation_id, user_id, symbol, asset, margin_mode, position_side,
+                SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,
                        trigger_price_sequence, signed_quantity_steps, close_quantity_steps,
                        deficit_units, execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
@@ -52,7 +52,7 @@ public class CoreLiquidationProjectionRepository {
         args.add(limit + 1);
         List<CoreLiquidationProjection> fetched = jdbcTemplate.query(sql.toString(), (rs, rowNum) ->
                 new CoreLiquidationProjection(rs.getLong("liquidation_id"), rs.getLong("user_id"),
-                        rs.getString("symbol"), rs.getString("asset"),
+                        rs.getString("instrument_id"), rs.getString("asset"),
                         CoreMarginMode.valueOf(rs.getString("margin_mode")),
                         CorePositionSide.valueOf(rs.getString("position_side")),
                         rs.getLong("trigger_price_sequence"), rs.getLong("signed_quantity_steps"),
@@ -69,14 +69,14 @@ public class CoreLiquidationProjectionRepository {
     public List<CoreLiquidationProjection> byLiquidationId(String productLine, long liquidationId) {
         if (liquidationId <= 0) throw new IllegalArgumentException("candidateId must be positive");
         return jdbcTemplate.query("""
-                SELECT liquidation_id, user_id, symbol, asset, margin_mode, position_side,
+                SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,
                        trigger_price_sequence, signed_quantity_steps, close_quantity_steps,
                        deficit_units, execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
                   FROM core_liquidation_projection
                  WHERE product_line = ? AND liquidation_id = ?
                 """, (rs, rowNum) -> new CoreLiquidationProjection(rs.getLong("liquidation_id"),
-                rs.getLong("user_id"), rs.getString("symbol"), rs.getString("asset"),
+                rs.getLong("user_id"), rs.getString("instrument_id"), rs.getString("asset"),
                 CoreMarginMode.valueOf(rs.getString("margin_mode")),
                 CorePositionSide.valueOf(rs.getString("position_side")),
                 rs.getLong("trigger_price_sequence"), rs.getLong("signed_quantity_steps"),

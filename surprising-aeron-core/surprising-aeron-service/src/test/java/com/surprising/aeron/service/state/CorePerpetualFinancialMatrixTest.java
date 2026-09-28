@@ -48,7 +48,7 @@ class CorePerpetualFinancialMatrixTest {
     private static final long USER_ID = 101;
     private static final long MAKER_ID = 202;
     private static final long SECOND_MAKER_ID = 203;
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
     private static final long ENTRY_PRICE = 100;
     private static final long QUANTITY = 10;
     private static final long POSITION_MARGIN = 100;
@@ -476,7 +476,7 @@ class CorePerpetualFinancialMatrixTest {
         }
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         if (partial) {
-            plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+            plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.instrumentId(), plan.marginMode(),
                     plan.positionSide(), plan.triggerPriceSequence(),
                     plan.signedQuantitySteps(), closeQuantity, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
             marked = replaceLiquidation(marked, plan);
@@ -548,7 +548,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ApplyFundingCommand(501, SYMBOL, -100_000));
         TradingCoreState marked = mark(funding.state(), variant, 150, 2);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
-        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.instrumentId(), plan.marginMode(),
                 plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 5, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
@@ -597,7 +597,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState opening = withPosition(variant, USER_ID, signedQuantity, ENTRY_PRICE, 101, 101);
         TradingCoreState marked = mark(opening, variant, markPrice, 1);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
-        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.instrumentId(), plan.marginMode(),
                 plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
@@ -636,7 +636,7 @@ class CorePerpetualFinancialMatrixTest {
                         3, ENTRY_PRICE, Long.MAX_VALUE, position.realizedPnlUnits(),
                         position.positionMarginUnits()));
         CoreLiquidationState plan = overflow.riskState().liquidations().get(1L);
-        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.instrumentId(), plan.marginMode(),
                 plan.positionSide(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         overflow = replaceLiquidation(overflow, plan);
@@ -816,19 +816,19 @@ class CorePerpetualFinancialMatrixTest {
 
     private Row isolatedCollateralLeakage(Variant variant) {
         TradingCoreState opening = stateWithInstrument(variant, false);
-        opening = reducer.registerInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
-        opening = reducer.registerInstrument(opening, instrument(variant, "SOL-USDT", "SOL", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "2", "ETH", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "3", "SOL", false));
         opening = fundedState(opening, USER_ID, 175);
         opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
                 50, variant.marginMode());
-        opening = addPosition(opening, variant, USER_ID, "ETH-USDT", 1, ENTRY_PRICE,
+        opening = addPosition(opening, variant, USER_ID, "2", 1, ENTRY_PRICE,
                 75, CoreMarginMode.CROSS);
-        opening = addPosition(opening, variant, USER_ID, "SOL-USDT", 1, ENTRY_PRICE,
+        opening = addPosition(opening, variant, USER_ID, "3", 1, ENTRY_PRICE,
                 50, CoreMarginMode.ISOLATED);
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
-                new ApplyMarkPriceCommand("ETH-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("2", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState markedSol = reducer.applyMarkPrice(markedEth,
-                new ApplyMarkPriceCommand("SOL-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("3", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState marked = reducer.applyMarkPrice(markedSol,
                 new ApplyMarkPriceCommand(SYMBOL, 90, 2, 1_700_000_000_000L));
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -837,12 +837,12 @@ class CorePerpetualFinancialMatrixTest {
         CoreUserState user = ending.user(USER_ID);
         assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(variant.marginMode());
         assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
-        assertThat(user.positions().get("ETH-USDT").marginMode()).isEqualTo(CoreMarginMode.CROSS);
-        assertThat(user.positions().get("ETH-USDT").signedQuantitySteps()).isEqualTo(1);
-        assertThat(user.positions().get("ETH-USDT").positionMarginUnits()).isEqualTo(75);
-        assertThat(user.positions().get("SOL-USDT").marginMode()).isEqualTo(CoreMarginMode.ISOLATED);
-        assertThat(user.positions().get("SOL-USDT").signedQuantitySteps()).isEqualTo(1);
-        assertThat(user.positions().get("SOL-USDT").positionMarginUnits()).isEqualTo(50);
+        assertThat(user.positions().get("2").marginMode()).isEqualTo(CoreMarginMode.CROSS);
+        assertThat(user.positions().get("2").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("2").positionMarginUnits()).isEqualTo(75);
+        assertThat(user.positions().get("3").marginMode()).isEqualTo(CoreMarginMode.ISOLATED);
+        assertThat(user.positions().get("3").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("3").positionMarginUnits()).isEqualTo(50);
         assertThat(user.positions().get(SYMBOL).signedQuantitySteps()).isZero();
         assertThat(ending.treasuryState().insuranceBalances())
                 .containsEntry(variant.settleAsset(), 50L);
@@ -852,16 +852,16 @@ class CorePerpetualFinancialMatrixTest {
 
     private Row isolatedFreeCollateralLeakage(Variant variant) {
         TradingCoreState opening = stateWithInstrument(variant, false);
-        opening = reducer.registerInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
+        opening = reducer.registerInstrument(opening, instrument(variant, "2", "ETH", false));
         opening = fundedState(opening, USER_ID, 175);
         opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
                 50, CoreMarginMode.ISOLATED);
-        opening = addPosition(opening, variant, USER_ID, "ETH-USDT", 1, ENTRY_PRICE,
+        opening = addPosition(opening, variant, USER_ID, "2", 1, ENTRY_PRICE,
                 75, CoreMarginMode.CROSS);
         assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
         assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
-                new ApplyMarkPriceCommand("ETH-USDT", ENTRY_PRICE, 1, 1_700_000_000_000L));
+                new ApplyMarkPriceCommand("2", ENTRY_PRICE, 1, 1_700_000_000_000L));
         TradingCoreState marked = reducer.applyMarkPrice(markedEth,
                 new ApplyMarkPriceCommand(SYMBOL, 90, 2, 1_700_000_000_000L));
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -873,9 +873,9 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(75);
         assertThat(user.positions().get(SYMBOL).signedQuantitySteps()).isZero();
         assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(CoreMarginMode.ISOLATED);
-        assertThat(user.positions().get("ETH-USDT").signedQuantitySteps()).isEqualTo(1);
-        assertThat(user.positions().get("ETH-USDT").marginMode()).isEqualTo(CoreMarginMode.CROSS);
-        assertThat(user.positions().get("ETH-USDT").positionMarginUnits()).isEqualTo(75);
+        assertThat(user.positions().get("2").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("2").marginMode()).isEqualTo(CoreMarginMode.CROSS);
+        assertThat(user.positions().get("2").positionMarginUnits()).isEqualTo(75);
         assertThat(result.deficitUnits()).isEqualTo(linearOrInverse(variant, 50, 61));
         assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED);
         assertThat(ending.treasuryState().insuranceBalances())
@@ -961,7 +961,7 @@ class CorePerpetualFinancialMatrixTest {
         return addPosition(state, variant, userId, SYMBOL, quantity, entryPrice, margin, variant.marginMode());
     }
 
-    private TradingCoreState addPosition(TradingCoreState state, Variant variant, long userId, String symbol,
+    private TradingCoreState addPosition(TradingCoreState state, Variant variant, long userId, String instrumentId,
                                          long quantity, long entryPrice, long margin, CoreMarginMode marginMode) {
         CoreUserState current = state.user(userId);
         AssetBalance currentBalance = current.balances().getOrDefault(variant.settleAsset(),
@@ -970,7 +970,7 @@ class CorePerpetualFinancialMatrixTest {
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(variant.settleAsset(), nextBalance);
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
-        positions.put(symbol, new CorePositionState(symbol, variant.settleAsset(), marginMode,
+        positions.put(instrumentId, new CorePositionState(instrumentId, variant.settleAsset(), marginMode,
                 CorePositionSide.NET, quantity, entryPrice,
                 Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
@@ -1004,19 +1004,19 @@ class CorePerpetualFinancialMatrixTest {
                 new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, 1_700_000_000_000L));
     }
 
-    private RegisterInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
+    private RegisterInstrumentCommand instrument(Variant variant, String instrumentId, String baseAsset,
                                                boolean tiered) {
-        return instrument(variant, symbol, baseAsset, tiered, 0, 0);
+        return instrument(variant, instrumentId, baseAsset, tiered, 0, 0);
     }
 
-    private RegisterInstrumentCommand instrument(Variant variant, String symbol, String baseAsset,
+    private RegisterInstrumentCommand instrument(Variant variant, String instrumentId, String baseAsset,
                                                boolean tiered, long makerFeeRatePpm, long takerFeeRatePpm) {
         List<CoreRiskLimitBracket> brackets = tiered
                 ? List.of(new CoreRiskLimitBracket(1, 0, 1_000, 5_000_000, 100_000, 100_000),
                 new CoreRiskLimitBracket(2, 1_000, 2_500, 5_000_000, 200_000, 200_000))
                 : List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000));
         long maxLeveragePpm = tiered ? 5_000_000 : 10_000_000;
-        return new RegisterInstrumentCommand(symbol, variant.type().ordinal(), baseAsset,
+        return new RegisterInstrumentCommand(instrumentId, variant.type().ordinal(), baseAsset,
                 variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
                 variant.settleScaleUnits(), 100_000, 100_000, makerFeeRatePpm, takerFeeRatePpm,
                 0, -1, 0, maxLeveragePpm,
@@ -1120,8 +1120,8 @@ class CorePerpetualFinancialMatrixTest {
             if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(row.variant().settleAsset())) {
                 continue;
             }
-            CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
-            CoreInstrument instrument = state.instruments().get(position.symbol());
+            CoreMarkPriceState mark = state.riskState().markPrices().get(position.instrumentId());
+            CoreInstrument instrument = state.instruments().get(position.instrumentId());
             if (mark != null && instrument != null) {
                 value = Math.addExact(value, CoreContractMath.pnlUnits(instrument,
                         position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks()));
@@ -1147,7 +1147,7 @@ class CorePerpetualFinancialMatrixTest {
                 .getOrDefault(row.variant().settleAsset(), 0L);
         if (!row.includeLiquidationDeficit()) return value;
         long deficit = state.riskState().liquidations().values().stream()
-                .filter(liquidation -> liquidation.symbol().equals(SYMBOL))
+                .filter(liquidation -> liquidation.instrumentId().equals(SYMBOL))
                 .mapToLong(CoreLiquidationState::deficitUnits).sum();
         return Math.subtractExact(value, deficit);
     }

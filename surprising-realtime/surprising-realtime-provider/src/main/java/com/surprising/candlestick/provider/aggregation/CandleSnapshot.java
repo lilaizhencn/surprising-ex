@@ -7,7 +7,7 @@ import java.time.Instant;
 
 public class CandleSnapshot {
 
-    private String symbol;
+    private String instrumentId;
     private String period;
     private Instant openTime;
     private Instant closeTime;
@@ -30,12 +30,12 @@ public class CandleSnapshot {
     public CandleSnapshot() {
     }
 
-    public CandleSnapshot(String symbol, String period, Instant openTime, Instant closeTime,
+    public CandleSnapshot(String instrumentId, String period, Instant openTime, Instant closeTime,
                           BigDecimal openPrice, BigDecimal highPrice, BigDecimal lowPrice, BigDecimal closePrice,
                           BigDecimal baseVolume, BigDecimal quoteVolume, long tradeCount,
                           String firstTradeId, String lastTradeId, Long firstSequence, Long lastSequence,
                           CandleStatus status, Instant updatedAt, Integer sourcePartition, Long sourceOffset) {
-        this.symbol = symbol;
+        this.instrumentId = instrumentId;
         this.period = period;
         this.openTime = openTime;
         this.closeTime = closeTime;
@@ -57,17 +57,17 @@ public class CandleSnapshot {
     }
 
     public CandleUpdatedEvent toUpdatedEvent(Instant emittedAt) {
-        return new CandleUpdatedEvent(symbol, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
+        return new CandleUpdatedEvent(instrumentId, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
                 baseVolume, quoteVolume, tradeCount, firstTradeId, lastTradeId, firstSequence, lastSequence,
                 status, updatedAt, emittedAt, sourcePartition, sourceOffset);
     }
 
-    public String getSymbol() {
-        return symbol;
+    public String getInstrumentId() {
+        return instrumentId;
     }
 
-    public void setSymbol(String symbol) {
-        this.symbol = symbol;
+    public void setInstrumentId(String instrumentId) {
+        this.instrumentId = instrumentId;
     }
 
     public String getPeriod() {

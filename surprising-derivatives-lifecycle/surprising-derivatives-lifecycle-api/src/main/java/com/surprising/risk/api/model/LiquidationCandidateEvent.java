@@ -9,7 +9,7 @@ public record LiquidationCandidateEvent(
         long candidateId,
         long snapshotId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         long instrumentChangeId,

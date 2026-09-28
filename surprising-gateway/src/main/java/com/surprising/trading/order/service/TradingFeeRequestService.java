@@ -24,9 +24,9 @@ public class TradingFeeRequestService {
         this.tradingFeeService = tradingFeeService;
     }
 
-    public EffectiveTradingFeeResponse effective(long userId, String symbol, long instrumentChangeId, String productLineHeader, String productLineValue) {
+    public EffectiveTradingFeeResponse effective(long userId, String instrumentId, long instrumentChangeId, String productLineHeader, String productLineValue) {
         try {
-            return tradingFeeService.effectiveFee(userId, symbol, instrumentChangeId, productLine(productLineValue, productLineHeader));
+            return tradingFeeService.effectiveFee(userId, instrumentId, instrumentChangeId, productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -53,9 +53,9 @@ public class TradingFeeRequestService {
         }
     }
 
-    public FeeScheduleQueryResponse query(long userId, String productLineHeader, String productLineValue, String symbol, FeeScheduleStatus status, int limit, String cursor, String sort) {
+    public FeeScheduleQueryResponse query(long userId, String productLineHeader, String productLineValue, String instrumentId, FeeScheduleStatus status, int limit, String cursor, String sort) {
         try {
-            return tradingFeeService.querySchedules(productLine(productLineValue, productLineHeader), userId, symbol, status, limit, cursor, sort);
+            return tradingFeeService.querySchedules(productLine(productLineValue, productLineHeader), userId, instrumentId, status, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -65,7 +65,7 @@ public class TradingFeeRequestService {
         if (request == null || request.productLine() != null || productLine == null) {
             return request;
         }
-        return new FeeScheduleUpsertRequest(request.feeScheduleId(), productLine, request.userId(), request.symbol(), request.makerFeeRatePpm(), request.takerFeeRatePpm(), request.sourceType(), request.tierCode(), request.reason(), request.status(), request.effectiveTime(), request.expireTime());
+        return new FeeScheduleUpsertRequest(request.feeScheduleId(), productLine, request.userId(), request.instrumentId(), request.makerFeeRatePpm(), request.takerFeeRatePpm(), request.sourceType(), request.tierCode(), request.reason(), request.status(), request.effectiveTime(), request.expireTime());
     }
 
     private ProductLine productLine(String queryValue, String headerValue) {

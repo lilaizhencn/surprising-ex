@@ -36,7 +36,7 @@ public class TriggerCommitBenchmark {
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
         runtime = new TradingRuntimeState(topology);
         instrument = CoreInstrument.from(ProductLine.SPOT,
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         var accounts = new java.util.ArrayList<Long>();
         var ids = new java.util.ArrayList<Long>();
@@ -58,7 +58,7 @@ public class TriggerCommitBenchmark {
         for (int i = 0; i < users.size(); i++) {
             long id = triggerIds.get(i);
             runtime.putTriggerOrder(new CoreTriggerOrderState(id, ProductLine.SPOT, users.get(i),
-                    "trigger-" + id, "", "BTC-USDT", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                    "trigger-" + id, "", "1", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1, 1, 1));

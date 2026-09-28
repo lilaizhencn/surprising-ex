@@ -24,9 +24,9 @@ class RuntimeChangedIndexCommitTest {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
-        int symbolId = identities.symbolId("BTC-USDT");
+        int symbolId = identities.symbolId("1");
         int assetId = identities.assetId("USDT");
-        long positionKey = identities.positionKey(7, "BTC-USDT:NET");
+        long positionKey = identities.positionKey(7, "1:NET");
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
@@ -36,8 +36,8 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.ids()).containsExactly(11L);
-        assertThat(indexes.positionUsers.users("BTC-USDT")).containsExactly(7L);
-        assertThat(indexes.openInterest.openInterestSteps("BTC-USDT")).isEqualTo(2);
+        assertThat(indexes.positionUsers.users("1")).containsExactly(7L);
+        assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(2);
 
         runtime.clearChangedKeys();
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
@@ -47,9 +47,9 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.pendingQuantity(
-                7, "BTC-USDT", CorePositionSide.NET,
+                7, "1", CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY)).isEqualTo(5);
-        assertThat(indexes.openInterest.openInterestSteps("BTC-USDT")).isEqualTo(3);
+        assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
         runtime.clearChangedKeys();
         runtime.removeOrder(11);
@@ -57,8 +57,8 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.ids()).isEmpty();
-        assertThat(indexes.positionUsers.users("BTC-USDT")).isEmpty();
-        assertThat(indexes.openInterest.openInterestSteps("BTC-USDT")).isZero();
+        assertThat(indexes.positionUsers.users("1")).isEmpty();
+        assertThat(indexes.openInterest.openInterestSteps("1")).isZero();
         runtime.close();
     }
 
@@ -67,10 +67,10 @@ class RuntimeChangedIndexCommitTest {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
-        int symbolId = identities.symbolId("BTC-USDT");
+        int symbolId = identities.symbolId("1");
         int assetId = identities.assetId("USDT");
         long userId = 7;
-        long positionKey = identities.positionKey(userId, "BTC-USDT:NET");
+        long positionKey = identities.positionKey(userId, "1:NET");
         runtime.putPosition(positionKey, new PositionRuntime(userId, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
@@ -98,7 +98,7 @@ class RuntimeChangedIndexCommitTest {
         runtime.clearCommittedChanges(identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isNull();
-        assertThat(identities.findPositionKey(userId, "BTC-USDT:NET")).isNull();
+        assertThat(identities.findPositionKey(userId, "1:NET")).isNull();
         assertThat(runtime.snapshotProjectionStateDirty()).isFalse();
         runtime.close();
     }
@@ -108,7 +108,7 @@ class RuntimeChangedIndexCommitTest {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
-        int symbolId = identities.symbolId("BTC-USDT");
+        int symbolId = identities.symbolId("1");
         long userId = 7;
         LiquidationRuntime planned = new LiquidationRuntime(1, userId, symbolId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,

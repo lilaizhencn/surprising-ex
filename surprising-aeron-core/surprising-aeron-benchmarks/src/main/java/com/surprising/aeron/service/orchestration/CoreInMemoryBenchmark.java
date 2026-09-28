@@ -26,7 +26,7 @@ import java.util.UUID;
 @Slf4j
 public final class CoreInMemoryBenchmark {
 
-    private static final String SYMBOL = "BENCH-BTC-USDT";
+    private static final String SYMBOL = "13";
     private static final long USER_ID = 1001;
     private static final long BALANCE_UNITS = 1_000_000_000_000L;
 

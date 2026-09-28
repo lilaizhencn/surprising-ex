@@ -13,7 +13,7 @@ import java.time.Instant;
  */
 public record MarkPriceEvent(
         ProductLine productLine,
-        String symbol,
+        String instrumentId,
         long instrumentChangeId,
         long markPriceUnits,
         long markPriceTicks,

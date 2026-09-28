@@ -18,15 +18,15 @@ class ProductRecoveryLifecycleTest {
         try (TradingCoreRuntime live = new TradingCoreRuntime(product)) {
             apply(live, command(product, 1, 1, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "BTC-USDT", type.ordinal(), "BTC", "USDT", asset, 1, 1,
+                            "1", type.ordinal(), "BTC", "USDT", asset, 1, 1,
                             type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                             type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
             apply(live, new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                     UUID.randomUUID(), product, CommandSource.OPERATIONS, 992, 1, 1,
                     1_700_000_000_000L, 99), TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                    ? new ApplyMarkPriceCommand("BTC-USDT", 100, 100, 100, 1, 1_700_000_000_000L)
-                    : new ApplyMarkPriceCommand("BTC-USDT", 100, 1, 1_700_000_000_000L))));
+                    ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, 1_700_000_000_000L)
+                    : new ApplyMarkPriceCommand("1", 100, 1, 1_700_000_000_000L))));
             apply(live, command(product, 2, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(
                             product == ProductLine.SPOT ? "BTC" : asset, product == ProductLine.SPOT ? 20 : 20_000))));
@@ -38,7 +38,7 @@ class ProductRecoveryLifecycleTest {
                     TradingCommandCodec.encodePlaceOrder(order(102, CoreOrderSide.BUY, 100, 4)));
             CoreResponse partialResult = apply(live, partial);
             assertThat(live.tradingState().order(101).executedQuantitySteps()).isEqualTo(4);
-            var trigger = new CoreTriggerOrderStateView(501, product, 22, "recovery-trigger", "", "BTC-USDT",
+            var trigger = new CoreTriggerOrderStateView(501, product, 22, "recovery-trigger", "", "1",
                     product == ProductLine.SPOT ? CoreOrderSide.BUY : CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.GREATER_OR_EQUAL,
                     200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1,
@@ -90,7 +90,7 @@ class ProductRecoveryLifecycleTest {
                     assertThat(recovered.tradingState().user(11).totalUnits(asset)
                             + recovered.tradingState().user(22).totalUnits(asset)).isEqualTo(40_000);
                 }
-                var takeProfit = new CoreTriggerOrderStateView(502, product, 22, "recovery-take-profit", "recovery-oco", "BTC-USDT",
+                var takeProfit = new CoreTriggerOrderStateView(502, product, 22, "recovery-take-profit", "recovery-oco", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         120, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 120, 2,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
@@ -111,8 +111,8 @@ class ProductRecoveryLifecycleTest {
                 try (TradingCoreRuntime afterPendingTrigger = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(300))) {
                     CoreMessage price = command(product, 14, 1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
-                                    ? new ApplyMarkPriceCommand("BTC-USDT", 120, 120, 120, 2, 1_700_000_000_013L)
-                                    : new ApplyMarkPriceCommand("BTC-USDT", 120, 2, 1_700_000_000_013L)));
+                                    ? new ApplyMarkPriceCommand("1", 120, 120, 120, 2, 1_700_000_000_013L)
+                                    : new ApplyMarkPriceCommand("1", 120, 2, 1_700_000_000_013L)));
                     apply(live, price);
                     apply(afterPendingTrigger, price);
                     CoreMessage execute = command(product, 15, 22, CoreMessageType.EXECUTE_TRIGGER_ORDER,
@@ -144,7 +144,7 @@ class ProductRecoveryLifecycleTest {
     }
 
     private static CoreTriggerOrderStateView ocoStopLoss(ProductLine product, String clientId) {
-        return new CoreTriggerOrderStateView(503, product, 22, clientId, "recovery-oco", "BTC-USDT",
+        return new CoreTriggerOrderStateView(503, product, 22, clientId, "recovery-oco", "1",
                 CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.LESS_OR_EQUAL,
                 80, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 80, 2,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
@@ -158,7 +158,7 @@ class ProductRecoveryLifecycleTest {
     }
 
     private static PlaceOrderCommand order(long id, CoreOrderSide side, long price, long qty) {
-        return new PlaceOrderCommand(id, "BTC-USDT", side, price, qty, false, CoreMarginMode.CROSS,
+        return new PlaceOrderCommand(id, "1", side, price, qty, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "qa-" + id);
     }
 

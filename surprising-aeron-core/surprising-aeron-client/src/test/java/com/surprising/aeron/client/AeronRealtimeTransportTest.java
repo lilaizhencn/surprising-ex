@@ -19,7 +19,7 @@ class AeronRealtimeTransportTest {
              var receiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 75, received::add);
              var sender = new AeronRealtimeSender(outbox, directory, "aeron:ipc", 75)) {
             var frame = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 123, 0, 456, 0,
-                    "BTC-USDT", "789", new byte[0]);
+                    "1", "789", new byte[0]);
             assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
             Thread.sleep(4000);
             received.clear();
@@ -39,7 +39,7 @@ class AeronRealtimeTransportTest {
              var receiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 74, received::add);
              var sender = new AeronRealtimeSender(outbox, directory, "aeron:ipc", 74)) {
             var frame = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 123, 0, 456, 0,
-                    "BTC-USDT", "789", new byte[0]);
+                    "1", "789", new byte[0]);
             assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
             receiver.transportFailed(new IllegalStateException("injected transport error"));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -60,7 +60,7 @@ class AeronRealtimeTransportTest {
         try (var receiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 73, received::add);
              var sender = new AeronRealtimeSender(outbox, directory, "aeron:ipc", 73)) {
             var frame = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 123, 0, 456, 0,
-                    "BTC-USDT", "789", new byte[0]);
+                    "1", "789", new byte[0]);
             assertThat(deliver(outbox, received, frame)).usingRecursiveComparison().isEqualTo(frame);
             driver.close();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
@@ -73,7 +73,7 @@ class AeronRealtimeTransportTest {
                     .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
             received.clear();
             var next = new RealtimeFrame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 42, 124, 0, 457, 0,
-                    "BTC-USDT", "790", new byte[0]);
+                    "1", "790", new byte[0]);
             assertThat(deliver(outbox, received, next)).usingRecursiveComparison().isEqualTo(next);
             assertThat(receiver.ready()).isTrue();
         } finally { driver.close(); }
@@ -101,7 +101,7 @@ class AeronRealtimeTransportTest {
             var outbox = new RealtimeOutbox(64,1_048_576);
             try (var sender = new AeronRealtimeSender(outbox,directory,"aeron:ipc",71)) {
                 var frame = new RealtimeFrame(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,42,123,0,456,0,
-                        "BTC-USDT","789",new byte[100_000]);
+                        "1","789",new byte[100_000]);
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
                 RealtimeFrame actual=null;
                 while(actual==null && System.nanoTime()<deadline) {

@@ -19,6 +19,7 @@ import org.mockito.Mockito;
 import tools.jackson.databind.ObjectMapper;
 
 class CustodyWithdrawalServiceTest {
+    private final com.surprising.asset.service.AssetConfigurationService assets = Mockito.mock(com.surprising.asset.service.AssetConfigurationService.class);
 
     @Test
     void unknownCustodyResponseKeepsFundsInBroadcastUnknownWithoutRefund() {
@@ -29,7 +30,7 @@ class CustodyWithdrawalServiceTest {
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
         CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "PROCESSING");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(record(withdrawalId, "DEBITED"));
@@ -60,7 +61,7 @@ class CustodyWithdrawalServiceTest {
                 "withdraw-concurrent");
         CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
                 "withdraw-concurrent");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
@@ -92,7 +93,7 @@ class CustodyWithdrawalServiceTest {
                 "withdraw-timeout-race");
         CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
                 "withdraw-timeout-race");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
@@ -121,7 +122,7 @@ class CustodyWithdrawalServiceTest {
                 "withdraw-local-conflict");
         CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
                 "withdraw-local-conflict");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
@@ -149,7 +150,7 @@ class CustodyWithdrawalServiceTest {
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
         CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "PROCESSING", "withdraw-rejected");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(
@@ -178,7 +179,7 @@ class CustodyWithdrawalServiceTest {
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
         CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "SUBMITTED");
-        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, false));
 
@@ -411,7 +412,7 @@ class CustodyWithdrawalServiceTest {
         CustodyWithdrawalReconciliationService reconciliationService =
                 new CustodyWithdrawalReconciliationService(repository, walletClient, refundService, new ObjectMapper());
         return new CustodyWithdrawalService(properties, repository, walletClient, spotAccountClient,
-                valuationClient, refundService, reconciliationService, new ObjectMapper());
+                valuationClient, refundService, reconciliationService, new ObjectMapper(), assets);
     }
 
     private CustodyWithdrawalService.WithdrawalRequest request() {

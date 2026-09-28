@@ -42,10 +42,10 @@ public class AdlController {
     @GetMapping("/events")
     public AdlEventQueryResponse events(@RequestParam(required = false) Long userId,
                                         @RequestParam(required = false) String asset,
-                                        @RequestParam(required = false) String symbol,
+                                        @RequestParam(required = false) String instrumentId,
                                         @RequestParam(defaultValue = "100") int limit) {
         try {
-            return adlService.events(userId, asset, symbol, limit);
+            return adlService.events(userId, asset, instrumentId, limit);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -76,13 +76,13 @@ public class AdlController {
     public AdlEventQueryResponse adminEvents(@RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
                                              @RequestParam(required = false) Long userId,
                                              @RequestParam(required = false) String asset,
-                                             @RequestParam(required = false) String symbol,
+                                             @RequestParam(required = false) String instrumentId,
                                              @RequestParam(defaultValue = "100") int limit,
                                              @RequestParam(required = false) String cursor,
                                              @RequestParam(required = false) String sort) {
         requireAdmin(adminUserId);
         try {
-            return adlService.events(userId, asset, symbol, limit, cursor, sort);
+            return adlService.events(userId, asset, instrumentId, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

@@ -60,7 +60,7 @@ class FeeScheduleSnapshotInitializerTest {
 
     private static FeeScheduleResponse policy() {
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
-        return new FeeScheduleResponse(71, ProductLine.LINEAR_PERPETUAL, 1001, "BTC-USDT", -25, 75,
+        return new FeeScheduleResponse(71, ProductLine.LINEAR_PERPETUAL, 1001, "1", -25, 75,
                 FeeScheduleSourceType.VIP, "VIP3", "tier", FeeScheduleStatus.ACTIVE,
                 now.minusSeconds(60), null, now.minusSeconds(120), now);
     }

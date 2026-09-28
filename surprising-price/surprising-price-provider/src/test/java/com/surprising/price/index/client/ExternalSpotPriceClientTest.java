@@ -240,10 +240,10 @@ class ExternalSpotPriceClientTest {
         }
     }
 
-    private IndexPriceProperties.SourceConfig source(String name, String symbol, String parser) {
+    private IndexPriceProperties.SourceConfig source(String name, String instrumentId, String parser) {
         IndexPriceProperties.SourceConfig source = new IndexPriceProperties.SourceConfig();
         source.setName(name);
-        source.setSourceSymbol(symbol);
+        source.setSourceSymbol(instrumentId);
         source.setParser(parser);
         source.setWebsocketParser(parser);
         source.setWeight(BigDecimal.ONE);

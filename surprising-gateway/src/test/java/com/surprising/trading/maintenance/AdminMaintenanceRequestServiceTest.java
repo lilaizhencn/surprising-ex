@@ -29,7 +29,7 @@ class AdminMaintenanceRequestServiceTest {
         var service = mock(MaintenanceService.class);
         when(service.create(eq("1"), any())).thenAnswer(i -> new MaintenanceTask("9007199254740999", ProductLine.LINEAR_PERPETUAL, i.getArgument(1), "1", "RUNNING", "GATE", 0, 0, 0, null, "2026-09-06", "2026-09-06"));
         var mapper = new tools.jackson.databind.ObjectMapper();
-        var request = mapper.readValue("{\"requestId\":\"98515364-34c9-46a9-bf6f-bbb48f330ea3\",\"symbol\":\"BTC-USDT\",\"userId\":\"9007199254740997\",\"mode\":\"LIMIT\",\"priceTicks\":\"9007199254740993\",\"reason\":\"upgrade\"}", MaintenanceRequest.class);
+        var request = mapper.readValue("{\"requestId\":\"98515364-34c9-46a9-bf6f-bbb48f330ea3\",\"instrumentId\":\"1\",\"userId\":\"9007199254740997\",\"mode\":\"LIMIT\",\"priceTicks\":\"9007199254740993\",\"reason\":\"upgrade\"}", MaintenanceRequest.class);
         var result = mapper.readTree(mapper.writeValueAsString(new AdminMaintenanceRequestService(service).create("1", request)));
         org.assertj.core.api.Assertions.assertThat(result.get("id").asText()).isEqualTo("9007199254740999");
         org.assertj.core.api.Assertions.assertThat(result.get("request").get("priceTicks").asText()).isEqualTo("9007199254740993");

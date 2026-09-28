@@ -27,7 +27,7 @@ public class AccountOpenInterestSnapshotService {
         Instant now = Instant.now();
         long revision = Math.max(1L, state.revision());
         var shards = state.values().stream()
-                .map(row -> new OpenInterestShardSnapshot(productLine, row.symbol(), 0,
+                .map(row -> new OpenInterestShardSnapshot(productLine, row.instrumentId(), 0,
                         row.longQuantitySteps(), row.shortQuantitySteps(), revision, now))
                 .toList();
         return new OpenInterestSnapshotResponse(productLine, state.revision(), now, shards);

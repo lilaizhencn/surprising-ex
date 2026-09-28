@@ -45,13 +45,13 @@ final class OrderBookQueryService {
 
     CoreResponse beginBookQuery(CoreMessage message) {
         if (message.payloadUnsafe().length == 0) {
-            throw new IllegalArgumentException("single-symbol book query payload is required");
+            throw new IllegalArgumentException("single-instrumentId book query payload is required");
         }
         var query = CoreStateQueryCodec.decodeOrderBookQuery(message.payloadUnsafe());
         long queryId = nextAsyncQueryId++;
         try {
-            owner.matcherPipeline.readAtSubmissionFence(owner.matchingAdapter.matcherShardId(query.symbol()),
-                    () -> owner.matchingAdapter.orderBookLevelsAsync(query.symbol(), query.depth()).join())
+            owner.matcherPipeline.readAtSubmissionFence(owner.matchingAdapter.matcherShardId(query.instrumentId()),
+                    () -> owner.matchingAdapter.orderBookLevelsAsync(query.instrumentId(), query.depth()).join())
                     .whenComplete((levels, failure) -> {
                         if (failure != null) failedQueries.put(queryId, true);
                         else completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
@@ -128,11 +128,11 @@ final class OrderBookQueryService {
         List<String> symbols = session.symbols().tailMap(query.symbolCursor(), false).keySet().stream()
                 .limit(query.limit()).toList();
         int expectedLevels = 0;
-        for (String symbol : symbols) {
-            expectedLevels = Math.addExact(expectedLevels, session.symbols().get(symbol).size());
+        for (String instrumentId : symbols) {
+            expectedLevels = Math.addExact(expectedLevels, session.symbols().get(instrumentId).size());
         }
         List<com.surprising.aeron.protocol.CoreBookLevelView> levels = new ArrayList<>(expectedLevels);
-        for (String symbol : symbols) levels.addAll(session.symbols().get(symbol));
+        for (String instrumentId : symbols) levels.addAll(session.symbols().get(instrumentId));
         boolean complete = symbols.isEmpty()
                 || session.symbols().higherKey(symbols.getLast()) == null;
         String nextCursor = complete ? "" : symbols.getLast();
@@ -180,13 +180,13 @@ final class OrderBookQueryService {
                 int depth,
                 BookBootstrapSnapshot snapshot) {
             NavigableMap<String, List<com.surprising.aeron.protocol.CoreBookLevelView>> grouped = new TreeMap<>();
-            for (String symbol : snapshot.symbols()) grouped.put(symbol, new ArrayList<>());
+            for (String instrumentId : snapshot.symbols()) grouped.put(instrumentId, new ArrayList<>());
             for (com.surprising.aeron.protocol.CoreBookLevelView level : snapshot.levels()) {
-                List<com.surprising.aeron.protocol.CoreBookLevelView> levels = grouped.get(level.symbol());
-                if (levels == null) throw new IllegalStateException("bootstrap level references unknown symbol");
+                List<com.surprising.aeron.protocol.CoreBookLevelView> levels = grouped.get(level.instrumentId());
+                if (levels == null) throw new IllegalStateException("bootstrap level references unknown instrumentId");
                 levels.add(level);
             }
-            grouped.replaceAll((symbol, levels) -> List.copyOf(levels));
+            grouped.replaceAll((instrumentId, levels) -> List.copyOf(levels));
             return new BookBootstrapSession(snapshotId, exportSequence, depth,
                     Collections.unmodifiableNavigableMap(grouped));
         }

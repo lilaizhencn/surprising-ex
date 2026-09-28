@@ -113,9 +113,9 @@ class MarketMakerServiceTest {
         fixtures.tradeBatchSize = 8;
         var service = fixtures.service();
         var strategy = fixtures.properties().getStrategies().getFirst();
-        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
-        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("BTC-USDT", 50);
-        var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+        var instrument = new FakeInstrumentRpc(100L).latest(1, ProductLine.LINEAR_PERPETUAL);
+        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("1", 50);
+        var requests = service.simulatedOrders(strategy, "1", 900002L, 1,
                 instrument, book, null, 0, new java.util.Random(42));
         assertThat(requests).hasSize(8);
         assertThat(requests).extracting(PlaceOrderRequest::side).contains(OrderSide.BUY, OrderSide.SELL);
@@ -131,10 +131,10 @@ class MarketMakerServiceTest {
         fixtures.tradeBatchSize = 8;
         var service = fixtures.service();
         var strategy = fixtures.properties().getStrategies().getFirst();
-        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
-        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("BTC-USDT", 50);
+        var instrument = new FakeInstrumentRpc(100L).latest(1, ProductLine.LINEAR_PERPETUAL);
+        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("1", 50);
         for (long position : new long[] {4998, -4998, 5000, -5000, 5010, -5010}) {
-            var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+            var requests = service.simulatedOrders(strategy, "1", 900002L, 1,
                     instrument, book, null, position, new java.util.Random(42));
             long buys = requests.stream().filter(r -> r.side() == OrderSide.BUY)
                     .mapToLong(PlaceOrderRequest::quantitySteps).sum();
@@ -153,10 +153,10 @@ class MarketMakerServiceTest {
         fixtures.tradeBatchSize = 8;
         var service = fixtures.service();
         var strategy = fixtures.properties().getStrategies().getFirst();
-        var instrument = new FakeInstrumentRpc(100L).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL);
-        var book = new OrderBookSnapshotResponse("BTC-USDT", 1, 50, List.of(),
+        var instrument = new FakeInstrumentRpc(100L).latest(1, ProductLine.LINEAR_PERPETUAL);
+        var book = new OrderBookSnapshotResponse("1", 1, 50, List.of(),
                 List.of(new OrderBookLevel(50_010, 3, 1)), Instant.now());
-        var requests = service.simulatedOrders(strategy, "BTC-USDT", 900002L, 1,
+        var requests = service.simulatedOrders(strategy, "1", 900002L, 1,
                 instrument, book, null, 0, new java.util.Random(42));
         assertThat(requests).isNotEmpty().allSatisfy(r -> assertThat(r.side()).isEqualTo(OrderSide.BUY));
         assertThat(requests.stream().mapToLong(PlaceOrderRequest::quantitySteps).sum()).isLessThanOrEqualTo(3);
@@ -168,7 +168,7 @@ class MarketMakerServiceTest {
         fixtures.tradeEnabled = true;
         MarketMakerService service = fixtures.service();
         for (int cycle = 0; cycle < 3; cycle++) {
-            service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+            service.runOnce(new MarketMakerRunRequest("47", "1"));
         }
         assertThat(fixtures.orderRpc.placeRequests.stream()
                 .filter(request -> request.timeInForce() == TimeInForce.IOC).toList()).hasSize(3)
@@ -187,7 +187,7 @@ class MarketMakerServiceTest {
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
         fixtures.orderRpc.omitMarketBatchDetails = true;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.runEventRepository.events)
                 .filteredOn(event -> event.eventType().equals("TRADE_SUBMITTED"))
                 .singleElement().satisfies(event -> {
@@ -206,7 +206,7 @@ class MarketMakerServiceTest {
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
         fixtures.orderRpc.rejectMarketBatch = true;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.runEventRepository.events)
                 .filteredOn(event -> event.eventType().equals("TRADE_REJECTED"))
                 .singleElement().satisfies(event -> {
@@ -222,7 +222,7 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         var trades = fixtures.orderRpc.placeRequests.stream().filter(r -> r.orderType() == OrderType.MARKET).toList();
         assertThat(trades).hasSize(8);
         assertThat(trades).extracting(PlaceOrderRequest::clientOrderId).doesNotHaveDuplicates();
@@ -236,7 +236,7 @@ class MarketMakerServiceTest {
         fixtures.orderRpc.rejectQuoteBatch = true;
         MarketMakerService service = fixtures.service();
 
-        var rejected = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var rejected = service.runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(rejected.strategies()).singleElement().satisfies(strategy -> {
             assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED);
             assertThat(strategy.lastError()).contains("INSUFFICIENT_AVAILABLE_BALANCE");
@@ -250,7 +250,7 @@ class MarketMakerServiceTest {
                 });
 
         fixtures.orderRpc.rejectQuoteBatch = false;
-        var recovered = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var recovered = service.runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(recovered.strategies()).singleElement().satisfies(strategy -> {
             assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.RUNNING);
             assertThat(strategy.lastError()).isNull();
@@ -263,7 +263,7 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
 
-        var response = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var response = service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(response.strategies()).singleElement()
                 .satisfies(strategy -> {
@@ -288,12 +288,12 @@ class MarketMakerServiceTest {
     void spotColdStartUsesMarkPriceWhenTheLocalBookIsEmpty() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.productLine = ProductLine.SPOT;
-        fixtures.symbol = "BTC-USDT-SPOT";
+        fixtures.instrumentId = "48";
         fixtures.bestBidTicks = 0;
         fixtures.bestAskTicks = 0;
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", fixtures.symbol, ProductLine.SPOT));
+        service.runOnce(new MarketMakerRunRequest("47", fixtures.instrumentId, ProductLine.SPOT));
 
         assertThat(fixtures.orderRpc.placeRequests).isNotEmpty();
         assertThat(fixtures.orderRpc.placeRequests)
@@ -307,7 +307,7 @@ class MarketMakerServiceTest {
         fixtures.orderLevels = 20;
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.batchPlaceRequests).hasSize(2);
         assertThat(fixtures.orderRpc.batchPlaceRequests.get(0).orders()).hasSize(20);
@@ -320,7 +320,7 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT", ProductLine.INVERSE_PERPETUAL));
+        service.runOnce(new MarketMakerRunRequest("47", "1", ProductLine.INVERSE_PERPETUAL));
 
         assertThat(fixtures.orderRpc.placeRequests).isEmpty();
         assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
@@ -330,20 +330,20 @@ class MarketMakerServiceTest {
     void runOnceRecordsReferenceMarketSampleWhenSnapshotIsAvailable() {
         Fixtures fixtures = new Fixtures(List.of());
         FakeReferenceSampleRepository sampleRepository = new FakeReferenceSampleRepository();
-        ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "BTC-USDT",
+        ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "1",
                 List.of(new ReferenceOrderBookLevel(49_990L, 3L)),
                 List.of(new ReferenceOrderBookLevel(50_020L, 7L)),
                 Instant.parse("2026-01-01T00:00:01Z"));
         MarketMakerService service = fixtures.service(
-                fixtures.runEventRepository, sampleRepository, (symbol, productLine, instrument) -> snapshot);
+                fixtures.runEventRepository, sampleRepository, (instrumentId, productLine, instrument) -> snapshot);
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(sampleRepository.referenceSamples).singleElement()
                 .satisfies(sample -> {
-                    assertThat(sample.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(sample.strategyId()).isEqualTo("47");
                     assertThat(sample.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(sample.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(sample.instrumentId()).isEqualTo("1");
                     assertThat(sample.sourceName()).isEqualTo("BINANCE_USDM");
                     assertThat(sample.transport()).isEqualTo("WEBSOCKET");
                     assertThat(sample.bidLevels()).isEqualTo(1);
@@ -354,14 +354,14 @@ class MarketMakerServiceTest {
 
     @Test
     void runOnceCancelsOffTargetOwnedQuotesBeforeReposting() {
-        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         OrderResponse staleBid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
                 49_000L, 10L, OrderStatus.ACCEPTED);
         Fixtures fixtures = new Fixtures(List.of(staleBid));
         fixtures.orderRpc.jsonRoundTripReceipts = true;
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.cancelRequests).singleElement()
                 .extracting(CancelOrderRequest::orderId)
@@ -373,11 +373,11 @@ class MarketMakerServiceTest {
 
     @Test
     void ownOldAskDoesNotPinRisingReferencePrice() {
-        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         Fixtures fixtures = new Fixtures(List.of(order(77L, 900001L, prefix + "s0-1", OrderSide.SELL,
                 50_010L, 100L, OrderStatus.ACCEPTED)));
         fixtures.markPriceUnits = 5_100_000L;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId).contains(77L);
         assertThat(fixtures.orderRpc.placeRequests).filteredOn(q -> q.side() == OrderSide.BUY)
                 .allSatisfy(q -> assertThat(q.priceTicks()).isGreaterThan(50_010L));
@@ -385,11 +385,11 @@ class MarketMakerServiceTest {
 
     @Test
     void otherParticipantsAtTheSamePriceStillProtectPostOnlyQuotes() {
-        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         Fixtures fixtures = new Fixtures(List.of(order(77L, 900001L, prefix + "s0-1", OrderSide.SELL,
                 50_010L, 99L, OrderStatus.ACCEPTED)));
         fixtures.markPriceUnits = 5_100_000L;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.orderRpc.placeRequests).filteredOn(q -> q.side() == OrderSide.BUY)
                 .isEmpty();
     }
@@ -400,7 +400,7 @@ class MarketMakerServiceTest {
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
     }
@@ -411,7 +411,7 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(orders.subList(5, orders.size()));
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 40;
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.orderRpc.openOrders).hasSize(40);
         assertThat(fixtures.orderRpc.liveCountsAfterCancel).isNotEmpty()
                 .allSatisfy(count -> assertThat(count).isGreaterThanOrEqualTo(37));
@@ -423,7 +423,7 @@ class MarketMakerServiceTest {
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
@@ -437,7 +437,7 @@ class MarketMakerServiceTest {
         fixtures.orderLevels = 30;
         fixtures.maxOpenOrders = 100;
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(60);
         assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(10);
@@ -452,7 +452,7 @@ class MarketMakerServiceTest {
         fixtures.maxOpenOrders = 60;
         fixtures.orderRpc.failedCancelOrderIds.add(staleOrders.get(0).orderId());
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(4);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(3);
@@ -466,7 +466,7 @@ class MarketMakerServiceTest {
         fixtures.maxOpenOrders = 60;
         fixtures.orderRpc.batchSupported = false;
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.cancelRequests).hasSize(4);
         assertThat(fixtures.orderRpc.openOrders).hasSize(36);
@@ -484,7 +484,7 @@ class MarketMakerServiceTest {
         fixtures.bestAskTicks = 780_842L;
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
         var metrics = service.adminMetrics(100);
 
         assertThat(fixtures.orderRpc.placeRequests).hasSize(40)
@@ -530,7 +530,7 @@ class MarketMakerServiceTest {
         fixtures.bestAskTicks = 79L;
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
         var metrics = service.adminMetrics(100);
 
         assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
@@ -545,13 +545,13 @@ class MarketMakerServiceTest {
     @Test
     void restartedProviderDoesNotReuseClientOrderIdsFromPreviousInstance() {
         Fixtures first = new Fixtures(List.of());
-        first.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        first.service().runOnce(new MarketMakerRunRequest("47", "1"));
         List<String> firstIds = first.orderRpc.placeRequests.stream()
                 .map(PlaceOrderRequest::clientOrderId)
                 .toList();
 
         Fixtures second = new Fixtures(List.of());
-        second.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        second.service().runOnce(new MarketMakerRunRequest("47", "1"));
         List<String> secondIds = second.orderRpc.placeRequests.stream()
                 .map(PlaceOrderRequest::clientOrderId)
                 .toList();
@@ -565,8 +565,8 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.openOrdersCalls).isEqualTo(1);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
@@ -586,9 +586,9 @@ class MarketMakerServiceTest {
         assertThat(metrics.totals().warnAnomalies()).isEqualTo(1L);
         assertThat(metrics.rows()).singleElement()
                 .satisfies(row -> {
-                    assertThat(row.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(row.strategyId()).isEqualTo("47");
                     assertThat(row.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(row.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(row.instrumentId()).isEqualTo("1");
                     assertThat(row.accountId()).isEqualTo(900001L);
                     assertThat(row.qualityStatus()).isEqualTo("CRITICAL");
                     assertThat(row.desiredQuoteCount()).isEqualTo(6L);
@@ -609,11 +609,11 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
 
-        var config = service.updateStrategyConfig("btc-usdt-mm-a",
+        var config = service.updateStrategyConfig("47",
                 new MarketMakerService.MarketMakerStrategyConfigUpdateRequest(
                         true, 25L, "CROSS", 40L, 12L, 500L, 500_000L, 2, "quote tuning"),
                 "1001");
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(config.effective().baseQuantitySteps()).isEqualTo(25L);
         assertThat(config.effective().orderLevels()).isEqualTo(2);
@@ -629,7 +629,7 @@ class MarketMakerServiceTest {
         FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         MarketMakerService service = fixtures.service(runEventRepository);
 
-        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(runEventRepository.events)
                 .extracting(MarketMakerRunEventWrite::eventType)
@@ -638,9 +638,9 @@ class MarketMakerServiceTest {
                 .filteredOn(event -> "QUOTE_RECONCILED".equals(event.eventType()))
                 .singleElement()
                 .satisfies(event -> {
-                    assertThat(event.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(event.strategyId()).isEqualTo("47");
                     assertThat(event.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(event.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(event.instrumentId()).isEqualTo("1");
                     assertThat(event.accountId()).isEqualTo(900001L);
                     assertThat(event.submittedOrders()).isEqualTo(6L);
                     assertThat(event.traceId()).isNotBlank();
@@ -654,11 +654,11 @@ class MarketMakerServiceTest {
         MarketMakerService service = fixtures.service(runEventRepository);
         Instant createdAt = Instant.parse("2026-07-03T00:00:00Z");
         runEventRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
-                77L, "btc-usdt-mm-a", ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 900001L, "mm-test", 9L,
+                77L, "47", ProductLine.LINEAR_PERPETUAL, "1", 900001L, "mm-test", 9L,
                 "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, "trace-1", createdAt)),
                 "next", true, "createdAt.desc", 25);
 
-        var response = service.runLogs(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "btc-usdt", 900001L,
+        var response = service.runLogs(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L,
                 "QUOTE_RECONCILED", 25, "cursor", "createdAt.desc");
 
         assertThat(response.events()).singleElement()
@@ -668,15 +668,15 @@ class MarketMakerServiceTest {
         assertThat(response.sort()).isEqualTo("createdAt.desc");
         assertThat(response.limit()).isEqualTo(25);
         assertThat(runEventRepository.lastRunEventsPageProductLine).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-        assertThat(runEventRepository.lastRunEventsPageStrategyId).isEqualTo("BTC-USDT-MM-A");
-        assertThat(runEventRepository.lastRunEventsPageSymbol).isEqualTo("BTC-USDT");
+        assertThat(runEventRepository.lastRunEventsPageStrategyId).isEqualTo("47");
+        assertThat(runEventRepository.lastRunEventsPageSymbol).isEqualTo("1");
         assertThat(runEventRepository.lastRunEventsPageCursor).isEqualTo("cursor");
         assertThat(runEventRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
     }
 
-    private static String accountPrefix(ProductLine productLine, String strategyId, String symbol, long accountId) {
+    private static String accountPrefix(ProductLine productLine, String strategyId, String instrumentId, long accountId) {
         CRC32 crc32 = new CRC32();
-        crc32.update((productLine.name() + ":" + strategyId + ":" + symbol).getBytes(StandardCharsets.UTF_8));
+        crc32.update((productLine.name() + ":" + strategyId + ":" + instrumentId).getBytes(StandardCharsets.UTF_8));
         return "mm-" + Long.toUnsignedString(crc32.getValue(), 36) + "-" + accountId + "-";
     }
 
@@ -696,7 +696,7 @@ class MarketMakerServiceTest {
     }
 
     private static List<OrderResponse> staleOrders(int levels) {
-        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         List<OrderResponse> orders = new ArrayList<>();
         for (int level = 0; level < levels; level++) {
             orders.add(order(1_000L + level, 900001L, prefix + "b" + level + "-1", OrderSide.BUY,
@@ -715,7 +715,7 @@ class MarketMakerServiceTest {
                                          long remainingQuantity,
                                          OrderStatus status,
                                          Instant now) {
-        return new OrderResponse(orderId, userId, clientOrderId, "BTC-USDT", side, OrderType.LIMIT,
+        return new OrderResponse(orderId, userId, clientOrderId, "1", side, OrderType.LIMIT,
                 TimeInForce.GTX, priceTicks, remainingQuantity, 0L, remainingQuantity, MarginMode.CROSS,
                 PositionSide.NET, -100L, 500L, false, true, status, null, now, now);
     }
@@ -734,7 +734,7 @@ class MarketMakerServiceTest {
         private long bestBidTicks = 49_990L;
         private long bestAskTicks = 50_010L;
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private String symbol = "BTC-USDT";
+        private String instrumentId = "1";
 
         private Fixtures(List<OrderResponse> openOrders) {
             this.orderRpc = new FakeOrderRpc(openOrders);
@@ -754,10 +754,10 @@ class MarketMakerServiceTest {
             MarketMakerProperties properties = properties();
             InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
             snapshotCache.replace(productLine,
-                    List.of(new FakeInstrumentRpc(priceTickUnits).latest(symbol, productLine)));
+                    List.of(new FakeInstrumentRpc(priceTickUnits).latest(Integer.parseInt(instrumentId), productLine)));
             return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(bestBidTicks, bestAskTicks), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
-                    referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
+                    referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
                     new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
         }
 
@@ -768,7 +768,7 @@ class MarketMakerServiceTest {
             LatestMarkPriceCache cache = new LatestMarkPriceCache(consumerProperties);
             Instant now = Instant.now();
             BigDecimal price = BigDecimal.valueOf(50_000L);
-            cache.update(new MarkPriceEvent(productLine, symbol, 1L,
+            cache.update(new MarkPriceEvent(productLine, instrumentId, 1L,
                     markPriceUnits, 50_000L, price, price, null, price, price, price,
                     BigDecimal.valueOf(bestBidTicks), BigDecimal.valueOf(bestAskTicks), BigDecimal.ZERO,
                     now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
@@ -791,11 +791,11 @@ class MarketMakerServiceTest {
             properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
-            strategy.setStrategyId("btc-usdt-mm-a");
+            strategy.setStrategyId("47");
             strategy.setProductLine(productLine);
             strategy.setEnabled(true);
             strategy.setAccountIds(List.of(900001L));
-            strategy.setSymbols(List.of(symbol));
+            strategy.setInstrumentIds(List.of(instrumentId));
             strategy.setBaseQuantitySteps(10L);
             strategy.setMarginMode(MarginMode.CROSS);
             properties.setStrategies(List.of(strategy));
@@ -862,7 +862,7 @@ class MarketMakerServiceTest {
         @Override
         public List<MarketMakerRunEventRecord> find(ProductLine productLine,
                                                     String strategyId,
-                                                    String symbol,
+                                                    String instrumentId,
                                                     Long accountId,
                                                     String eventType,
                                                     int limit) {
@@ -872,7 +872,7 @@ class MarketMakerServiceTest {
         @Override
         public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
                                                               String strategyId,
-                                                              String symbol,
+                                                              String instrumentId,
                                                               Long accountId,
                                                               String eventType,
                                                               int limit,
@@ -880,7 +880,7 @@ class MarketMakerServiceTest {
                                                               String sort) {
             lastRunEventsPageProductLine = productLine;
             lastRunEventsPageStrategyId = strategyId;
-            lastRunEventsPageSymbol = symbol;
+            lastRunEventsPageSymbol = instrumentId;
             lastRunEventsPageAccountId = accountId;
             lastRunEventsPageEventType = eventType;
             lastRunEventsPageLimit = limit;
@@ -1057,7 +1057,7 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public AlgoOrderQueryResponse openAlgoOrders(long userId, String symbol, int limit) {
+        public AlgoOrderQueryResponse openAlgoOrders(long userId, String instrumentId, int limit) {
             throw new UnsupportedOperationException();
         }
 
@@ -1072,7 +1072,7 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
+        public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
             productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
             openOrdersCalls++;
             return new OrderQueryResponse(openOrders.size(), openOrders);
@@ -1089,9 +1089,9 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public OrderBookSnapshotResponse orderBook(String symbol, int depth) {
+        public OrderBookSnapshotResponse orderBook(String instrumentId, int depth) {
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
-            return new OrderBookSnapshotResponse(symbol, 1L, depth,
+            return new OrderBookSnapshotResponse(instrumentId, 1L, depth,
                     List.of(new OrderBookLevel(bestBidTicks, 100L, 1L)),
                     List.of(new OrderBookLevel(bestAskTicks, 100L, 1L)), now);
         }
@@ -1106,7 +1106,7 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public InstrumentResponse latest(String symbol, ProductLine productLine) {
+        public InstrumentResponse latest(int instrumentId, ProductLine productLine) {
             ProductLine effectiveProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
             InstrumentType instrumentType = switch (effectiveProductLine) {
                 case SPOT -> InstrumentType.SPOT;
@@ -1116,17 +1116,17 @@ class MarketMakerServiceTest {
             };
             ContractType contractType = ContractType.valueOf(effectiveProductLine.contractTypeCode());
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
-            return new InstrumentResponse(symbol, 1L, instrumentType, contractType,
+            return new InstrumentResponse(instrumentId, 3, 1, 1, 3, "1", 1L, instrumentType, contractType,
                     "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
                     1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
                     true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                     1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                    10_000_000L, 3, null, null, null, null, null, null, null,
+                    10_000_000L, 3, null, null, null, null, null, null, null, null,
                     InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
         }
 
         @Override
-        public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine productLine, String symbol, long changeId) {
+        public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine productLine, int instrumentId, long changeId) {
             throw new UnsupportedOperationException("maker never reads historical trade units");
         }
 
@@ -1137,7 +1137,7 @@ class MarketMakerServiceTest {
 
         @Override
         public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
-            return new InstrumentSnapshotResponse(productLine, 1L, "test", List.of(latest("BTC-USDT")));
+            return new InstrumentSnapshotResponse(productLine, 1L, "test", List.of(latest(1, productLine)));
         }
     }
 
@@ -1186,13 +1186,13 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
-            return new PositionResponse(userId, symbol, MarginMode.CROSS, PositionSide.NET,
+        public PositionResponse position(long userId, String instrumentId, String marginMode, String positionSide) {
+            return new PositionResponse(userId, instrumentId, MarginMode.CROSS, PositionSide.NET,
                     0L, 0L, 0L, Instant.parse("2026-01-01T00:00:00Z"));
         }
 
         @Override
-        public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
+        public PositionMarginResponse positionMargin(long userId, String instrumentId, String marginMode) {
             throw new UnsupportedOperationException();
         }
 

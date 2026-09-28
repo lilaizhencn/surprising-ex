@@ -44,7 +44,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
         }
         CoreInstrument instrument = RuntimeLifecycleSettlement.requireInstrument(runtime, command);
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
@@ -64,7 +64,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         List<CoreOrderState> selectedOrders = List.of();
         boolean moreOrders = false;
         if (!ordersComplete) {
-            RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(runtime, identities, activeOrderIndex, instrument.symbol(),
+            RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(runtime, identities, activeOrderIndex, instrument.instrumentId(),
                     accountLaneId, command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
             moreOrders = !page.complete();

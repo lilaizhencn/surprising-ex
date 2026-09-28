@@ -11,18 +11,18 @@ public final class InstrumentEventKeys {
     private InstrumentEventKeys() {
     }
 
-    public static String key(ProductLine productLine, String symbol) {
-        if (productLine == null || symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("productLine and symbol are required");
+    public static String key(ProductLine productLine, int instrumentId) {
+        if (productLine == null || instrumentId <= 0) {
+            throw new IllegalArgumentException("productLine and instrumentId are required");
         }
-        return productLine.name() + ":" + symbol.trim().toUpperCase(java.util.Locale.ROOT);
+        return productLine.name() + ":" + instrumentId;
     }
 
     public static String key(InstrumentEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("event is required");
         }
-        return key(event.productLine(), event.symbol());
+        return key(event.productLine(), event.instrumentId());
     }
 
     public static boolean matches(String key, InstrumentEvent event) {

@@ -132,7 +132,7 @@ class GatewayMediaDriverConfigurationTest {
                     new com.surprising.aeron.protocol.RealtimeFrame(
                             com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
                             com.surprising.aeron.protocol.RealtimeFrame.Kind.TRADE,
-                            0, sequence, 0, 1700000000000L, 0, "BTC-USDT", "fill", new byte[25]));
+                            0, sequence, 0, 1700000000000L, 0, "1", "fill", new byte[25]));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (received.get() != sequence && System.nanoTime() < deadline) {
                 publication.offer(new UnsafeBuffer(bytes));

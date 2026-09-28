@@ -29,6 +29,6 @@ class CoreLaneMetricsPrometheusFormatterTest {
                 .containsOnlyOnce("# TYPE surprising_core_account_lane_operations_total counter")
                 .containsOnlyOnce("# TYPE surprising_core_account_lane_latency_seconds_total counter")
                 .doesNotContain("user_id=")
-                .doesNotContain("symbol=");
+                .doesNotContain("instrumentId=");
     }
 }

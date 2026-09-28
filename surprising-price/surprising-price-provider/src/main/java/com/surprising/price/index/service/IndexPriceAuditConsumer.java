@@ -44,9 +44,9 @@ public class IndexPriceAuditConsumer {
                     continue;
                 }
                 IndexPriceEvent event = publication.indexPrice();
-                if (record.key() == null || !record.key().equals(publication.symbol())
-                        || !record.key().equals(event.symbol())) {
-                    throw new IllegalArgumentException("index price audit Kafka key must match payload symbol");
+                if (record.key() == null || !record.key().equals(publication.instrumentId())
+                        || !record.key().equals(event.instrumentId())) {
+                    throw new IllegalArgumentException("index price audit Kafka key must match payload instrumentId");
                 }
                 events.add(event);
             }

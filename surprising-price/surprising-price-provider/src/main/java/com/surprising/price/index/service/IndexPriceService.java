@@ -71,47 +71,47 @@ public class IndexPriceService {
             try {
                 publishSymbol(symbolConfig);
             } catch (Exception ex) {
-                log.error("Failed to publish index price for symbol={}", symbolConfig.getSymbol(), ex);
+                log.error("Failed to publish index price for instrumentId={}", symbolConfig.getInstrumentId(), ex);
             }
         }
     }
 
     private void publishSymbol(IndexPriceProperties.SymbolConfig symbolConfig) {
-        String symbol = normalizeSymbol(symbolConfig.getSymbol());
-        if (!ownsSymbol(symbol)) {
+        String instrumentId = normalizeSymbol(symbolConfig.getInstrumentId());
+        if (!ownsSymbol(instrumentId)) {
             return;
         }
 
         Instant now = Instant.now();
         List<CompletableFuture<SourceQuote>> futures = symbolConfig.getSources().stream()
-                .map(source -> websocketQuoteOrRest(symbol, source, now))
+                .map(source -> websocketQuoteOrRest(instrumentId, source, now))
                 .toList();
         List<SourceQuote> quotes = futures.stream()
                 .map(CompletableFuture::join)
                 .toList();
 
-        long sequence = sequenceRepository.next(SEQUENCE_MODULE, symbol);
-        IndexPriceEvent event = indexPriceCalculator.calculate(symbol, sequence, symbolConfig.getMinValidSources(),
+        long sequence = sequenceRepository.next(SEQUENCE_MODULE, instrumentId);
+        IndexPriceEvent event = indexPriceCalculator.calculate(instrumentId, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
         latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
-        kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), symbol, PricePublishedEvent.index(event));
+        kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
         if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,symbol,symbol,event.sequence(),event.eventTime(),event);
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
     }
 
-    private boolean ownsSymbol(String symbol) {
+    private boolean ownsSymbol(String instrumentId) {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
-        return leaseRepository.acquire(SEQUENCE_MODULE, symbol, nodeId,
+        return leaseRepository.acquire(SEQUENCE_MODULE, instrumentId, nodeId,
                 properties.getCoordination().getLeaseDuration());
     }
 
-    private CompletableFuture<SourceQuote> websocketQuoteOrRest(String symbol, IndexPriceProperties.SourceConfig source,
+    private CompletableFuture<SourceQuote> websocketQuoteOrRest(String instrumentId, IndexPriceProperties.SourceConfig source,
                                                                 Instant now) {
         if (properties.getWebSocket().isEnabled() && source.isWebsocketEnabled()) {
-            return latestSourceQuoteStore.latest(symbol, source)
+            return latestSourceQuoteStore.latest(instrumentId, source)
                     .filter(quote -> freshEnough(quote, now))
                     .map(CompletableFuture::completedFuture)
                     .orElseGet(() -> properties.getWebSocket().isRestFallbackEnabled()
@@ -142,10 +142,10 @@ public class IndexPriceService {
         return "index-" + UUID.randomUUID();
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("Invalid symbol: " + symbol);
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId)) {
+            throw new IllegalArgumentException("Invalid instrumentId: " + instrumentId);
         }
-        return symbol;
+        return instrumentId;
     }
 }

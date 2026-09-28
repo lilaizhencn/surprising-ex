@@ -7,6 +7,6 @@ import jakarta.validation.constraints.Size;
 
 public record CancelAllAfterRequest(
         @Positive long userId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         @Min(0) @Max(120_000) Long countdownMs) {
 }

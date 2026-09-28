@@ -106,9 +106,9 @@ public class TriggerOrderRequestService {
         }
     }
 
-    public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
+    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
         try {
-            return triggerOrderService.openOrders(userId, symbol, limit, cursor);
+            return triggerOrderService.openOrders(userId, instrumentId, limit, cursor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

@@ -85,15 +85,15 @@ public class AeronOrderProjectionRepository {
                 Query.byClient(userId, clientOrderId.trim()));
     }
 
-    public ProjectionReadResult openOrders(ProductLine productLine, Long userId, String symbol,
+    public ProjectionReadResult openOrders(ProductLine productLine, Long userId, String instrumentId,
                                            String cursor, int limit, Long minExportSequence) {
         if (userId != null) requireUserId(userId);
         requireLimit(limit);
         return execute(productLine, minExportSequence,
-                Query.open(userId, symbol, decodeCursor(cursor), limit));
+                Query.open(userId, instrumentId, decodeCursor(cursor), limit));
     }
 
-    public ProjectionReadResult historyOrders(ProductLine productLine, long userId, String symbol,
+    public ProjectionReadResult historyOrders(ProductLine productLine, long userId, String instrumentId,
                                               int limit, Long minimumOrderId, Long startTimeMillis,
                                               Long endTimeMillis, String cursor, Long minExportSequence) {
         requireUserId(userId);
@@ -109,18 +109,18 @@ public class AeronOrderProjectionRepository {
             throw new IllegalArgumentException("startTime must not be after endTime");
         }
         return execute(productLine, minExportSequence,
-                Query.history(userId, symbol, minimumOrderId, startTimeMillis, endTimeMillis,
+                Query.history(userId, instrumentId, minimumOrderId, startTimeMillis, endTimeMillis,
                         decodeCursor(cursor), limit));
     }
 
-    public ProjectionReadResult search(ProductLine productLine, Long userId, String symbol,
+    public ProjectionReadResult search(ProductLine productLine, Long userId, String instrumentId,
                                        OrderStatus status, Long orderId, String cursor,
                                        boolean ascending, int limit, Long minExportSequence) {
         if (userId != null) requireUserId(userId);
         if (orderId != null) requirePositive(orderId, "orderId");
         requireLimit(limit);
         return execute(productLine, minExportSequence,
-                Query.search(userId, symbol, status, orderId, decodeCursor(cursor), ascending, limit));
+                Query.search(userId, instrumentId, status, orderId, decodeCursor(cursor), ascending, limit));
     }
 
     private ProjectionReadResult execute(ProductLine productLine, Long minExportSequence, Query query) {
@@ -210,7 +210,7 @@ public class AeronOrderProjectionRepository {
         OrderStatus status = "OPEN".equals(view.status())
                 ? (view.executedQuantitySteps() == 0 ? OrderStatus.ACCEPTED : OrderStatus.PARTIALLY_FILLED)
                 : OrderStatus.valueOf(view.status());
-        return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.symbol(),
+        return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.instrumentId(),
                 OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
                 TimeInForce.valueOf(view.timeInForce().name()), view.priceTicks(), view.quantitySteps(),
                 view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),
@@ -266,21 +266,21 @@ public class AeronOrderProjectionRepository {
                     args(userId, clientOrderId), 1);
         }
 
-        private static Query open(Long userId, String symbol, Cursor cursor, int limit) {
+        private static Query open(Long userId, String instrumentId, Cursor cursor, int limit) {
             StringBuilder sql = new StringBuilder(base(userId)).append(" AND status = 'OPEN'");
             List<Object> arguments = new ArrayList<>(args(userId));
-            appendSymbol(sql, arguments, symbol);
+            appendSymbol(sql, arguments, instrumentId);
             appendCursor(sql, arguments, cursor, false);
             sql.append(" ORDER BY updated_at_epoch_ms DESC, order_id DESC LIMIT ?");
             arguments.add(limit + 1);
             return new Query(sql.toString(), arguments, limit);
         }
 
-        private static Query history(Long userId, String symbol, Long minimumOrderId,
+        private static Query history(Long userId, String instrumentId, Long minimumOrderId,
                                      Long startTimeMillis, Long endTimeMillis, Cursor cursor, int limit) {
             StringBuilder sql = new StringBuilder(base(userId)).append(" AND status <> 'OPEN'");
             List<Object> arguments = new ArrayList<>(args(userId));
-            appendSymbol(sql, arguments, symbol);
+            appendSymbol(sql, arguments, instrumentId);
             append(sql, arguments, " AND order_id >= ?", minimumOrderId);
             append(sql, arguments, " AND created_at_epoch_ms >= ?", startTimeMillis);
             append(sql, arguments, " AND created_at_epoch_ms <= ?", endTimeMillis);
@@ -290,11 +290,11 @@ public class AeronOrderProjectionRepository {
             return new Query(sql.toString(), arguments, limit);
         }
 
-        private static Query search(Long userId, String symbol, OrderStatus status, Long orderId,
+        private static Query search(Long userId, String instrumentId, OrderStatus status, Long orderId,
                                     Cursor cursor, boolean ascending, int limit) {
             StringBuilder sql = new StringBuilder(base(userId));
             List<Object> arguments = new ArrayList<>(args(userId));
-            appendSymbol(sql, arguments, symbol);
+            appendSymbol(sql, arguments, instrumentId);
             if (status != null) append(sql, arguments, " AND status = ?", coreStatus(status));
             append(sql, arguments, " AND order_id = ?", orderId);
             appendCursor(sql, arguments, cursor, ascending);
@@ -318,8 +318,8 @@ public class AeronOrderProjectionRepository {
             return arguments;
         }
 
-        private static void appendSymbol(StringBuilder sql, List<Object> arguments, String symbol) {
-            append(sql, arguments, " AND symbol = ?", symbol == null || symbol.isBlank() ? null : symbol);
+        private static void appendSymbol(StringBuilder sql, List<Object> arguments, String instrumentId) {
+            append(sql, arguments, " AND instrument_id = ?", instrumentId == null || instrumentId.isBlank() ? null : instrumentId);
         }
 
         private static void append(StringBuilder sql, List<Object> arguments, String clause, Object value) {

@@ -29,10 +29,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public int resultCount() { return items.size(); }
     public long resultOrderId(int index) { return items.get(index).orderId(); }
     public long resultOriginalOrderId(int index) { return items.get(index).originalOrderId(); }
-    public void resultOrder(int index, OrderRuntime order, String symbol) {
+    public void resultOrder(int index, OrderRuntime order, String instrumentId) {
         var item = items.get(index);
         item.resultOrder = order;
-        item.resultOrderSymbol = symbol;
+        item.resultOrderSymbol = instrumentId;
         item.laneResultPrepared = true;
     }
     @Override public boolean captureUnchangedResults() {
@@ -123,7 +123,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public long orderId() { return responseItem.resultOrder.orderId(); }
     public com.surprising.product.api.ProductLine productLine() { return responseItem.resultOrder.productLine(); }
     public long userId() { return responseItem.resultOrder.userId(); }
-    public String symbol() { return responseItem.resultOrderSymbol; }
+    public String instrumentId() { return responseItem.resultOrderSymbol; }
     public com.surprising.aeron.protocol.CoreOrderSide side() { return responseItem.resultOrder.side(); }
     public long priceTicks() { return responseItem.resultOrder.priceTicks(); }
     public long quantitySteps() { return responseItem.resultOrder.quantitySteps(); }

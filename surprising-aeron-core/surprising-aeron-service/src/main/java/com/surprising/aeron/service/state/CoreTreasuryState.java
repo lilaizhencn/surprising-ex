@@ -133,40 +133,40 @@ public record CoreTreasuryState(
                 fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
     }
 
-    public CoreTreasuryState recordFunding(String symbol, long settlementId) {
+    public CoreTreasuryState recordFunding(String instrumentId, long settlementId) {
         Map<String, FundingProgress> progress = StateMapSupport.delta(fundingProgress);
-        progress.remove(OrderReservation.normalizeSymbol(symbol));
+        progress.remove(OrderReservation.requireInstrumentId(instrumentId));
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
                 liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                recordMarker(fundingSettlements, symbol, settlementId), lifecycleSettlements, progress,
+                recordMarker(fundingSettlements, instrumentId, settlementId), lifecycleSettlements, progress,
                 lifecycleProgress);
     }
 
-    public CoreTreasuryState recordLifecycle(String symbol, long settlementId) {
+    public CoreTreasuryState recordLifecycle(String instrumentId, long settlementId) {
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
                 liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                fundingSettlements, recordMarker(lifecycleSettlements, symbol, settlementId), fundingProgress,
-                clearLifecycleProgress(symbol));
+                fundingSettlements, recordMarker(lifecycleSettlements, instrumentId, settlementId), fundingProgress,
+                clearLifecycleProgress(instrumentId));
     }
 
-    public FundingProgress fundingProgress(String symbol) {
-        return fundingProgress.get(OrderReservation.normalizeSymbol(symbol));
+    public FundingProgress fundingProgress(String instrumentId) {
+        return fundingProgress.get(OrderReservation.requireInstrumentId(instrumentId));
     }
 
-    public LifecycleProgress lifecycleProgress(String symbol) {
-        return lifecycleProgress.get(OrderReservation.normalizeSymbol(symbol));
+    public LifecycleProgress lifecycleProgress(String instrumentId) {
+        return lifecycleProgress.get(OrderReservation.requireInstrumentId(instrumentId));
     }
 
-    public long fundingSettlement(String symbol) {
-        return fundingSettlements.getOrDefault(OrderReservation.normalizeSymbol(symbol), 0L);
+    public long fundingSettlement(String instrumentId) {
+        return fundingSettlements.getOrDefault(OrderReservation.requireInstrumentId(instrumentId), 0L);
     }
 
-    public long lifecycleSettlement(String symbol) {
-        return lifecycleSettlements.getOrDefault(OrderReservation.normalizeSymbol(symbol), 0L);
+    public long lifecycleSettlement(String instrumentId) {
+        return lifecycleSettlements.getOrDefault(OrderReservation.requireInstrumentId(instrumentId), 0L);
     }
 
-    public CoreTreasuryState withFundingProgress(String symbol, FundingProgress progress) {
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+    public CoreTreasuryState withFundingProgress(String instrumentId, FundingProgress progress) {
+        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
         Map<String, FundingProgress> next = StateMapSupport.delta(fundingProgress);
         if (progress == null) next.remove(normalizedSymbol);
         else next.put(normalizedSymbol, progress);
@@ -175,8 +175,8 @@ public record CoreTreasuryState(
                 fundingSettlements, lifecycleSettlements, next, lifecycleProgress);
     }
 
-    public CoreTreasuryState withLifecycleProgress(String symbol, LifecycleProgress progress) {
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+    public CoreTreasuryState withLifecycleProgress(String instrumentId, LifecycleProgress progress) {
+        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
         Map<String, LifecycleProgress> next = StateMapSupport.delta(lifecycleProgress);
         if (progress == null) next.remove(normalizedSymbol);
         else next.put(normalizedSymbol, progress);
@@ -256,7 +256,7 @@ public record CoreTreasuryState(
             for (Object key : StateMapSupport.changedKeys(source)) {
                 if (source.containsKey(key)) {
                     Long settlementId = source.get(key);
-                    if (!OrderReservation.normalizeSymbol((String) key).equals(key)
+                    if (!OrderReservation.requireInstrumentId((String) key).equals(key)
                             || settlementId == null || settlementId <= 0) {
                         throw new IllegalArgumentException("invalid settlement marker");
                     }
@@ -265,8 +265,8 @@ public record CoreTreasuryState(
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, Long> result = new TreeMap<>();
-        source.forEach((symbol, settlementId) -> {
-            String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        source.forEach((instrumentId, settlementId) -> {
+            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             if (settlementId == null || settlementId <= 0 || result.put(normalizedSymbol, settlementId) != null) {
                 throw new IllegalArgumentException("invalid settlement marker");
             }
@@ -284,8 +284,8 @@ public record CoreTreasuryState(
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, FundingProgress> result = new TreeMap<>();
-        source.forEach((symbol, progress) -> {
-            String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        source.forEach((instrumentId, progress) -> {
+            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             validateProgress(normalizedSymbol, progress);
             if (result.put(normalizedSymbol, progress) != null) {
                 throw new IllegalArgumentException("duplicate funding progress");
@@ -304,8 +304,8 @@ public record CoreTreasuryState(
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, LifecycleProgress> result = new TreeMap<>();
-        source.forEach((symbol, progress) -> {
-            String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        source.forEach((instrumentId, progress) -> {
+            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             validateLifecycleProgress(normalizedSymbol, progress);
             if (result.put(normalizedSymbol, progress) != null) {
                 throw new IllegalArgumentException("duplicate lifecycle progress");
@@ -314,14 +314,14 @@ public record CoreTreasuryState(
         return StateMapSupport.freezeSorted(result);
     }
 
-    private Map<String, LifecycleProgress> clearLifecycleProgress(String symbol) {
+    private Map<String, LifecycleProgress> clearLifecycleProgress(String instrumentId) {
         Map<String, LifecycleProgress> next = StateMapSupport.delta(lifecycleProgress);
-        next.remove(OrderReservation.normalizeSymbol(symbol));
+        next.remove(OrderReservation.requireInstrumentId(instrumentId));
         return next;
     }
 
-    private static Map<String, Long> recordMarker(Map<String, Long> source, String symbol, long settlementId) {
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+    private static Map<String, Long> recordMarker(Map<String, Long> source, String instrumentId, long settlementId) {
+        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
         long current = source.getOrDefault(normalizedSymbol, 0L);
         if (settlementId <= current) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
@@ -338,14 +338,14 @@ public record CoreTreasuryState(
         }
     }
 
-    private static void validateProgress(String symbol, FundingProgress progress) {
-        if (!OrderReservation.normalizeSymbol(symbol).equals(symbol) || progress == null) {
+    private static void validateProgress(String instrumentId, FundingProgress progress) {
+        if (!OrderReservation.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
             throw new IllegalArgumentException("invalid funding progress");
         }
     }
 
-    private static void validateLifecycleProgress(String symbol, LifecycleProgress progress) {
-        if (!OrderReservation.normalizeSymbol(symbol).equals(symbol) || progress == null) {
+    private static void validateLifecycleProgress(String instrumentId, LifecycleProgress progress) {
+        if (!OrderReservation.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
             throw new IllegalArgumentException("invalid lifecycle progress");
         }
     }

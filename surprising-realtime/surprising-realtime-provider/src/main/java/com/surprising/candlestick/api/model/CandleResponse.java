@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 public record CandleResponse(
-        String symbol,
+        String instrumentId,
         String period,
         Instant openTime,
         Instant closeTime,

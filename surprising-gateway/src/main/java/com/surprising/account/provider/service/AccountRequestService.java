@@ -180,22 +180,22 @@ public class AccountRequestService {
         return ProductLine.requireExternalCode(value);
     }
 
-    public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
+    public PositionResponse position(long userId, String instrumentId, String marginMode, String positionSide) {
         try {
-            return accountService.position(userId, symbol, marginMode, positionSide);
+            return accountService.position(userId, instrumentId, marginMode, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
-    public PositionResponse adminPosition(String adminUserId, long userId, String symbol, String marginMode, String positionSide) {
+    public PositionResponse adminPosition(String adminUserId, long userId, String instrumentId, String marginMode, String positionSide) {
         requireAdmin(adminUserId);
-        return accountService.adminPosition(userId, symbol, marginMode, positionSide);
+        return accountService.adminPosition(userId, instrumentId, marginMode, positionSide);
     }
 
-    public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
+    public PositionMarginResponse positionMargin(long userId, String instrumentId, String marginMode) {
         try {
-            return accountService.positionMargin(userId, symbol, marginMode);
+            return accountService.positionMargin(userId, instrumentId, marginMode);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

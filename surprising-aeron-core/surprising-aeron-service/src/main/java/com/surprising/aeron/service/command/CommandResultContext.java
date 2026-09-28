@@ -34,7 +34,7 @@ public interface CommandResultContext extends CommandOwnerContext {
 
     RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork();
 
-    void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String symbol, int maxUsers,
+    void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String instrumentId, int maxUsers,
                               int pendingBefore, long startedAt, long beforeRevision);
 
     void deferAdlControl(RuntimeAdlExecution.AdlWork work);

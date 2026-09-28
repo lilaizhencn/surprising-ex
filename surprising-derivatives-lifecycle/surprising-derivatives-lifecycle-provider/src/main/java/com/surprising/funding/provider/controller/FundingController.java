@@ -32,20 +32,20 @@ public class FundingController {
     }
 
     @GetMapping("/rates/latest")
-    public FundingRateResponse latestRate(@RequestParam String symbol) {
-        return fundingService.latestRate(symbol);
+    public FundingRateResponse latestRate(@RequestParam String instrumentId) {
+        return fundingService.latestRate(instrumentId);
     }
 
     @GetMapping("/rates/history")
-    public FundingRateQueryResponse rateHistory(@RequestParam String symbol,
+    public FundingRateQueryResponse rateHistory(@RequestParam String instrumentId,
                                                 @RequestParam(defaultValue = "100") int limit) {
-        return fundingService.rateHistory(symbol, limit);
+        return fundingService.rateHistory(instrumentId, limit);
     }
 
     @GetMapping("/settlements/latest")
-    public FundingSettlementResponse latestSettlement(@RequestParam String symbol) {
+    public FundingSettlementResponse latestSettlement(@RequestParam String instrumentId) {
         try {
-            return fundingService.latestSettlement(symbol);
+            return fundingService.latestSettlement(instrumentId);
         } catch (java.util.NoSuchElementException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -53,26 +53,26 @@ public class FundingController {
 
     @GetMapping("/payments")
     public FundingPaymentQueryResponse payments(@RequestParam long userId,
-                                                @RequestParam(required = false) String symbol,
+                                                @RequestParam(required = false) String instrumentId,
                                                 @RequestParam(defaultValue = "100") int limit) {
-        return fundingService.payments(userId, symbol, limit);
+        return fundingService.payments(userId, instrumentId, limit);
     }
 
     @GetMapping("/admin/rates/latest")
     public FundingRateResponse adminLatestRate(@RequestHeader("X-Admin-User-Id") String adminUserId,
-                                               @RequestParam String symbol) {
-        return latestRate(symbol);
+                                               @RequestParam String instrumentId) {
+        return latestRate(instrumentId);
     }
 
     @GetMapping("/admin/rates/history")
     public FundingRateQueryResponse adminRateHistory(
             @RequestHeader("X-Admin-User-Id") String adminUserId,
-            @RequestParam String symbol,
+            @RequestParam String instrumentId,
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) String sort) {
         try {
-            return fundingService.rateHistory(symbol, limit, cursor, sort);
+            return fundingService.rateHistory(instrumentId, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -80,20 +80,20 @@ public class FundingController {
 
     @GetMapping("/admin/settlements/latest")
     public FundingSettlementResponse adminLatestSettlement(@RequestHeader("X-Admin-User-Id") String adminUserId,
-                                                           @RequestParam String symbol) {
-        return latestSettlement(symbol);
+                                                           @RequestParam String instrumentId) {
+        return latestSettlement(instrumentId);
     }
 
     @GetMapping("/admin/payments")
     public FundingPaymentQueryResponse adminPayments(
             @RequestHeader("X-Admin-User-Id") String adminUserId,
             @RequestParam long userId,
-            @RequestParam(required = false) String symbol,
+            @RequestParam(required = false) String instrumentId,
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) String sort) {
         try {
-            return fundingService.payments(userId, symbol, limit, cursor, sort);
+            return fundingService.payments(userId, instrumentId, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

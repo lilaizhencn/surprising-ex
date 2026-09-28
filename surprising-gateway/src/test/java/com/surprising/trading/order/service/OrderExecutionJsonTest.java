@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrderExecutionJsonTest {
     @Test
     void queryAndWebsocketOrderExposeExactExecutionValueAndFractionalAverage() {
-        var order = new CoreOrderStateView(71, ProductLine.LINEAR_PERPETUAL, 7, "BTC-USDT-SWAP",
+        var order = new CoreOrderStateView(71, ProductLine.LINEAR_PERPETUAL, 7, "49",
                 CoreOrderSide.BUY, 120, 4, 3, 1, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
                 "partial", new UUID(0, 71), 0, 20, 7, 0, 310, 100, 110, 99, "OPEN", 2);

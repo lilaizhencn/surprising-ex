@@ -21,15 +21,15 @@ class InstrumentOrderDrainServiceTest {
     void waitsUntilOrdinaryOrdersReachTerminalState() {
         OrderService orderService = mock(OrderService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
-        when(orderService.hasLifecycleActiveOrders("BTC-USDT-260327")).thenReturn(true);
+        when(orderService.hasLifecycleActiveOrders("1")).thenReturn(true);
         InstrumentOrderDrainService service = service(orderService, algoOrderService, kafkaTemplate());
 
         assertThatThrownBy(() -> service.drain(event()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未完成");
 
-        verify(algoOrderService).cancelLifecycleOrders("BTC-USDT-260327", 1000);
-        verify(orderService).requestLifecycleCancellation("BTC-USDT-260327", 1000);
+        verify(algoOrderService).cancelLifecycleOrders("1", 1000);
+        verify(orderService).requestLifecycleCancellation("1", 1000);
     }
 
     @Test
@@ -39,7 +39,7 @@ class InstrumentOrderDrainServiceTest {
         KafkaTemplate<String, String> kafkaTemplate = kafkaTemplate();
         when(kafkaTemplate.send(
                 org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
-                org.mockito.ArgumentMatchers.eq("BTC-USDT-260327"),
+                org.mockito.ArgumentMatchers.eq("1"),
                 any(String.class))).thenReturn(CompletableFuture.completedFuture(null));
 
         TradingOrderProperties properties = new TradingOrderProperties();
@@ -50,7 +50,7 @@ class InstrumentOrderDrainServiceTest {
 
         verify(kafkaTemplate).send(
                 org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
-                org.mockito.ArgumentMatchers.eq("BTC-USDT-260327"),
+                org.mockito.ArgumentMatchers.eq("1"),
                 any(String.class));
     }
 
@@ -66,7 +66,7 @@ class InstrumentOrderDrainServiceTest {
     private InstrumentEvent event() {
         InstrumentEvent event = mock(InstrumentEvent.class);
         when(event.status()).thenReturn(InstrumentStatus.SETTLING);
-        when(event.symbol()).thenReturn("BTC-USDT-260327");
+        when(event.instrumentId()).thenReturn(1);
         when(event.changeId()).thenReturn(2L);
         when(event.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);
         return event;

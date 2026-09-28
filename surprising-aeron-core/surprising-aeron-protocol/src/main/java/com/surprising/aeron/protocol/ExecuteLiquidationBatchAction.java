@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 public record ExecuteLiquidationBatchAction(
         long liquidationId,
         long userId,
-        String symbol,
+        String instrumentId,
         long triggerPriceSequence,
         long executionPriceTicks,
         long cursorOrderId) {
@@ -13,8 +13,8 @@ public record ExecuteLiquidationBatchAction(
     private static final int MAX_SYMBOL_BYTES = 64;
 
     public ExecuteLiquidationBatchAction {
-        if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
-                || symbol.getBytes(StandardCharsets.UTF_8).length > MAX_SYMBOL_BYTES
+        if (liquidationId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank()
+                || instrumentId.getBytes(StandardCharsets.UTF_8).length > MAX_SYMBOL_BYTES
                 || triggerPriceSequence <= 0 || executionPriceTicks <= 0
                 || cursorOrderId < 0) {
             throw new IllegalArgumentException("invalid liquidation batch action");

@@ -201,15 +201,15 @@ final class LinearPerpetualSaturationWorkload {
             private void refreshMarkPricesIfRequired() {
                 long refreshTimestamp = harness.nextCommandTimestamp();
                 if (refreshTimestamp < nextMarkRefreshAt) return;
-                for (String symbol : template.symbols()) {
-                    var current = harness.state().runtimeMarkPrice(symbol);
+                for (String instrumentId : template.symbols()) {
+                    var current = harness.state().runtimeMarkPrice(instrumentId);
                     if (current == null) {
-                        throw new IllegalStateException("saturation mark price is missing: " + symbol);
+                        throw new IllegalStateException("saturation mark price is missing: " + instrumentId);
                     }
                     harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                    symbol, current.markPriceTicks(),
+                                    instrumentId, current.markPriceTicks(),
                                     Math.incrementExact(current.priceSequence()), refreshTimestamp))));
                 }
                 nextMarkRefreshAt = Math.addExact(refreshTimestamp, MARK_REFRESH_INTERVAL_MILLIS);
@@ -254,9 +254,9 @@ final class LinearPerpetualSaturationWorkload {
                     usersInFlight.add(makerId);
                     usersInFlight.add(takerId);
                     pairInFlight[symbolIndex] = true;
-                    String symbol = template.symbols().get(symbolIndex);
-                    submit(target, makerId, symbol, makerSide, CoreTimeInForce.GTC);
-                    submit(target, takerId, symbol, takerSide, CoreTimeInForce.IOC);
+                    String instrumentId = template.symbols().get(symbolIndex);
+                    submit(target, makerId, instrumentId, makerSide, CoreTimeInForce.GTC);
+                    submit(target, takerId, instrumentId, takerSide, CoreTimeInForce.IOC);
                     scheduledOperations += 2;
                     filled += 2;
                     if (pendingBefore != 0) refillOperations += 2;
@@ -265,9 +265,9 @@ final class LinearPerpetualSaturationWorkload {
             }
 
             private void submit(LinearPerpetualBenchmarkSupport.Harness target, long userId,
-                                String symbol, CoreOrderSide side, CoreTimeInForce timeInForce) {
+                                String instrumentId, CoreOrderSide side, CoreTimeInForce timeInForce) {
                 long orderId = target.nextOrderId();
-                var order = new PlaceOrderCommand(orderId, symbol, side, PRICE_TICKS, 1,
+                var order = new PlaceOrderCommand(orderId, instrumentId, side, PRICE_TICKS, 1,
                         false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         timeInForce, false, "saturation-" + orderId);
                 long scheduledEntryNanos = Math.addExact(firstScheduledEntryNanos,
@@ -330,7 +330,7 @@ final class LinearPerpetualSaturationWorkload {
 
             private void putUserSymbol(LongLongHashMap values, long userId, int symbolIndex) {
                 if (values.containsKey(userId)) {
-                    throw new IllegalArgumentException("saturation users must be unique per symbol");
+                    throw new IllegalArgumentException("saturation users must be unique per instrumentId");
                 }
                 values.put(userId, symbolIndex + 1L);
             }

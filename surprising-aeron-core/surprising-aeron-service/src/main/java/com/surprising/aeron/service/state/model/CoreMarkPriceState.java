@@ -2,11 +2,11 @@ package com.surprising.aeron.service.state.model;
 
 import com.surprising.aeron.service.state.OrderReservation;
 
-public record CoreMarkPriceState(String symbol, long markPriceTicks,
+public record CoreMarkPriceState(String instrumentId, long markPriceTicks,
                                  long indexPriceTicks, long forwardPriceTicks, long priceSequence,
                                  long generatedAtEpochMillis) {
     public CoreMarkPriceState {
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         if (markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
                 || (indexPriceTicks == 0) != (forwardPriceTicks == 0)
                 || priceSequence <= 0 || generatedAtEpochMillis <= 0) {
@@ -14,8 +14,8 @@ public record CoreMarkPriceState(String symbol, long markPriceTicks,
         }
     }
 
-    public CoreMarkPriceState(String symbol, long markPriceTicks, long priceSequence,
+    public CoreMarkPriceState(String instrumentId, long markPriceTicks, long priceSequence,
                               long generatedAtEpochMillis) {
-        this(symbol, markPriceTicks, 0, 0, priceSequence, generatedAtEpochMillis);
+        this(instrumentId, markPriceTicks, 0, 0, priceSequence, generatedAtEpochMillis);
     }
 }

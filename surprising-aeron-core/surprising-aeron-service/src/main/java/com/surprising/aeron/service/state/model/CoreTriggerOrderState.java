@@ -14,7 +14,7 @@ import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 public record CoreTriggerOrderState(
         long triggerOrderId, ProductLine productLine, long userId, String clientTriggerOrderId, String ocoGroupId,
-        String symbol, CoreInstrument instrument, CoreOrderSide side, CoreTriggerOrderType triggerType,
+        String instrumentId, CoreInstrument instrument, CoreOrderSide side, CoreTriggerOrderType triggerType,
         CoreTriggerCondition triggerCondition,
         long triggerPriceTicks, long activationPriceTicks, long callbackRatePpm, long highestPriceTicks,
         long lowestPriceTicks, long activatedAtEpochMillis, CoreOrderType orderType, CoreTimeInForce timeInForce,
@@ -25,7 +25,7 @@ public record CoreTriggerOrderState(
         long makerFeeRatePpm, long takerFeeRatePpm) {
 
     public CoreTriggerOrderState(long triggerOrderId, ProductLine productLine, long userId,
-                                 String clientTriggerOrderId, String ocoGroupId, String symbol,
+                                 String clientTriggerOrderId, String ocoGroupId, String instrumentId,
                                  CoreInstrument instrument, CoreOrderSide side,
                                  CoreTriggerOrderType triggerType, CoreTriggerCondition triggerCondition,
                                  long triggerPriceTicks, long activationPriceTicks, long callbackRatePpm,
@@ -36,7 +36,7 @@ public record CoreTriggerOrderState(
                                  long triggeredPriceTicks, String rejectReason, String traceId,
                                  long expiresAtEpochMillis, long triggeredAtEpochMillis, long createdAtEpochMillis,
                                  long updatedAtEpochMillis, long revision) {
-        this(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId, symbol, instrument, side, triggerType,
+        this(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId, instrumentId, instrument, side, triggerType,
                 triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm, highestPriceTicks,
                 lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks, quantitySteps,
                 marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
@@ -49,8 +49,8 @@ public record CoreTriggerOrderState(
         ocoGroupId = ocoGroupId == null ? "" : ocoGroupId;
         rejectReason = rejectReason == null ? "" : rejectReason;
         traceId = traceId == null ? "" : traceId;
-        if (triggerOrderId <= 0 || productLine == null || userId <= 0 || symbol == null || symbol.isBlank()
-                || instrument == null || !instrument.symbol().equals(symbol)
+        if (triggerOrderId <= 0 || productLine == null || userId <= 0 || instrumentId == null || instrumentId.isBlank()
+                || instrument == null || !instrument.instrumentId().equals(instrumentId)
                 || side == null || triggerType == null || triggerCondition == null || triggerPriceTicks < 0
                 || callbackRatePpm < 0 || orderType == null || timeInForce == null || quantitySteps <= 0
                 || marginMode == null || positionSide == null || status == null || revision < 0 || makerFeeRatePpm < -1_000_000L || makerFeeRatePpm > 1_000_000L
@@ -61,7 +61,7 @@ public record CoreTriggerOrderState(
 
     public CoreTriggerOrderStateView view() {
         return new CoreTriggerOrderStateView(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId,
-                symbol, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm,
+                instrumentId, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm,
                 highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks,
                 quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
                 rejectReason, traceId, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
@@ -70,7 +70,7 @@ public record CoreTriggerOrderState(
 
     public static CoreTriggerOrderState from(CoreTriggerOrderStateView view, CoreInstrument instrument) {
         return new CoreTriggerOrderState(view.triggerOrderId(), view.productLine(), view.userId(),
-                view.clientTriggerOrderId(), view.ocoGroupId(), view.symbol(), instrument, view.side(), view.triggerType(),
+                view.clientTriggerOrderId(), view.ocoGroupId(), view.instrumentId(), instrument, view.side(), view.triggerType(),
                 view.triggerCondition(), view.triggerPriceTicks(), view.activationPriceTicks(), view.callbackRatePpm(),
                 view.highestPriceTicks(), view.lowestPriceTicks(), view.activatedAtEpochMillis(), view.orderType(),
                 view.timeInForce(), view.priceTicks(), view.quantitySteps(), view.marginMode(), view.positionSide(),
@@ -83,7 +83,7 @@ public record CoreTriggerOrderState(
     public CoreTriggerOrderState withExecutionSnapshot(long makerFeeRatePpm,
                                                        long takerFeeRatePpm) {
         return new CoreTriggerOrderState(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId,
-                symbol, instrument, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
+                instrumentId, instrument, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
                 callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
                 triggerSequence, triggeredPriceTicks, rejectReason, traceId, expiresAtEpochMillis,

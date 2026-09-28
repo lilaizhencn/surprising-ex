@@ -34,7 +34,7 @@ class CoreCommandResultCodecTest {
     @Test
     void singleOrderEncodingMatchesListEncoding() {
         CoreOrderStateView order = new CoreOrderStateView(71, com.surprising.product.api.ProductLine.SPOT,
-                7, "BTC-USDT", CoreOrderSide.BUY, 100, 3, 0, 3, false,
+                7, "1", CoreOrderSide.BUY, 100, 3, 0, 3, false,
                 "OPEN", 1);
         byte[] listEncoded = CoreCommandResultCodec.encode(List.of(order), List.of());
         byte[] singleEncoded = CoreCommandResultCodec.encodeSingleOrder(order);
@@ -46,10 +46,10 @@ class CoreCommandResultCodecTest {
     @Test
     void sourceListEncodingMatchesViewListEncoding() {
         CoreOrderStateView first = new CoreOrderStateView(71, com.surprising.product.api.ProductLine.SPOT,
-                7, "BTC-USDT", CoreOrderSide.BUY, 100, 3, 0, 3, false,
+                7, "1", CoreOrderSide.BUY, 100, 3, 0, 3, false,
                 "OPEN", 1);
         CoreOrderStateView second = new CoreOrderStateView(72, com.surprising.product.api.ProductLine.SPOT,
-                8, "BTC-USDT", CoreOrderSide.SELL, 101, 2, 1, 1, false,
+                8, "1", CoreOrderSide.SELL, 101, 2, 1, 1, false,
                 "OPEN", 2);
 
         byte[] viewEncoded = CoreCommandResultCodec.encode(List.of(first, second), List.of());

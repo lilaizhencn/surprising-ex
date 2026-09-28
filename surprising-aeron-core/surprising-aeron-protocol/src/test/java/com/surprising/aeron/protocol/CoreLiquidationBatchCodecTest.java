@@ -14,12 +14,12 @@ class CoreLiquidationBatchCodecTest {
 
     @Test
     void buildsProductionBatchWithExactContinuationAndActionFields() {
-        var action = new CoreLiquidationActionView(7,11,"BTC-USDT",CoreMarginMode.CROSS,
+        var action = new CoreLiquidationActionView(7,11,"1",CoreMarginMode.CROSS,
                 CorePositionSide.NET,19,10,5,60_000,"ORDERED",91);
-        var cursor = new CoreRiskScanContinuation("ETH-USDT",23,41);
+        var cursor = new CoreRiskScanContinuation("2",23,41);
         var work = new CoreLiquidationWorkView(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
                 7,true,cursor,List.of(action),List.of());
-        var expected = new ExecuteLiquidationBatchCommand(List.of(action(7,11,"BTC-USDT")),
+        var expected = new ExecuteLiquidationBatchCommand(List.of(action(7,11,"1")),
                 ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,3_000,cursor,64);
         assertThat(ExecuteLiquidationBatchCommand.fromWork(work,3_000,64)).isEqualTo(expected);
         assertThat(ExecuteLiquidationBatchCommand.fromWork(work,3_000,0).riskScanContinuation()).isNull();
@@ -56,8 +56,8 @@ class CoreLiquidationBatchCodecTest {
 
     @Test
     void rejectsUnsortedAndDuplicateActions() {
-        ExecuteLiquidationBatchAction first = action(7, 11, "BTC-USDT");
-        ExecuteLiquidationBatchAction second = action(8, 12, "ETH-USDT");
+        ExecuteLiquidationBatchAction first = action(7, 11, "1");
+        ExecuteLiquidationBatchAction second = action(8, 12, "2");
 
         assertThatThrownBy(() -> new ExecuteLiquidationBatchCommand(
                 List.of(second, first), 512, 3_000, null, 0))
@@ -80,13 +80,13 @@ class CoreLiquidationBatchCodecTest {
     @Test
     void rejectsNegativeCursorsAndInvalidRiskBounds() {
         assertThatThrownBy(() -> new ExecuteLiquidationBatchAction(
-                7, 11, "BTC-USDT", 19, 60_000, -1))
+                7, 11, "1", 19, 60_000, -1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CoreRiskScanContinuation("BTC-USDT", 19, -1))
+        assertThatThrownBy(() -> new CoreRiskScanContinuation("1", 19, -1))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ExecuteLiquidationBatchCommand(
-                List.of(action(7, 11, "BTC-USDT")), 512, 3_000,
-                new CoreRiskScanContinuation("BTC-USDT", 19, 0), 4_097))
+                List.of(action(7, 11, "1")), 512, 3_000,
+                new CoreRiskScanContinuation("1", 19, 0), 4_097))
                 .isInstanceOf(IllegalArgumentException.class);
 
         byte[] negativeCursor = TradingCommandCodec.encodeExecuteLiquidationBatch(command(512));
@@ -99,7 +99,7 @@ class CoreLiquidationBatchCodecTest {
     @Test
     void defensivelyCopiesActions() {
         ArrayList<ExecuteLiquidationBatchAction> mutable = new ArrayList<>();
-        mutable.add(action(7, 11, "BTC-USDT"));
+        mutable.add(action(7, 11, "1"));
         ExecuteLiquidationBatchCommand command = new ExecuteLiquidationBatchCommand(
                 mutable, 512, 3_000, null, 0);
 
@@ -143,13 +143,13 @@ class CoreLiquidationBatchCodecTest {
 
     private static ExecuteLiquidationBatchCommand command(int maxCancelOrders) {
         return new ExecuteLiquidationBatchCommand(List.of(
-                action(7, 11, "BTC-USDT"),
-                action(8, 12, "ETH-USDT")), maxCancelOrders, 3_000,
-                new CoreRiskScanContinuation("BTC-USDT", 19, 41), 64);
+                action(7, 11, "1"),
+                action(8, 12, "2")), maxCancelOrders, 3_000,
+                new CoreRiskScanContinuation("1", 19, 41), 64);
     }
 
-    private static ExecuteLiquidationBatchAction action(long liquidationId, long userId, String symbol) {
-        return new ExecuteLiquidationBatchAction(liquidationId, userId, symbol, 19, 60_000, 91);
+    private static ExecuteLiquidationBatchAction action(long liquidationId, long userId, String instrumentId) {
+        return new ExecuteLiquidationBatchAction(liquidationId, userId, instrumentId, 19, 60_000, 91);
     }
 
     private static void decodeWithBudget(int budget) {

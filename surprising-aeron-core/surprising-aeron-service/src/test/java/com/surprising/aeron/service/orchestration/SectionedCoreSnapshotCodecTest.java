@@ -415,12 +415,12 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     private static TradingCoreState stateWithOpenBid() {
-        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT",
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
                 CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
-                Map.of("BTC-USDT", CoreInstrument.from(ProductLine.SPOT,
-                        new RegisterInstrumentCommand("BTC-USDT", ContractType.SPOT.ordinal(),
+                Map.of("1", CoreInstrument.from(ProductLine.SPOT,
+                        new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
@@ -438,7 +438,7 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     private static CoreMatchingOrder bid() {
-        return new CoreMatchingOrder(1, "BTC-USDT", CoreOrderSide.BUY,
+        return new CoreMatchingOrder(1, "1", CoreOrderSide.BUY,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, 100, 2);
     }

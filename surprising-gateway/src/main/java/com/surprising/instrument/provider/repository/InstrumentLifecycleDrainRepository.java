@@ -26,29 +26,29 @@ public class InstrumentLifecycleDrainRepository {
     public void acknowledge(InstrumentLifecycleDrainEvent event, Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO instrument_lifecycle_drain_acks (
-                    symbol, instrument_change_id, product_line, component, ready_at, updated_at
+                    instrument_id, instrument_change_id, product_line, component, ready_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (symbol, instrument_change_id, component) DO UPDATE SET
+                ON CONFLICT (product_line, instrument_id, instrument_change_id, component) DO UPDATE SET
                     product_line = EXCLUDED.product_line,
                     ready_at = GREATEST(instrument_lifecycle_drain_acks.ready_at, EXCLUDED.ready_at),
                     updated_at = EXCLUDED.updated_at
-                """, event.symbol(), event.instrumentChangeId(), event.productLine().name(),
+                """, com.surprising.product.api.InstrumentIds.parse(event.instrumentId()), event.instrumentChangeId(), event.productLine().name(),
                 event.component().name(), Timestamp.from(event.readyAt()), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("生命周期清理确认写入失败: "
-                    + event.symbol() + ":" + event.component());
+                    + event.instrumentId() + ":" + event.component());
         }
     }
 
-    public boolean isReady(ProductLine productLine, String symbol, long instrumentChangeId) {
+    public boolean isReady(ProductLine productLine, String instrumentId, long instrumentChangeId) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(DISTINCT component)::int
                   FROM instrument_lifecycle_drain_acks
                  WHERE product_line = ?
-                   AND symbol = ?
+                   AND instrument_id = ?
                    AND instrument_change_id = ?
                    AND component IN ('ORDER', 'ACCOUNT')
-                """, Integer.class, productLine.name(), symbol, instrumentChangeId);
+                """, Integer.class, productLine.name(), com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId);
         return count != null && count == REQUIRED_COMPONENTS.size();
     }
 }

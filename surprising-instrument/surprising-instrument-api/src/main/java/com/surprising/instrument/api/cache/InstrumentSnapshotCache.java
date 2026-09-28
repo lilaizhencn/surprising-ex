@@ -29,18 +29,18 @@ public final class InstrumentSnapshotCache {
                         List<InstrumentResponse> instruments,
                         Map<String, Long> assetScales) {
         requireProductLine(productLine);
-        Map<SymbolKey, InstrumentResponse> current = new HashMap<>();
+        Map<InstrumentKey, InstrumentResponse> current = new HashMap<>();
         for (InstrumentResponse instrument : instruments == null ? List.<InstrumentResponse>of() : instruments) {
             if (instrument == null || instrument.contractType() == null
                     || instrument.contractType().productLine() != productLine) {
                 continue;
             }
             InstrumentResponse immutable = InstrumentResponse.immutableCopy(instrument);
-            current.merge(new SymbolKey(productLine, immutable.symbol()), immutable,
+            current.merge(new InstrumentKey(productLine, immutable.instrumentId()), immutable,
                     InstrumentSnapshotCache::newer);
         }
         state.updateAndGet(previous -> {
-            Map<SymbolKey, InstrumentResponse> mergedCurrent = new HashMap<>(previous.current());
+            Map<InstrumentKey, InstrumentResponse> mergedCurrent = new HashMap<>(previous.current());
             current.forEach((key, value) -> mergedCurrent.merge(key, value, InstrumentSnapshotCache::newer));
             java.util.Set<ProductLine> initialized = new java.util.HashSet<>(previous.initializedProductLines());
             initialized.add(productLine);
@@ -56,7 +56,7 @@ public final class InstrumentSnapshotCache {
         if (event == null || event.snapshot() == null) {
             return false;
         }
-        if (event.symbol() == null || !normalize(event.symbol()).equals(normalize(event.snapshot().symbol()))
+        if (event.instrumentId() != event.snapshot().instrumentId() || event.symbol() == null || !normalize(event.symbol()).equals(normalize(event.snapshot().symbol()))
                 || event.changeId() != event.snapshot().lastChangeId()) {
             return false;
         }
@@ -66,14 +66,14 @@ public final class InstrumentSnapshotCache {
             return false;
         }
         InstrumentResponse immutable = InstrumentResponse.immutableCopy(event.snapshot());
-        SymbolKey symbolKey = new SymbolKey(productLine, immutable.symbol());
+        InstrumentKey symbolKey = new InstrumentKey(productLine, immutable.instrumentId());
         while (true) {
             State previous = state.get();
             InstrumentResponse oldVersion = previous.current().get(symbolKey);
             if (oldVersion != null && oldVersion.lastChangeId() >= immutable.lastChangeId()) {
                 return false;
             }
-            Map<SymbolKey, InstrumentResponse> current = new HashMap<>(previous.current());
+            Map<InstrumentKey, InstrumentResponse> current = new HashMap<>(previous.current());
             current.merge(symbolKey, immutable, InstrumentSnapshotCache::newer);
             java.util.Set<ProductLine> initialized = new java.util.HashSet<>(previous.initializedProductLines());
             initialized.add(productLine);
@@ -83,13 +83,24 @@ public final class InstrumentSnapshotCache {
         }
     }
 
-    public Optional<InstrumentResponse> current(ProductLine productLine, String symbol) {
-        return Optional.ofNullable(state.get().current().get(new SymbolKey(productLine, normalize(symbol))));
+    public Optional<InstrumentResponse> current(ProductLine productLine, int instrumentId) {
+        requireProductLine(productLine);
+        if (instrumentId <= 0) throw new IllegalArgumentException("instrumentId must be positive");
+        return Optional.ofNullable(state.get().current().get(new InstrumentKey(productLine, instrumentId)));
     }
 
-    /** Reject a stale caller instead of selecting an old executable configuration. */
-    public Optional<InstrumentResponse> current(ProductLine productLine, String symbol, long expectedChangeId) {
-        return current(productLine, symbol).filter(value -> value.changeId() == expectedChangeId);
+    /** Metadata lookup for a displayed name; business state is keyed by permanent ID. */
+    public Optional<InstrumentResponse> bySymbol(ProductLine productLine, String symbol) {
+        requireProductLine(productLine);
+        String name = normalize(symbol);
+        return state.get().current().entrySet().stream()
+                .filter(entry -> entry.getKey().productLine() == productLine
+                        && normalize(entry.getValue().symbol()).equals(name))
+                .map(Map.Entry::getValue).findFirst();
+    }
+
+    public Optional<InstrumentResponse> current(ProductLine productLine, int instrumentId, long expectedChangeId) {
+        return current(productLine, instrumentId).filter(value -> value.changeId() == expectedChangeId);
     }
 
     public List<InstrumentResponse> current(ProductLine productLine) {
@@ -169,12 +180,12 @@ public final class InstrumentSnapshotCache {
         return symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
-    private record State(Map<SymbolKey, InstrumentResponse> current,
+    private record State(Map<InstrumentKey, InstrumentResponse> current,
                          Map<ProductLine, Map<String, Long>> assetScales,
                          boolean ready,
                          java.util.Set<ProductLine> initializedProductLines) {
     }
 
-    private record SymbolKey(ProductLine productLine, String symbol) {
+    private record InstrumentKey(ProductLine productLine, int instrumentId) {
     }
 }

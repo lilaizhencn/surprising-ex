@@ -25,13 +25,25 @@ public class InstrumentRequestService {
         this.instrumentService = instrumentService;
     }
 
-    public InstrumentResponse latest(String symbol, String productLineHeader, String productLineValue) {
+    public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
-            return instrumentService.latest(symbol, productLine(productLineValue, productLineHeader));
+            return instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
+    }
+
+    public InstrumentResponse defaultInstrument(String header, String query) {
+        try {
+            var line = productLine(query, header);
+            if (line == null) throw new IllegalArgumentException("productLine is required");
+            return instrumentService.defaultInstrument(line);
+        } catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
+        } catch (IllegalStateException error) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
         }
     }
 
@@ -47,9 +59,9 @@ public class InstrumentRequestService {
         }
     }
 
-    public InstrumentResponse adminLatest(String symbol, String productLineHeader, String productLineValue) {
+    public InstrumentResponse adminLatest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
-            return instrumentService.latest(symbol, productLine(productLineValue, productLineHeader));
+            return instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -65,8 +77,8 @@ public class InstrumentRequestService {
         }
     }
 
-    public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(String symbol, ProductLine productLine, long beforeId, int limit) {
-        return instrumentService.changes(symbol, productLine, beforeId, limit);
+    public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(int instrumentId, ProductLine productLine, long beforeId, int limit) {
+        return instrumentService.changes(instrumentId, productLine, beforeId, limit);
     }
 
     public InstrumentResponse upsert(InstrumentUpsertRequest request, String operator, String reason) {
@@ -77,9 +89,9 @@ public class InstrumentRequestService {
         }
     }
 
-    public InstrumentResponse updateStatus(String symbol, InstrumentStatus status, String productLineHeader, String productLineValue, String operator, String reason) {
+    public InstrumentResponse updateStatus(int instrumentId, InstrumentStatus status, String productLineHeader, String productLineValue, String operator, String reason) {
         try {
-            return instrumentService.updateStatus(symbol, productLine(productLineValue, productLineHeader), status, operator, reason);
+            return instrumentService.updateStatus(instrumentId, requiredProductLine(productLineValue, productLineHeader), status, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -87,13 +99,13 @@ public class InstrumentRequestService {
         }
     }
 
-    public InstrumentResponse closeForSettlement(String symbol, String productLineHeader, String productLineValue, long settlementPriceTicks, long underlyingSettlementPriceUnits, String operator, String reason) {
+    public InstrumentResponse closeForSettlement(int instrumentId, String productLineHeader, String productLineValue, long settlementPriceTicks, long underlyingSettlementPriceUnits, String operator, String reason) {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             if (productLine == null) {
                 throw new IllegalArgumentException("settlement productLine is required");
             }
-            return instrumentService.closeForSettlement(symbol, productLine, settlementPriceTicks, underlyingSettlementPriceUnits, operator, reason);
+            return instrumentService.closeForSettlement(instrumentId, productLine, settlementPriceTicks, underlyingSettlementPriceUnits, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -101,7 +113,17 @@ public class InstrumentRequestService {
         }
     }
 
+    private ProductLine requiredProductLine(String queryValue, String headerValue) {
+        ProductLine value = productLine(queryValue, headerValue);
+        if (value == null) throw new IllegalArgumentException("productLine is required for instrument identity");
+        return value;
+    }
+
     private ProductLine productLine(String queryValue, String headerValue) {
+        if (queryValue != null && !queryValue.isBlank() && headerValue != null && !headerValue.isBlank()
+                && productLine(queryValue, null) != productLine(null, headerValue)) {
+            throw new IllegalArgumentException("productLine query and header disagree");
+        }
         String value = queryValue != null && !queryValue.isBlank() ? queryValue : headerValue;
         if (value == null || value.isBlank()) {
             return null;

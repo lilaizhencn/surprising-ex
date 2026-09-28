@@ -36,7 +36,7 @@ public class CandleUpdateCoalescer {
 
     public void publish(CandleUpdatedEvent event, ProductLine productLine) {
         SubscriptionTopic topic = new SubscriptionTopic(
-                WsChannel.CANDLES, event.symbol(), event.period(), null, productLine);
+                WsChannel.CANDLES, event.instrumentId(), event.period(), null, productLine);
         if (event.status() == CandleStatus.CLOSED) {
             latestPartial.remove(topic);
             registry.publish(topic, event, event.eventTime());

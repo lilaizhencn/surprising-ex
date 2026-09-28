@@ -67,10 +67,10 @@ class MarketMakerApplicationYamlTest {
 
     private static List<Object[]> makerMatrixOverrides() {
         return List.of(
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_ORDER_LEVELS", "5",
+                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1", "MM_ORDER_LEVELS", "5",
                         "MM_ACCOUNT_IDS", "900001,900002"),
                         5, 2},
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_ORDER_LEVELS", "50",
+                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1", "MM_ORDER_LEVELS", "50",
                         "MM_ACCOUNT_IDS", "900001,900002,900003,900004,900005,900006,900007,900008"),
                         50, 8});
     }

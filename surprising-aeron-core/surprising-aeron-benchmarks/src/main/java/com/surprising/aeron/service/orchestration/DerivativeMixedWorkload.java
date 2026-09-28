@@ -82,18 +82,18 @@ final class DerivativeMixedWorkload {
         Harness harness = Harness.create(accountLanes, productLine);
         try {
             for (int index = 0; index < symbolCount; index++) {
-                String symbol = symbols.get(index);
+                String instrumentId = symbols.get(index);
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument(profile, symbol, index))));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(profile, instrumentId, index))));
             }
-            for (String symbol : symbols) {
+            for (String instrumentId : symbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
                                 productLine == ProductLine.OPTION
-                                        ? new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, ENTRY_PRICE,
+                                        ? new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, ENTRY_PRICE,
                                         ENTRY_PRICE, 1, BASE_EPOCH_MILLIS)
-                                        : new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, 1,
+                                        : new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, 1,
                                         BASE_EPOCH_MILLIS))));
             }
 
@@ -120,15 +120,15 @@ final class DerivativeMixedWorkload {
             }
             for (int index = 0; index < activeUsers; index++) {
                 long userId = retailUsers.get(index);
-                String symbol = symbols.get(index % symbolCount);
+                String instrumentId = symbols.get(index % symbolCount);
                 harness.adjust(userId, profile.settleAsset(), SAFE_BALANCE + index);
                 harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                        order(harness.nextOrderId(), symbol, CoreOrderSide.BUY,
+                        order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY,
                                 ENTRY_PRICE, 1, CoreTimeInForce.IOC)));
                 int openOrders = index < OPEN_ORDER_USER_CAP ? index & 3 : 0;
                 for (int open = 0; open < openOrders; open++) {
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                            order(harness.nextOrderId(), symbol, CoreOrderSide.BUY,
+                            order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY,
                                     90 - open, 1, CoreTimeInForce.GTC)));
                 }
             }
@@ -200,8 +200,8 @@ final class DerivativeMixedWorkload {
             }
 
             private void executeHeavyWork(Harness target, Template source, int index) {
-                String symbol = source.symbols().get(index);
-                var scan = target.state().tradingState().riskState().scans().get(symbol);
+                String instrumentId = source.symbols().get(index);
+                var scan = target.state().tradingState().riskState().scans().get(instrumentId);
                 if (scan != null && !scan.complete()) {
                     target.execute(target.command(CoreMessageType.CONTINUE_RISK_SCAN,
                             CommandSource.OPERATIONS, 0,
@@ -209,19 +209,19 @@ final class DerivativeMixedWorkload {
                                     new ContinueRiskScanCommand(RISK_BATCH_SIZE))));
                 } else {
                     long sequence = Math.incrementExact(Math.max(markSequences[index],
-                            target.state().runtimeMarkPrice(symbol).priceSequence()));
+                            target.state().runtimeMarkPrice(instrumentId).priceSequence()));
                     markSequences[index] = sequence;
                     target.execute(target.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     source.productLine() == ProductLine.OPTION
-                                            ? new ApplyMarkPriceCommand(symbol, 99, ENTRY_PRICE,
+                                            ? new ApplyMarkPriceCommand(instrumentId, 99, ENTRY_PRICE,
                                             ENTRY_PRICE, sequence, target.nextCommandTimestamp())
-                                            : new ApplyMarkPriceCommand(symbol, 99, sequence,
+                                            : new ApplyMarkPriceCommand(instrumentId, 99, sequence,
                                             target.nextCommandTimestamp()))));
                 }
                 if (!source.productLine().isFundingProduct()) return;
-                if (target.state().tradingState().treasuryState().fundingSettlement(symbol)
+                if (target.state().tradingState().treasuryState().fundingSettlement(instrumentId)
                         == fundingIds[index]) {
                     fundingIds[index] += source.symbols().size();
                     fundingCursors[index] = 0;
@@ -229,7 +229,7 @@ final class DerivativeMixedWorkload {
                 var response = target.execute(target.command(CoreMessageType.APPLY_FUNDING,
                         CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                fundingIds[index], symbol, (index & 1) == 0 ? 100_000 : -100_000,
+                                fundingIds[index], instrumentId, (index & 1) == 0 ? 100_000 : -100_000,
                                 fundingCursors[index], RISK_BATCH_SIZE))));
                 var progress = CoreFundingProgressCodec.decode(response.data());
                 fundingCursors[index] = progress.complete() ? 0 : progress.nextCursorUserId();
@@ -326,14 +326,14 @@ final class DerivativeMixedWorkload {
         harness.drainSubmitted();
     }
 
-    private static List<Long> placeBatch(Harness harness, long userId, String symbol, CoreOrderSide side,
+    private static List<Long> placeBatch(Harness harness, long userId, String instrumentId, CoreOrderSide side,
                                          long price, long quantity, CoreTimeInForce tif, int size) {
         List<Long> ids = new ArrayList<>(size);
         List<PlaceOrderCommand> orders = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
             long orderId = harness.nextOrderId();
             ids.add(orderId);
-            orders.add(orderCommand(orderId, symbol, side, price, quantity, tif));
+            orders.add(orderCommand(orderId, instrumentId, side, price, quantity, tif));
         }
         harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
@@ -376,25 +376,25 @@ final class DerivativeMixedWorkload {
     private static List<String> symbols(Profile profile, int count) {
         List<String> symbols = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
-            symbols.add("JMH-" + profile.productLine().topicSegment().toUpperCase() + "-" + index);
+            symbols.add(Integer.toString(10000 + index));
         }
         return List.copyOf(symbols);
     }
 
-    private static byte[] order(long id, String symbol, CoreOrderSide side, long price, long quantity,
+    private static byte[] order(long id, String instrumentId, CoreOrderSide side, long price, long quantity,
                                 CoreTimeInForce tif) {
-        return TradingCommandCodec.encodePlaceOrder(orderCommand(id, symbol, side, price, quantity, tif));
+        return TradingCommandCodec.encodePlaceOrder(orderCommand(id, instrumentId, side, price, quantity, tif));
     }
 
-    private static PlaceOrderCommand orderCommand(long id, String symbol, CoreOrderSide side, long price,
+    private static PlaceOrderCommand orderCommand(long id, String instrumentId, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce tif) {
-        return new PlaceOrderCommand(id, symbol, side, price, quantity, false,
+        return new PlaceOrderCommand(id, instrumentId, side, price, quantity, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, tif, false,
                 "derivative-mixed-" + id);
     }
 
-    private static RegisterInstrumentCommand instrument(Profile profile, String symbol, int index) {
-        return new RegisterInstrumentCommand(symbol, profile.contractType().ordinal(),
+    private static RegisterInstrumentCommand instrument(Profile profile, String instrumentId, int index) {
+        return new RegisterInstrumentCommand(instrumentId, profile.contractType().ordinal(),
                 "D" + index, profile.quoteAsset(), profile.settleAsset(),
                 profile.notionalMultiplier(), 1, profile.settleScale(), 100_000, 50_000,
                 0, 0, profile.expiryEpochMillis(), profile.optionTypeCode(), profile.strikePrice());

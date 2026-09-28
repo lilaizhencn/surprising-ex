@@ -24,8 +24,8 @@ class BboOrderServiceTest {
         var service = new OrderService(config, validator, null, commands, null, gateway);
         var levels = new ArrayList<CoreBookLevelView>();
         for (int i = 0; i < 5; i++) {
-            levels.add(new CoreBookLevelView("BTC-USDT", CoreOrderSide.BUY, 96 + i, 10, 1));
-            levels.add(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 105 - i, 10, 1));
+            levels.add(new CoreBookLevelView("1", CoreOrderSide.BUY, 96 + i, 10, 1));
+            levels.add(new CoreBookLevelView("1", CoreOrderSide.SELL, 105 - i, 10, 1));
         }
         when(gateway.orderBook(any())).thenReturn(new CoreOrderBookView(1, levels));
         when(validator.validate(any())).thenReturn(ValidationResult.ok(1));
@@ -37,8 +37,8 @@ class BboOrderServiceTest {
             verify(commands).place(argThat(r -> r.side() == side && r.priceTicks() == expected
                     && r.bboPriceMode() == null && r.quantitySteps() == 2 && r.orderType() == OrderType.LIMIT), any());
         }
-        verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("BTC-USDT", 1));
-        verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("BTC-USDT", 5));
+        verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("1", 1));
+        verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("1", 5));
     }
 
     @ParameterizedTest @EnumSource(ProductLine.class)
@@ -59,7 +59,7 @@ class BboOrderServiceTest {
     }
 
     private PlaceOrderRequest request(OrderSide side, BboPriceMode mode, OrderType type, long price) {
-        return new PlaceOrderRequest(1, "bbo-" + side + mode, "BTC-USDT", side, type, TimeInForce.GTC,
+        return new PlaceOrderRequest(1, "bbo-" + side + mode, "1", side, type, TimeInForce.GTC,
                 price, 2, MarginMode.CROSS, PositionSide.NET, false, false, mode);
     }
 }

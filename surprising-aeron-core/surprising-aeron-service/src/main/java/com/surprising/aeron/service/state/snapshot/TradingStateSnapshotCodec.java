@@ -68,7 +68,7 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(user.reservations().size());
             user.reservations().values().forEach(reservation -> {
                 writer.longValue(reservation.orderId());
-                writer.text(reservation.symbol());
+                writer.text(reservation.instrumentId());
                 writer.intValue(reservation.kind().wireCode());
                 writer.text(reservation.asset());
                 writer.longValue(reservation.reservedUnits());
@@ -78,7 +78,7 @@ public final class TradingStateSnapshotCodec {
             });
             writer.intValue(user.positions().size());
             user.positions().values().forEach(position -> {
-                writer.text(position.symbol());
+                writer.text(position.instrumentId());
                 writer.text(position.marginAsset());
                 writer.intValue(position.marginMode().wireCode());
                 writer.intValue(position.positionSide().wireCode());
@@ -93,7 +93,7 @@ public final class TradingStateSnapshotCodec {
         state.orders().values().forEach(order -> {
             writer.longValue(order.orderId());
             writer.longValue(order.userId());
-            writer.text(order.symbol());
+            writer.text(order.instrumentId());
             writer.intValue(order.side().wireCode());
             writer.longValue(order.priceTicks());
             writer.longValue(order.matchingPriceTicks());
@@ -122,7 +122,7 @@ public final class TradingStateSnapshotCodec {
         });
         writer.intValue(state.instruments().size());
         state.instruments().values().forEach(instrument -> {
-            writer.text(instrument.symbol());
+            writer.text(instrument.instrumentId());
             writer.intValue(instrument.contractType().ordinal());
             writer.text(instrument.baseAsset());
             writer.text(instrument.quoteAsset());
@@ -163,7 +163,7 @@ public final class TradingStateSnapshotCodec {
         });
         writer.intValue(state.riskState().markPrices().size());
         state.riskState().markPrices().values().forEach(mark -> {
-            writer.text(mark.symbol());
+            writer.text(mark.instrumentId());
             writer.longValue(mark.markPriceTicks());
             writer.longValue(mark.indexPriceTicks());
             writer.longValue(mark.forwardPriceTicks());
@@ -173,7 +173,7 @@ public final class TradingStateSnapshotCodec {
         writer.intValue(state.riskState().snapshots().size());
         state.riskState().snapshots().values().forEach(risk -> {
             writer.longValue(risk.userId());
-            writer.text(risk.symbol());
+            writer.text(risk.instrumentId());
             writer.intValue(risk.positionSide().wireCode());
             writer.longValue(risk.priceSequence());
             writer.longValue(risk.equityUnits());
@@ -186,7 +186,7 @@ public final class TradingStateSnapshotCodec {
         state.riskState().liquidations().values().forEach(liquidation -> {
             writer.longValue(liquidation.liquidationId());
             writer.longValue(liquidation.userId());
-            writer.text(liquidation.symbol());
+            writer.text(liquidation.instrumentId());
             writer.intValue(liquidation.marginMode().wireCode());
             writer.intValue(liquidation.positionSide().wireCode());
             writer.longValue(liquidation.triggerPriceSequence());
@@ -201,7 +201,7 @@ public final class TradingStateSnapshotCodec {
         });
         writer.intValue(state.riskState().scans().size());
         state.riskState().scans().values().forEach(scan -> {
-            writer.text(scan.symbol());
+            writer.text(scan.instrumentId());
             writer.intValue(scan.accountLaneId());
             writer.longValue(scan.priceSequence());
             writer.longValue(scan.scanStartPriceSequence());
@@ -262,8 +262,8 @@ public final class TradingStateSnapshotCodec {
         writeUnits(writer, state.treasuryState().fundingSettlements());
         writeUnits(writer, state.treasuryState().lifecycleSettlements());
         writer.intValue(state.treasuryState().fundingProgress().size());
-        state.treasuryState().fundingProgress().forEach((symbol, progress) -> {
-            writer.text(symbol);
+        state.treasuryState().fundingProgress().forEach((instrumentId, progress) -> {
+            writer.text(instrumentId);
             writer.longValue(progress.settlementId());
             writer.longValue(progress.fundingRatePpm());
             writer.longValue(progress.markPriceTicks());
@@ -274,8 +274,8 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.commandId().getLeastSignificantBits());
         });
         writer.intValue(state.treasuryState().lifecycleProgress().size());
-        state.treasuryState().lifecycleProgress().forEach((symbol, progress) -> {
-            writer.text(symbol);
+        state.treasuryState().lifecycleProgress().forEach((instrumentId, progress) -> {
+            writer.text(instrumentId);
             writer.longValue(progress.settlementId());
             writer.longValue(progress.settlementPriceTicks());
             writer.longValue(progress.optionCashUnitsPerContract());
@@ -290,7 +290,7 @@ public final class TradingStateSnapshotCodec {
         writer.intValue(state.leverages().size());
         state.leverages().forEach((key, leverage) -> {
             writer.longValue(key.userId());
-            writer.text(key.symbol());
+            writer.text(key.instrumentId());
             writer.intValue(key.marginMode().wireCode());
             writer.longValue(leverage);
         });
@@ -298,7 +298,7 @@ public final class TradingStateSnapshotCodec {
         state.algoOrders().values().forEach(algo -> {
             byte[] encoded = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(
                     new com.surprising.aeron.protocol.CoreAlgoOrderView(algo.algoOrderId(), algo.userId(),
-                            algo.clientAlgoOrderId(), algo.symbol(), algo.algoTypeCode(), algo.side(), algo.priceTicks(),
+                            algo.clientAlgoOrderId(), algo.instrumentId(), algo.algoTypeCode(), algo.side(), algo.priceTicks(),
                             algo.quantitySteps(), algo.childQuantitySteps(), algo.intervalSeconds(), algo.durationSeconds(),
                             algo.marginMode(), algo.positionSide(), algo.reduceOnly(), algo.postOnly(), algo.timeInForce(),
                             algo.statusCode(), algo.currentOrderId(), algo.rejectReason(), algo.traceId(),
@@ -366,15 +366,15 @@ public final class TradingStateSnapshotCodec {
             Map<String, CorePositionState> positions = new TreeMap<>();
             int positionCount = reader.count("positions");
             for (int positionIndex = 0; positionIndex < positionCount; positionIndex++) {
-                String symbol = reader.text();
+                String instrumentId = reader.text();
                 String marginAsset = reader.text();
                 CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
                 CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-                CorePositionState position = new CorePositionState(symbol, marginAsset, marginMode, positionSide,
+                CorePositionState position = new CorePositionState(instrumentId, marginAsset, marginMode, positionSide,
                         reader.longValue(),
                         reader.nonNegativeLong("entry price"), reader.nonNegativeLong("entry value"),
                         reader.longValue(), reader.nonNegativeLong("position margin"));
-                putUnique(positions, symbol, position);
+                putUnique(positions, instrumentId, position);
             }
             putUnique(users, userId, new CoreUserState(productLine, userId, userRevision,
                     balances, reservations, positions, positionMode));
@@ -384,7 +384,7 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < orderCount; index++) {
             long orderId = reader.positiveLong("orderId");
             long userId = reader.positiveLong("order userId");
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
             long priceTicks = reader.nonNegativeLong("price ticks");
             long matchingPriceTicks = reader.nonNegativeLong("matching price ticks");
@@ -411,7 +411,7 @@ public final class TradingStateSnapshotCodec {
             if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
                 throw new ProtocolException("invalid order status: " + statusCode);
             }
-            CoreOrderState order = new CoreOrderState(orderId, productLine, userId, symbol,
+            CoreOrderState order = new CoreOrderState(orderId, productLine, userId, instrumentId,
                     side,
                     priceTicks, matchingPriceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
                     orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
@@ -423,7 +423,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrument> instruments = new TreeMap<>();
         int instrumentCount = reader.count("instruments");
         for (int index = 0; index < instrumentCount; index++) {
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             int contractType = reader.intValue();
             if (contractType < 0 || contractType >= ContractType.values().length) {
                 throw new ProtocolException("invalid contract type: " + contractType);
@@ -476,7 +476,7 @@ public final class TradingStateSnapshotCodec {
                         reader.positiveLong("risk bracket maintenance margin"),
                         reader.positiveLong("option margin factor")));
             }
-            CoreInstrument instrument = new CoreInstrument(symbol,
+            CoreInstrument instrument = new CoreInstrument(instrumentId,
                     decodedType, baseAsset, quoteAsset, settleAsset, multiplier, priceTick, settleScale,
                     initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
                     optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
@@ -485,23 +485,23 @@ public final class TradingStateSnapshotCodec {
                     com.surprising.instrument.api.model.InstrumentStatus.values()[instrumentStatus],
                     marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
                     supportedOrderTypeMask, supportedTimeInForceMask);
-            putUnique(instruments, symbol, instrument);
+            putUnique(instruments, instrumentId, instrument);
         }
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();
         int markCount = reader.count("mark prices");
         for (int index = 0; index < markCount; index++) {
-            String symbol = reader.text();
-            CoreMarkPriceState mark = new CoreMarkPriceState(symbol,
+            String instrumentId = reader.text();
+            CoreMarkPriceState mark = new CoreMarkPriceState(instrumentId,
                     reader.positiveLong("mark price"),
                     reader.nonNegativeLong("mark index price"), reader.nonNegativeLong("mark forward price"),
                     reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"));
-            putUnique(marks, symbol, mark);
+            putUnique(marks, instrumentId, mark);
         }
         Map<String, CoreRiskSnapshot> risks = new TreeMap<>();
         int riskCount = reader.count("risk snapshots");
         for (int index = 0; index < riskCount; index++) {
             long userId = reader.positiveLong("risk userId");
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
             long priceSequence = reader.positiveLong("risk price sequence");
             long equity = reader.longValue();
@@ -512,7 +512,7 @@ public final class TradingStateSnapshotCodec {
             if (status < 0 || status >= CoreRiskStatus.values().length) {
                 throw new ProtocolException("invalid risk status: " + status);
             }
-            CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, symbol, positionSide,
+            CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, instrumentId, positionSide,
                     priceSequence, equity, unrealized, maintenance, ratio, CoreRiskStatus.values()[status]);
             putUnique(risks, risk.key(), risk);
         }
@@ -521,7 +521,7 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < liquidationCount; index++) {
             long liquidationId = reader.positiveLong("liquidationId");
             long userId = reader.positiveLong("liquidation userId");
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
             long priceSequence = reader.positiveLong("liquidation price sequence");
@@ -535,7 +535,7 @@ public final class TradingStateSnapshotCodec {
             if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
                 throw new ProtocolException("invalid liquidation status: " + status);
             }
-            CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
+            CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, instrumentId,
                     marginMode, positionSide, priceSequence, signedQuantity, closeQuantity,
                     deficitUnits, executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits,
                     CoreLiquidationState.Status.values()[status], reader.nonNegativeLong("liquidation cancel cursor"));
@@ -584,7 +584,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
         int fundingProgressCount = reader.count("funding progress");
         for (int index = 0; index < fundingProgressCount; index++) {
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             long settlementId = reader.positiveLong("funding progress settlement id");
             long rate = reader.longValue();
             long mark = reader.positiveLong("funding progress mark");
@@ -593,12 +593,12 @@ public final class TradingStateSnapshotCodec {
                     settlementId, rate, reader.intValue(),
                     reader.nonNegativeLong("funding progress cursor"),
                     new UUID(reader.longValue(), reader.longValue()), mark, priceSequence);
-            putUnique(fundingProgress, symbol, progress);
+            putUnique(fundingProgress, instrumentId, progress);
         }
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
         int lifecycleProgressCount = reader.count("lifecycle progress");
         for (int index = 0; index < lifecycleProgressCount; index++) {
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             CoreTreasuryState.LifecycleProgress progress = new CoreTreasuryState.LifecycleProgress(
                     reader.positiveLong("lifecycle progress settlement id"),
                     reader.nonNegativeLong("lifecycle progress settlement price"),
@@ -607,7 +607,7 @@ public final class TradingStateSnapshotCodec {
                     reader.nonNegativeLong("lifecycle progress order cursor"),
                     reader.nonNegativeLong("lifecycle progress user cursor"),
                     new UUID(reader.longValue(), reader.longValue()), reader.nonNegativeLong("required settlement insurance"));
-            putUnique(lifecycleProgress, symbol, progress);
+            putUnique(lifecycleProgress, instrumentId, progress);
         }
         CoreTreasuryState treasuryState = new CoreTreasuryState(feeBalances, insuranceBalances,
                 insuranceDeficits, liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances,
@@ -652,7 +652,7 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < triggerCount; index++) {
             int length = reader.count("trigger payload bytes");
             var view = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(reader.bytes(length));
-            CoreInstrument instrument = instruments.get(view.symbol());
+            CoreInstrument instrument = instruments.get(view.instrumentId());
             if (instrument == null) throw new ProtocolException("trigger instrument is missing");
             CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument);
             putUnique(triggerOrders, trigger.triggerOrderId(), trigger);

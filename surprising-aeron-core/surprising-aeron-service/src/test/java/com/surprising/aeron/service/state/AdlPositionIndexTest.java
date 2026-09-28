@@ -52,7 +52,7 @@ class AdlPositionIndexTest {
     void rejectsStalePreviousWithoutDamagingOtherPositionsOrCurrentValue() {
         var index = emptyIndex();
         var first = position("USDT", 1);
-        var second = new RuntimePositionIndexValue(8, "BTC-USDT", "USDT", CorePositionSide.NET, 2);
+        var second = new RuntimePositionIndexValue(8, "1", "USDT", CorePositionSide.NET, 2);
         index.apply(1, null, first);
         index.apply(2, null, second);
         assertThatThrownBy(() -> index.apply(1, position("USDT", 1), null))
@@ -70,6 +70,6 @@ class AdlPositionIndexTest {
     }
 
     private static RuntimePositionIndexValue position(String asset, long quantity) {
-        return new RuntimePositionIndexValue(7, "BTC-USDT", asset, CorePositionSide.NET, quantity);
+        return new RuntimePositionIndexValue(7, "1", asset, CorePositionSide.NET, quantity);
     }
 }

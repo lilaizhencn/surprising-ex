@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * K 线服务消费 Instrument 增量事件并刷新 symbol 和精度快照。
+ * K 线服务消费 Instrument 增量事件并刷新 instrumentId 和精度快照。
  */
 @Service
 public class InstrumentSnapshotConsumer {

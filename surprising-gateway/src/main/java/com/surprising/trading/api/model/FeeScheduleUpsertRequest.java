@@ -9,7 +9,7 @@ public record FeeScheduleUpsertRequest(
         @NotNull @Positive Long feeScheduleId,
         ProductLine productLine,
         long userId,
-        String symbol,
+        String instrumentId,
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         FeeScheduleSourceType sourceType,

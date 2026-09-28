@@ -73,18 +73,18 @@ class RuntimeTreasuryDeltaTest {
                 Map.of("USDT", 100L, "BTC", 200L),
                 Map.of("USDT", 50L),
                 Map.of(),
-                Map.of("BTC-USDT", 7L),
-                Map.of("ETH-USDT", 3L),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(7, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
-                Map.of("ETH-USDT", new CoreTreasuryState.LifecycleProgress(3, 60_000,
+                Map.of("1", 7L),
+                Map.of("2", 3L),
+                Map.of("1", new CoreTreasuryState.FundingProgress(7, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
+                Map.of("2", new CoreTreasuryState.LifecycleProgress(3, 60_000,
                         0, true, 0, 12, lifecycleCommandId)));
         TradingCoreState before = state(beforeTreasury, 1);
 
         CoreTreasuryState afterTreasury = beforeTreasury
                 .adjustFee("USDT", -100)
                 .adjustInsurance("USDT", -100)
-                .recordFunding("BTC-USDT", 8)
-                .recordLifecycle("ETH-USDT", 4);
+                .recordFunding("1", 8)
+                .recordLifecycle("2", 4);
         TradingCoreState after = state(afterTreasury, 2);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -94,18 +94,18 @@ class RuntimeTreasuryDeltaTest {
         int usdt = identities.assetId("USDT");
         treasury.setFee(usdt, 0);
         treasury.setInsurance(usdt, -50, 0);
-        treasury.setFundingSettlement(identities.symbolId("BTC-USDT"), 8);
-        treasury.setLifecycleSettlement(identities.symbolId("ETH-USDT"), 4);
+        treasury.setFundingSettlement(identities.symbolId("1"), 8);
+        treasury.setLifecycleSettlement(identities.symbolId("2"), 4);
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 2);
 
         assertThat(treasury.fee(identities.assetId("BTC"))).isEqualTo(200L);
         assertThat(treasury.fee(identities.assetId("USDT"))).isZero();
         assertThat(treasury.insurance(identities.assetId("USDT"))).isEqualTo(-50L);
         assertThat(treasury.insuranceDeficit(identities.assetId("USDT"))).isZero();
-        assertThat(treasury.fundingSettlement(identities.symbolId("BTC-USDT"))).isEqualTo(8L);
-        assertThat(treasury.fundingProgress(identities.symbolId("BTC-USDT"))).isNull();
-        assertThat(treasury.lifecycleSettlement(identities.symbolId("ETH-USDT"))).isEqualTo(4L);
-        assertThat(treasury.lifecycleProgress(identities.symbolId("ETH-USDT"))).isNull();
+        assertThat(treasury.fundingSettlement(identities.symbolId("1"))).isEqualTo(8L);
+        assertThat(treasury.fundingProgress(identities.symbolId("1"))).isNull();
+        assertThat(treasury.lifecycleSettlement(identities.symbolId("2"))).isEqualTo(4L);
+        assertThat(treasury.lifecycleProgress(identities.symbolId("2"))).isNull();
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(after);
     }
 
@@ -167,16 +167,16 @@ class RuntimeTreasuryDeltaTest {
     }
 
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {
-        CoreInstrument btc = instrument("BTC-USDT", "BTC");
-        CoreInstrument eth = instrument("ETH-USDT", "ETH");
+        CoreInstrument btc = instrument("1", "BTC");
+        CoreInstrument eth = instrument("2", "ETH");
         return new TradingCoreState(ProductLine.LINEAR_PERPETUAL, revision,
-                Map.of(), Map.of(), Map.of(btc.symbol(), btc, eth.symbol(), eth),
+                Map.of(), Map.of(), Map.of(btc.instrumentId(), btc, eth.instrumentId(), eth),
                 CoreRiskState.empty(), treasury);
     }
 
-    private static CoreInstrument instrument(String symbol, String baseAsset) {
+    private static CoreInstrument instrument(String instrumentId, String baseAsset) {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
                         baseAsset, "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0));
     }

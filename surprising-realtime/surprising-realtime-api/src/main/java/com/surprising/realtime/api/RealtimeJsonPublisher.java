@@ -41,7 +41,7 @@ public final class RealtimeJsonPublisher implements AutoCloseable {
     public void publish(
             ProductLine product,
             RealtimeFrame.Kind kind,
-            String symbol,
+            String instrumentId,
             String entity,
             long sequence,
             Instant time,
@@ -62,7 +62,7 @@ public final class RealtimeJsonPublisher implements AutoCloseable {
                                     0,
                                     time.toEpochMilli(),
                                     0,
-                                    symbol,
+                                    instrumentId,
                                     entity,
                                     mapper.writeValueAsBytes(payload))));
             outbox.commit();

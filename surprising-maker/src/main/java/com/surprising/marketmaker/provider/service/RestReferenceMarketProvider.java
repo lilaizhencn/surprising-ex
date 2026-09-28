@@ -52,13 +52,13 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     @Override
-    public ReferenceOrderBookSnapshot snapshot(String symbol, ProductLine productLine, InstrumentResponse instrument) {
+    public ReferenceOrderBookSnapshot snapshot(String instrumentId, ProductLine productLine, InstrumentResponse instrument) {
         MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
         if (!referenceMarket.isEnabled() || instrument == null) {
             return null;
         }
         ProductLine effectiveProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-        String normalizedSymbol = normalizeSymbol(symbol);
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         String cacheKey = cacheKey(effectiveProductLine, normalizedSymbol);
         Instant now = Instant.now();
         ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
@@ -92,7 +92,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     ReferenceOrderBookSnapshot parsePayload(MarketMakerProperties.ReferenceMarket.Source source,
-                                            String symbol,
+                                            String instrumentId,
                                             InstrumentResponse instrument,
                                             String payload,
                                             Instant receivedAt) {
@@ -104,14 +104,14 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (bids.isEmpty() || asks.isEmpty()) {
                 return null;
             }
-            return new ReferenceOrderBookSnapshot(source.getName(), "REST", symbol, bids, asks, receivedAt);
+            return new ReferenceOrderBookSnapshot(source.getName(), "REST", instrumentId, bids, asks, receivedAt);
         } catch (Exception ex) {
             throw new IllegalArgumentException("invalid reference order book payload: " + ex.getMessage(), ex);
         }
     }
 
     ReferenceOrderBookSnapshot parseWebSocketPayload(MarketMakerProperties.ReferenceMarket.Source source,
-                                                     String symbol,
+                                                     String instrumentId,
                                                      InstrumentResponse instrument,
                                                      String payload,
                                                      Instant receivedAt) {
@@ -121,7 +121,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (update == null || update.empty()) {
                 return null;
             }
-            String normalizedSymbol = normalizeSymbol(symbol);
+            String normalizedSymbol = normalizeSymbol(instrumentId);
             LiveBook liveBook = liveBooks.computeIfAbsent(liveKey(source, normalizedSymbol), ignored -> new LiveBook());
             if (update.delta()) {
                 if (liveBook.isEmpty()) {
@@ -144,7 +144,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private ReferenceOrderBookSnapshot fetch(MarketMakerProperties.ReferenceMarket.Source source,
-                                             String symbol,
+                                             String instrumentId,
                                              InstrumentResponse instrument) {
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(url(source)))
@@ -156,7 +156,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new IllegalArgumentException("http status " + response.statusCode());
             }
-            return parsePayload(source, symbol, instrument, response.body(), Instant.now());
+            return parsePayload(source, instrumentId, instrument, response.body(), Instant.now());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("reference market request interrupted", ex);
@@ -282,11 +282,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return new BigDecimal(value);
     }
 
-    private boolean matches(MarketMakerProperties.ReferenceMarket.Source source, ProductLine productLine, String symbol) {
+    private boolean matches(MarketMakerProperties.ReferenceMarket.Source source, ProductLine productLine, String instrumentId) {
         return source != null
                 && source.isEnabled()
                 && source.getProductLine() == productLine
-                && symbol.equals(normalizeSymbol(source.getSymbol()));
+                && instrumentId.equals(normalizeSymbol(source.getInstrumentId()));
     }
 
     private boolean fresh(ReferenceOrderBookSnapshot snapshot, Instant now) {
@@ -298,17 +298,17 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     private void ensureWebSocketConnections(MarketMakerProperties.ReferenceMarket referenceMarket,
                                             ProductLine productLine,
-                                            String symbol,
+                                            String instrumentId,
                                             InstrumentResponse instrument,
                                             Instant now) {
         if (!referenceMarket.isWebSocketEnabled()) {
             return;
         }
         for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
-            if (!matches(source, productLine, symbol) || !hasText(source.getWebSocketUrl())) {
+            if (!matches(source, productLine, instrumentId) || !hasText(source.getWebSocketUrl())) {
                 continue;
             }
-            String liveKey = liveKey(source, symbol);
+            String liveKey = liveKey(source, instrumentId);
             WebSocketState state = webSockets.computeIfAbsent(liveKey, ignored -> new WebSocketState());
             if (!shouldConnect(state, now)) {
                 continue;
@@ -319,20 +319,20 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 httpClient.newWebSocketBuilder()
                         .connectTimeout(timeout())
                         .buildAsync(URI.create(template(source.getWebSocketUrl(), source)),
-                                new ReferenceMarketWebSocketListener(source, symbol, instrument, state))
+                                new ReferenceMarketWebSocketListener(source, instrumentId, instrument, state))
                         .whenComplete((webSocket, error) -> {
                             if (error != null) {
                                 state.connecting = false;
                                 state.webSocket = null;
                                 log.debug("Reference market websocket connect failed source={} symbol={} error={}",
-                                        source.getName(), symbol, error.getMessage());
+                                        source.getName(), instrumentId, error.getMessage());
                             }
                         });
             } catch (RuntimeException ex) {
                 state.connecting = false;
                 state.webSocket = null;
                 log.debug("Reference market websocket connect rejected source={} symbol={} error={}",
-                        source.getName(), symbol, ex.getMessage());
+                        source.getName(), instrumentId, ex.getMessage());
             }
         }
     }
@@ -352,7 +352,6 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private String template(String value, MarketMakerProperties.ReferenceMarket.Source source) {
         String externalSymbol = source.getExternalSymbol();
         return value
-                .replace("{symbol}", externalSymbol)
                 .replace("{externalSymbol}", externalSymbol)
                 .replace("{externalSymbolLower}", externalSymbol.toLowerCase(Locale.ROOT));
     }
@@ -383,12 +382,12 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return hasText(source.getWebSocketParser()) ? source.getWebSocketParser() : source.getParser();
     }
 
-    private String liveKey(MarketMakerProperties.ReferenceMarket.Source source, String symbol) {
-        return source.getProductLine().name() + ":" + normalizeSymbol(source.getName()) + ":" + normalizeSymbol(symbol);
+    private String liveKey(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId) {
+        return source.getProductLine().name() + ":" + normalizeSymbol(source.getName()) + ":" + normalizeSymbol(instrumentId);
     }
 
-    private String cacheKey(ProductLine productLine, String symbol) {
-        return (productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine).name() + ":" + normalizeSymbol(symbol);
+    private String cacheKey(ProductLine productLine, String instrumentId) {
+        return (productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine).name() + ":" + normalizeSymbol(instrumentId);
     }
 
     private boolean hasText(String value) {
@@ -410,17 +409,17 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     private final class ReferenceMarketWebSocketListener implements WebSocket.Listener {
         private final MarketMakerProperties.ReferenceMarket.Source source;
-        private final String symbol;
+        private final String instrumentId;
         private final InstrumentResponse instrument;
         private final WebSocketState state;
         private final StringBuilder text = new StringBuilder();
 
         private ReferenceMarketWebSocketListener(MarketMakerProperties.ReferenceMarket.Source source,
-                                                 String symbol,
+                                                 String instrumentId,
                                                  InstrumentResponse instrument,
                                                  WebSocketState state) {
             this.source = source;
-            this.symbol = symbol;
+            this.instrumentId = instrumentId;
             this.instrument = instrument;
             this.state = state;
         }
@@ -443,10 +442,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 String payload = text.toString();
                 text.setLength(0);
                 try {
-                    parseWebSocketPayload(source, symbol, instrument, payload, Instant.now());
+                    parseWebSocketPayload(source, instrumentId, instrument, payload, Instant.now());
                 } catch (IllegalArgumentException ex) {
                     log.debug("Reference market websocket message ignored source={} symbol={} error={}",
-                            source.getName(), symbol, ex.getMessage());
+                            source.getName(), instrumentId, ex.getMessage());
                 }
             }
             webSocket.request(1);
@@ -465,7 +464,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             state.webSocket = null;
             state.connecting = false;
             log.debug("Reference market websocket failed source={} symbol={} error={}",
-                    source.getName(), symbol, error.getMessage());
+                    source.getName(), instrumentId, error.getMessage());
         }
     }
 
@@ -492,7 +491,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         }
 
         synchronized ReferenceOrderBookSnapshot snapshot(String source,
-                                                         String symbol,
+                                                         String instrumentId,
                                                          Instant receivedAt,
                                                          int depthLevels) {
             List<ReferenceOrderBookLevel> bidLevels = topLevels(bids, depthLevels);
@@ -500,7 +499,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (bidLevels.isEmpty() || askLevels.isEmpty()) {
                 return null;
             }
-            return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", symbol, bidLevels, askLevels, receivedAt);
+            return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", instrumentId, bidLevels, askLevels, receivedAt);
         }
 
         private void putAll(NavigableMap<Long, Long> side, List<ReferenceOrderBookLevel> levels) {

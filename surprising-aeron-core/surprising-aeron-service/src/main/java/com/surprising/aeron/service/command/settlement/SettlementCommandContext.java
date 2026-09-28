@@ -13,9 +13,9 @@ public interface SettlementCommandContext extends CommandResultContext {
 
     ActiveOrderIndex activeOrderIndex();
 
-    TreasuryRuntime.LifecycleProgressRuntime lifecycleProgress(String symbol);
+    TreasuryRuntime.LifecycleProgressRuntime lifecycleProgress(String instrumentId);
 
-    LifecycleOrderPage settlementLifecycleOrders(long userId, String symbol, long cursorOrderId, int maxOrders);
+    LifecycleOrderPage settlementLifecycleOrders(long userId, String instrumentId, long cursorOrderId, int maxOrders);
 
     record LifecycleOrderPage(List<CoreOrderState> orders, long nextCursorOrderId) {
         public boolean more() {

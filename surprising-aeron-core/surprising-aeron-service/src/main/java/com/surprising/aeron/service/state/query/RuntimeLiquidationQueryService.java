@@ -34,12 +34,12 @@ public final class RuntimeLiquidationQueryService {
                 || command.executionPriceTicks() != mark.markPriceTicks()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
         }
-        String symbol = identities.symbol(liquidation.symbolId());
-        CoreInstrument instrument = runtime.instrument(symbol);
+        String instrumentId = identities.instrumentId(liquidation.symbolId());
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         String positionName = liquidation.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? symbol : symbol + ':' + liquidation.positionSide().name();
+                ? instrumentId : instrumentId + ':' + liquidation.positionSide().name();
         Long positionKey = identities.findPositionKey(liquidation.userId(), positionName);
         PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
         RiskSnapshotRuntime risk = positionKey == null ? null : runtime.riskSnapshot(positionKey);
@@ -81,18 +81,18 @@ public final class RuntimeLiquidationQueryService {
             }
             CoreLiquidationActionView action = null;
             CoreLiquidationWorkView.Resolution resolution = null;
-            String symbol = identities.symbol(value.symbolId());
+            String instrumentId = identities.instrumentId(value.symbolId());
             if (query.purpose() == CoreLiquidationWorkView.Purpose.EXECUTION) {
                 MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
-                action = new CoreLiquidationActionView(value.liquidationId(), value.userId(), symbol,
+                action = new CoreLiquidationActionView(value.liquidationId(), value.userId(), instrumentId,
                         value.marginMode(), value.positionSide(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.closeQuantitySteps(),
                         mark.markPriceTicks(), value.status().name(),
                         value.status() == CoreLiquidationState.Status.ORDERED ? value.nextCancelOrderId() : 0);
                 actions.add(action);
             } else {
-                CoreInstrument instrument = runtime.instrument(symbol);
-                resolution = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(), symbol,
+                CoreInstrument instrument = runtime.instrument(instrumentId);
+                resolution = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(), instrumentId,
                         instrument.settleAsset(), value.marginMode(), value.positionSide(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
                         insuranceAllocations.getOrDefault(value.liquidationId(), 0L), query.purpose());
@@ -133,7 +133,7 @@ public final class RuntimeLiquidationQueryService {
             MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
             return mark != null && mark.priceSequence() == value.triggerPriceSequence();
         }
-        CoreInstrument instrument = runtime.instrument(identities.symbol(value.symbolId()));
+        CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
         return instrument != null && instrument == value.instrument()
                 && instrument.contractType().productLine() == productLine;
     }
@@ -148,7 +148,7 @@ public final class RuntimeLiquidationQueryService {
         }
         RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
         return selected == null ? null
-                : new CoreRiskScanContinuation(identities.symbol(selected.symbolId()),
+                : new CoreRiskScanContinuation(identities.instrumentId(selected.symbolId()),
                         selected.priceSequence(), selected.lastUserId());
     }
 }

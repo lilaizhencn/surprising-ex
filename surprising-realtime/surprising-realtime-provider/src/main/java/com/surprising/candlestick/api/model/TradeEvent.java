@@ -10,13 +10,13 @@ import java.time.Instant;
 /**
  * Executed perpetual trade produced by the matching/trading service.
  *
- * <p>The Kafka record key must be the normalized {@code symbol}. That keeps all trades for
- * one symbol in one Kafka partition, which is the concurrency boundary for candle aggregation.
+ * <p>The Kafka record key must be the normalized {@code instrumentId}. That keeps all trades for
+ * one instrumentId in one Kafka partition, which is the concurrency boundary for candle aggregation.
  * {@code tradeId} and {@code sequence} are both carried so the consumer can reject duplicates
  * and old replayed trades after restarts or Kafka redelivery.</p>
  */
 public record TradeEvent(
-        @NotBlank String symbol,
+        @NotBlank String instrumentId,
         @NotBlank String tradeId,
         @PositiveOrZero long sequence,
         @NotNull Instant tradeTime,

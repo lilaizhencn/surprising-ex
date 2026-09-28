@@ -16,11 +16,11 @@ public class MaintenanceAeronGateway implements AutoCloseable {
         clients=clients(properties);
         views=new OrderAeronGateway(clients);
     }
-    public CoreMaintenanceCodec.Page maintenance(String symbol,long afterUserId,int limit) { return views.maintenance(symbol,afterUserId,limit); }
+    public CoreMaintenanceCodec.Page maintenance(String instrumentId,long afterUserId,int limit) { return views.maintenance(instrumentId,afterUserId,limit); }
     public CoreUserStateView userState(long userId) { return views.userState(userId); }
     public CoreOrderStateView orderState(long userId,long orderId) { return views.orderState(userId,orderId); }
-    public List<CoreOrderStateView> openOrders(long userId,String symbol,long before,int limit) { return views.openOrders(userId,symbol,before,limit); }
-    public CoreSettlementProgressView settlementProgress(String symbol) { return views.settlementProgress(symbol); }
+    public List<CoreOrderStateView> openOrders(long userId,String instrumentId,long before,int limit) { return views.openOrders(userId,instrumentId,before,limit); }
+    public CoreSettlementProgressView settlementProgress(String instrumentId) { return views.settlementProgress(instrumentId); }
     public CoreResponse command(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return views.command(type,id,userId,payload); }
     public com.surprising.aeron.client.CoreCommandOutcome commandOutcome(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return clients.commandOutcome(type,id,userId,payload); }
     private static AeronClientPool clients(TradingOrderProperties properties) {
@@ -28,8 +28,8 @@ public class MaintenanceAeronGateway implements AutoCloseable {
         return new AeronClientPool("maintenance",line,config.getHostnames(),config.getEgressHostname(),
                 config.getResponseTimeout(),1,"maintenance-"+line.name()+"-node-"+config.getNodeId());
     }
-    public List<CoreTriggerOrderStateView> openTriggers(long userId,String symbol,long before,int limit) {
-        return triggerQuery(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,userId,new CoreTriggerOrderQuery(0,symbol,before,limit));
+    public List<CoreTriggerOrderStateView> openTriggers(long userId,String instrumentId,long before,int limit) {
+        return triggerQuery(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,userId,new CoreTriggerOrderQuery(0,instrumentId,before,limit));
     }
     public CoreTriggerOrderStateView triggerState(long userId,long id) {
         return triggerQuery(CoreMessageType.TRIGGER_ORDER_QUERY,userId,new CoreTriggerOrderQuery(id,"",0,1)).stream().findFirst().orElse(null);

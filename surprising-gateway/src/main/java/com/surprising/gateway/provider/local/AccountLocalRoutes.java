@@ -108,7 +108,7 @@ public final class AccountLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, ACCOUNT_CONTROLLER_POSITIONMARGIN)) {
             return accountRequests.positionMargin(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, true),
+                    r.query("instrumentId", String.class, null, true),
                     r.query("marginMode", String.class, null, false));
         }
         if (r.matches(HttpMethod.GET, ACCOUNT_CONTROLLER_ADMINPOSITIONS)) {
@@ -132,7 +132,7 @@ public final class AccountLocalRoutes {
         if (r.matches(HttpMethod.GET, ACCOUNT_CONTROLLER_ADMINPOSITION)) {
             return accountRequests.adminPosition(r.header("X-Admin-User-Id", String.class, null, false),
                     r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, true),
+                    r.query("instrumentId", String.class, null, true),
                     r.query("marginMode", String.class, null, false),
                     r.query("positionSide", String.class, null, false));
         }
@@ -184,7 +184,7 @@ public final class AccountLocalRoutes {
         }
         if (r.matches(HttpMethod.GET, ACCOUNT_CONTROLLER_POSITION)) {
             return accountRequests.position(r.query("userId", long.class, null, true),
-                    r.query("symbol", String.class, null, true),
+                    r.query("instrumentId", String.class, null, true),
                     r.query("marginMode", String.class, null, false),
                     r.query("positionSide", String.class, null, false));
         }

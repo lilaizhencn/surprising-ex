@@ -102,9 +102,9 @@ class LocalBusinessApiTest {
     @Test
     void publicBookUsesLocalControllerAndDefaultDepthWithoutUserIdentity() {
         assertThat(LocalBusinessApi.isLocalService("trading-market")).isTrue();
-        var response = invoke("trading-market", "/api/v1/trading/market/orderbook?symbol=BTC-USDT", HttpMethod.GET, new HttpHeaders(), null);
+        var response = invoke("trading-market", "/api/v1/trading/market/orderbook?instrumentId=1", HttpMethod.GET, new HttpHeaders(), null);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(market).orderBookSnapshot("BTC-USDT", 30);
+        verify(market).orderBookSnapshot("1", 30);
     }
 
     @Test

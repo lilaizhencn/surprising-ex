@@ -257,7 +257,7 @@ public class MarketMakerProperties {
             @Setter
             @NotBlank
             @Size(max = 64)
-            private String symbol;
+            private String instrumentId;
             @Setter
             @NotBlank
             @Size(max = 64)
@@ -301,7 +301,7 @@ public class MarketMakerProperties {
         @Size(min = 1)
         private List<@Positive Long> accountIds = new ArrayList<>();
         @Size(min = 1)
-        private List<@NotBlank @Size(max = 64) String> symbols = new ArrayList<>();
+        private List<@NotBlank @Size(max = 64) String> instrumentIds = new ArrayList<>();
         @Getter
         @Setter
         @Positive
@@ -349,12 +349,12 @@ public class MarketMakerProperties {
             this.accountIds = accountIds;
         }
 
-        public List<String> getSymbols() {
-            return symbols;
+        public List<String> getInstrumentIds() {
+            return instrumentIds;
         }
 
-        public void setSymbols(List<String> symbols) {
-            this.symbols = symbols;
+        public void setInstrumentIds(List<String> instrumentIds) {
+            this.instrumentIds = instrumentIds;
         }
 
         public MarginMode getMarginMode() {

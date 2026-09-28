@@ -29,13 +29,13 @@ public class InstrumentInternalController {
     }
 
     @GetMapping("/latest")
-    public InstrumentResponse latest(@RequestParam("symbol") String symbol,
+    public InstrumentResponse latest(@RequestParam("instrumentId") int instrumentId,
                                      @RequestParam(value = "productLine", required = false)
                                      String productLineValue,
                                      @RequestHeader(value = "X-Product-Line", required = false)
                                      String productLineHeader) {
         try {
-            return instrumentService.latest(symbol, productLine(productLineValue, productLineHeader));
+            return instrumentService.latest(instrumentId, productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -45,8 +45,8 @@ public class InstrumentInternalController {
 
     @GetMapping("/trade-encoding")
     public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(@RequestParam ProductLine productLine,
-            @RequestParam String symbol, @RequestParam long changeId) {
-        return instrumentService.tradeEncoding(productLine,symbol,changeId);
+            @RequestParam int instrumentId, @RequestParam long changeId) {
+        return instrumentService.tradeEncoding(productLine,instrumentId,changeId);
     }
 
     @GetMapping("/list")

@@ -10,7 +10,7 @@ public record LiquidationOrderResponse(
         long candidateId,
         long orderId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         OrderSide side,
@@ -32,13 +32,13 @@ public record LiquidationOrderResponse(
                                     long candidateId,
                                     long orderId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     OrderSide side,
                                     long quantitySteps,
                                     LiquidationOrderStatus status,
                                     String reason,
                                     Instant createdAt) {
-        this(liquidationOrderId, candidateId, orderId, userId, symbol, MarginMode.CROSS, PositionSide.NET, side, quantitySteps,
+        this(liquidationOrderId, candidateId, orderId, userId, instrumentId, MarginMode.CROSS, PositionSide.NET, side, quantitySteps,
                 0L, 0L, 0L, 0L, status, reason, createdAt);
     }
 
@@ -46,14 +46,14 @@ public record LiquidationOrderResponse(
                                     long candidateId,
                                     long orderId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     OrderSide side,
                                     long quantitySteps,
                                     LiquidationOrderStatus status,
                                     String reason,
                                     Instant createdAt) {
-        this(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, PositionSide.NET, side, quantitySteps,
+        this(liquidationOrderId, candidateId, orderId, userId, instrumentId, marginMode, PositionSide.NET, side, quantitySteps,
                 0L, 0L, 0L, 0L, status, reason, createdAt);
     }
 
@@ -61,7 +61,7 @@ public record LiquidationOrderResponse(
                                     long candidateId,
                                     long orderId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     OrderSide side,
                                     long quantitySteps,
@@ -72,7 +72,7 @@ public record LiquidationOrderResponse(
                                     LiquidationOrderStatus status,
                                     String reason,
                                     Instant createdAt) {
-        this(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, PositionSide.NET, side,
+        this(liquidationOrderId, candidateId, orderId, userId, instrumentId, marginMode, PositionSide.NET, side,
                 quantitySteps, bankruptcyPriceTicks, takeoverPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits,
                 status, reason, createdAt);
     }
@@ -81,7 +81,7 @@ public record LiquidationOrderResponse(
                                     long candidateId,
                                     long orderId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     OrderSide side,
                                     long quantitySteps,
@@ -91,7 +91,7 @@ public record LiquidationOrderResponse(
                                     LiquidationOrderStatus status,
                                     String reason,
                                     Instant createdAt) {
-        this(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, PositionSide.NET, side, quantitySteps,
+        this(liquidationOrderId, candidateId, orderId, userId, instrumentId, marginMode, PositionSide.NET, side, quantitySteps,
                 bankruptcyPriceTicks, takeoverPriceTicks, 0L, liquidationFeeUnits, status, reason, createdAt);
     }
 }

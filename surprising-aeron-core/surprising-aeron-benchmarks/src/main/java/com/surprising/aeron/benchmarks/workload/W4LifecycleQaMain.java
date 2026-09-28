@@ -71,7 +71,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
             ProductLine.OPTION);
 
     private static final String BASE_ASSET = "BTC";
-    private static final String SYMBOL = "BTC-USDT";
+    private static final String SYMBOL = "1";
     private static final long STRIKE = 100;
     private static final long MAKER_FEE_RATE_PPM = 100_000;
     private static final long TAKER_FEE_RATE_PPM = 200_000;
@@ -334,18 +334,18 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     }
 
     private void runSpot() {
-        String symbol = scenarioSymbol(productLine, "BTC-USDT", seed);
-        setupInstrument(symbol, ContractType.SPOT, -1, 0, 0);
+        String instrumentId = scenarioSymbol(productLine, "1", seed);
+        setupInstrument(instrumentId, ContractType.SPOT, -1, 0, 0);
         long seller = user(1);
         long buyer = user(2);
         adjust(seller, "BTC", 5);
         adjust(buyer, "USDT", 1_000);
-        place(seller, order(1), symbol, CoreOrderSide.SELL, CoreMarginMode.CROSS,
+        place(seller, order(1), instrumentId, CoreOrderSide.SELL, CoreMarginMode.CROSS,
                 ReservationKind.SPOT_ASSET, "BTC", 5, 5);
-        place(buyer, order(2), symbol, CoreOrderSide.BUY, CoreMarginMode.CROSS,
+        place(buyer, order(2), instrumentId, CoreOrderSide.BUY, CoreMarginMode.CROSS,
                 ReservationKind.SPOT_ASSET, "USDT", 500, 5);
         awaitSpotOrdersFilled();
-        requireBookEmpty(symbol);
+        requireBookEmpty(instrumentId);
         reconcile();
         rows.add("SPOT:CONSERVATION");
         rows.add("SPOT:CONTROL_GUARD");
@@ -354,28 +354,28 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private void runPerpetual() {
         for (CoreMarginMode marginMode : List.of(CoreMarginMode.CROSS, CoreMarginMode.ISOLATED)) {
             String mode = marginMode.name();
-            String symbol = scenarioSymbol(productLine, mode, seed);
+            String instrumentId = scenarioSymbol(productLine, mode, seed);
             long shortUser = user(10 + marginMode.ordinal() * 10);
             long longUser = user(11 + marginMode.ordinal() * 10);
-            setupInstrument(symbol, ContractType.valueOf(productLine.contractTypeCode()), -1, 0, 0);
-            applyMark(symbol, 100);
+            setupInstrument(instrumentId, ContractType.valueOf(productLine.contractTypeCode()), -1, 0, 0);
+            applyMark(instrumentId, 100);
             adjust(shortUser, settleAsset(), 1_000);
             adjust(longUser, settleAsset(), 1_000);
-            place(shortUser, order(10 + marginMode.ordinal() * 10), symbol, CoreOrderSide.SELL,
+            place(shortUser, order(10 + marginMode.ordinal() * 10), instrumentId, CoreOrderSide.SELL,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
-            place(longUser, order(11 + marginMode.ordinal() * 10), symbol, CoreOrderSide.BUY,
+            place(longUser, order(11 + marginMode.ordinal() * 10), instrumentId, CoreOrderSide.BUY,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
             queryRisk(shortUser);
             queryRisk(longUser);
-            applyFunding(symbol, 20_000L + marginMode.ordinal(), FUNDING_RATE_PPM);
-            readFundingProgress(symbol);
-            applyFunding(symbol, 20_100L + marginMode.ordinal(), Math.negateExact(FUNDING_RATE_PPM));
-            readFundingProgress(symbol);
-            applyMark(symbol, productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80);
-            resolveBoundedLiquidationWork(symbol);
+            applyFunding(instrumentId, 20_000L + marginMode.ordinal(), FUNDING_RATE_PPM);
+            readFundingProgress(instrumentId);
+            applyFunding(instrumentId, 20_100L + marginMode.ordinal(), Math.negateExact(FUNDING_RATE_PPM));
+            readFundingProgress(instrumentId);
+            applyMark(instrumentId, productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80);
+            resolveBoundedLiquidationWork(instrumentId);
             queryAdlCandidates();
-            runProviderCycles(symbol, shortUser);
-            requireBookEmpty(symbol);
+            runProviderCycles(instrumentId, shortUser);
+            requireBookEmpty(instrumentId);
             rows.add(productLine + ":" + mode + ":FUNDING_POSITIVE");
             rows.add(productLine + ":" + mode + ":FUNDING_NEGATIVE");
             rows.add(productLine + ":" + mode + ":MARK");
@@ -390,21 +390,21 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         for (CoreMarginMode marginMode : List.of(CoreMarginMode.CROSS, CoreMarginMode.ISOLATED)) {
             String mode = marginMode.name();
-            String symbol = scenarioSymbol(productLine, mode, seed);
+            String instrumentId = scenarioSymbol(productLine, mode, seed);
             long buyer = user(30 + marginMode.ordinal() * 10);
             long seller = user(31 + marginMode.ordinal() * 10);
-            setupInstrument(symbol, type, -1, 0, 2_000_000_000_000L);
-            applyMark(symbol, 100);
+            setupInstrument(instrumentId, type, -1, 0, 2_000_000_000_000L);
+            applyMark(instrumentId, 100);
             adjust(buyer, settleAsset(), 1_000);
             adjust(seller, settleAsset(), 1_000);
-            place(seller, order(30 + marginMode.ordinal() * 10), symbol, CoreOrderSide.SELL,
+            place(seller, order(30 + marginMode.ordinal() * 10), instrumentId, CoreOrderSide.SELL,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
-            place(buyer, order(31 + marginMode.ordinal() * 10), symbol, CoreOrderSide.BUY,
+            place(buyer, order(31 + marginMode.ordinal() * 10), instrumentId, CoreOrderSide.BUY,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
-            settle(symbol, 110, 0, 1_000L + marginMode.ordinal());
-            readSettlementProgress(symbol);
-            runProviderCycles(symbol, buyer);
-            requireBookEmpty(symbol);
+            settle(instrumentId, 110, 0, 1_000L + marginMode.ordinal());
+            readSettlementProgress(instrumentId);
+            runProviderCycles(instrumentId, buyer);
+            requireBookEmpty(instrumentId);
             rows.add(productLine + ":" + mode + ":SETTLEMENT");
         }
     }
@@ -412,45 +412,45 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private void runOptions() {
         for (String optionType : List.of("CALL", "PUT")) {
             for (String moneyness : List.of("ITM", "ATM", "OTM")) {
-                String symbol = scenarioSymbol(productLine, optionType + '-' + moneyness, seed);
+                String instrumentId = scenarioSymbol(productLine, optionType + '-' + moneyness, seed);
                 long buyer = user(100 + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 long seller = user(110 + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 int optionCode = optionType.equals("CALL") ? 0 : 1;
                 long settlementPrice = optionSettlementPrice(optionType, moneyness);
-                setupInstrument(symbol, ContractType.VANILLA_OPTION, optionCode, STRIKE,
+                setupInstrument(instrumentId, ContractType.VANILLA_OPTION, optionCode, STRIKE,
                         2_000_000_000_000L);
-                applyMark(symbol, 100);
+                applyMark(instrumentId, 100);
                 adjust(buyer, "USDT", 2_000);
                 adjust(seller, "USDT", 2_000);
                 place(seller, order(100 + optionTypeOffset(optionType) + moneynessOffset(moneyness)),
-                        symbol, CoreOrderSide.SELL, CoreMarginMode.CROSS,
+                        instrumentId, CoreOrderSide.SELL, CoreMarginMode.CROSS,
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 2);
                 place(buyer, order(110 + optionTypeOffset(optionType) + moneynessOffset(moneyness)),
-                        symbol, CoreOrderSide.BUY, CoreMarginMode.CROSS,
+                        instrumentId, CoreOrderSide.BUY, CoreMarginMode.CROSS,
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 2);
-                settle(symbol, settlementPrice, settlementPrice,
+                settle(instrumentId, settlementPrice, settlementPrice,
                         2_000L + optionTypeOffset(optionType) + moneynessOffset(moneyness));
-                readSettlementProgress(symbol);
-                runProviderCycles(symbol, buyer);
-                requireBookEmpty(symbol);
+                readSettlementProgress(instrumentId);
+                runProviderCycles(instrumentId, buyer);
+                requireBookEmpty(instrumentId);
                 rows.add("OPTION:" + optionType + ':' + moneyness);
             }
         }
     }
 
-    private void setupInstrument(String symbol, ContractType type, int optionCode,
+    private void setupInstrument(String instrumentId, ContractType type, int optionCode,
                                  long strike, long expiry) {
-        registerInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
+        registerInstrumentViaProvider(instrumentId, type, optionCode, strike, expiry);
         command(CoreMessageType.REGISTER_INSTRUMENT, 0,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        symbol, type.ordinal(), BASE_ASSET,
+                        instrumentId, type.ordinal(), BASE_ASSET,
                         type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                         expiry, optionCode, strike)));
     }
 
-    private void registerInstrumentViaProvider(String symbol, ContractType type, int optionCode,
+    private void registerInstrumentViaProvider(String instrumentId, ContractType type, int optionCode,
                                              long strike, long expiry) {
         boolean spot = type == ContractType.SPOT;
         boolean perpetual = type.isPerpetual();
@@ -485,7 +485,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 + "\"conversionPath\":null,\"conversionParser\":null,\"conversionMode\":null,"
                 + "\"conversionOperation\":null,\"fallbackWeightMultiplierPpm\":0,\"websocketEnabled\":false,"
                 + "\"websocketUrl\":null,\"websocketSubscribeMessage\":null,\"websocketParser\":null,\"weightPpm\":500000}]";
-        String body = "{\"symbol\":" + json(symbol) + ",\"instrumentType\":" + json(instrumentType)
+        String body = "{\"instrumentId\":" + json(instrumentId) + ",\"instrumentType\":" + json(instrumentType)
                 + ",\"contractType\":" + json(type.name()) + ",\"baseAsset\":\"BTC\",\"quoteAsset\":"
                 + json(quote) + ",\"settleAsset\":" + json(settleAsset())
                 + ",\"contractMultiplierPpm\":1000000,\"contractValueAsset\":\"USDT\","
@@ -502,7 +502,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 + ",\"fundingRateCapPpm\":" + funding.split(",")[2] + ",\"fundingRateFloorPpm\":"
                 + funding.split(",")[3] + ",\"impactNotionalUnits\":1000000000000,\"minValidIndexSources\":"
                 + (spot ? 1 : 2) + ",\"expiryTime\":" + expiryJson + ",\"deliveryTime\":" + expiryJson
-                + ",\"underlyingSymbol\":" + (type.isOption() ? json("BTC-USDT") : "null")
+                + ",\"underlyingInstrumentId\":" + (type.isOption() ? json("1") : "null")
                 + ",\"strikePriceUnits\":" + strikeJson + ",\"optionType\":" + optionTypeJson
                 + ",\"optionExerciseStyle\":" + optionStyleJson + ",\"settlementMethod\":" + settlementJson
                 + ",\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":" + brackets
@@ -542,12 +542,12 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         expectedFunds.merge(asset, units, Math::addExact);
     }
 
-    private void place(long userId, long orderId, String symbol, CoreOrderSide side,
+    private void place(long userId, long orderId, String instrumentId, CoreOrderSide side,
                        CoreMarginMode marginMode, ReservationKind reservationKind,
                        String reservationAsset, long reservedUnits, long quantity) {
         participantUsers.add(userId);
         String body = "{\"userId\":" + userId + ",\"clientOrderId\":" + json("w4-" + orderId)
-                + ",\"symbol\":" + json(symbol) + ",\"side\":" + json(side.name())
+                + ",\"instrumentId\":" + json(instrumentId) + ",\"side\":" + json(side.name())
                 + ",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\",\"priceTicks\":100"
                 + ",\"quantitySteps\":" + quantity + ",\"marginMode\":" + json(marginMode.name())
                 + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
@@ -581,11 +581,11 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 || !response.contains("\"code\":\"NONE\"")) {
             throw new IllegalStateException("order command did not complete: " + response);
         }
-        if (symbol.startsWith("W4-SPOT-")) {
+        if (instrumentId.startsWith("W4-SPOT-")) {
             String identityResponse = acceptedResponse.contains("\"prospectiveOrderIds\":[]")
                     ? response : acceptedResponse;
             spotOrders.add(new SpotOrder(userId, jsonLong(identityResponse, "\"prospectiveOrderIds\":[", ']'),
-                    symbol));
+                    instrumentId));
         }
         providerBoundaryObserved = true;
     }
@@ -616,15 +616,15 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         return response;
     }
 
-    private void applyMark(String symbol, long price) {
+    private void applyMark(String instrumentId, long price) {
         indexFeed.setMarkPriceTicks(price);
-        awaitPublishedMark(symbol, price);
+        awaitPublishedMark(instrumentId, price);
     }
 
-    private void awaitPublishedMark(String symbol, long expectedMarkPriceTicks) {
+    private void awaitPublishedMark(String instrumentId, long expectedMarkPriceTicks) {
         String probe = "{\"userId\":" + makerUserId + ",\"clientOrderId\":"
-                + json("w4-mark-probe-" + seed + '-' + symbol + '-' + expectedMarkPriceTicks)
-                + ",\"symbol\":" + json(symbol)
+                + json("w4-mark-probe-" + seed + '-' + instrumentId + '-' + expectedMarkPriceTicks)
+                + ",\"instrumentId\":" + json(instrumentId)
                 + ",\"side\":\"BUY\",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\""
                 + ",\"priceTicks\":100,\"quantitySteps\":1,\"marginMode\":\"CROSS\""
                 + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
@@ -632,13 +632,13 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         String observed = "unavailable";
         while (Instant.now().isBefore(deadline)) {
             try {
-                String mark = request("price", "GET", "/api/v1/price/mark/latest?symbol=" + symbol,
+                String mark = request("price", "GET", "/api/v1/price/mark/latest?instrumentId=" + instrumentId,
                         null, Map.of());
                 long units = jsonLong(mark, "\"markPriceUnits\":", ',');
                 String validation = request("trading", "POST", "/api/v1/trading/orders/test", probe, Map.of());
                 observed = "markPriceUnits=" + units + " validation=" + validation;
                 if (units == expectedMarkPriceTicks && !validation.contains("mark price unavailable")) {
-                    rows.add(productLine + ":" + symbol + ":REAL_PRICE_PIPELINE_MARK=" + expectedMarkPriceTicks);
+                    rows.add(productLine + ":" + instrumentId + ":REAL_PRICE_PIPELINE_MARK=" + expectedMarkPriceTicks);
                     return;
                 }
             } catch (IllegalStateException unavailable) {
@@ -651,26 +651,26 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 throw new IllegalStateException("mark price pipeline wait interrupted", interrupted);
             }
         }
-        throw new IllegalStateException("mark price pipeline timeout symbol=" + symbol
+        throw new IllegalStateException("mark price pipeline timeout instrumentId=" + instrumentId
                 + " expectedTicks=" + expectedMarkPriceTicks + " observed=" + observed);
     }
 
-    private void applyFunding(String symbol, long settlementId, long fundingRatePpm) {
+    private void applyFunding(String instrumentId, long settlementId, long fundingRatePpm) {
         command(CoreMessageType.APPLY_FUNDING, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementId, symbol, fundingRatePpm, 0, 256)));
+                        settlementId, instrumentId, fundingRatePpm, 0, 256)));
     }
 
-    private void settle(String symbol, long price, long underlyingSettlementPrice, long settlementId) {
-        request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/status"
+    private void settle(String instrumentId, long price, long underlyingSettlementPrice, long settlementId) {
+        request("instrument", "POST", "/api/v1/instruments/admin/" + instrumentId + "/status"
                         + "?productLine=" + productLine + "&status=SETTLING", null, Map.of());
-        request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/settlement"
+        request("instrument", "POST", "/api/v1/instruments/admin/" + instrumentId + "/settlement"
                         + "?productLine=" + productLine + "&settlementPriceTicks=" + price
                         + "&underlyingSettlementPriceUnits=" + underlyingSettlementPrice, null, Map.of());
         providerBoundaryObserved = true;
         for (int attempt = 0; attempt < 20; attempt++) {
             try {
-                CoreSettlementProgressView progress = readSettlementProgress(symbol);
+                CoreSettlementProgressView progress = readSettlementProgress(instrumentId);
                 if (progress.complete() && progress.ordersComplete()) {
                     return;
                 }
@@ -683,15 +683,15 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 throw new IllegalStateException("SETTLEMENT_WAIT_INTERRUPTED", ex);
             }
         }
-        throw new IllegalStateException("SETTLEMENT_PROVIDER_EVENT_TIMEOUT symbol=" + symbol);
+        throw new IllegalStateException("SETTLEMENT_PROVIDER_EVENT_TIMEOUT instrumentId=" + instrumentId);
     }
 
-    private void runProviderCycles(String symbol, long userId) {
+    private void runProviderCycles(String instrumentId, long userId) {
         request("risk", "GET", "/api/v1/risk/account/latest?userId=" + userId
                 + "&accountType=" + productLine.accountTypeCode()
                 + "&settleAsset=" + settleAsset(), null, Map.of());
         request("maker", "POST", makerRunOncePath(),
-                "{\"strategyId\":null,\"symbol\":" + json(symbol)
+                "{\"strategyId\":null,\"instrumentId\":" + json(instrumentId)
                         + ",\"productLine\":" + json(productLine.name()) + "}", adminHeaders());
         providerBoundaryObserved = true;
         if (productLine == ProductLine.LINEAR_PERPETUAL || productLine == ProductLine.INVERSE_PERPETUAL) {
@@ -702,13 +702,13 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         }
     }
 
-    private void resolveBoundedLiquidationWork(String symbol) {
-        CoreLiquidationWorkView work = liquidationWork(symbol, 0,
+    private void resolveBoundedLiquidationWork(String instrumentId) {
+        CoreLiquidationWorkView work = liquidationWork(instrumentId, 0,
                 CoreLiquidationWorkView.Purpose.EXECUTION);
         if (work.riskScanPending()) {
             command(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(256)));
-            work = liquidationWork(symbol, work.nextCursorLiquidationId(),
+            work = liquidationWork(instrumentId, work.nextCursorLiquidationId(),
                     CoreLiquidationWorkView.Purpose.EXECUTION);
         }
         for (var action : work.actions()) {
@@ -722,7 +722,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                     if (!exception.getMessage().contains("LIQUIDATION_STATE_CONFLICT")) {
                         throw exception;
                     }
-                    CoreLiquidationWorkView refreshed = liquidationWork(symbol, 0,
+                    CoreLiquidationWorkView refreshed = liquidationWork(instrumentId, 0,
                             CoreLiquidationWorkView.Purpose.EXECUTION);
                     boolean stillPending = refreshed.actions().stream()
                             .anyMatch(candidate -> candidate.liquidationId() == action.liquidationId());
@@ -737,9 +737,9 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         if (!work.actions().isEmpty() || !work.resolutions().isEmpty()) {
             rows.add(productLine + ":LIQUIDATION_WORK_APPLIED");
         }
-        CoreLiquidationWorkView insurance = liquidationWork(symbol, 0,
+        CoreLiquidationWorkView insurance = liquidationWork(instrumentId, 0,
                 CoreLiquidationWorkView.Purpose.INSURANCE);
-        CoreLiquidationWorkView adl = liquidationWork(symbol, 0,
+        CoreLiquidationWorkView adl = liquidationWork(instrumentId, 0,
                 CoreLiquidationWorkView.Purpose.ADL);
         for (CoreLiquidationWorkView.Resolution resolution : insurance.resolutions()) {
             expectedFunds.merge(resolution.asset(), Math.negateExact(resolution.deficitUnits()), Math::addExact);
@@ -749,7 +749,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         rows.add(productLine + ":ADL_WORK_QUERY:" + adl.resolutions().size());
     }
 
-    private CoreLiquidationWorkView liquidationWork(String symbol, long cursor,
+    private CoreLiquidationWorkView liquidationWork(String instrumentId, long cursor,
                                                      CoreLiquidationWorkView.Purpose purpose) {
         return CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
                 CoreLiquidationWorkCodec.encodeQuery(productLine, purpose, cursor, 128, 1_048_576)));
@@ -764,14 +764,14 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 CoreAdlQueryCodec.encodeQuery(settleAsset(), 128)));
     }
 
-    private void readFundingProgress(String symbol) {
+    private void readFundingProgress(String instrumentId) {
         CoreFundingProgressCodec.decode(query(CoreMessageType.FUNDING_PROGRESS_QUERY, 0,
-                CoreStateQueryCodec.encodeFundingProgressQuery(symbol)));
+                CoreStateQueryCodec.encodeFundingProgressQuery(instrumentId)));
     }
 
-    private CoreSettlementProgressView readSettlementProgress(String symbol) {
+    private CoreSettlementProgressView readSettlementProgress(String instrumentId) {
         return CoreSettlementProgressCodec.decode(query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, 0,
-                CoreStateQueryCodec.encodeSettlementProgressQuery(symbol)));
+                CoreStateQueryCodec.encodeSettlementProgressQuery(instrumentId)));
     }
 
     private void reconcile() {
@@ -874,13 +874,13 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         }
     }
 
-    private void requireBookEmpty(String symbol) {
+    private void requireBookEmpty(String instrumentId) {
         Instant deadline = Instant.now().plusSeconds(10);
         int levels;
         Object levelDetails = List.of();
         do {
             var book = OrderBookBootstrapLoader.load((type, payload) -> query(type, 0, payload));
-            var symbolLevels = book.levels().stream().filter(level -> symbol.equals(level.symbol())).toList();
+            var symbolLevels = book.levels().stream().filter(level -> instrumentId.equals(level.instrumentId())).toList();
             levels = symbolLevels.size();
             levelDetails = symbolLevels;
             if (levels == 0) {
@@ -904,7 +904,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
             boolean allFilled = true;
             for (SpotOrder order : spotOrders) {
                 String path = "/api/v1/trading/orders/history?userId=" + order.userId()
-                        + "&symbol=" + order.symbol() + "&limit=100&orderId=" + order.orderId();
+                        + "&instrumentId=" + order.instrumentId() + "&limit=100&orderId=" + order.orderId();
                 try {
                     String response = request("command", "GET", path, null, Map.of());
                     int orderStart = response.indexOf("\"orderId\":" + order.orderId());
@@ -1020,7 +1020,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 status = 200;
                 String price = BigDecimal.valueOf(markPriceTicks.get())
                         .divide(BigDecimal.valueOf(QUOTE_SCALE_UNITS)).toPlainString();
-                response = ("{\"symbol\":\"BTCUSDT\",\"bidPrice\":" + json(price)
+                response = ("{\"instrumentId\":\"BTCUSDT\",\"bidPrice\":" + json(price)
                         + ",\"askPrice\":" + json(price) + ",\"E\":" + System.currentTimeMillis() + '}')
                         .getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -1038,7 +1038,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         }
     }
 
-    private record SpotOrder(long userId, long orderId, String symbol) {
+    private record SpotOrder(long userId, long orderId, String instrumentId) {
     }
 
     private void command(CoreMessageType type, long userId, byte[] payload) {

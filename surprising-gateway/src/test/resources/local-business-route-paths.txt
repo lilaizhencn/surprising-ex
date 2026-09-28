@@ -27,9 +27,9 @@
 /api/v1/admin/trading/leverage/settings
 /api/v1/admin/trading/orders
 /api/v1/admin/trading/orders/cancel
-/api/v1/admin/trading/orders/cancel-by-symbol
+/api/v1/admin/trading/orders/cancel-by-instrument
 /api/v1/admin/trading/orders/cancel-preview
-/api/v1/admin/trading/orders/instrument-sync/{symbol}
+/api/v1/admin/trading/orders/instrument-sync/{instrumentId}
 /api/v1/admin/trading/orders/maintenance
 /api/v1/admin/trading/orders/maintenance/preview
 /api/v1/admin/trading/orders/maintenance/{id}
@@ -43,10 +43,10 @@
 /api/v1/admin/websocket/metrics
 /api/v1/instruments/admin/list
 /api/v1/instruments/admin/upsert
-/api/v1/instruments/admin/{symbol}
-/api/v1/instruments/admin/{symbol}/changes
-/api/v1/instruments/admin/{symbol}/settlement
-/api/v1/instruments/admin/{symbol}/status
+/api/v1/instruments/admin/{instrumentId}
+/api/v1/instruments/admin/{instrumentId}/changes
+/api/v1/instruments/admin/{instrumentId}/settlement
+/api/v1/instruments/admin/{instrumentId}/status
 /api/v1/instruments/asset-scales
 /api/v1/instruments/latest
 /api/v1/instruments/list
@@ -80,3 +80,4 @@
 /api/v1/trading/trigger-orders/cancel-open
 /api/v1/trading/trigger-orders/open
 /api/v1/trading/trigger-orders/{triggerOrderId}
+/api/v1/instruments/default

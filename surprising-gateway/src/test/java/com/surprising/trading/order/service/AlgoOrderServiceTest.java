@@ -18,7 +18,7 @@ class AlgoOrderServiceTest {
     void twapRejectsChildQuantityThatCannotFinishInsideDuration() {
         AlgoOrderService service = service(ProductLine.LINEAR_PERPETUAL);
         assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
-                1001L, "twap-small-child", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                1001L, "twap-small-child", "1", AlgoOrderType.TWAP, OrderSide.BUY,
                 0L, 100L, 10L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
                 false, false, TimeInForce.IOC, null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("childQuantitySteps is too small");
@@ -29,7 +29,7 @@ class AlgoOrderServiceTest {
         for (ProductLine line : ProductLine.values()) {
             AlgoOrderService service = service(line);
             assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
-                    1001L, "algo-" + line, "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                    1001L, "algo-" + line, "1", AlgoOrderType.TWAP, OrderSide.BUY,
                     0L, 100L, 10L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
                     false, false, TimeInForce.IOC, null)))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -42,7 +42,7 @@ class AlgoOrderServiceTest {
         AlgoOrderService service = service(ProductLine.LINEAR_PERPETUAL);
 
         assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
-                1001L, " ", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                1001L, " ", "1", AlgoOrderType.TWAP, OrderSide.BUY,
                 0L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
                 false, false, TimeInForce.IOC, null)))
                 .isInstanceOf(IllegalArgumentException.class)

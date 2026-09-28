@@ -48,7 +48,7 @@ public class PublicTradeEventMapper {
         if (publicTrade == null) {
             throw new IllegalArgumentException("public trade is required");
         }
-        String symbol = CandleKey.normalizeSymbol(publicTrade.symbol());
+        String instrumentId = CandleKey.normalizeSymbol(publicTrade.instrumentId());
         if (publicTrade.tradeId() == null || publicTrade.tradeId().isBlank()) {
             throw new IllegalArgumentException("public trade id is required");
         }
@@ -62,13 +62,13 @@ public class PublicTradeEventMapper {
             throw new IllegalArgumentException("public trade eventTime is required");
         }
 
-        InstrumentScale scale = scales.computeIfAbsent(symbol, this::loadScale);
+        InstrumentScale scale = scales.computeIfAbsent(instrumentId, this::loadScale);
         BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
         BigDecimal quantity = productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
                 ? toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L)
                 : toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
         return new TradeEvent(
-                symbol,
+                instrumentId,
                 publicTrade.tradeId(),
                 publicTrade.sequence(),
                 publicTrade.eventTime(),
@@ -79,12 +79,12 @@ public class PublicTradeEventMapper {
                 null);
     }
 
-    private InstrumentScale loadScale(String symbol) {
+    private InstrumentScale loadScale(String instrumentId) {
         if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(productLine, symbol)
-                .orElseThrow(() -> new IllegalArgumentException("committed trade encoding unavailable: " + symbol));
+        var instrument = snapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId))
+                .orElseThrow(() -> new IllegalArgumentException("committed trade encoding unavailable: " + instrumentId));
         long baseScaleUnits = snapshotCache.scale(productLine, instrument.baseAsset())
                 .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));
         long quoteScaleUnits = snapshotCache.scale(productLine, instrument.quoteAsset())

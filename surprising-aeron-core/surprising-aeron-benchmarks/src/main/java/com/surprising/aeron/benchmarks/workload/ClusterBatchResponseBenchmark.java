@@ -29,7 +29,7 @@ public class ClusterBatchResponseBenchmark {
     public int batchSize;
     private static final int USERS = 32, ROUNDS = 8;
     private static final long FUNDS = 1_000_000;
-    private static final String SYMBOL = "BATCH-USDT";
+    private static final String SYMBOL = "19";
     /** 发压线程独占客户端、请求序号及订单序号；Owner 和 Lane 使用真实节点实例。 */
     private AeronClientPool client;
     private long sequence, orderId, terminal;

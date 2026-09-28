@@ -299,7 +299,7 @@ public final class AccountLaneState {
 
     AdmissionOrderIndex admissionOrderIndex(int symbolId) {
         assertOwner();
-        if (symbolId < 0) throw new IllegalArgumentException("invalid admission symbol");
+        if (symbolId < 0) throw new IllegalArgumentException("invalid admission instrumentId");
         admissionOrderIndex.symbolId = symbolId;
         return admissionOrderIndex;
     }
@@ -409,7 +409,7 @@ public final class AccountLaneState {
 
         @Override
         public AdmissionSummary inspect(
-                long userId, String symbol, CorePositionSide positionSide,
+                long userId, String instrumentId, CorePositionSide positionSide,
                 CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
             IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);
             AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(symbolId);

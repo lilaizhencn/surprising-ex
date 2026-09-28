@@ -4,11 +4,11 @@ import com.surprising.aeron.service.state.OrderReservation;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 
-public record CoreLeverageKey(long userId, String symbol, CoreMarginMode marginMode)
+public record CoreLeverageKey(long userId, String instrumentId, CoreMarginMode marginMode)
         implements Comparable<CoreLeverageKey> {
 
     public CoreLeverageKey {
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         if (userId <= 0 || marginMode == null) {
             throw new IllegalArgumentException("invalid leverage key");
         }
@@ -18,7 +18,7 @@ public record CoreLeverageKey(long userId, String symbol, CoreMarginMode marginM
     public int compareTo(CoreLeverageKey other) {
         int userComparison = Long.compare(userId, other.userId);
         if (userComparison != 0) return userComparison;
-        int symbolComparison = symbol.compareTo(other.symbol);
+        int symbolComparison = instrumentId.compareTo(other.instrumentId);
         return symbolComparison != 0 ? symbolComparison : marginMode.compareTo(other.marginMode);
     }
 }

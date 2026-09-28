@@ -10,7 +10,7 @@ public record RiskPositionUpdatedEvent(
         ProductLine productLine,
         long snapshotId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         long instrumentChangeId,
@@ -38,7 +38,7 @@ public record RiskPositionUpdatedEvent(
     public RiskPositionUpdatedEvent(long eventId,
                                     long snapshotId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     PositionSide positionSide,
                                     long instrumentChangeId,
@@ -54,7 +54,7 @@ public record RiskPositionUpdatedEvent(
                                     RiskStatus status,
                                     Instant eventTime,
                                     String traceId) {
-        this(eventId, ProductLine.LINEAR_PERPETUAL, snapshotId, userId, symbol, marginMode, positionSide,
+        this(eventId, ProductLine.LINEAR_PERPETUAL, snapshotId, userId, instrumentId, marginMode, positionSide,
                 instrumentChangeId, settleAsset, signedQuantitySteps, entryPriceTicks, markPriceTicks,
                 notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits, positionMarginUnits, marginRatioPpm,
                 status, eventTime, traceId);
@@ -63,7 +63,7 @@ public record RiskPositionUpdatedEvent(
     public RiskPositionUpdatedEvent(long eventId,
                                     long snapshotId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     long instrumentChangeId,
                                     String settleAsset,
@@ -78,7 +78,7 @@ public record RiskPositionUpdatedEvent(
                                     RiskStatus status,
                                     Instant eventTime,
                                     String traceId) {
-        this(eventId, snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentChangeId, settleAsset,
+        this(eventId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId, settleAsset,
                 signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
                 maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime, traceId);
     }
@@ -86,7 +86,7 @@ public record RiskPositionUpdatedEvent(
     public RiskPositionUpdatedEvent(long eventId,
                                     long snapshotId,
                                     long userId,
-                                    String symbol,
+                                    String instrumentId,
                                     MarginMode marginMode,
                                     long instrumentChangeId,
                                     String settleAsset,
@@ -100,7 +100,7 @@ public record RiskPositionUpdatedEvent(
                                     long marginRatioPpm,
                                     RiskStatus status,
                                     Instant eventTime) {
-        this(eventId, snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentChangeId, settleAsset, signedQuantitySteps,
+        this(eventId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId, settleAsset, signedQuantitySteps,
                 entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits,
                 positionMarginUnits, marginRatioPpm, status, eventTime, null);
     }

@@ -33,7 +33,7 @@ public final class SmallControlReproMain {
             try (var pool = new AeronClientPool("small-control-repro", PRODUCT, HOSTS,
                     EGRESS_HOST, Duration.ofSeconds(10), 2)) {
                 var response = pool.command(CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), 1,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument("REPRO-POOL")));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument("30")));
                 requireApplied(response);
                 log.info("poolCommand=PASS");
                 var query = pool.query(CoreMessageType.TREASURY_STATE_QUERY, UUID.randomUUID(), 0, new byte[0]);
@@ -77,32 +77,32 @@ public final class SmallControlReproMain {
         }
     }
 
-    private static RegisterInstrumentCommand instrument(String symbol) {
-        return new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
+    private static RegisterInstrumentCommand instrument(String instrumentId) {
+        return new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 
     private void orders() {
-        String symbol = "REPRO-CATCHUP";
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(symbol)));
+        String instrumentId = "29";
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long user : new long[]{1001, 1002}) command(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         for (int i = 0; i < 8; i++) {
-            order(1001, symbol, 3001 + i * 2, CoreOrderSide.SELL, 1);
-            order(1002, symbol, 3002 + i * 2, CoreOrderSide.BUY, 1);
+            order(1001, instrumentId, 3001 + i * 2, CoreOrderSide.SELL, 1);
+            order(1002, instrumentId, 3002 + i * 2, CoreOrderSide.BUY, 1);
         }
         verifyOrders();
         log.info("smallOrders=PASS orders=16 fills=8 fundsDiff=0");
     }
 
     private void verifyOrders() {
-        String symbol = "REPRO-CATCHUP";
+        String instrumentId = "29";
         long funds = 0;
         for (long user : new long[]{1001, 1002}) {
             var state = CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY, user, new byte[0]).data());
-            long quantity = state.positions().stream().filter(p -> p.symbol().equals(symbol))
+            long quantity = state.positions().stream().filter(p -> p.instrumentId().equals(instrumentId))
                     .mapToLong(CorePositionView::signedQuantitySteps).sum();
             if (quantity != (user == 1001 ? -8 : 8)) throw new IllegalStateException("catchup position mismatch");
             for (var balance : state.balances()) funds = Math.addExact(funds,
@@ -114,10 +114,10 @@ public final class SmallControlReproMain {
 
     private void amendCycle(int index) {
         amendRejection(index);
-        String symbol = "REPRO-AMEND-" + index;
+        String instrumentId = Integer.toString(20000 + index);
         long user = 1001 + index * 2L, base = 3001 + index * 10L;
         command(CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                base + 4, symbol, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                base + 4, instrumentId, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cycle-old-" + index)));
         var amended = submitCommand(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
                 new AmendOrderCommand(base + 4, base + 5, "cycle-new-" + index, 90L, 1L, CoreTimeInForce.GTC, false)));
@@ -127,7 +127,7 @@ public final class SmallControlReproMain {
                 || result.orders().stream().noneMatch(order -> order.orderId() == base + 5 && order.status().equals("OPEN")))
             throw new IllegalStateException("accepted amend lifecycle mismatch");
         var replaced = command(CoreMessageType.REPLACE_ORDER, user, TradingCommandCodec.encodeReplaceOrder(
-                new ReplaceOrderCommand(base + 5, new PlaceOrderCommand(base + 8, symbol,
+                new ReplaceOrderCommand(base + 5, new PlaceOrderCommand(base + 8, instrumentId,
                         CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cycle-replace-" + index))));
         var replaceResult = CoreCommandResultCodec.decode(replaced.data());
@@ -136,10 +136,10 @@ public final class SmallControlReproMain {
             throw new IllegalStateException("replacement lifecycle mismatch");
         var placedBatch = command(CoreMessageType.PLACE_ORDER_BATCH, user, TradingOrderBatchCodec.encodePlaceOrderBatch(
                 new PlaceOrderBatchCommand(List.of(
-                        new PlaceOrderCommand(base + 6, symbol, CoreOrderSide.BUY, 80, 1, false,
+                        new PlaceOrderCommand(base + 6, instrumentId, CoreOrderSide.BUY, 80, 1, false,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, "cycle-batch-a-" + index),
-                        new PlaceOrderCommand(base + 7, symbol, CoreOrderSide.BUY, 80, 1, false,
+                        new PlaceOrderCommand(base + 7, instrumentId, CoreOrderSide.BUY, 80, 1, false,
                                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                                 CoreTimeInForce.GTC, false, "cycle-batch-b-" + index)))));
         if (TradingOrderBatchCodec.firstNonAppliedItem(placedBatch, 2) != -1)
@@ -171,18 +171,18 @@ public final class SmallControlReproMain {
     }
 
     private void amendRejection(int index) {
-        String symbol = "REPRO-AMEND-" + index;
+        String instrumentId = Integer.toString(20000 + index);
         long user = 1001 + index * 2L, maker = user + 1, base = 3001 + index * 10L;
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(symbol)));
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long account : new long[]{user, maker}) command(CoreMessageType.ADJUST_BALANCE, account,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
-        order(user, symbol, base, CoreOrderSide.SELL, 1);
+        order(user, instrumentId, base, CoreOrderSide.SELL, 1);
         command(CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                base + 1, symbol, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                base + 1, instrumentId, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "amend-old-" + index)));
-        order(maker, symbol, base + 2, CoreOrderSide.SELL, 1);
+        order(maker, instrumentId, base + 2, CoreOrderSide.SELL, 1);
         var response = submitCommand(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
                 new AmendOrderCommand(base + 1, base + 3, "amend-new-" + index, 100L, 1L, CoreTimeInForce.GTX, true)));
         if (response.commandStatus() != ResponseStatus.REJECTED || response.resultCode() != CoreResultCode.MATCHING_REJECTED)
@@ -215,25 +215,25 @@ public final class SmallControlReproMain {
     }
 
     private void trigger(int index, boolean scan) {
-        String symbol = "REPRO-TRIGGER-" + index;
+        String instrumentId = Integer.toString(30000 + index);
         long maker = 1001 + index * 2L, user = maker + 1, triggerId = 9001 + index;
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(symbol)));
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long account : new long[]{maker, user}) command(CoreMessageType.ADJUST_BALANCE, account,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
-        order(maker, symbol, 2001 + index * 10, CoreOrderSide.SELL, 10);
-        order(user, symbol, 2002 + index * 10, CoreOrderSide.BUY, 10);
-        if (rejectTrigger || (index & 1) == 1) order(maker, symbol, 2003 + index * 10, CoreOrderSide.BUY, 1);
+        order(maker, instrumentId, 2001 + index * 10, CoreOrderSide.SELL, 10);
+        order(user, instrumentId, 2002 + index * 10, CoreOrderSide.BUY, 10);
+        if (rejectTrigger || (index & 1) == 1) order(maker, instrumentId, 2003 + index * 10, CoreOrderSide.BUY, 1);
         var trigger = new CoreTriggerOrderStateView(triggerId, PRODUCT, user, "repro-trigger-" + triggerId,
-                "repro-oco-" + index, symbol, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                "repro-oco-" + index, instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 100, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, rejectTrigger ? CoreTimeInForce.GTX : CoreTimeInForce.IOC, rejectTrigger ? 100 : (index & 1) == 0 ? 110 : 100, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                 0, 0, 0, "", "repro", 0, 0, 0, 0, 1, 0, 0);
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger));
         var sibling = new CoreTriggerOrderStateView(10001 + index, PRODUCT, user, "repro-sibling-" + index,
-                "repro-oco-" + index, symbol, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                "repro-oco-" + index, instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 200, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
@@ -241,14 +241,14 @@ public final class SmallControlReproMain {
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling));
         if (scan) {
             command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand(symbol, 100, 2, System.currentTimeMillis())));
+                    new ApplyMarkPriceCommand(instrumentId, 100, 2, System.currentTimeMillis())));
             // Risk and trigger pages share the real continuation budget. Query terminal state only at this boundary.
             boolean complete = false;
             for (int page = 0; page < 64; page++) {
                 command(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1)));
                 var state = CoreTriggerOrderCodec.decodeList(query(CoreMessageType.TRIGGER_ORDER_QUERY, user,
-                        CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, symbol, 0, 1))).data());
+                        CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, instrumentId, 0, 1))).data());
                 if (!state.isEmpty() && state.getFirst().status() == CoreTriggerOrderStatus.TRIGGERED) {
                     complete = true;
                     break;
@@ -261,20 +261,20 @@ public final class SmallControlReproMain {
     }
 
     private void verifyTrigger(int index) {
-        String symbol = "REPRO-TRIGGER-" + index;
+        String instrumentId = Integer.toString(30000 + index);
         long maker = 1001 + index * 2L, user = maker + 1, triggerId = 9001 + index;
         var state = CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY, user, new byte[0]).data());
-        long quantity = state.positions().stream().filter(p -> p.symbol().equals(symbol))
+        long quantity = state.positions().stream().filter(p -> p.instrumentId().equals(instrumentId))
                 .mapToLong(CorePositionView::signedQuantitySteps).sum();
         if (quantity != (rejectTrigger || (index & 1) == 0 ? 10 : 9)) throw new IllegalStateException("trigger position mismatch: " + quantity);
         var terminals = CoreTriggerOrderCodec.decodeList(query(CoreMessageType.TRIGGER_ORDER_QUERY, user,
-                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, symbol, 0, 1))).data());
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, instrumentId, 0, 1))).data());
         if (terminals.size() != 1 || terminals.getFirst().status() != (rejectTrigger ? CoreTriggerOrderStatus.TRIGGER_FAILED : CoreTriggerOrderStatus.TRIGGERED))
             throw new IllegalStateException("trigger terminal mismatch: " + terminals);
         if (terminals.getFirst().placedOrderId() != (rejectTrigger ? 0 : triggerId * 2 + 1))
             throw new IllegalStateException("trigger child identity mismatch");
         var siblings = CoreTriggerOrderCodec.decodeList(query(CoreMessageType.TRIGGER_ORDER_QUERY, user,
-                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(10001 + index, symbol, 0, 1))).data());
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(10001 + index, instrumentId, 0, 1))).data());
         if (siblings.size() != 1 || siblings.getFirst().status() != CoreTriggerOrderStatus.CANCELED)
             throw new IllegalStateException("OCO sibling was not canceled on trigger execution");
         long funds = 0;
@@ -293,9 +293,9 @@ public final class SmallControlReproMain {
         log.info("{}", "triggerCase=" + index + " PASS quantity=" + quantity + " fundsDiff=0 margin=true ocoCanceled=true");
     }
 
-    private void order(long user, String symbol, long id, CoreOrderSide side, long quantity) {
+    private void order(long user, String instrumentId, long id, CoreOrderSide side, long quantity) {
         command(CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                id, symbol, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                id, instrumentId, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "repro-order-" + id)));
     }
 

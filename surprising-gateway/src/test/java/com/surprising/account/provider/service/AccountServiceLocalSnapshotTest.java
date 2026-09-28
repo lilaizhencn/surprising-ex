@@ -44,7 +44,7 @@ class AccountServiceLocalSnapshotTest {
         AccountService service = service(aeron, projection);
 
         assertThat(service.balance(1001L, "usdt").availableUnits()).isEqualTo(800L);
-        assertThat(service.position(1001L, "btc-usdt").signedQuantitySteps()).isEqualTo(10L);
+        assertThat(service.position(1001L, "1").signedQuantitySteps()).isEqualTo(10L);
         assertThat(service.positions(1001L).count()).isEqualTo(1);
         assertThat(service.positionMode(1001L).positionMode()).isEqualTo(PositionMode.ONE_WAY);
         verifyNoInteractions(projection);
@@ -89,7 +89,7 @@ class AccountServiceLocalSnapshotTest {
     private static CoreUserStateView snapshot() {
         return new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1001L, 1L, CorePositionMode.ONE_WAY,
                 List.of(new CoreBalanceView("USDT", 800L, 200L)), List.of(),
-                List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.CROSS,
+                List.of(new CorePositionView("1", "USDT", CoreMarginMode.CROSS,
                         CorePositionSide.NET, 10L, 100L, 1000L, 0L, 200L)));
     }
 }

@@ -139,12 +139,12 @@ public class RiskService {
 
     private LiquidationCandidateResponse enrich(LiquidationCandidateResponse candidate) {
         CoreRiskSnapshotView risk = riskState(candidate.userId()).stream()
-                .filter(value -> value.symbol().equals(candidate.symbol()))
+                .filter(value -> value.instrumentId().equals(candidate.instrumentId()))
                 .filter(value -> value.positionSide().name().equals(candidate.positionSide().name()))
                 .findFirst().orElse(null);
         if (risk == null) return candidate;
         return new LiquidationCandidateResponse(candidate.candidateId(), risk.priceSequence(), candidate.userId(),
-                candidate.symbol(), MarginMode.valueOf(risk.marginMode().name()), candidate.positionSide(),
+                candidate.instrumentId(), MarginMode.valueOf(risk.marginMode().name()), candidate.positionSide(),
                 candidate.instrumentChangeId(), candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
                 risk.markPriceTicks(), risk.equityUnits(), risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
                 candidate.status(), candidate.eventTime());
@@ -153,13 +153,13 @@ public class RiskService {
     private List<CoreRiskSnapshotView> riskState(long userId) {
         return aeron.riskState(userId).stream()
                 .filter(value -> value.userId() == userId)
-                .sorted(Comparator.comparing(CoreRiskSnapshotView::symbol)
+                .sorted(Comparator.comparing(CoreRiskSnapshotView::instrumentId)
                         .thenComparing(value -> value.positionSide().name()))
                 .toList();
     }
 
     private RiskPositionSnapshotResponse position(CoreRiskSnapshotView value, Instant eventTime) {
-        return new RiskPositionSnapshotResponse(value.priceSequence(), value.userId(), value.symbol(),
+        return new RiskPositionSnapshotResponse(value.priceSequence(), value.userId(), value.instrumentId(),
                 MarginMode.valueOf(value.marginMode().name()), PositionSide.valueOf(value.positionSide().name()),
                 value.settleAsset(), value.signedQuantitySteps(), value.entryPriceTicks(),
                 value.markPriceTicks(), value.notionalUnits(), value.unrealizedPnlUnits(),

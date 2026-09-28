@@ -26,28 +26,28 @@ public class FundingSettlementRepository {
     }
 
     public CoreSettlement reserveCore(FundingRateResponse rate) {
-        MarkPriceEvent markPrice = markPriceCache.fresh(rate.symbol(), properties.getCalculation().getMaxMarkAge())
-                .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.symbol()));
+        MarkPriceEvent markPrice = markPriceCache.fresh(rate.instrumentId(), properties.getCalculation().getMaxMarkAge())
+                .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.instrumentId()));
         long settlementId = rate.fundingTime().toEpochMilli();
         if (settlementId <= 0) throw new IllegalArgumentException("funding time must produce a positive settlement id");
         return new CoreSettlement(settlementId, markPrice.instrumentChangeId());
     }
 
-    public Optional<FundingSettlementResponse> latestCore(String symbol) {
+    public Optional<FundingSettlementResponse> latestCore(String instrumentId) {
         return jdbcTemplate.query("""
-                SELECT settlement_id, symbol, funding_rate_ppm, total_long_payment_units,
+                SELECT settlement_id, instrument_id, funding_rate_ppm, total_long_payment_units,
                        total_short_payment_units, position_count, command_status, occurred_at_epoch_ms
                   FROM core_funding_settlement_projection
-                 WHERE product_line = ? AND symbol = ?
+                 WHERE product_line = ? AND instrument_id = ?
                  ORDER BY settlement_id DESC
                  LIMIT 1
                 """, (rs, rowNum) -> {
             Instant occurredAt = Instant.ofEpochMilli(rs.getLong("occurred_at_epoch_ms"));
-            return new FundingSettlementResponse(rs.getLong("settlement_id"), rs.getString("symbol"),
+            return new FundingSettlementResponse(rs.getLong("settlement_id"), rs.getString("instrument_id"),
                     Instant.ofEpochMilli(rs.getLong("settlement_id")), rs.getLong("funding_rate_ppm"),
                     rs.getLong("total_long_payment_units"), rs.getLong("total_short_payment_units"),
                     rs.getInt("position_count"), rs.getString("command_status"), occurredAt, occurredAt);
-        }, properties.getKafka().getProductLine().name(), symbol).stream().findFirst();
+        }, properties.getKafka().getProductLine().name(), instrumentId).stream().findFirst();
     }
 
     public record CoreSettlement(long settlementId, long instrumentChangeId) {

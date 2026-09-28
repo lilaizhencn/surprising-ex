@@ -25,7 +25,7 @@ class MarkPriceEncodingServiceTest {
                 Map.of("BTC", 100_000_000L, "USD", 100_000_000L));
         MarkPriceEncodingService service = new MarkPriceEncodingService(properties, cache);
 
-        MarkPriceEncoding encoding = service.encoding("BTC-USD", 8L);
+        MarkPriceEncoding encoding = service.encoding("5", 8L);
 
         assertThat(encoding.instrumentChangeId()).isEqualTo(8L);
         assertThat(encoding.quoteScaleUnits()).isEqualTo(100_000_000L);
@@ -36,12 +36,12 @@ class MarkPriceEncodingServiceTest {
 
     private InstrumentResponse instrument() {
         Instant now = Instant.parse("2026-07-31T00:00:00Z");
-        return new InstrumentResponse("BTC-USD", 8L, InstrumentType.PERPETUAL, ContractType.INVERSE_PERPETUAL,
+        return new InstrumentResponse(5, 3, 2, 2, 3, "BTC-USD", 8L, InstrumentType.PERPETUAL, ContractType.INVERSE_PERPETUAL,
                 "BTC", "USD", "USD", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
-                10_000_000L, 3, null, null, null, null, null, null, null,
+                10_000_000L, 3, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }

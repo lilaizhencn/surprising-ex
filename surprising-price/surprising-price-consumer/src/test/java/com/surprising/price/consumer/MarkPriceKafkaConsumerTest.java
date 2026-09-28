@@ -28,21 +28,21 @@ class MarkPriceKafkaConsumerTest {
         MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
         Instant now = Instant.now();
         BigDecimal price = new BigDecimal("59000");
-        MarkPriceEvent result = new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
+        MarkPriceEvent result = new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "1", 1L,
                 5_900_000_000_000L, 590_000L, price, price, null, price, price, price,
                 new BigDecimal("58999"), new BigDecimal("59001"), BigDecimal.ZERO,
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("57000"), new BigDecimal("61000"), 1L,
                 PriceStatus.HEALTHY, now, now);
-        IndexPriceEvent indexInput = new IndexPriceEvent("BTC-USDT", price, 1L, PriceStatus.HEALTHY,
+        IndexPriceEvent indexInput = new IndexPriceEvent("1", price, 1L, PriceStatus.HEALTHY,
                 0, 0, BigDecimal.ZERO, now, List.of());
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(result, indexInput, null, null, null,
                 BigDecimal.ZERO, 60L, now);
 
-        consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L, "BTC-USDT",
+        consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L, "1",
                 new ObjectMapper().writeValueAsString(PricePublishedEvent.mark(publication))));
 
-        assertThat(cache.latest("BTC-USDT")).contains(result);
+        assertThat(cache.latest("1")).contains(result);
     }
 
     @Test
@@ -52,22 +52,22 @@ class MarkPriceKafkaConsumerTest {
         MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
 
         assertThatCode(() -> consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L,
-                "BTC-USDT", "{not-json"))).doesNotThrowAnyException();
+                "1", "{not-json"))).doesNotThrowAnyException();
 
-        assertThat(cache.latest("BTC-USDT")).isEmpty();
+        assertThat(cache.latest("1")).isEmpty();
     }
 
     @Test
     void skipsUnconfiguredSymbolsBeforeDeserializingThePublication() {
         MarkPriceConsumerProperties properties = new MarkPriceConsumerProperties();
-        properties.setRequiredSymbols(List.of("BTC-USDT"));
+        properties.setRequiredInstrumentIds(List.of("1"));
         LatestMarkPriceCache cache = new LatestMarkPriceCache(properties);
         MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
 
         assertThatCode(() -> consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L,
-                "ETH-USDT", "{not-json"))).doesNotThrowAnyException();
+                "2", "{not-json"))).doesNotThrowAnyException();
 
-        assertThat(cache.latest("ETH-USDT")).isEmpty();
+        assertThat(cache.latest("2")).isEmpty();
     }
 
     @Test
@@ -93,18 +93,18 @@ class MarkPriceKafkaConsumerTest {
     private void publish(MarkPriceKafkaConsumer consumer,
                          MarkPriceConsumerProperties properties,
                          MarkPriceEvent event) throws Exception {
-        IndexPriceEvent indexInput = new IndexPriceEvent("BTC-USDT", event.indexPrice(), event.sequence(),
+        IndexPriceEvent indexInput = new IndexPriceEvent("1", event.indexPrice(), event.sequence(),
                 PriceStatus.HEALTHY, 0, 0, BigDecimal.ZERO, event.eventTime(), List.of());
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, indexInput, null, null, null,
                 BigDecimal.ZERO, 60L, event.eventTime());
-        consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, event.sequence(), event.symbol(),
+        consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, event.sequence(), event.instrumentId(),
                 new ObjectMapper().writeValueAsString(PricePublishedEvent.mark(publication))));
     }
 
     private MarkPriceEvent mark(long ticks, long sequence) {
         Instant now = Instant.now();
         BigDecimal price = BigDecimal.valueOf(ticks, 1);
-        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
+        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "1", 1L,
                 ticks * 10_000_000L, ticks, price, price, null, price, price, price,
                 price, price, BigDecimal.ZERO, now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 price, price, sequence, PriceStatus.HEALTHY, now, now);

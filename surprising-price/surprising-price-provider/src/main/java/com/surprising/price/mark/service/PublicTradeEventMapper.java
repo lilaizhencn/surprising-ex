@@ -19,14 +19,14 @@ public class PublicTradeEventMapper {
     }
 
     public PerpTradeEvent toPerpTradeEvent(PublicTradeEvent event) {
-        if (event == null || event.symbol() == null || event.symbol().isBlank()
+        if (event == null || event.instrumentId() == null || event.instrumentId().isBlank()
                 || event.tradeId() == null || event.tradeId().isBlank() || event.sequence() < 0
                 || event.priceTicks() <= 0 || event.quantitySteps() <= 0
                 || event.eventTime() == null) {
             throw new IllegalArgumentException("canonical public trade is invalid");
         }
-        MarkPriceEncoding encoding = encodingService.currentEncoding(event.symbol());
-        return new PerpTradeEvent(event.symbol(), event.tradeId(), event.sequence(), event.eventTime(),
+        MarkPriceEncoding encoding = encodingService.currentEncoding(event.instrumentId());
+        return new PerpTradeEvent(event.instrumentId(), event.tradeId(), event.sequence(), event.eventTime(),
                 decimal(event.priceTicks(), encoding.priceTickUnits(), encoding.quoteScaleUnits()),
                 decimal(event.quantitySteps(), encoding.quantityStepUnits(), encoding.baseScaleUnits()),
                 event.takerSide() == null ? null : event.takerSide().name());

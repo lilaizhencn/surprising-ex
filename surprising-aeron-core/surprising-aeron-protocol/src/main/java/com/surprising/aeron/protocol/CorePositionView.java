@@ -1,7 +1,7 @@
 package com.surprising.aeron.protocol;
 
 public record CorePositionView(
-        String symbol,
+        String instrumentId,
         String marginAsset,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,
@@ -11,10 +11,10 @@ public record CorePositionView(
         long realizedPnlUnits,
         long positionMarginUnits) {
 
-    public CorePositionView(String symbol, String marginAsset,
+    public CorePositionView(String instrumentId, String marginAsset,
                             long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                             long realizedPnlUnits, long positionMarginUnits) {
-        this(symbol, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET,
+        this(instrumentId, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, realizedPnlUnits, positionMarginUnits);
     }
 }

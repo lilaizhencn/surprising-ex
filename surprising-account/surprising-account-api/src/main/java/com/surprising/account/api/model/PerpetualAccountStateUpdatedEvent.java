@@ -92,7 +92,7 @@ public record PerpetualAccountStateUpdatedEvent(
         }
     }
 
-    public record Position(String symbol,
+    public record Position(String instrumentId,
                            MarginMode marginMode,
                            PositionSide positionSide,
                            long signedQuantitySteps,
@@ -101,7 +101,7 @@ public record PerpetualAccountStateUpdatedEvent(
                            long realizedPnlUnits,
                            Instant updatedAt) {
         public Position {
-            symbol = normalizeSymbol(symbol);
+            instrumentId = normalizeSymbol(instrumentId);
             marginMode = MarginMode.defaultIfNull(marginMode);
             positionSide = PositionSide.defaultIfNull(positionSide);
             if (signedQuantitySteps == 0L) {
@@ -117,13 +117,13 @@ public record PerpetualAccountStateUpdatedEvent(
         }
     }
 
-    public record PositionMargin(String symbol,
+    public record PositionMargin(String instrumentId,
                                  String asset,
                                  MarginMode marginMode,
                                  PositionSide positionSide,
                                  long marginUnits) {
         public PositionMargin {
-            symbol = normalizeSymbol(symbol);
+            instrumentId = normalizeSymbol(instrumentId);
             asset = normalizeAsset(asset);
             marginMode = MarginMode.defaultIfNull(marginMode);
             positionSide = PositionSide.defaultIfNull(positionSide);
@@ -165,9 +165,9 @@ public record PerpetualAccountStateUpdatedEvent(
     }
 
     private static String normalizeSymbol(String value) {
-        String normalized = requireText(value, "symbol");
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + value);
+        String normalized = requireText(value, "instrumentId");
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + value);
         }
         return normalized;
     }

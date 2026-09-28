@@ -37,15 +37,15 @@ class TradingFeeServiceTest {
         TradingFeeService service = service(feeRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
 
-        when(instrumentRuleLookup.currentRule("BTC-USDT")).thenReturn(Optional.of(rule(7L)));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(instrumentRuleLookup.currentRule("1")).thenReturn(Optional.of(rule(7L)));
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("1"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -50L, 350L, "VIP_SYMBOL")));
 
-        var response = service.effectiveFee(1001L, "btc-usdt", 0L);
+        var response = service.effectiveFee(1001L, "1", 0L);
 
         assertThat(response.userId()).isEqualTo(1001L);
         assertThat(response.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-        assertThat(response.symbol()).isEqualTo("BTC-USDT");
+        assertThat(response.instrumentId()).isEqualTo("1");
         assertThat(response.instrumentChangeId()).isEqualTo(7L);
         assertThat(response.makerFeeRatePpm()).isEqualTo(-50L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(350L);
@@ -60,11 +60,11 @@ class TradingFeeServiceTest {
         TradingFeeService service = service(feeRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
 
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("1"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.INVERSE_PERPETUAL,
                         -50L, 350L, "VIP_SYMBOL")));
 
-        assertThatThrownBy(() -> service.effectiveFee(1001L, "btc-usdt", 7L, ProductLine.LINEAR_PERPETUAL))
+        assertThatThrownBy(() -> service.effectiveFee(1001L, "1", 7L, ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("fee schedule unavailable for productLine");
     }
@@ -79,7 +79,7 @@ class TradingFeeServiceTest {
                 ProductLine.LINEAR_PERPETUAL, coreImporter);
         Instant effectiveTime = Instant.parse("2026-07-01T00:00:00Z");
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(777L, ProductLine.LINEAR_PERPETUAL,
-                1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
+                1001L, "1", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
                 FeeScheduleStatus.ACTIVE, effectiveTime, null);
 
         FeeScheduleResponse response = service.upsertSchedule(request);
@@ -100,19 +100,19 @@ class TradingFeeServiceTest {
         FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
                 "updatedAt.asc", 50);
 
-        when(feeRepository.querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+        when(feeRepository.querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "1",
                 FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc")).thenReturn(expected);
 
-        FeeScheduleQueryResponse response = service.querySchedules(ProductLine.LINEAR_DELIVERY, 1001L, "btc-usdt",
+        FeeScheduleQueryResponse response = service.querySchedules(ProductLine.LINEAR_DELIVERY, 1001L, "1",
                 FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
 
         assertThat(response).isEqualTo(expected);
-        verify(feeRepository).querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+        verify(feeRepository).querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "1",
                 FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
     }
 
     private InstrumentRule rule(long version) {
-        return new InstrumentRule("BTC-USDT", version, "TRADING", ContractType.LINEAR_PERPETUAL,
+        return new InstrumentRule("1", version, "TRADING", ContractType.LINEAR_PERPETUAL,
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC"), true, true, true,
                 1L, 100_000L, 1L, 1_000_000_000L, 10_000L, 100_000_000L, 10_000L);
     }

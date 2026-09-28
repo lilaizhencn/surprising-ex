@@ -8,7 +8,7 @@ public record LiquidationCandidateResponse(
         long candidateId,
         long snapshotId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         long instrumentChangeId,
@@ -31,7 +31,7 @@ public record LiquidationCandidateResponse(
     public LiquidationCandidateResponse(long candidateId,
                                         long snapshotId,
                                         long userId,
-                                        String symbol,
+                                        String instrumentId,
                                         MarginMode marginMode,
                                         PositionSide positionSide,
                                         long instrumentChangeId,
@@ -43,7 +43,7 @@ public record LiquidationCandidateResponse(
                                         long marginRatioPpm,
                                         LiquidationCandidateStatus status,
                                         Instant eventTime) {
-        this(candidateId, snapshotId, userId, symbol, marginMode, positionSide, instrumentChangeId,
+        this(candidateId, snapshotId, userId, instrumentId, marginMode, positionSide, instrumentChangeId,
                 "USDT_PERPETUAL", settleAsset, signedQuantitySteps, markPriceTicks, equityUnits,
                 maintenanceMarginUnits, marginRatioPpm, status, eventTime);
     }
@@ -51,7 +51,7 @@ public record LiquidationCandidateResponse(
     public LiquidationCandidateResponse(long candidateId,
                                         long snapshotId,
                                         long userId,
-                                        String symbol,
+                                        String instrumentId,
                                         MarginMode marginMode,
                                         long instrumentChangeId,
                                         String settleAsset,
@@ -62,7 +62,7 @@ public record LiquidationCandidateResponse(
                                         long marginRatioPpm,
                                         LiquidationCandidateStatus status,
                                         Instant eventTime) {
-        this(candidateId, snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentChangeId,
+        this(candidateId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId,
                 "USDT_PERPETUAL", settleAsset,
                 signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, status,
                 eventTime);
@@ -71,7 +71,7 @@ public record LiquidationCandidateResponse(
     public LiquidationCandidateResponse(long candidateId,
                                         long snapshotId,
                                         long userId,
-                                        String symbol,
+                                        String instrumentId,
                                         long instrumentChangeId,
                                         String settleAsset,
                                         long signedQuantitySteps,
@@ -81,7 +81,7 @@ public record LiquidationCandidateResponse(
                                         long marginRatioPpm,
                                         LiquidationCandidateStatus status,
                                         Instant eventTime) {
-        this(candidateId, snapshotId, userId, symbol, MarginMode.CROSS, PositionSide.NET, instrumentChangeId,
+        this(candidateId, snapshotId, userId, instrumentId, MarginMode.CROSS, PositionSide.NET, instrumentChangeId,
                 "USDT_PERPETUAL", settleAsset,
                 signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, status,
                 eventTime);

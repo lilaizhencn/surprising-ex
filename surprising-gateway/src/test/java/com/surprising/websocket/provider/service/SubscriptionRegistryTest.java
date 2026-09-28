@@ -30,14 +30,14 @@ class SubscriptionRegistryTest {
         registry.subscribe(subscriber, new SubscriptionTopic(WsChannel.EXECUTION_REPORTS,
                 SubscriptionTopic.WILDCARD, null, 1001L, product));
         when(subscriber.sendBatch(org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
-        var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "BTC-USDT", null, 1001L, product);
+        var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "1", null, 1001L, product);
         var time = Instant.parse("2026-09-26T00:00:00Z");
         registry.publishTimedBatch(topic, java.util.List.of(new SubscriptionRegistry.TimedPayload("fill", time)));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<java.util.List<String>> messages = ArgumentCaptor.forClass(java.util.List.class);
         verify(subscriber).sendBatch(messages.capture());
         var event = new ObjectMapper().readTree(messages.getValue().getFirst());
-        assertThat(event.path("symbol").asText()).isEqualTo("BTC-USDT");
+        assertThat(event.path("instrumentId").asText()).isEqualTo("1");
         assertThat(event.path("productLine").asText()).isEqualTo(product.name());
         assertThat(event.path("userId").asLong()).isEqualTo(1001);
     }
@@ -47,7 +47,7 @@ class SubscriptionRegistryTest {
         var registry=new SubscriptionRegistry(new ObjectMapper(),new WebSocketProperties());
         var lifecycle=mock(SubscriptionRegistry.RouteLifecycle.class);registry.routeLifecycle(lifecycle);
         var connection=connection("node-membership");registry.add(connection);
-        var topic=new SubscriptionTopic(WsChannel.ORDERS,"BTC-USDT",null,1001L,ProductLine.SPOT);
+        var topic=new SubscriptionTopic(WsChannel.ORDERS,"1",null,1001L,ProductLine.SPOT);
         registry.subscribe(connection,topic);registry.subscribe(connection,topic);
         verify(lifecycle,org.mockito.Mockito.times(1)).subscribed(topic);
         registry.remove(connection.id());verify(lifecycle,org.mockito.Mockito.times(1)).unsubscribed(topic);
@@ -61,23 +61,23 @@ class SubscriptionRegistryTest {
     @Test
     void privateSymbolFanoutDoesNotLeakAcrossUsersAndAlsoReachesSameUserWildcard() {
         SubscriptionRegistry registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
-        ClientConnection user1001Symbol = connection("s-1001-symbol");
+        ClientConnection user1001Symbol = connection("s-1001-instrumentId");
         ClientConnection user1001Wildcard = connection("s-1001-all");
-        ClientConnection user2002SameSymbol = connection("s-2002-symbol");
+        ClientConnection user2002SameSymbol = connection("s-2002-instrumentId");
         registry.add(user1001Symbol);
         registry.add(user1001Wildcard);
         registry.add(user2002SameSymbol);
         registry.subscribe(user1001Symbol,
-                new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 1001L));
+                new SubscriptionTopic(WsChannel.ORDERS, "1", null, 1001L));
         registry.subscribe(user1001Wildcard,
                 new SubscriptionTopic(WsChannel.ORDERS, SubscriptionTopic.WILDCARD, null, 1001L));
         registry.subscribe(user2002SameSymbol,
-                new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 2002L));
+                new SubscriptionTopic(WsChannel.ORDERS, "1", null, 2002L));
 
-        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "BTC-USDT",
+        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "1",
                 OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null,
                 Instant.parse("2026-07-01T00:00:00Z"), "trace-private-1");
-        registry.publish(new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 1001L),
+        registry.publish(new SubscriptionTopic(WsChannel.ORDERS, "1", null, 1001L),
                 event, event.eventTime());
 
         ArgumentCaptor<String> symbolPayload = ArgumentCaptor.forClass(String.class);
@@ -85,7 +85,7 @@ class SubscriptionRegistryTest {
         verify(user1001Symbol).send(symbolPayload.capture());
         verify(user1001Wildcard).send(wildcardPayload.capture());
         verify(user2002SameSymbol, never()).send(anyString());
-        assertThat(symbolPayload.getValue()).contains("\"userId\":1001", "\"symbol\":\"BTC-USDT\"");
+        assertThat(symbolPayload.getValue()).contains("\"userId\":1001", "\"instrumentId\":\"1\"");
         assertThat(wildcardPayload.getValue()).isEqualTo(symbolPayload.getValue());
     }
 
@@ -97,7 +97,7 @@ class SubscriptionRegistryTest {
         when(failed.send(anyString())).thenReturn(false);
         registry.add(failed);
         registry.add(healthy);
-        SubscriptionTopic topic = new SubscriptionTopic(WsChannel.POSITIONS, "ETH-USDT", null, 3003L);
+        SubscriptionTopic topic = new SubscriptionTopic(WsChannel.POSITIONS, "2", null, 3003L);
         registry.subscribe(failed, topic);
         registry.subscribe(healthy, topic);
 
@@ -116,9 +116,9 @@ class SubscriptionRegistryTest {
         ClientConnection productSubscriber = connection("s-product");
         registry.add(productSubscriber);
         registry.subscribe(productSubscriber,
-                new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null, ProductLine.LINEAR_DELIVERY));
+                new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null, ProductLine.LINEAR_DELIVERY));
 
-        registry.publish(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null),
+        registry.publish(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null),
                 "payload", Instant.parse("2026-07-01T00:00:00Z"));
 
         verify(productSubscriber, never()).send(anyString());
@@ -135,8 +135,8 @@ class SubscriptionRegistryTest {
         when(user.queuedMessages()).thenReturn(3);
         when(anonymous.queueCapacity()).thenReturn(4);
         when(user.queueCapacity()).thenReturn(6);
-        SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null);
-        SubscriptionTopic privateTopic = new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 7001L);
+        SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null);
+        SubscriptionTopic privateTopic = new SubscriptionTopic(WsChannel.ORDERS, "1", null, 7001L);
         registry.subscribe(anonymous, publicTopic);
         registry.subscribe(user, publicTopic);
         registry.subscribe(user, privateTopic);
@@ -159,10 +159,10 @@ class SubscriptionRegistryTest {
         var first = connection("first");
         var second = connection("second");
         var otherProduct = connection("other");
-        var topic = new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.LINEAR_PERPETUAL);
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.LINEAR_PERPETUAL);
         registry.add(first); registry.add(second); registry.add(otherProduct);
         registry.subscribe(first, topic);
-        registry.subscribe(otherProduct, new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.SPOT));
+        registry.subscribe(otherProduct, new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT));
         registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(1, java.util.List.of()), "v1", "book", Instant.now());
         registry.subscribe(second, topic);
         registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(2, java.util.List.of()), "v2", "book", Instant.now());
@@ -188,7 +188,7 @@ class SubscriptionRegistryTest {
         var failed = connection("failed-depth");
         var healthy = connection("healthy-depth");
         when(failed.send(anyString())).thenReturn(false);
-        var topic = new SubscriptionTopic(WsChannel.DEPTH, "BTC-USDT", null, null, ProductLine.SPOT);
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT);
         registry.add(failed); registry.add(healthy);
         registry.subscribe(failed, topic); registry.subscribe(healthy, topic);
         for (int seq = 1; seq <= 2; seq++)

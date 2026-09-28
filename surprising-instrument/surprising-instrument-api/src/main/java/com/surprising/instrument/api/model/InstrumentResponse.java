@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 public record InstrumentResponse(
+        int instrumentId,
+        int baseAssetId, int quoteAssetId, int settleAssetId, int contractValueAssetId,
         String symbol,
         long changeId,
         InstrumentType instrumentType,
@@ -43,7 +45,8 @@ public record InstrumentResponse(
         int minValidIndexSources,
         Instant expiryTime,
         Instant deliveryTime,
-        String underlyingSymbol,
+        String underlyingInstrumentId,
+        com.surprising.product.api.ProductLine underlyingProductLine,
         Long strikePriceUnits,
         OptionType optionType,
         OptionExerciseStyle optionExerciseStyle,
@@ -56,7 +59,13 @@ public record InstrumentResponse(
         List<IndexSourceConfig> indexSources,
         long lastChangeId) {
 
+    public InstrumentResponse {
+        if (instrumentId <= 0) throw new IllegalArgumentException("instrumentId must be positive");
+    }
+
     public InstrumentResponse(
+        int instrumentId,
+        int baseAssetId, int quoteAssetId, int settleAssetId, int contractValueAssetId,
         String symbol,
         long changeId,
         InstrumentType instrumentType,
@@ -96,7 +105,8 @@ public record InstrumentResponse(
         int minValidIndexSources,
         Instant expiryTime,
         Instant deliveryTime,
-        String underlyingSymbol,
+        String underlyingInstrumentId,
+        com.surprising.product.api.ProductLine underlyingProductLine,
         Long strikePriceUnits,
         OptionType optionType,
         OptionExerciseStyle optionExerciseStyle,
@@ -107,7 +117,7 @@ public record InstrumentResponse(
         Instant updatedAt,
         List<RiskLimitBracket> riskLimitBrackets,
         List<IndexSourceConfig> indexSources) {
-        this(symbol, changeId, instrumentType, contractType, baseAsset, quoteAsset, settleAsset, contractMultiplierPpm, contractValueAsset, priceTickUnits, quantityStepUnits, minQuantitySteps, maxQuantitySteps, minNotionalUnits, maxNotionalUnits, notionalMultiplierUnits, pricePrecision, quantityPrecision, supportedOrderTypes, supportedTimeInForce, postOnlyEnabled, reduceOnlyEnabled, marketOrderEnabled, maxLeveragePpm, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, fundingIntervalHours, interestRatePpm, fundingRateCapPpm, fundingRateFloorPpm, impactNotionalUnits, minValidIndexSources, expiryTime, deliveryTime, underlyingSymbol, strikePriceUnits, optionType, optionExerciseStyle, settlementMethod, status, effectiveTime, createdAt, updatedAt, riskLimitBrackets, indexSources, changeId);
+        this(instrumentId, baseAssetId, quoteAssetId, settleAssetId, contractValueAssetId, symbol, changeId, instrumentType, contractType, baseAsset, quoteAsset, settleAsset, contractMultiplierPpm, contractValueAsset, priceTickUnits, quantityStepUnits, minQuantitySteps, maxQuantitySteps, minNotionalUnits, maxNotionalUnits, notionalMultiplierUnits, pricePrecision, quantityPrecision, supportedOrderTypes, supportedTimeInForce, postOnlyEnabled, reduceOnlyEnabled, marketOrderEnabled, maxLeveragePpm, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, fundingIntervalHours, interestRatePpm, fundingRateCapPpm, fundingRateFloorPpm, impactNotionalUnits, minValidIndexSources, expiryTime, deliveryTime, underlyingInstrumentId, underlyingProductLine, strikePriceUnits, optionType, optionExerciseStyle, settlementMethod, status, effectiveTime, createdAt, updatedAt, riskLimitBrackets, indexSources, changeId);
     }
 
     /**
@@ -118,7 +128,7 @@ public record InstrumentResponse(
             throw new IllegalArgumentException("instrument snapshot is required");
         }
         return new InstrumentResponse(
-                value.symbol(), value.changeId(), value.instrumentType(), value.contractType(),
+                value.instrumentId(), value.baseAssetId(), value.quoteAssetId(), value.settleAssetId(), value.contractValueAssetId(), value.symbol(), value.changeId(), value.instrumentType(), value.contractType(),
                 value.baseAsset(), value.quoteAsset(), value.settleAsset(), value.contractMultiplierPpm(),
                 value.contractValueAsset(), value.priceTickUnits(), value.quantityStepUnits(),
                 value.minQuantitySteps(), value.maxQuantitySteps(), value.minNotionalUnits(),
@@ -132,7 +142,7 @@ public record InstrumentResponse(
                 value.userOpenInterestLimitRatePpm(), value.userOpenInterestLimitFloorUnits(),
                 value.fundingIntervalHours(), value.interestRatePpm(), value.fundingRateCapPpm(),
                 value.fundingRateFloorPpm(), value.impactNotionalUnits(), value.minValidIndexSources(),
-                value.expiryTime(), value.deliveryTime(), value.underlyingSymbol(), value.strikePriceUnits(),
+                value.expiryTime(), value.deliveryTime(), value.underlyingInstrumentId(), value.underlyingProductLine(), value.strikePriceUnits(),
                 value.optionType(), value.optionExerciseStyle(), value.settlementMethod(), value.status(),
                 value.effectiveTime(), value.createdAt(), value.updatedAt(),
                 value.riskLimitBrackets() == null ? List.of() : List.copyOf(value.riskLimitBrackets()),

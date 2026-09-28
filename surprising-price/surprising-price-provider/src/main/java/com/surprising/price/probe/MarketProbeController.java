@@ -16,10 +16,10 @@ public class MarketProbeController {
     }
 
     @GetMapping
-    public MarketProbeService.MarketProbeSnapshot snapshot(@RequestParam("symbol") String symbol,
+    public MarketProbeService.MarketProbeSnapshot snapshot(@RequestParam("instrumentId") String instrumentId,
                                                             @RequestParam(value = "sourceMode",
                                                                     defaultValue = "PUBLIC_WEBSOCKET_ONLY")
                                                             MarketProbeService.SourceMode sourceMode) {
-        return marketProbeService.snapshot(symbol, sourceMode);
+        return marketProbeService.snapshot(instrumentId, sourceMode);
     }
 }

@@ -41,10 +41,10 @@ final class GeneratedMarkPriceSource implements AutoCloseable {
         }
     }
 
-    Quote quote(int symbol) {
+    Quote quote(int instrumentId) {
         if (failure != null) throw new IllegalStateException("mark price source failed", failure);
         if (!running) throw new IllegalStateException("mark price source closed");
-        return new Quote(prices[symbol], publishedTimestamp);
+        return new Quote(prices[instrumentId], publishedTimestamp);
     }
 
     @Override public void close() {

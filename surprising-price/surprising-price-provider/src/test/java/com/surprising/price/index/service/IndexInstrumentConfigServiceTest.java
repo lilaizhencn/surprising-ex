@@ -15,14 +15,14 @@ class IndexInstrumentConfigServiceTest {
     void refreshUsesRepositoryAggregationSnapshot() {
         IndexPriceProperties properties = new IndexPriceProperties();
         IndexInstrumentConfigLoader loader = mock(IndexInstrumentConfigLoader.class);
-        IndexPriceProperties.SymbolConfig symbol = new IndexPriceProperties.SymbolConfig();
-        symbol.setSymbol("BTC-USDT");
-        when(loader.load()).thenReturn(List.of(symbol));
+        IndexPriceProperties.SymbolConfig instrumentId = new IndexPriceProperties.SymbolConfig();
+        instrumentId.setInstrumentId("1");
+        when(loader.load()).thenReturn(List.of(instrumentId));
         IndexInstrumentConfigService service = new IndexInstrumentConfigService(loader);
 
         service.refresh();
 
-        assertThat(service.symbols()).containsExactly(symbol);
+        assertThat(service.symbols()).containsExactly(instrumentId);
         verify(loader).load();
     }
 

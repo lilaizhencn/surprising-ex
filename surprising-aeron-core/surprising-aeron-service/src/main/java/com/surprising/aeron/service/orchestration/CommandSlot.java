@@ -135,7 +135,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     OrderRuntime laneResultOrder(long orderId) { return laneResultTarget.order(orderId); }
-    String laneResultSymbol(long orderId) { return laneResultTarget.symbol(orderId); }
+    String laneResultSymbol(long orderId) { return laneResultTarget.instrumentId(orderId); }
     boolean laneResultPrepared() { return laneResultTarget.prepared(); }
     byte[] lanePreparedResponse() { return laneResultTarget.preparedResponse(); }
     int lanePreparedResponseLength() { return laneResultTarget.preparedResponseLength(); }
@@ -165,18 +165,18 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     /** Reuses the command slot for the common cancellation path instead of allocating a lambda. */
     java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
-            int matcherShard, long orderId, long userId, String symbol, MatcherSettlementEvent direct) {
-        cancelMatching.prepare(owner, matcherShard, orderId, userId, symbol, direct);
+            int matcherShard, long orderId, long userId, String instrumentId, MatcherSettlementEvent direct) {
+        cancelMatching.prepare(owner, matcherShard, orderId, userId, instrumentId, direct);
         return cancelMatching;
     }
 
     /** Reuses the command slot for a resolved replacement without intermediate submission objects. */
     java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId,
-            long originalOrderId, String symbol, CoreMatchingOrder replacement,
+            long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
             MatcherSettlementEvent direct) {
         replaceMatching.prepare(owner, matcherShard, orderId, userId,
-                originalOrderId, symbol, replacement, direct);
+                originalOrderId, instrumentId, replacement, direct);
         return replaceMatching;
     }
 
@@ -928,16 +928,16 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private int matcherShard;
         private long orderId;
         private long userId;
-        private String symbol;
+        private String instrumentId;
         private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, String symbol, MatcherSettlementEvent direct) {
+                     long userId, String instrumentId, MatcherSettlementEvent direct) {
             this.owner = Objects.requireNonNull(owner);
             this.matcherShard = matcherShard;
             this.orderId = orderId;
             this.userId = userId;
-            this.symbol = Objects.requireNonNull(symbol);
+            this.instrumentId = Objects.requireNonNull(instrumentId);
             this.direct = direct;
         }
 
@@ -946,7 +946,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             matcherShard = 0;
             orderId = 0;
             userId = 0;
-            symbol = null;
+            instrumentId = null;
             direct = null;
         }
 
@@ -955,11 +955,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             if (direct != null) {
                 return owner.matchingAdapter.cancelDirect(
                         matcherShard, coreSequence, command.header().commandId(), orderId,
-                        command.header().submittedAtEpochMillis(), userId, symbol, direct);
+                        command.header().submittedAtEpochMillis(), userId, instrumentId, direct);
             }
             return owner.matchingAdapter.cancelWithEvidence(
                     matcherShard, coreSequence, command.header().commandId(), orderId,
-                    command.header().submittedAtEpochMillis(), userId, symbol);
+                    command.header().submittedAtEpochMillis(), userId, instrumentId);
         }
     }
 
@@ -969,19 +969,19 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private long orderId;
         private long userId;
         private long originalOrderId;
-        private String symbol;
+        private String instrumentId;
         private CoreMatchingOrder replacement;
         private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, long originalOrderId, String symbol, CoreMatchingOrder replacement,
+                     long userId, long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
                      MatcherSettlementEvent direct) {
             this.owner = Objects.requireNonNull(owner);
             this.matcherShard = matcherShard;
             this.orderId = orderId;
             this.userId = userId;
             this.originalOrderId = originalOrderId;
-            this.symbol = Objects.requireNonNull(symbol);
+            this.instrumentId = Objects.requireNonNull(instrumentId);
             this.replacement = Objects.requireNonNull(replacement);
             this.direct = direct;
         }
@@ -992,7 +992,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             orderId = 0;
             userId = 0;
             originalOrderId = 0;
-            symbol = null;
+            instrumentId = null;
             replacement = null;
             direct = null;
         }
@@ -1003,12 +1003,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 return owner.matchingAdapter.replaceDirect(
                         matcherShard, coreSequence, command.header().commandId(), orderId,
                         command.header().submittedAtEpochMillis(), userId,
-                        originalOrderId, symbol, replacement, direct);
+                        originalOrderId, instrumentId, replacement, direct);
             }
             return owner.matchingAdapter.replaceWithEvidence(
                     matcherShard, coreSequence, command.header().commandId(), orderId,
                     command.header().submittedAtEpochMillis(), userId,
-                    originalOrderId, symbol, replacement);
+                    originalOrderId, instrumentId, replacement);
         }
     }
 
@@ -1097,7 +1097,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             for (int index = 0; index < count; index++) if (ids[index] == id) return orders[index];
             return null;
         }
-        String symbol(long id) {
+        String instrumentId(long id) {
             for (int index = 0; index < count; index++) if (ids[index] == id) return symbols[index];
             return null;
         }
@@ -1105,9 +1105,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public int resultCount() { return count; }
         @Override public long resultOrderId(int index) { return ids[index]; }
         @Override public long resultOriginalOrderId(int index) { return 0; }
-        @Override public void resultOrder(int index, OrderRuntime order, String symbol) {
+        @Override public void resultOrder(int index, OrderRuntime order, String instrumentId) {
             orders[index] = order;
-            symbols[index] = symbol;
+            symbols[index] = instrumentId;
         }
         @Override public boolean includeTerminalAfterImage() { return true; }
         @Override public void matcherResult(com.surprising.aeron.service.matching.MatchingResult result) {
@@ -1138,7 +1138,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                     public long orderId() { return value().orderId(); }
                     public com.surprising.product.api.ProductLine productLine() { return value().productLine(); }
                     public long userId() { return value().userId(); }
-                    public String symbol() { return symbols[0]; }
+                    public String instrumentId() { return symbols[0]; }
                     public com.surprising.aeron.protocol.CoreOrderSide side() { return value().side(); }
                     public long priceTicks() { return value().priceTicks(); }
                     public long quantitySteps() { return value().quantitySteps(); }

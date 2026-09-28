@@ -54,12 +54,12 @@ public final class ClusterInstrumentSeedMain {
             int applied = 0;
             for (InstrumentSeed instrument : instruments) {
                 UUID commandId = UUID.nameUUIDFromBytes((productLine + ":instrument:"
-                        + instrument.command().symbol())
+                        + instrument.command().instrumentId())
                         .getBytes(StandardCharsets.UTF_8));
                 var response = clients.command(CoreMessageType.REGISTER_INSTRUMENT, commandId, 0,
                         TradingCommandCodec.encodeRegisterInstrument(instrument.command()));
                 if (response.commandStatus() != ResponseStatus.APPLIED) {
-                    throw new IllegalStateException("instrument rejected symbol=" + instrument.command().symbol()
+                    throw new IllegalStateException("instrument rejected instrumentId=" + instrument.command().instrumentId()
                             + " result=" + response.resultCode());
                 }
                 applied++;
@@ -86,16 +86,18 @@ public final class ClusterInstrumentSeedMain {
     private static List<InstrumentSeed> load(
             String url, String user, String password, ProductLine productLine) throws Exception {
         String sql = """
-                SELECT i.symbol, a.scale_units AS settle_scale_units, i.contract_type, i.base_asset, i.quote_asset, i.settle_asset,
+                SELECT i.instrument_id, a.scale_units AS settle_scale_units, i.contract_type, b.asset AS base_asset, q.asset AS quote_asset, a.asset AS settle_asset,
                        i.notional_multiplier_units, i.price_tick_units, i.initial_margin_rate_ppm,
                        i.maintenance_margin_rate_ppm, i.maker_fee_rate_ppm, i.taker_fee_rate_ppm,
                        i.expiry_time, i.option_type, i.strike_price_units, i.max_leverage_ppm,
                        i.max_position_notional_units, i.user_open_interest_limit_rate_ppm,
                        i.user_open_interest_limit_floor_units
                   FROM instruments i
-                  JOIN account_asset_scales a ON a.asset=i.settle_asset
+                  JOIN assets a ON a.asset_id=i.settle_asset_id
+                  JOIN assets b ON b.asset_id=i.base_asset_id
+                  JOIN assets q ON q.asset_id=i.quote_asset_id
                  WHERE i.product_line=?
-                 ORDER BY i.symbol
+                 ORDER BY i.instrument_id
                 """;
         List<InstrumentSeed> result = new ArrayList<>();
         try (var connection = DriverManager.getConnection(url, user, password);
@@ -103,7 +105,7 @@ public final class ClusterInstrumentSeedMain {
             statement.setString(1, productLine.name());
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    List<CoreRiskLimitBracket> brackets = loadBrackets(connection, rows.getString("symbol"),
+                    List<CoreRiskLimitBracket> brackets = loadBrackets(connection, rows.getString("instrument_id"),
                             productLine.name());
                     if (brackets.isEmpty()) {
                         brackets = List.of(new CoreRiskLimitBracket(1, 0,
@@ -118,7 +120,7 @@ public final class ClusterInstrumentSeedMain {
                     long strike = rows.getObject("strike_price_units") == null ? 0
                             : rows.getLong("strike_price_units") / rows.getLong("price_tick_units");
                     long settleScale = contractType.isInverse() ? rows.getLong("settle_scale_units") : 1L;
-                    result.add(new InstrumentSeed(new RegisterInstrumentCommand(rows.getString("symbol"), contractType.ordinal(), rows.getString("base_asset"),
+                    result.add(new InstrumentSeed(new RegisterInstrumentCommand(rows.getString("instrument_id"), contractType.ordinal(), rows.getString("base_asset"),
                             rows.getString("quote_asset"), rows.getString("settle_asset"),
                             rows.getLong("notional_multiplier_units"), rows.getLong("price_tick_units"),
                             settleScale, rows.getLong("initial_margin_rate_ppm"),
@@ -134,16 +136,16 @@ public final class ClusterInstrumentSeedMain {
     }
 
     private static List<CoreRiskLimitBracket> loadBrackets(
-            java.sql.Connection connection, String symbol, String productLine) throws Exception {
+            java.sql.Connection connection, String instrumentId, String productLine) throws Exception {
         String sql = """
                 SELECT bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
                        initial_margin_rate_ppm, maintenance_margin_rate_ppm, option_margin_factor_ppm
                   FROM instrument_risk_brackets
-                 WHERE symbol=? AND product_line=? ORDER BY bracket_no
+                 WHERE instrument_id=? AND product_line=? ORDER BY bracket_no
                 """;
         List<CoreRiskLimitBracket> result = new ArrayList<>();
         try (var statement = connection.prepareStatement(sql)) {
-            statement.setString(1, symbol);
+            statement.setInt(1, com.surprising.product.api.InstrumentIds.parse(instrumentId));
             statement.setString(2, productLine);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {

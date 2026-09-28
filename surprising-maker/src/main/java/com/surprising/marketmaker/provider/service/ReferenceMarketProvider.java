@@ -6,9 +6,9 @@ import com.surprising.product.api.ProductLine;
 
 public interface ReferenceMarketProvider {
 
-    ReferenceOrderBookSnapshot snapshot(String symbol, ProductLine productLine, InstrumentResponse instrument);
+    ReferenceOrderBookSnapshot snapshot(String instrumentId, ProductLine productLine, InstrumentResponse instrument);
 
     static ReferenceMarketProvider disabled() {
-        return (symbol, productLine, instrument) -> null;
+        return (instrumentId, productLine, instrument) -> null;
     }
 }

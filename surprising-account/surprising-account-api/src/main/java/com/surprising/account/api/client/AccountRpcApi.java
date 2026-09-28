@@ -66,17 +66,17 @@ public interface AccountRpcApi {
 
     @GetMapping("/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
-                              @RequestParam("symbol") @NotBlank String symbol,
+                              @RequestParam("instrumentId") @NotBlank String instrumentId,
                               @RequestParam(value = "marginMode", required = false) String marginMode,
                               @RequestParam(value = "positionSide", required = false) String positionSide);
 
-    default PositionResponse position(long userId, String symbol, String marginMode) {
-        return position(userId, symbol, marginMode, null);
+    default PositionResponse position(long userId, String instrumentId, String marginMode) {
+        return position(userId, instrumentId, marginMode, null);
     }
 
     @GetMapping("/position-margin")
     PositionMarginResponse positionMargin(@RequestParam("userId") @Positive long userId,
-                                          @RequestParam("symbol") @NotBlank String symbol,
+                                          @RequestParam("instrumentId") @NotBlank String instrumentId,
                                           @RequestParam(value = "marginMode", required = false) String marginMode);
 
     @PostMapping("/position-margin-adjustments")

@@ -22,12 +22,12 @@ class IndexPriceAuditConsumerTest {
         IndexPriceAuditService auditService = mock(IndexPriceAuditService.class);
         IndexPriceProperties properties = new IndexPriceProperties();
         IndexPriceAuditConsumer consumer = new IndexPriceAuditConsumer(new ObjectMapper(), auditService, properties);
-        IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 7,
+        IndexPriceEvent event = new IndexPriceEvent("1", new BigDecimal("100"), 7,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), Instant.now(), List.of());
         String payload = new ObjectMapper().writeValueAsString(PricePublishedEvent.index(event));
 
         consumer.onAudit(List.of(new ConsumerRecord<>(properties.getKafka().getPriceEventsTopic(), 0, 0L,
-                event.symbol(), payload)));
+                event.instrumentId(), payload)));
 
         verify(auditService).saveBatch(eq(List.of(event)));
     }

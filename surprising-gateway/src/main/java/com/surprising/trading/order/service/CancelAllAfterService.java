@@ -51,7 +51,7 @@ public class CancelAllAfterService {
             throw new IllegalArgumentException("countdownMs must be in [0, 120000]");
         }
 
-        String symbolScope = normalizeSymbolScope(request.symbol());
+        String symbolScope = normalizeSymbolScope(request.instrumentId());
         Instant now = Instant.now();
         boolean active = request.countdownMs() > 0;
         Instant triggerAt = active ? now.plusMillis(request.countdownMs()) : null;
@@ -71,12 +71,12 @@ public class CancelAllAfterService {
     }
 
     void cancelDueTimer(CancelAllAfterTimer timer) {
-        String symbol = publicSymbol(timer.symbolScope());
+        String instrumentId = publicSymbol(timer.symbolScope());
         try {
             OrderBatchResponse orderResponse = orderService.cancelOpenOrders(
-                    new CancelOpenOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
+                    new CancelOpenOrdersRequest(timer.userId(), instrumentId, CANCEL_LIMIT));
             TriggerOrderBatchResponse triggerResponse = triggerOrderService.cancelOpenOrders(
-                    new CancelOpenTriggerOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
+                    new CancelOpenTriggerOrdersRequest(timer.userId(), instrumentId, CANCEL_LIMIT));
             timerStore.complete(timer, orderResponse.completed(), triggerResponse.completed(), Instant.now());
         } catch (RuntimeException ex) {
             timerStore.retry(timer, Instant.now());
@@ -97,13 +97,13 @@ public class CancelAllAfterService {
                 timer.canceledTriggerOrders());
     }
 
-    private static String normalizeSymbolScope(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
+    private static String normalizeSymbolScope(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
             return "*";
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("^[A-Z0-9][A-Z0-9_-]{1,63}$")) {
-            throw new IllegalArgumentException("symbol format is invalid");
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("instrumentId format is invalid");
         }
         return normalized;
     }

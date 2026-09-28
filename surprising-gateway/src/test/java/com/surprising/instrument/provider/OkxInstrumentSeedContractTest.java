@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class OkxInstrumentSeedContractTest {
 
-    private static final String MATRIX_MARKER = "-- BTC-USDT-SWAP three-source public WebSocket matrix";
+    private static final String MATRIX_MARKER = "-- BTC-USDT three-source public WebSocket matrix";
 
     @Test
     void linearPerpetualBtcSwapHasCanonicalThreeSourcePublicWebSocketMatrix() throws IOException {
@@ -20,7 +20,7 @@ class OkxInstrumentSeedContractTest {
         String matrix = sql.substring(matrixStart, sql.indexOf("-- OKX catalog counts", matrixStart));
         assertThat(matrix)
                 .contains("UPDATE instruments SET min_valid_index_sources = 3")
-                .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT-SWAP'")
+                .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT'")
                 .contains("'OKX', TRUE", "'BINANCE', TRUE", "'BYBIT', TRUE")
                 .contains("'wss://ws.okx.com:8443/ws/v5/public'")
                 .contains("'wss://stream.binance.com:443/ws'")
@@ -40,7 +40,7 @@ class OkxInstrumentSeedContractTest {
                 UPDATE surprising_okx_instruments
                    SET price_tick_units = 10000000
                  WHERE product_line = 'LINEAR_PERPETUAL'
-                   AND symbol = 'BTC-USDT-SWAP';
+                   AND symbol = 'BTC-USDT';
                 """);
     }
 

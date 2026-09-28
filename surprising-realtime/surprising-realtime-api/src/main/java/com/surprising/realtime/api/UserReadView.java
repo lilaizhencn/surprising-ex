@@ -15,7 +15,7 @@ public record UserReadView(
         long exportSequence,
         List<PositionRisk> positionRisks) {
     public record PositionRisk(
-            String symbol,
+            String instrumentId,
             CorePositionSide positionSide,
             String priceSequence,
             long equityUnits,
@@ -33,7 +33,7 @@ public record UserReadView(
                     maintenance = b.getLong(),
                     ratio = b.getLong();
             return new PositionRisk(
-                    frame.symbol(),
+                    frame.instrumentId(),
                     CorePositionSide.values()[b.get()],
                     Long.toString(price),
                     equity,
@@ -69,10 +69,10 @@ public record UserReadView(
                     user.balances().forEach(v -> balances.put(v.asset(), v));
                     user.positions().stream()
                             .filter(v -> v.signedQuantitySteps() != 0)
-                            .forEach(v -> positions.put(v.symbol() + ":" + v.positionSide(), v));
+                            .forEach(v -> positions.put(v.instrumentId() + ":" + v.positionSide(), v));
                     user.reservations().forEach(v -> reservations.put(v.orderId(), v));
                     user.leverages()
-                            .forEach(v -> leverages.put(v.symbol() + ":" + v.marginMode(), v));
+                            .forEach(v -> leverages.put(v.instrumentId() + ":" + v.marginMode(), v));
                 }
                 case METADATA -> {
                     var v = CoreStateQueryCodec.decodeUserState(f.payload());
@@ -97,7 +97,7 @@ public record UserReadView(
                                 .positions()
                                 .forEach(
                                         v -> {
-                                            String key = v.symbol() + ":" + v.positionSide();
+                                            String key = v.instrumentId() + ":" + v.positionSide();
                                             if (v.signedQuantitySteps() == 0) positions.remove(key);
                                             else positions.put(key, v);
                                         });
@@ -115,7 +115,7 @@ public record UserReadView(
                 case LEVERAGE ->
                         CoreStateQueryCodec.decodeUserState(f.payload())
                                 .leverages()
-                                .forEach(v -> leverages.put(v.symbol() + ":" + v.marginMode(), v));
+                                .forEach(v -> leverages.put(v.instrumentId() + ":" + v.marginMode(), v));
                 case ORDER -> {
                     var v = CoreStateQueryCodec.decodeOrderState(f.payload());
                     if (v.status().equals("OPEN")) orders.put(v.orderId(), v);
@@ -156,7 +156,7 @@ public record UserReadView(
                 List.copyOf(triggers.values()),
                 source.exportSequence(),
                 risks.values().stream()
-                        .filter(r -> positions.containsKey(r.symbol() + ":" + r.positionSide()))
+                        .filter(r -> positions.containsKey(r.instrumentId() + ":" + r.positionSide()))
                         .toList());
     }
 }

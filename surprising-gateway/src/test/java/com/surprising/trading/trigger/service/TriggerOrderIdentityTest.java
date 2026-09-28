@@ -88,7 +88,7 @@ class TriggerOrderIdentityTest {
     }
 
     private static PlaceTriggerOrderRequest leg(String client, TriggerOrderType type, long triggerPrice) {
-        return new PlaceTriggerOrderRequest(1001L, client, "pair", "BTC-USDT", OrderSide.SELL,
+        return new PlaceTriggerOrderRequest(1001L, client, "pair", "1", OrderSide.SELL,
                 type, triggerPrice, OrderType.MARKET, TimeInForce.IOC, 0L, 10L,
                 MarginMode.CROSS, PositionSide.NET, null);
     }
@@ -100,7 +100,7 @@ class TriggerOrderIdentityTest {
     }
 
     private static PlaceTriggerOrderRequest request(String clientId) {
-        return new PlaceTriggerOrderRequest(1001L, clientId, null, "BTC-USDT", OrderSide.SELL,
+        return new PlaceTriggerOrderRequest(1001L, clientId, null, "1", OrderSide.SELL,
                 TriggerOrderType.TAKE_PROFIT, 70_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L,
                 MarginMode.CROSS, PositionSide.NET, null);
     }

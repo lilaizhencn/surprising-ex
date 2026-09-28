@@ -120,7 +120,7 @@ class TradingCoreOwnerTest {
             epoch.setAccessible(true);
             long before = epoch.getLong(runtime);
             for (int revision = 1; revision <= 3; revision++) {
-                var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "BTC-USDT", 0,
+                var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                         CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                         false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
                         1, 1, 0, 1, revision, revision, List.of(), 0, 0, 0);
@@ -133,7 +133,7 @@ class TradingCoreOwnerTest {
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
             long revisionBeforeFailure = runtime.revision();
             runtime.setMetadata(ProductLine.SPOT, Long.MAX_VALUE);
-            var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "BTC-USDT", 0,
+            var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                     CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                     false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
                     1, 1, 0, 1, 4, 4, List.of(), 0, 0, 0);
@@ -172,7 +172,7 @@ class TradingCoreOwnerTest {
                     command(CoreMessageType.VERIFY_STATE_HASH, 2, 1001, new byte[0]));
             finishCommands(service);
             var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
-                    com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 1001, "BTC-USDT",
+                    com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 1001, "1",
                     1000, 2000, 0, 0, 0, 1000);
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
@@ -180,7 +180,7 @@ class TradingCoreOwnerTest {
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
             assertThat(service.state().probeValue()).isEqualTo(3);
             assertThat(runtime.cancelAllAfterTimer(new com.surprising.aeron.service.state.model.CoreCancelAllAfterKey(
-                    1001, "BTC-USDT")).revision()).isEqualTo(1);
+                    1001, "1")).revision()).isEqualTo(1);
             assertThat(service.state().appliedCommandCount()).isEqualTo(3);
         } finally {
             service.onTerminate(null);
@@ -206,7 +206,7 @@ class TradingCoreOwnerTest {
             var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.BOOK_STATE_QUERY,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 0, 1000, 9),
                     com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookQuery(
-                            new com.surprising.aeron.protocol.CoreOrderBookQuery("BTC-USDT", 10)));
+                            new com.surprising.aeron.protocol.CoreOrderBookQuery("1", 10)));
             byte[] encoded = CoreMessageCodec.encode(query);
             service.onSessionMessage(clientSession(responses), 1000, new UnsafeBuffer(encoded), 0,
                     encoded.length, aeronHeader());
@@ -297,7 +297,7 @@ class TradingCoreOwnerTest {
                     com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST,
                     1001, 0, 0, 0, 91, "", "", new byte[0]))).isTrue();
             var place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "1",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "progress")));
             byte[] encoded = CoreMessageCodec.encode(place);
@@ -355,7 +355,7 @@ class TradingCoreOwnerTest {
             replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",10000))));
             replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20000,"BTC-USDT",
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20000,"1",
                     CoreOrderSide.BUY,1000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"overflow-order"))));
             replayWithoutSession(service,command(CoreMessageType.CANCEL_ORDER,3,1001,
@@ -385,7 +385,7 @@ class TradingCoreOwnerTest {
                 assertThat(view.balances().getFirst().availableUnits()).isEqualTo(10_000);
             });
             replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20_000,"BTC-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20_000,"1",
                     CoreOrderSide.BUY,1_000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"push-order"))));
             assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
@@ -426,7 +426,7 @@ class TradingCoreOwnerTest {
                 for (int cycle = 0; cycle < 256; cycle++) {
                     long orderId = 20_000 + cycle;
                     replayWithoutSession(service, command(CoreMessageType.PLACE_ORDER, 2 + cycle * 2, 1001,
-                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT",
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1",
                                     CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                                     false, "replay-" + orderId))));
@@ -468,7 +468,7 @@ class TradingCoreOwnerTest {
             var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.BOOK_STATE_QUERY,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 0, 1000, 9),
                     com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookQuery(
-                            new com.surprising.aeron.protocol.CoreOrderBookQuery("BTC-USDT", 10)));
+                            new com.surprising.aeron.protocol.CoreOrderBookQuery("1", 10)));
             replayWithoutSession(service, query);
             assertThat(service.state().querySequence(query.header().commandId())).isZero();
             assertThat(service.doBackgroundWork(0)).isZero();
@@ -542,7 +542,7 @@ class TradingCoreOwnerTest {
             onSessionMessage(service, responses, metrics);
             assertThat(responses).hasSize(1);
             CoreMessage later = command(CoreMessageType.PLACE_ORDER, 3, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(18_002, "BTC-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(18_002, "1",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "later")));
             onSessionMessage(service, responses, later);
@@ -597,7 +597,7 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT",
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "1",
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                             false, "same-callback")));
@@ -628,7 +628,7 @@ class TradingCoreOwnerTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000012"))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
             assertThat(state.pendingMatchingCount()).isZero();
@@ -897,7 +897,7 @@ class TradingCoreOwnerTest {
                 .status()).isEqualTo(ResponseStatus.APPLIED);
         UUID commandId = UUID.randomUUID();
         CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "service-" + orderId)), commandId);
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "service-" + orderId)), commandId);
         assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         return state.matchingSequence(commandId);
     }
@@ -948,7 +948,7 @@ class TradingCoreOwnerTest {
     }
 
     private static CoreMessage timerInstrument() {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
@@ -959,7 +959,7 @@ class TradingCoreOwnerTest {
 
 
     private static CoreMessage instrument() {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,

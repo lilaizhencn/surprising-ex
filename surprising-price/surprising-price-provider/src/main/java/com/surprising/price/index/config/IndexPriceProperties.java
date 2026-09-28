@@ -36,10 +36,10 @@ public class IndexPriceProperties {
     private Coordination coordination = new Coordination();
     @Setter
     private Audit audit = new Audit();
-    private List<String> requiredSymbols = List.of();
+    private List<String> requiredInstrumentIds = List.of();
 
-    public void setRequiredSymbols(List<String> requiredSymbols) {
-        this.requiredSymbols = requiredSymbols == null ? List.of() : requiredSymbols.stream()
+    public void setRequiredInstrumentIds(List<String> requiredInstrumentIds) {
+        this.requiredInstrumentIds = requiredInstrumentIds == null ? List.of() : requiredInstrumentIds.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .distinct()
@@ -183,7 +183,7 @@ public class IndexPriceProperties {
     @Getter
     @Setter
     public static class SymbolConfig {
-        private String symbol;
+        private String instrumentId;
         private int minValidSources = 0;
         private List<SourceConfig> sources = new ArrayList<>();
 

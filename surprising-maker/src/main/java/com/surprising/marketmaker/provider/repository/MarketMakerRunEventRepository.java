@@ -13,14 +13,14 @@ public interface MarketMakerRunEventRepository {
 
     List<MarketMakerRunEventRecord> find(ProductLine productLine,
                                          String strategyId,
-                                         String symbol,
+                                         String instrumentId,
                                          Long accountId,
                                          String eventType,
                                          int limit);
 
     CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
                                                    String strategyId,
-                                                   String symbol,
+                                                   String instrumentId,
                                                    Long accountId,
                                                    String eventType,
                                                    int limit,
@@ -30,7 +30,7 @@ public interface MarketMakerRunEventRepository {
     record MarketMakerRunEventWrite(
             String strategyId,
             ProductLine productLine,
-            String symbol,
+            String instrumentId,
             Long accountId,
             String nodeId,
             long cycleSequence,
@@ -48,7 +48,7 @@ public interface MarketMakerRunEventRepository {
             long eventId,
             String strategyId,
             ProductLine productLine,
-            String symbol,
+            String instrumentId,
             Long accountId,
             String nodeId,
             long cycleSequence,

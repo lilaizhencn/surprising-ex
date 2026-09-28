@@ -109,7 +109,7 @@ final class LinearPerpetualMixedWorkload {
             throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
         }
         if (activeUsers < scaleConfig.activeSymbols()) {
-            throw new IllegalArgumentException("activeUsers must cover every active symbol");
+            throw new IllegalArgumentException("activeUsers must cover every active instrumentId");
         }
         List<String> listedSymbols = symbols(scaleConfig.listedSymbols());
         List<String> symbols = List.copyOf(listedSymbols.subList(0, scaleConfig.activeSymbols()));
@@ -118,15 +118,15 @@ final class LinearPerpetualMixedWorkload {
                 ? 0 : symbolCount - 1;
         Harness harness = Harness.create(accountLanes);
         try {
-            for (String symbol : listedSymbols) {
+            for (String instrumentId : listedSymbols) {
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument(symbol))));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId))));
             }
-            for (String symbol : listedSymbols) {
+            for (String instrumentId : listedSymbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand(symbol, ENTRY_PRICE, 1,
+                                new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, 1,
                                         harness.nextCommandTimestamp()))));
             }
 
@@ -182,9 +182,9 @@ final class LinearPerpetualMixedWorkload {
                 harness.adjust(userId, SAFE_BALANCE);
                 int positions = positionCount(index, scaleConfig);
                 for (int position = 0; position < positions; position++) {
-                    String symbol = symbols.get(positionSymbolIndex(index, position, scaleConfig));
+                    String instrumentId = symbols.get(positionSymbolIndex(index, position, scaleConfig));
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                            order(harness.nextOrderId(), symbol, CoreOrderSide.BUY, ENTRY_PRICE,
+                            order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY, ENTRY_PRICE,
                                     positionQuantity(index + position), CoreTimeInForce.IOC)));
                 }
             }
@@ -200,9 +200,9 @@ final class LinearPerpetualMixedWorkload {
                 int openOrders = openOrderCount(index, scaleConfig);
                 int positions = positionCount(index, scaleConfig);
                 for (int open = 0; open < openOrders; open++) {
-                    String symbol = symbols.get(positionSymbolIndex(index, open % positions, scaleConfig));
+                    String instrumentId = symbols.get(positionSymbolIndex(index, open % positions, scaleConfig));
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
-                            order(harness.nextOrderId(), symbol, CoreOrderSide.BUY, 90 - open % 10,
+                            order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY, 90 - open % 10,
                                     1, CoreTimeInForce.GTC)));
                 }
             }
@@ -308,7 +308,7 @@ final class LinearPerpetualMixedWorkload {
                 harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
-                    // A funding cut owns this symbol until its bounded pages finish. Do not
+                    // A funding cut owns this instrumentId until its bounded pages finish. Do not
                     // count rejected trades against that cut as successful mixed workload.
                     for (int index : tradingSymbols) {
                         while (fundingCursors[index] != 0) {
@@ -408,7 +408,7 @@ final class LinearPerpetualMixedWorkload {
                 var action = work.actions().getFirst();
                 liquidationId = action.liquidationId();
                 var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.triggerPriceSequence(),
+                        action.instrumentId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId());
                 var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
                         ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0);
@@ -553,15 +553,15 @@ final class LinearPerpetualMixedWorkload {
                 }
                 for (int index = 0; index < template.symbols().size(); index++) {
                     if (!fundingTouched[index]) continue;
-                    String symbol = template.symbols().get(index);
-                    var progress = state.treasuryState().fundingProgress(symbol);
+                    String instrumentId = template.symbols().get(index);
+                    var progress = state.treasuryState().fundingProgress(instrumentId);
                     long expectedSettlementId = fundingSettlementIds[index];
-                    boolean fundingAdvanced = state.treasuryState().fundingSettlement(symbol)
+                    boolean fundingAdvanced = state.treasuryState().fundingSettlement(instrumentId)
                             == expectedSettlementId
                             || !completeHeavyCycles && progress != null
                             && progress.settlementId() == expectedSettlementId;
                     if (!fundingAdvanced) {
-                        throw new IllegalStateException("funding settlement missing for " + symbol);
+                        throw new IllegalStateException("funding settlement missing for " + instrumentId);
                     }
                 }
                 if (triggerExecutions <= 0) {
@@ -701,7 +701,7 @@ final class LinearPerpetualMixedWorkload {
     private static void exerciseLifecycle(Harness harness, Template template, int index,
                                           boolean completeHeavyCycles, long settlementId,
                                           long[] markPriceSequences) {
-        String symbol = template.symbols().get(index);
+        String instrumentId = template.symbols().get(index);
         long fundingRate = (index & 1) == 0 ? 100_000 : -100_000;
         long fundingCursor = 0;
         boolean fundingComplete;
@@ -709,7 +709,7 @@ final class LinearPerpetualMixedWorkload {
             var fundingResponse = harness.execute(harness.command(
                     CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            settlementId, symbol, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
+                            settlementId, instrumentId, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
             var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
             fundingCursor = fundingProgress.nextCursorUserId();
             fundingComplete = fundingProgress.complete();
@@ -717,10 +717,10 @@ final class LinearPerpetualMixedWorkload {
         boolean liquidationSymbol = !template.scaleConfig().boundedSymbolWork()
                 && index == template.liquidationSymbolIndex();
         long markPrice = liquidationSymbol ? LIQUIDATION_MARK : SAFE_MARK;
-        long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
+        long priceSequence = nextMarkPriceSequence(harness, instrumentId, index, markPriceSequences);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(symbol, markPrice, priceSequence,
+                        new ApplyMarkPriceCommand(instrumentId, markPrice, priceSequence,
                                 harness.nextCommandTimestamp()))));
         while (completeHeavyCycles && !harness.state().runtimeRiskScanComplete()) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
@@ -732,21 +732,21 @@ final class LinearPerpetualMixedWorkload {
     private static void exerciseLifecycleBounded(Harness harness, Template template, int index,
                                                  long[] settlementIds, long[] fundingCursors,
                                                  long[] markPriceSequences) {
-        String symbol = template.symbols().get(index);
+        String instrumentId = template.symbols().get(index);
         long fundingRate = (index & 1) == 0 ? 100_000 : -100_000;
-        if (harness.state().runtimeFundingSettlement(symbol) == settlementIds[index]) {
+        if (harness.state().runtimeFundingSettlement(instrumentId) == settlementIds[index]) {
             settlementIds[index] = Math.addExact(settlementIds[index], template.symbols().size());
         }
         var fundingResponse = harness.execute(harness.command(
                 CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementIds[index], symbol, fundingRate,
+                        settlementIds[index], instrumentId, fundingRate,
                         fundingCursors[index], HEAVY_WORK_BATCH_SIZE))));
         var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
         fundingCursors[index] = fundingProgress.nextCursorUserId();
         if (fundingProgress.complete()) fundingCursors[index] = 0;
 
-        if (!harness.state().runtimeRiskScanComplete(symbol)) {
+        if (!harness.state().runtimeRiskScanComplete(instrumentId)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(
                             new ContinueRiskScanCommand(HEAVY_WORK_BATCH_SIZE))));
@@ -755,26 +755,26 @@ final class LinearPerpetualMixedWorkload {
         boolean liquidationSymbol = !template.scaleConfig().boundedSymbolWork()
                 && index == template.liquidationSymbolIndex();
         long markPrice = liquidationSymbol ? LIQUIDATION_MARK : SAFE_MARK;
-        long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
+        long priceSequence = nextMarkPriceSequence(harness, instrumentId, index, markPriceSequences);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, markPrice, priceSequence,
+                        instrumentId, markPrice, priceSequence,
                         harness.nextCommandTimestamp()))));
     }
 
     private static void executeTriggerLifecycle(Harness harness, Template template, int index) {
-        String symbol = template.symbols().get(index);
+        String instrumentId = template.symbols().get(index);
         long taker = template.hftTakers().get(index);
         long triggerId = harness.nextOrderId();
         boolean liquidationSymbol = index == template.liquidationSymbolIndex();
-        var mark = harness.state().runtimeMarkPrice(symbol);
-        if (mark == null) throw new IllegalStateException("mixed workload mark price is missing: " + symbol);
+        var mark = harness.state().runtimeMarkPrice(instrumentId);
+        if (mark == null) throw new IllegalStateException("mixed workload mark price is missing: " + instrumentId);
         CoreTriggerOrderType triggerType = liquidationSymbol
                 ? CoreTriggerOrderType.STOP_LOSS : CoreTriggerOrderType.TAKE_PROFIT;
         CoreTriggerCondition triggerCondition = liquidationSymbol
                 ? CoreTriggerCondition.LESS_OR_EQUAL : CoreTriggerCondition.GREATER_OR_EQUAL;
         CoreTriggerOrderStateView trigger = new CoreTriggerOrderStateView(triggerId,
-                ProductLine.LINEAR_PERPETUAL, taker, "mixed-trigger-" + triggerId, "", symbol,
+                ProductLine.LINEAR_PERPETUAL, taker, "mixed-trigger-" + triggerId, "", instrumentId,
                 CoreOrderSide.SELL, triggerType, triggerCondition, mark.markPriceTicks(),
                 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
@@ -800,10 +800,10 @@ final class LinearPerpetualMixedWorkload {
         return priceSequences;
     }
 
-    private static long nextMarkPriceSequence(Harness harness, String symbol, int index,
+    private static long nextMarkPriceSequence(Harness harness, String instrumentId, int index,
                                               long[] markPriceSequences) {
-        var current = harness.state().runtimeMarkPrice(symbol);
-        if (current == null) throw new IllegalStateException("mixed workload mark price is missing: " + symbol);
+        var current = harness.state().runtimeMarkPrice(instrumentId);
+        if (current == null) throw new IllegalStateException("mixed workload mark price is missing: " + instrumentId);
         long observed = Math.max(markPriceSequences[index], current.priceSequence());
         long next = Math.incrementExact(observed);
         markPriceSequences[index] = next;
@@ -934,27 +934,27 @@ final class LinearPerpetualMixedWorkload {
 
     private static List<String> symbols(int count) {
         List<String> symbols = new ArrayList<>(count);
-        for (int index = 0; index < count; index++) symbols.add("JMH-MIX-" + index + "-USDT");
+        for (int index = 0; index < count; index++) symbols.add(Integer.toString(10000 + index));
         return List.copyOf(symbols);
     }
 
-    private static byte[] order(long orderId, String symbol, CoreOrderSide side, long price, long quantity,
+    private static byte[] order(long orderId, String instrumentId, CoreOrderSide side, long price, long quantity,
                                 CoreTimeInForce timeInForce) {
         return TradingCommandCodec.encodePlaceOrder(
-                orderCommand(orderId, symbol, side, price, quantity, timeInForce));
+                orderCommand(orderId, instrumentId, side, price, quantity, timeInForce));
     }
 
-    private static PlaceOrderCommand orderCommand(long orderId, String symbol, CoreOrderSide side, long price,
+    private static PlaceOrderCommand orderCommand(long orderId, String instrumentId, CoreOrderSide side, long price,
                                                    long quantity, CoreTimeInForce timeInForce) {
-        return new PlaceOrderCommand(orderId, symbol, side, price,
+        return new PlaceOrderCommand(orderId, instrumentId, side, price,
                 quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 timeInForce, false, "mixed-" + orderId);
     }
 
-    private static RegisterInstrumentCommand instrument(String symbol) {
-        int symbolIndex = Integer.parseInt(symbol.substring("JMH-MIX-".length(), symbol.indexOf("-USDT")));
+    private static RegisterInstrumentCommand instrument(String instrumentId) {
+        int symbolIndex = Integer.parseInt(instrumentId) - 10000;
         String baseAsset = "MIX" + symbolIndex;
-        return new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
                 baseAsset, SETTLE_ASSET, SETTLE_ASSET,
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }

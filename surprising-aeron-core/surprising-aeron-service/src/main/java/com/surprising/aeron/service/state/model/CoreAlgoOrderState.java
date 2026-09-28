@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import java.util.List;
 
 public record CoreAlgoOrderState(
-        long algoOrderId, long userId, String clientAlgoOrderId, String symbol, int algoTypeCode,
+        long algoOrderId, long userId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
@@ -20,7 +20,7 @@ public record CoreAlgoOrderState(
 
     public CoreAlgoOrderState {
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         rejectReason = rejectReason == null ? "" : rejectReason;
         traceId = traceId == null ? "" : traceId;
         childOrderIds = List.copyOf(childOrderIds);
@@ -34,7 +34,7 @@ public record CoreAlgoOrderState(
     }
 
     public static CoreAlgoOrderState from(CoreAlgoOrderView value) {
-        return new CoreAlgoOrderState(value.algoOrderId(), value.userId(), value.clientAlgoOrderId(), value.symbol(),
+        return new CoreAlgoOrderState(value.algoOrderId(), value.userId(), value.clientAlgoOrderId(), value.instrumentId(),
                 value.algoTypeCode(), value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
                 value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(), value.reduceOnly(),
                 value.postOnly(), value.timeInForce(), value.statusCode(), value.currentOrderId(), value.rejectReason(),

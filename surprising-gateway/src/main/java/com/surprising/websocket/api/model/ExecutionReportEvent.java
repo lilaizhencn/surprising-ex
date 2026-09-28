@@ -5,7 +5,7 @@ import java.time.Instant;
 public record ExecutionReportEvent(
         String reportType,
         long userId,
-        String symbol,
+        String instrumentId,
         Long orderId,
         Long commandId,
         Long tradeId,

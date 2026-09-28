@@ -21,10 +21,10 @@ public final class DecodedMatchingCommand {
     private String routedSymbol;
     private int routedShard;
 
-    public int matcherShard(com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter adapter, String symbol) {
-        if (!symbol.equals(routedSymbol)) {
-            routedShard = adapter.matcherShardId(symbol);
-            routedSymbol = symbol;
+    public int matcherShard(com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter adapter, String instrumentId) {
+        if (!instrumentId.equals(routedSymbol)) {
+            routedShard = adapter.matcherShardId(instrumentId);
+            routedSymbol = instrumentId;
         }
         return routedShard;
     }

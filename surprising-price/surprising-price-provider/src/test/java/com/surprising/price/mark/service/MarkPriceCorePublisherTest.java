@@ -36,9 +36,9 @@ class MarkPriceCorePublisherTest {
         };
 
         try (MarkPriceCorePublisher publisher = new MarkPriceCorePublisher(transport)) {
-            publisher.publish(event("BTC-USDT", 1));
+            publisher.publish(event("1", 1));
             assertThat(firstAttempt.await(1, TimeUnit.SECONDS)).isTrue();
-            publisher.publish(event("BTC-USDT", 2));
+            publisher.publish(event("1", 2));
             assertThat(secondAttempt.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(sent.get().sequence()).isEqualTo(2L);
             assertThat(publisher.pendingCount()).isZero();
@@ -56,7 +56,7 @@ class MarkPriceCorePublisherTest {
         };
 
         try (MarkPriceCorePublisher publisher = new MarkPriceCorePublisher(transport)) {
-            publisher.publish(event("BTC-USDT", 1));
+            publisher.publish(event("1", 1));
             assertThat(firstAttempt.await(1, TimeUnit.SECONDS)).isTrue();
             Thread.sleep(100);
             assertThat(attempts).hasValue(1);
@@ -84,9 +84,9 @@ class MarkPriceCorePublisherTest {
         };
 
         try (MarkPriceCorePublisher publisher = new MarkPriceCorePublisher(transport)) {
-            publisher.publish(event("BTC-USDT", 2));
+            publisher.publish(event("1", 2));
             assertThat(sendStarted.await(1, TimeUnit.SECONDS)).isTrue();
-            publisher.publish(event("BTC-USDT", 1));
+            publisher.publish(event("1", 1));
             releaseSend.countDown();
             assertThat(sendFinished.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(sent.get().sequence()).isEqualTo(2L);
@@ -112,7 +112,7 @@ class MarkPriceCorePublisherTest {
 
         MarkPriceCorePublisher publisher = new MarkPriceCorePublisher(transport);
         publisher.close();
-        publisher.publish(event("BTC-USDT", 1));
+        publisher.publish(event("1", 1));
 
         assertThat(transportClosed).isTrue();
         assertThat(attempts).hasValue(0);
@@ -144,12 +144,12 @@ class MarkPriceCorePublisherTest {
         assertThatThrownBy(() -> MarkPriceCorePublisher.toCommand(optionEvent(null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("index and forward prices are required");
-        assertThat(MarkPriceCorePublisher.toCommand(event("BTC-USDT", 1)).indexPriceTicks()).isZero();
+        assertThat(MarkPriceCorePublisher.toCommand(event("1", 1)).indexPriceTicks()).isZero();
     }
 
-    private static MarkPriceEvent event(String symbol, long sequence) {
+    private static MarkPriceEvent event(String instrumentId, long sequence) {
         Instant now = Instant.now();
-        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, symbol, 1L, 100_000_000L, 100L,
+        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, instrumentId, 1L, 100_000_000L, 100L,
                 BigDecimal.valueOf(100), BigDecimal.valueOf(100), null, null, null, null, null, null, null,
                 null, 0L, null, 0L, null, null, sequence, PriceStatus.HEALTHY, now, now);
     }

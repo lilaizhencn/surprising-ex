@@ -33,14 +33,14 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
     public void record(MarketMakerRunEventWrite event) {
         jdbcTemplate.update("""
                 INSERT INTO market_maker_strategy_run_events (
-                    product_line, strategy_id, symbol, account_id, node_id, cycle_sequence, event_type,
+                    product_line, strategy_id, instrument_id, account_id, node_id, cycle_sequence, event_type,
                     submitted_orders, canceled_orders, rejected_orders, skipped_reason,
                     error_message, trace_id, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 event.productLine().name(),
                 event.strategyId(),
-                event.symbol(),
+                event.instrumentId(),
                 event.accountId(),
                 event.nodeId(),
                 event.cycleSequence(),
@@ -57,19 +57,19 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
     @Override
     public List<MarketMakerRunEventRecord> find(ProductLine productLine,
                                                 String strategyId,
-                                                String symbol,
+                                                String instrumentId,
                                                 Long accountId,
                                                 String eventType,
                                                 int limit) {
         int safeLimit = AdminCursorPage.limit(limit, MAX_RUN_EVENT_LIMIT);
         return jdbcTemplate.query("""
-                SELECT event_id, product_line, strategy_id, symbol, account_id, node_id, cycle_sequence,
+                SELECT event_id, product_line, strategy_id, instrument_id, account_id, node_id, cycle_sequence,
                        event_type, submitted_orders, canceled_orders, rejected_orders,
                        skipped_reason, error_message, trace_id, created_at
                   FROM market_maker_strategy_run_events
                  WHERE (CAST(? AS text) IS NULL OR product_line = ?)
                    AND (CAST(? AS text) IS NULL OR strategy_id = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                    AND (CAST(? AS text) IS NULL OR account_id = ?)
                    AND (CAST(? AS text) IS NULL OR event_type = ?)
                  ORDER BY created_at DESC, event_id DESC
@@ -78,7 +78,7 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
                 productLine == null ? null : productLine.name(),
                 productLine == null ? null : productLine.name(),
                 strategyId, strategyId,
-                symbol, symbol,
+                instrumentId, instrumentId,
                 accountId, accountId,
                 eventType, eventType,
                 safeLimit);
@@ -87,7 +87,7 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
     @Override
     public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
                                                           String strategyId,
-                                                          String symbol,
+                                                          String instrumentId,
                                                           Long accountId,
                                                           String eventType,
                                                           int limit,
@@ -102,20 +102,20 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
         args.add(productLine == null ? null : productLine.name());
         args.add(strategyId);
         args.add(strategyId);
-        args.add(symbol);
-        args.add(symbol);
+        args.add(instrumentId);
+        args.add(instrumentId);
         args.add(accountId);
         args.add(accountId);
         args.add(eventType);
         args.add(eventType);
         String sql = """
-                SELECT event_id, product_line, strategy_id, symbol, account_id, node_id, cycle_sequence,
+                SELECT event_id, product_line, strategy_id, instrument_id, account_id, node_id, cycle_sequence,
                        event_type, submitted_orders, canceled_orders, rejected_orders,
                        skipped_reason, error_message, trace_id, created_at
                   FROM market_maker_strategy_run_events
                  WHERE (CAST(? AS text) IS NULL OR product_line = ?)
                    AND (CAST(? AS text) IS NULL OR strategy_id = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                    AND (CAST(? AS text) IS NULL OR account_id = ?)
                    AND (CAST(? AS text) IS NULL OR event_type = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
@@ -139,7 +139,7 @@ public class JdbcMarketMakerRunEventRepository implements MarketMakerRunEventRep
                 rs.getLong("event_id"),
                 rs.getString("strategy_id"),
                 ProductLine.valueOf(rs.getString("product_line")),
-                rs.getString("symbol"),
+                rs.getString("instrument_id"),
                 nullableLong(rs, "account_id"),
                 rs.getString("node_id"),
                 rs.getLong("cycle_sequence"),

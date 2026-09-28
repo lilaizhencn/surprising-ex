@@ -22,7 +22,7 @@ record LinearPerpetualScaleConfig(
         }
         if (maxPositionsPerUser < 1
                 || maxPositionsPerUser > Math.min(activeSymbols, MAX_POSITIONS_PER_USER)) {
-            throw new IllegalArgumentException("maxPositionsPerUser exceeds the active symbol limit");
+            throw new IllegalArgumentException("maxPositionsPerUser exceeds the active instrumentId limit");
         }
         if (maxOpenOrdersPerUser < 0 || maxOpenOrdersPerUser > MAX_OPEN_ORDERS_PER_USER) {
             throw new IllegalArgumentException("maxOpenOrdersPerUser must be in [0,100]");

@@ -5,7 +5,7 @@ import com.surprising.trading.api.model.PositionSide;
 public record AdlQueuePositionResponse(
         long userId,
         String asset,
-        String symbol,
+        String instrumentId,
         PositionSide positionSide,
         AdlSide side,
         long signedQuantitySteps,
@@ -24,7 +24,7 @@ public record AdlQueuePositionResponse(
 
     public AdlQueuePositionResponse(long userId,
                                     String asset,
-                                    String symbol,
+                                    String instrumentId,
                                     AdlSide side,
                                     long signedQuantitySteps,
                                     long entryPriceTicks,
@@ -35,7 +35,7 @@ public record AdlQueuePositionResponse(
                                     long profitRatePpm,
                                     long effectiveLeveragePpm,
                                     long priorityScorePpm) {
-        this(userId, asset, symbol, PositionSide.NET, side, signedQuantitySteps, entryPriceTicks, markPriceTicks,
+        this(userId, asset, instrumentId, PositionSide.NET, side, signedQuantitySteps, entryPriceTicks, markPriceTicks,
                 notionalUnits, unrealizedProfitUnits, marginUnits, profitRatePpm, effectiveLeveragePpm,
                 priorityScorePpm);
     }

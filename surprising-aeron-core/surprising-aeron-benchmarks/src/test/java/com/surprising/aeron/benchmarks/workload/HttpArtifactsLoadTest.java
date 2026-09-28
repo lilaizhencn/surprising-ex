@@ -110,7 +110,7 @@ class HttpArtifactsLoadTest {
         traffic.put(WorkloadOperation.PLACE, 100);
         return new HttpWorkloadConfig(baseUri, output, output.getFileName().toString(), 1L, rate, duration,
                 maxInFlight, Duration.ofSeconds(2), Duration.ZERO, 2, new long[] {1001L},
-                new String[] {"BTC-USDT"}, TrafficSkew.UNIFORM, Map.copyOf(traffic));
+                new String[] {"1"}, TrafficSkew.UNIFORM, Map.copyOf(traffic));
     }
 
     private static long correctedCount(String histogram) {

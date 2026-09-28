@@ -8,7 +8,7 @@ public interface CoreOrderStateSource {
     long orderId();
     ProductLine productLine();
     long userId();
-    String symbol();
+    String instrumentId();
     CoreOrderSide side();
     long priceTicks();
     long quantitySteps();

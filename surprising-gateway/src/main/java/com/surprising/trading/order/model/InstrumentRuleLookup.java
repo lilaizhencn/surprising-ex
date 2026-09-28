@@ -4,5 +4,5 @@ import java.util.Optional;
 
 public interface InstrumentRuleLookup {
 
-    Optional<InstrumentRule> currentRule(String symbol);
+    Optional<InstrumentRule> currentRule(String instrumentId);
 }

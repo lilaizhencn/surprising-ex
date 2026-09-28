@@ -126,29 +126,6 @@ public class CustodyWalletClient {
         return exchange(HttpMethod.POST, API_PREFIX + "/withdrawals", withdrawal, Map.class, idempotencyKey);
     }
 
-    public long amountUnits(String asset, String amount) {
-        if (asset == null || amount == null || amount.isBlank()) {
-            throw new IllegalArgumentException("asset and amount are required");
-        }
-        Long scale = properties.getCustodyWallet().getAssetScales().entrySet().stream()
-                .filter(entry -> entry.getKey().equalsIgnoreCase(asset.trim()))
-                .map(Map.Entry::getValue)
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("asset scale is not configured: " + asset));
-        if (scale < 0L || scale > 18L) {
-            throw new IllegalArgumentException("asset scale is invalid: " + asset);
-        }
-        try {
-            BigDecimal value = new BigDecimal(amount.trim());
-            if (value.signum() <= 0) {
-                throw new IllegalArgumentException("amount must be positive");
-            }
-            return value.movePointRight(scale.intValue()).setScale(0, RoundingMode.UNNECESSARY).longValueExact();
-        } catch (ArithmeticException | NumberFormatException ex) {
-            throw new IllegalArgumentException("amount is not an exact asset unit amount", ex);
-        }
-    }
-
     public String subject(long userId) {
         if (userId <= 0L) {
             throw new IllegalArgumentException("userId must be positive");

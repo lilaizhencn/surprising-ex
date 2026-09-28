@@ -58,7 +58,7 @@ public final class RuntimeLiquidationResolution {
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
-        CoreInstrument instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()));
+        CoreInstrument instrument = requireInstrument(runtime, identities.instrumentId(liquidation.symbolId()));
         LiquidationRuntime current = liquidation;
         ResolutionWork work = reuse == null ? new ResolutionWork() : reuse;
         CoreLiquidationState.Status nextStatus;
@@ -168,8 +168,8 @@ public final class RuntimeLiquidationResolution {
         }
     }
 
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
-        CoreInstrument instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }

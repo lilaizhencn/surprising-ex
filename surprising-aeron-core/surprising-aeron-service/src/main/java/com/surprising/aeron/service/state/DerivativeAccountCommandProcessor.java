@@ -52,7 +52,7 @@ public final class DerivativeAccountCommandProcessor {
                                          long userId, UpdateLeverageCommand command) {
         if (runtime == null) throw new IllegalArgumentException("invalid runtime leverage update");
         CoreLeverageKey key = leverageKey(runtime, identities, userId, command);
-        boolean changed = updateAccountLeverage(runtime, key, identities.symbolId(key.symbol()), command.leveragePpm());
+        boolean changed = updateAccountLeverage(runtime, key, identities.symbolId(key.instrumentId()), command.leveragePpm());
         if (changed) runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return changed;
     }
@@ -65,7 +65,7 @@ public final class DerivativeAccountCommandProcessor {
             throw new IllegalArgumentException("invalid runtime leverage update");
         if (!runtime.productLine().isDerivative())
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "leverage requires derivative product line");
-        CoreInstrument instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         if (instrument.contractType().isOption())
             throw new CoreStateRejectedException("OPTION_LEVERAGE_UNSUPPORTED", "non-portfolio option margin is not leverage based");
@@ -73,7 +73,7 @@ public final class DerivativeAccountCommandProcessor {
                 CoreContractMath.riskBracket(instrument, 0).initialMarginRatePpm());
         if (CoreContractMath.initialMarginRateFromLeverage(command.leveragePpm()) < minimumRate)
             throw new CoreStateRejectedException("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT", "leverage exceeds instrument maximum");
-        return new CoreLeverageKey(userId, instrument.symbol(), command.marginMode());
+        return new CoreLeverageKey(userId, instrument.instrumentId(), command.marginMode());
     }
 
     /** 同一账户跨撮合分区的敞口不拆分；写入前完成全部拒绝与溢出检查。 */
@@ -104,8 +104,8 @@ public final class DerivativeAccountCommandProcessor {
         runtime.assertOwner();
         if (command.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.ISOLATED || command.amountUnits() == 0)
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID", "only isolated position margin can be adjusted");
-        String symbol = OrderReservation.normalizeSymbol(command.symbol());
-        CoreInstrument instrument = runtime.instrument(symbol);
+        String instrumentId = OrderReservation.requireInstrumentId(command.instrumentId());
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         return identities.positionKey(userId, instrument, command.positionSide());
     }

@@ -114,18 +114,6 @@ public class GatewayProperties implements EnvironmentAware {
                 }
             });
         }
-        if (wallet.getAssetScales().isEmpty()) {
-            failures.add("custody-wallet.asset-scales must contain at least one asset");
-        } else {
-            wallet.getAssetScales().forEach((asset, scale) -> {
-                if (asset == null || asset.isBlank()) {
-                    failures.add("custody-wallet.asset-scales contains a blank asset");
-                }
-                if (scale == null || scale < 0L || scale > 18L) {
-                    failures.add("custody-wallet.asset-scales contains an invalid scale");
-                }
-            });
-        }
 
         Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
         if (configuredWithdrawal.getSingleApprovalThresholdUsdt() == null
@@ -435,21 +423,10 @@ public class GatewayProperties implements EnvironmentAware {
         @Setter
         private String spotAccountBaseUrl = "";
 
-        private Map<String, Long> assetScales = Map.of();
         private Map<String, String> withdrawalAddressIds = Map.of();
         private Duration requestTimeout = Duration.ofSeconds(10);
 
 
-
-        public void setAssetScales(Map<String, Long> assetScales) {
-            this.assetScales = assetScales == null ? Map.of() : Map.copyOf(assetScales);
-        }
-
-        public void setAssetScalesJson(String assetScalesJson) {
-            if (assetScalesJson != null && !assetScalesJson.trim().equals("{}")) {
-                setAssetScales(readLongMap(assetScalesJson));
-            }
-        }
 
         public void setWithdrawalAddressIds(Map<String, String> withdrawalAddressIds) {
             this.withdrawalAddressIds = withdrawalAddressIds == null ? Map.of() : Map.copyOf(withdrawalAddressIds);
@@ -564,13 +541,21 @@ public class GatewayProperties implements EnvironmentAware {
             }
         }
 
-        public String backendSymbol(String symbol) {
-            String normalized = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
+        public String backendInstrumentId(String symbol, com.surprising.product.api.ProductLine line) {
+            String key = line.name() + ":" + symbol.trim().toUpperCase(java.util.Locale.ROOT);
+            String id = symbolAliases.get(key);
+            if (!com.surprising.product.api.InstrumentIds.valid(id)) {
+                throw new IllegalArgumentException("permanent instrument ID alias is not configured: " + key);
+            }
+            return id;
+        }
+
+        public String externalSymbol(String instrumentId, com.surprising.product.api.ProductLine line) {
+            String prefix = line.name() + ":";
             return symbolAliases.entrySet().stream()
-                    .filter(entry -> entry.getKey().equalsIgnoreCase(normalized))
-                    .map(Map.Entry::getValue)
-                    .findFirst()
-                    .orElse(normalized);
+                    .filter(entry -> entry.getKey().startsWith(prefix) && entry.getValue().equals(instrumentId))
+                    .map(entry -> entry.getKey().substring(prefix.length()))
+                    .findFirst().orElseThrow(() -> new IllegalArgumentException("external symbol alias is not configured"));
         }
 
         public SymbolScale scale(String symbol) {

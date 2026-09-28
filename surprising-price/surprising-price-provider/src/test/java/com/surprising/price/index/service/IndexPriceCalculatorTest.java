@@ -23,7 +23,7 @@ class IndexPriceCalculatorTest {
         IndexPriceCalculator calculator = new IndexPriceCalculator(properties);
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 
-        IndexPriceEvent event = calculator.calculate("BTC-USDT", 1, 3, List.of(
+        IndexPriceEvent event = calculator.calculate("1", 1, 3, List.of(
                 quote("A", "100.00", now),
                 quote("B", "100.10", now),
                 quote("C", "99.90", now),
@@ -47,7 +47,7 @@ class IndexPriceCalculatorTest {
         IndexPriceCalculator calculator = new IndexPriceCalculator(properties);
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 
-        IndexPriceEvent event = calculator.calculate("BTC-USDT", 2, 3, List.of(
+        IndexPriceEvent event = calculator.calculate("1", 2, 3, List.of(
                 quote("A", "100.00", now),
                 quote("B", "100.10", now.minusSeconds(90)),
                 quote("C", "99.90", now.minusSeconds(90))

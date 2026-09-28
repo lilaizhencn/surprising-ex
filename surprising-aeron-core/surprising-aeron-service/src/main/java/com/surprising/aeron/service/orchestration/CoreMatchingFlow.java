@@ -147,19 +147,19 @@ final class CoreMatchingFlow {
     int matcherShard(CommandSlot pending) {
         int cached = pending.cachedMatcherShard();
         if (cached >= 0) return cached;
-        String symbol = pending.operation() == CommandSlot.Operation.LIQUIDATION
+        String instrumentId = pending.operation() == CommandSlot.Operation.LIQUIDATION
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT
                 ? owner.admissions.pendingLifecycleSymbol(pending)
                 : owner.admissions.matchingSymbol(pending.command(), pending.operation(), pending.decodedCommand());
-        int shard = symbol == null || symbol.isBlank() ? 0 : owner.matchingAdapter.matcherShardId(symbol);
+        int shard = instrumentId == null || instrumentId.isBlank() ? 0 : owner.matchingAdapter.matcherShardId(instrumentId);
         pending.cachedMatcherShard(shard);
         return shard;
     }
 
     TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
-            long userId, String symbol, long cursorOrderId, int maxOrders) {
-        var page = owner.activeOrderIndex.page(userId, symbol, cursorOrderId, maxOrders);
+            long userId, String instrumentId, long cursorOrderId, int maxOrders) {
+        var page = owner.activeOrderIndex.page(userId, instrumentId, cursorOrderId, maxOrders);
         List<CoreOrderState> selected = page.orderIds().stream()
                 .map(owner.runtimeState::order)
                 .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
@@ -268,7 +268,7 @@ final class CoreMatchingFlow {
     int singleMatcherShard(List<CoreOrderState> orders) {
         int shardId = -1;
         for (CoreOrderState order : orders) {
-            int orderShard = owner.matchingAdapter.matcherShardId(order.symbol());
+            int orderShard = owner.matchingAdapter.matcherShardId(order.instrumentId());
             if (shardId == -1) shardId = orderShard;
             else if (shardId != orderShard) return -2;
         }
@@ -290,8 +290,8 @@ final class CoreMatchingFlow {
 
     PlaceOrderCommand replacementFor(CoreMessage message, OrderRuntime order) {
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        String symbol = owner.runtimeOrderSymbol(order);
-        if (owner.runtimeState.instrument(symbol) == null) {
+        String instrumentId = owner.runtimeOrderSymbol(order);
+        if (owner.runtimeState.instrument(instrumentId) == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
         if (message.header().messageType() == CoreMessageType.REPLACE_ORDER) {
@@ -325,8 +325,8 @@ final class CoreMatchingFlow {
 
     PlaceOrderCommand replacementForAmend(AmendOrderCommand command, OrderRuntime order) {
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        String symbol = owner.runtimeOrderSymbol(order);
-        if (owner.runtimeState.instrument(symbol) == null) {
+        String instrumentId = owner.runtimeOrderSymbol(order);
+        if (owner.runtimeState.instrument(instrumentId) == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
         long priceTicks = command.priceTicks() == null ? order.priceTicks() : command.priceTicks();
@@ -334,7 +334,7 @@ final class CoreMatchingFlow {
         var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
         boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
         String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
-        return new PlaceOrderCommand(command.replacementOrderId(), symbol,
+        return new PlaceOrderCommand(command.replacementOrderId(), instrumentId,
                 order.side(), priceTicks, quantitySteps, order.reduceOnly(), order.marginMode(),
                 order.positionSide(), order.orderType(), timeInForce, postOnly, clientOrderId);
     }
@@ -352,19 +352,19 @@ final class CoreMatchingFlow {
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
             long triggeredPriceTicks, OrderRuntime order) {
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "trigger child order not found");
-        if (owner.runtimeState.instrument(trigger.symbol()) == null) {
+        if (owner.runtimeState.instrument(trigger.instrumentId()) == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
         long limitPriceTicks = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (order.priceTicks() > 0 ? order.priceTicks() : triggeredPriceTicks) : 0;
-        return new PlaceOrderCommand(order.orderId(), trigger.symbol(),
+        return new PlaceOrderCommand(order.orderId(), trigger.instrumentId(),
                 trigger.side(), limitPriceTicks, order.quantitySteps(), order.reduceOnly(),
                 trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(),
                 false, order.clientOrderId());
     }
 
-    long currentMarkPriceTicks(String symbol, long referencePriceTicks) {
-        Integer symbolId = owner.identities.findSymbolId(symbol);
+    long currentMarkPriceTicks(String instrumentId, long referencePriceTicks) {
+        Integer symbolId = owner.identities.findSymbolId(instrumentId);
         var markPrice = symbolId == null ? null : owner.runtimeState.markPrice(symbolId);
         long value = markPrice == null ? referencePriceTicks : markPrice.markPriceTicks();
         if (value <= 0) throw new CoreStateRejectedException("MARK_PRICE_MISSING", "mark price is required");

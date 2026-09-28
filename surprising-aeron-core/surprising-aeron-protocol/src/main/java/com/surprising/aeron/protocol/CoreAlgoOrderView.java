@@ -3,7 +3,7 @@ package com.surprising.aeron.protocol;
 import java.util.List;
 
 public record CoreAlgoOrderView(
-        long algoOrderId, long userId, String clientAlgoOrderId, String symbol, int algoTypeCode,
+        long algoOrderId, long userId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
@@ -18,7 +18,7 @@ public record CoreAlgoOrderView(
         traceId = traceId == null ? "" : traceId;
         childOrderIds = List.copyOf(childOrderIds);
         boolean creationTemplate = revision == 1 && createdAtEpochMillis == 0 && updatedAtEpochMillis == 0;
-        if (algoOrderId <= 0 || userId <= 0 || symbol == null || symbol.isBlank() || algoTypeCode < 0
+        if (algoOrderId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0
                 || side == null || quantitySteps <= 0 || childQuantitySteps <= 0 || intervalSeconds <= 0
                 || durationSeconds <= 0 || marginMode == null || positionSide == null || timeInForce == null
                 || statusCode < 0 || startAtEpochMillis < 0
@@ -37,7 +37,7 @@ public record CoreAlgoOrderView(
             return this;
         }
         long effectiveStartAt = Math.max(startAtEpochMillis, clusterTimestamp);
-        return new CoreAlgoOrderView(algoOrderId, userId, clientAlgoOrderId, symbol, algoTypeCode, side,
+        return new CoreAlgoOrderView(algoOrderId, userId, clientAlgoOrderId, instrumentId, algoTypeCode, side,
                 priceTicks, quantitySteps, childQuantitySteps, intervalSeconds, durationSeconds, marginMode,
                 positionSide, reduceOnly, postOnly, timeInForce, statusCode, currentOrderId, rejectReason,
                 traceId, effectiveStartAt, effectiveStartAt, completedAtEpochMillis, clusterTimestamp,

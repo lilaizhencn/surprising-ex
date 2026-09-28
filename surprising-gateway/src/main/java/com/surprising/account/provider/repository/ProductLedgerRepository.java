@@ -99,7 +99,7 @@ public class ProductLedgerRepository {
                                     String referenceType,
                                     String referenceId,
                                     String reason,
-                                    String symbol,
+                                    String instrumentId,
                                     Instant now) {
         if (entryId <= 0L || userId <= 0L || accountType == null || asset == null || asset.isBlank()
                 || amountUnits == 0L || referenceType == null
@@ -110,13 +110,13 @@ public class ProductLedgerRepository {
         String normalizedReferenceType = referenceType.trim().toUpperCase(java.util.Locale.ROOT);
         String normalizedReferenceId = referenceId.trim();
         String normalizedReason = reason == null || reason.isBlank() ? normalizedReferenceType : reason.trim();
-        String normalizedSymbol = symbol == null || symbol.isBlank()
-                ? null : symbol.trim().toUpperCase(java.util.Locale.ROOT);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank()
+                ? null : instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
         Instant createdAt = now == null ? Instant.now() : now;
         int inserted = jdbcTemplate.update("""
                 INSERT INTO account_product_ledger_entries (
                     entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, symbol, created_at
+                    reference_type, reference_id, reason, instrument_id, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
                 """, entryId, userId, accountType.name(), normalizedAsset, amountUnits,
@@ -126,7 +126,7 @@ public class ProductLedgerRepository {
             return;
         }
         ExistingProjection existing = jdbcTemplate.query("""
-                SELECT amount_units, balance_after_units, reason, symbol
+                SELECT amount_units, balance_after_units, reason, instrument_id
                   FROM account_product_ledger_entries
                  WHERE reference_type = ?
                    AND reference_id = ?
@@ -134,13 +134,13 @@ public class ProductLedgerRepository {
                    AND account_type = ?
                    AND asset = ?
                 """, (rs, rowNum) -> new ExistingProjection(rs.getLong("amount_units"),
-                        rs.getLong("balance_after_units"), rs.getString("reason"), rs.getString("symbol")),
+                        rs.getLong("balance_after_units"), rs.getString("reason"), rs.getString("instrument_id")),
                 normalizedReferenceType, normalizedReferenceId, userId, accountType.name(), normalizedAsset)
                 .stream().findFirst().orElseThrow(
                         () -> new IllegalStateException("产品账本幂等记录不存在: " + normalizedReferenceId));
         if (existing.amountUnits() != amountUnits || existing.balanceAfterUnits() != balanceAfterUnits
                 || !java.util.Objects.equals(existing.reason(), normalizedReason)
-                || !java.util.Objects.equals(existing.symbol(), normalizedSymbol)) {
+                || !java.util.Objects.equals(existing.instrumentId(), normalizedSymbol)) {
             throw new IllegalStateException("产品账本异步投影发生幂等冲突: " + normalizedReferenceId);
         }
     }
@@ -160,6 +160,6 @@ public class ProductLedgerRepository {
     private record ExistingProjection(long amountUnits,
                                       long balanceAfterUnits,
                                       String reason,
-                                      String symbol) {
+                                      String instrumentId) {
     }
 }

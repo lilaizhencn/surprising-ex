@@ -13,7 +13,7 @@ import java.time.Instant;
 public record PricePublishedEvent(
         int schemaVersion,
         PriceEventType eventType,
-        String symbol,
+        String instrumentId,
         Instant generatedAt,
         IndexPriceEvent indexPrice,
         MarkPricePublishedEvent markPrice) {
@@ -24,8 +24,8 @@ public record PricePublishedEvent(
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported price event schema version: " + schemaVersion);
         }
-        if (eventType == null || symbol == null || symbol.isBlank() || generatedAt == null) {
-            throw new IllegalArgumentException("price event type, symbol, and generatedAt are required");
+        if (eventType == null || instrumentId == null || instrumentId.isBlank() || generatedAt == null) {
+            throw new IllegalArgumentException("price event type, instrument_id, and generatedAt are required");
         }
         boolean hasIndex = indexPrice != null;
         boolean hasMark = markPrice != null;
@@ -46,10 +46,10 @@ public record PricePublishedEvent(
                 || markPrice.indexInput().components() == null || markPrice.calculatedAt() == null)) {
             throw new IllegalArgumentException("mark price calculation inputs and generatedAt are required");
         }
-        String payloadSymbol = hasIndex ? indexPrice.symbol()
-                : markPrice.result() == null ? null : markPrice.result().symbol();
-        if (!symbol.equals(payloadSymbol)) {
-            throw new IllegalArgumentException("price event symbol must match payload symbol");
+        String payloadSymbol = hasIndex ? indexPrice.instrumentId()
+                : markPrice.result() == null ? null : markPrice.result().instrumentId();
+        if (!instrumentId.equals(payloadSymbol)) {
+            throw new IllegalArgumentException("price event instrumentId must match payload instrumentId");
         }
     }
 
@@ -58,7 +58,7 @@ public record PricePublishedEvent(
             throw new IllegalArgumentException("index price event is required");
         }
         return new PricePublishedEvent(CURRENT_SCHEMA_VERSION, PriceEventType.INDEX_PRICE,
-                event.symbol(), event.eventTime(), event, null);
+                event.instrumentId(), event.eventTime(), event, null);
     }
 
     public static PricePublishedEvent mark(MarkPricePublishedEvent event) {
@@ -68,6 +68,6 @@ public record PricePublishedEvent(
         }
         Instant generatedAt = event.calculatedAt();
         return new PricePublishedEvent(CURRENT_SCHEMA_VERSION, PriceEventType.MARK_PRICE,
-                event.result().symbol(), generatedAt, null, event);
+                event.result().instrumentId(), generatedAt, null, event);
     }
 }

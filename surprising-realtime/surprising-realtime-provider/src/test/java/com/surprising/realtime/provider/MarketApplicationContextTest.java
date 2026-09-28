@@ -72,9 +72,10 @@ class MarketApplicationContextTest {
             assertThat(ctx).hasNotFailed().hasSingleBean(CandleQueryService.class)
                     .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class)
                     .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
+                    .doesNotHaveBean(com.surprising.realtime.provider.export.CommittedOrderProjectionRepository.class)
                     .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class);
             MockMvcBuilders.webAppContextSetup(ctx).build()
-                    .perform(get("/api/v1/candlestick/candles").param("symbol", "BTC-USDT")
+                    .perform(get("/api/v1/candlestick/candles").param("instrumentId", "1")
                             .param("period", "1m").param("startTime", "2026-09-20T00:00:00Z")
                             .param("endTime", "2026-09-20T01:00:00Z"))
                     .andExpect(status().isOk());
@@ -96,6 +97,8 @@ class MarketApplicationContextTest {
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
                 .withBean("symbolRegistryService", SymbolRegistryService.class, () -> mock(SymbolRegistryService.class))
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
+                .withBean(org.springframework.transaction.PlatformTransactionManager.class,
+                        () -> mock(org.springframework.transaction.PlatformTransactionManager.class))
                 .withBean(StringRedisTemplate.class, () -> mock(StringRedisTemplate.class))
                 .withBean(ObjectMapper.class, ObjectMapper::new)
                 .withBean("disableExternalConsumers", BeanPostProcessor.class, () -> new BeanPostProcessor() {

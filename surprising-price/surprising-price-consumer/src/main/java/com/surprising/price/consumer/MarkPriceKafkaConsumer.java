@@ -44,8 +44,8 @@ public class MarkPriceKafkaConsumer {
             groupId = "#{@markPriceConsumerProperties.groupId}",
             containerFactory = "markPriceCacheKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
-        if (!properties.getRequiredSymbols().isEmpty()
-                && (record.key() == null || !properties.getRequiredSymbols().contains(record.key()))) {
+        if (!properties.getRequiredInstrumentIds().isEmpty()
+                && (record.key() == null || !properties.getRequiredInstrumentIds().contains(record.key()))) {
             return;
         }
         try {
@@ -57,12 +57,12 @@ public class MarkPriceKafkaConsumer {
             if (publication.result() == null) {
                 throw new IllegalArgumentException("mark price publication result is required");
             }
-            if (record.key() == null || !record.key().equals(priceEvent.symbol())
-                    || !record.key().equals(publication.result().symbol())) {
-                throw new IllegalArgumentException("mark price Kafka key must match payload symbol");
+            if (record.key() == null || !record.key().equals(priceEvent.instrumentId())
+                    || !record.key().equals(publication.result().instrumentId())) {
+                throw new IllegalArgumentException("mark price Kafka key must match payload instrumentId");
             }
             var current = publication.result();
-            var previous = cache.latest(current.symbol()).orElse(null);
+            var previous = cache.latest(current.instrumentId()).orElse(null);
             if (cache.update(current) && previous != null) {
                 for (MarkPriceUpdateListener listener : listeners) {
                     listener.onMarkPriceUpdated(previous, current);
@@ -70,7 +70,7 @@ public class MarkPriceKafkaConsumer {
             }
         } catch (Exception ex) {
             // A malformed upstream message can never succeed on retry.  Consume
-            // it after logging so it cannot stall the symbol's live-price
+            // it after logging so it cannot stall the instrumentId's live-price
             // partition; valid later publications remain usable immediately.
             log.warn("Discarding invalid mark price topic={} partition={} offset={}: {}",
                     record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);

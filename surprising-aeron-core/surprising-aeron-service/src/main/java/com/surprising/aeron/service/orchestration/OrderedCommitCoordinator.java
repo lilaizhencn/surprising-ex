@@ -711,10 +711,10 @@ final class OrderedCommitCoordinator {
             if (liquidation != null) mask |= owner.matchingAdapter.topology().accountLaneMask(liquidation.userId());
         } else if (pending.operation() == CommandSlot.Operation.SETTLEMENT) {
             var command = pending.decodedCommand().settlement();
-            var progress = owner.runtimeLifecycleProgress(command.symbol());
+            var progress = owner.runtimeLifecycleProgress(command.instrumentId());
             if (progress != null && progress.ordersComplete()
-                    || !owner.matchingFlow.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders()).more()) {
-                for (long userId : owner.instrumentSettlement.settlementUsers(command.symbol(), command.cursorUserId(), command.maxUsers())) {
+                    || !owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders()).more()) {
+                for (long userId : owner.instrumentSettlement.settlementUsers(command.instrumentId(), command.cursorUserId(), command.maxUsers())) {
                     mask |= owner.matchingAdapter.topology().accountLaneMask(userId);
                 }
             }
@@ -884,7 +884,7 @@ final class OrderedCommitCoordinator {
                     var scan = owner.runtimeState.firstRiskIncompleteScan();
                     var continuation = batch.riskScanContinuation();
                     if (scan != null && continuation != null
-                            && owner.identities.symbol(scan.symbolId()).equals(continuation.symbol())
+                            && owner.identities.instrumentId(scan.symbolId()).equals(continuation.instrumentId())
                             && scan.priceSequence() == continuation.priceSequence()
                             && scan.lastUserId() == continuation.lastUserId()) {
                         beforeRiskRevision = owner.runtimeState.revision();

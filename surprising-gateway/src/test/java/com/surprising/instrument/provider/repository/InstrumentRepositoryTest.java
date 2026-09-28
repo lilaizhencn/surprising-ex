@@ -126,29 +126,28 @@ class InstrumentRepositoryTest {
         Instant expiryTime = Instant.parse("2026-03-27T08:00:00Z");
         Instant deliveryTime = expiryTime.plusSeconds(300);
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
-                "BTC-USDT-260327-50000-C", InstrumentType.OPTION, ContractType.VANILLA_OPTION,
-                "BTC", "USDT", "USDT", 1_000_000L, "USDT", 10_000_000L, 100_000L,
+                null, "BTC-USDT-260327-50000-C", InstrumentType.OPTION, ContractType.VANILLA_OPTION, 3, 1, 1, 1_000_000L, 1, 10_000_000L, 100_000L,
                 1L, 100_000L, 500_000_000L, 1_000_000_000_000_000L, 10_000L,
                 1, 3, List.of("LIMIT"), List.of("GTC", "IOC"), true, true, false,
                 100_000_000L, 10_000L, 5_000L, 200L, 500L, 500_000_000_000_000L,
                 300_000L, 25_000_000_000_000L, 0, 0L, 0L, 0L, 1_000_000_000_000L,
-                2, expiryTime, deliveryTime, "btc-usdt", 50_000_000_000L, OptionType.CALL,
+                2, expiryTime, deliveryTime, "1", com.surprising.product.api.ProductLine.SPOT, 50_000_000_000L, OptionType.CALL,
                 OptionExerciseStyle.EUROPEAN, ContractSettlementMethod.CASH, InstrumentStatus.PRE_TRADING,
                 null, List.of(), List.of(new IndexSourceConfig("A", true, "https://example.com",
                 "/ticker", "BTCUSDT", "BINANCE_BOOK_TICKER", "USDT", "USDT", null, null, null,
                 "DISCOUNT", "MULTIPLY", 500_000L, false, null, null, null, 1_000_000L)));
 
-        repository.saveCurrent("BTC-USDT-260327-50000-C", 2L, 2L, request, Instant.parse("2026-01-01T00:00:00Z"));
+        repository.saveCurrent(1, "BTC-USDT-260327-50000-C", 2L, 2L, request, Instant.parse("2026-01-01T00:00:00Z"));
 
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).update(anyString(), args.capture());
         assertThat(args.getValue()).contains(Timestamp.from(expiryTime), Timestamp.from(deliveryTime),
-                "BTC-USDT", 50_000_000_000L, "CALL", "EUROPEAN", "CASH");
+                1, "SPOT", 50_000_000_000L, "CALL", "EUROPEAN", "CASH");
     }
 
     private InstrumentResponse response(String symbol, long version, Instant updatedAt) {
         return new InstrumentResponse(
-                symbol,
+                1, 3, 1, 1, 1, symbol,
                 version,
                 InstrumentType.PERPETUAL,
                 ContractType.LINEAR_PERPETUAL,
@@ -187,7 +186,7 @@ class InstrumentRepositoryTest {
                 3,
                 null,
                 null,
-                null,
+                null, null,
                 null,
                 null,
                 null,

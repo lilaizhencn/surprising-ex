@@ -52,58 +52,58 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
         if (minute == null) {
             return;
         }
-        String symbol = CandleKey.normalizeSymbol(minute.symbol());
+        String instrumentId = CandleKey.normalizeSymbol(minute.instrumentId());
         for (CandlePeriod period : periods) {
             Instant openTime = period.floor(minute.openTime());
-            String rollupKey = productKey + "|" + CandleKey.of(symbol, period, openTime).value();
+            String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
             String seenKey = rollupKey + "|" + minute.openTime().toEpochMilli();
             if (seenStore.get(seenKey) != null) {
                 continue;
             }
-            String watermarkKey = productKey + "|" + symbol + "|" + period.code();
+            String watermarkKey = productKey + "|" + instrumentId + "|" + period.code();
             Long activeOpenMillis = watermarkStore.get(watermarkKey);
             long currentOpenMillis = openTime.toEpochMilli();
             if (activeOpenMillis != null && currentOpenMillis < activeOpenMillis) {
                 continue;
             }
             if (activeOpenMillis == null || currentOpenMillis > activeOpenMillis) {
-                closeActiveRollup(symbol, period, activeOpenMillis, record.timestamp());
+                closeActiveRollup(instrumentId, period, activeOpenMillis, record.timestamp());
                 watermarkStore.put(watermarkKey, currentOpenMillis);
             }
             CandleRollupAccumulator accumulator = Optional.ofNullable(rollupStore.get(rollupKey))
-                    .orElseGet(() -> CandleRollupAccumulator.create(symbol, period, openTime));
+                    .orElseGet(() -> CandleRollupAccumulator.create(instrumentId, period, openTime));
             if (accumulator.isComplete()) {
                 continue;
             }
             accumulator.add(minute);
             rollupStore.put(rollupKey, accumulator);
             seenStore.put(seenKey, minute.openTime().toEpochMilli());
-            forward(symbol, accumulator, record.timestamp());
+            forward(instrumentId, accumulator, record.timestamp());
         }
     }
 
-    private void closeActiveRollup(String symbol, CandlePeriod period, Long activeOpenMillis, long timestamp) {
+    private void closeActiveRollup(String instrumentId, CandlePeriod period, Long activeOpenMillis, long timestamp) {
         if (activeOpenMillis == null) {
             return;
         }
         Instant activeOpen = Instant.ofEpochMilli(activeOpenMillis);
-        String activeKey = productKey + "|" + CandleKey.of(symbol, period, activeOpen).value();
+        String activeKey = productKey + "|" + CandleKey.of(instrumentId, period, activeOpen).value();
         CandleRollupAccumulator active = rollupStore.get(activeKey);
         if (active == null || active.isComplete()) {
             return;
         }
         active.close();
         rollupStore.put(activeKey, active);
-        forward(symbol, active, timestamp);
+        forward(instrumentId, active, timestamp);
     }
 
-    private void forward(String symbol, CandleRollupAccumulator accumulator, long timestamp) {
+    private void forward(String instrumentId, CandleRollupAccumulator accumulator, long timestamp) {
         Instant emittedAt = Instant.ofEpochMilli(context.currentSystemTimeMs());
         CandleUpdatedEvent event = accumulator.event(emittedAt);
         if (hotCache != null) {
             hotCache.put(event);
         }
-        context.forward(new Record<>(symbol, event, timestamp));
+        context.forward(new Record<>(instrumentId, event, timestamp));
     }
 
     private void closeElapsedRollups(long timestamp) {
@@ -116,16 +116,16 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
                         || watermark.value == null) {
                     continue;
                 }
-                String symbol = watermark.key.substring(prefix.length(), periodSeparator);
+                String instrumentId = watermark.key.substring(prefix.length(), periodSeparator);
                 CandlePeriod period = CandlePeriod.fromCode(watermark.key.substring(periodSeparator + 1));
                 Instant activeOpen = Instant.ofEpochMilli(watermark.value);
-                String rollupKey = productKey + "|" + CandleKey.of(symbol, period, activeOpen).value();
+                String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, activeOpen).value();
                 CandleRollupAccumulator accumulator = rollupStore.get(rollupKey);
                 if (accumulator != null && !accumulator.isComplete() && accumulator.getCloseTime() != null
                         && accumulator.getCloseTime().toEpochMilli() <= timestamp) {
                     accumulator.close();
                     rollupStore.put(rollupKey, accumulator);
-                    forward(symbol, accumulator, timestamp);
+                    forward(instrumentId, accumulator, timestamp);
                 }
             }
         }

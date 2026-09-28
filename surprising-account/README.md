@@ -42,7 +42,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 持仓使用 `signedQuantitySteps`，正数为净多，负数为净空。
 - 持仓保存 `instrumentChangeId`，当前敞口绑定开仓时的计算参数审计记录；有敞口时禁止替换计算参数。
 - 持仓和持仓保证金都会保存 `marginMode`；单向净持仓链路下 `CROSS` 和 `ISOLATED` 都可执行。
-- 持仓查询响应返回 `positionSide = NET`。Core 当前按 `userId + symbol + marginMode` 保存一条净持仓，hedge-mode
+- 持仓查询响应返回 `positionSide = NET`。Core 当前按 `userId + instrumentId + marginMode` 保存一条净持仓，hedge-mode
   `LONG/SHORT` 持仓还没有进入当前在线模型。
 - 开仓均价使用 `entryPriceTicks`。
 - 持仓保证金由 CoreUserState 维护；PostgreSQL 不保存第二份可变持仓保证金状态。
@@ -75,10 +75,10 @@ curl 'http://localhost:9086/api/v1/accounts/balances?userId=1001'
 查询持仓：
 
 ```bash
-curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&symbol=BTC-USDT'
-curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&symbol=BTC-USDT&marginMode=CROSS'
-curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&symbol=BTC-USDT&marginMode=CROSS&positionSide=NET'
-curl 'http://localhost:9086/api/v1/accounts/position-margin?userId=1001&symbol=BTC-USDT&marginMode=ISOLATED'
+curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&instrumentId=604'
+curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&instrumentId=604&marginMode=CROSS'
+curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&instrumentId=604&marginMode=CROSS&positionSide=NET'
+curl 'http://localhost:9086/api/v1/accounts/position-margin?userId=1001&instrumentId=604&marginMode=ISOLATED'
 curl 'http://localhost:9086/api/v1/accounts/positions?userId=1001'
 curl 'http://localhost:9086/api/v1/accounts/positions?userId=1001&positionSide=NET'
 ```
@@ -91,11 +91,11 @@ curl 'http://localhost:9086/api/v1/accounts/positions?userId=1001&positionSide=N
 ```bash
 curl -X POST 'http://localhost:9086/api/v1/accounts/position-margin-adjustments' \
   -H 'Content-Type: application/json' \
-  -d '{"userId":1001,"symbol":"BTC-USDT","marginMode":"ISOLATED","amountUnits":100000000,"referenceId":"iso-margin-add-1001-1","reason":"ADD_POSITION_MARGIN"}'
+  -d '{"userId":1001,"instrumentId":"604","marginMode":"ISOLATED","amountUnits":100000000,"referenceId":"iso-margin-add-1001-1","reason":"ADD_POSITION_MARGIN"}'
 
 curl -X POST 'http://localhost:9086/api/v1/accounts/position-margin-adjustments' \
   -H 'Content-Type: application/json' \
-  -d '{"userId":1001,"symbol":"BTC-USDT","marginMode":"ISOLATED","amountUnits":-50000000,"referenceId":"iso-margin-remove-1001-1","reason":"REMOVE_POSITION_MARGIN"}'
+  -d '{"userId":1001,"instrumentId":"604","marginMode":"ISOLATED","amountUnits":-50000000,"referenceId":"iso-margin-remove-1001-1","reason":"REMOVE_POSITION_MARGIN"}'
 ```
 
 `amountUnits` 为正数时，Aeron Core 将资金从 `availableUnits` 转入 `lockedUnits` 并增加对应持仓保证金；为负数时，Core 将逐仓持仓保证金释放回可用余额。
@@ -172,7 +172,7 @@ surprising:
 
 本地缓存只用于不可变读快照：
 
-- `contract-spec-max-entries` 按 `(symbol, instrumentChangeId)` 缓存合约数学配置。
+- `contract-spec-max-entries` 按 `(instrumentId, instrumentChangeId)` 缓存合约数学配置。
 
 余额、持仓和保证金冻结由 Aeron Core 的有序 Cluster Log 和 Core Snapshot 维护；account-provider
 只通过 Aeron Client 提交命令和查询状态。`account-state-events-topic` 用于向下游广播完整账户快照，
@@ -283,7 +283,7 @@ java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 - 订单、持仓和保证金事实都由 Aeron Core 维护，不能从 PostgreSQL 查询投影推导实时资金来源。
 - 用户逐仓保证金调整按 `referenceId` 幂等，并由 Aeron Core 把可用余额转入或从持仓保证金释放；`account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT` 只记录审计事实。
 - 平仓成交按平仓数量比例释放持仓保证金。这条链路必须保持 long-only，并与 exchange-core 的 ticks/steps 一致。
-- reduce-only 剪枝不是撮合层或账户表写入功能；trading provider 按用户消费持仓事件，在自己的事务里锁定相关订单并发布按 symbol 分区的 cancel command。多节点部署时必须共享 PostgreSQL，并使用同一个 Kafka consumer group。
+- reduce-only 剪枝不是撮合层或账户表写入功能；trading provider 按用户消费持仓事件，在自己的事务里锁定相关订单并发布按 instrumentId 分区的 cancel command。多节点部署时必须共享 PostgreSQL，并使用同一个 Kafka consumer group。
 - reduce-only 剪枝遇到 `Long.MIN_VALUE` 这类不可能的 signed quantity 必须 fail-fast，不能让容量数学回绕后基于负绝对值错误撤单或保留挂单。
 - 如果出现订单预占或保证金核算不平，要检查 Core Export 的订单/成交事实、账户账本幂等键和 Core projection watermark。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结；该状态转移必须由 Core reducer 原子完成，数据库只接收投影。

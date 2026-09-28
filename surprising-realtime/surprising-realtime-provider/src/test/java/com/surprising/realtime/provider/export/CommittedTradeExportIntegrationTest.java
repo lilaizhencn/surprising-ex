@@ -34,9 +34,17 @@ import java.util.concurrent.TimeUnit;
 
 class CommittedTradeExportIntegrationTest {
     @TempDir Path temp;
+    private final CommittedOrderProjectionRepository orders = org.mockito.Mockito.mock(CommittedOrderProjectionRepository.class);
 
     @Test
     void publishesOnlyCommittedTradesAndReplaysSameIdentityAfterCrashWindow() throws Exception {
+        var projectionUnavailable = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var projected = java.util.Collections.synchronizedList(new java.util.ArrayList<RealtimeFrame>());
+        org.mockito.Mockito.doAnswer(call -> {
+            if (projectionUnavailable.getAndSet(false)) throw new IllegalStateException("projection unavailable");
+            projected.addAll(call.<List<RealtimeFrame>>getArgument(1));
+            return null;
+        }).when(orders).persist(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong());
         String topic = ProductTopicNames.of(ProductLine.SPOT).matchTradesTopic();
         var broker =
                 new EmbeddedKafkaKraftBroker(1, 1, topic)
@@ -147,6 +155,10 @@ class CommittedTradeExportIntegrationTest {
                     Thread.sleep(10);
                 }
                 counter.set(beforeTrade);
+                assertThatThrownBy(() -> runExport(clusterDir, directory, control,
+                        broker.getBrokersAsString(), checkpoint, beforeTrade))
+                        .isInstanceOf(IllegalStateException.class).hasMessage("projection unavailable");
+                assertThat(Files.exists(checkpoint)).isFalse();
                 runExport(
                         clusterDir,
                         directory,
@@ -166,7 +178,7 @@ class CommittedTradeExportIntegrationTest {
                 var cancel = new java.util.concurrent.atomic.AtomicBoolean(true);
                 var observations = new java.util.concurrent.atomic.AtomicInteger();
                 var partialConfig = new TradeExportProperties(clusterDir, directory, control, checkpoint, 0, null, null, null);
-                new CommittedTradeExporter(partialConfig, ProductLine.SPOT, broker.getBrokersAsString())
+                new CommittedTradeExporter(partialConfig, ProductLine.SPOT, broker.getBrokersAsString(), orders)
                         .run(cancel, ready -> {
                             if (ready && observations.incrementAndGet() == 2) cancel.set(false);
                         }, Long.MAX_VALUE);
@@ -205,7 +217,7 @@ class CommittedTradeExportIntegrationTest {
                 var candles = new com.surprising.candlestick.provider.config.CandlestickProperties();
                 candles.getKafka().setProductLine(ProductLine.SPOT);
                 candles.getKafka().setBootstrapServers(broker.getBrokersAsString());
-                var service = new TradeExportService(config, candles);
+                var service = new TradeExportService(config, candles, orders);
                 try {
                     service.start();
                     long readyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
@@ -253,6 +265,10 @@ class CommittedTradeExportIntegrationTest {
                     assertThat(events.getFirst().priceTicks()).isEqualTo(100);
                     assertThat(events.getFirst().quantitySteps()).isEqualTo(3);
                 }
+                assertThat(projected.stream().filter(f -> f.kind() == RealtimeFrame.Kind.ORDER)
+                        .map(f -> CoreStateQueryCodec.decodeOrderState(f.payload()))
+                        .filter(o -> "FILLED".equals(o.status())).map(CoreOrderStateView::orderId))
+                        .contains(1L, 2L);
                 byte[] committedCheckpoint = Files.readAllBytes(checkpoint);
                 var invalid = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
                         UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY,
@@ -278,11 +294,11 @@ class CommittedTradeExportIntegrationTest {
         }
     }
 
-    private static void runExport(
+    private void runExport(
             Path cluster, String directory, String control, String kafka, Path checkpoint, long end)
             throws Exception {
         var config = new TradeExportProperties(cluster, directory, control, checkpoint, 0, null, null, null);
-        new CommittedTradeExporter(config, ProductLine.SPOT, kafka)
+        new CommittedTradeExporter(config, ProductLine.SPOT, kafka, orders)
                 .run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, end);
     }
 
@@ -309,7 +325,7 @@ class CommittedTradeExportIntegrationTest {
     private static PlaceOrderCommand order(long id, CoreOrderSide side) {
         return new PlaceOrderCommand(
                 id,
-                "BTC-USDT",
+                "1",
                 side,
                 100,
                 3,
@@ -336,7 +352,7 @@ class CommittedTradeExportIntegrationTest {
                         1),
                 TradingCommandCodec.encodeRegisterInstrument(
                         new RegisterInstrumentCommand(
-                                "BTC-USDT",
+                                "1",
                                 ContractType.SPOT.ordinal(),
                                 "BTC",
                                 "USDT",

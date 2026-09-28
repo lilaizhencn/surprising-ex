@@ -54,7 +54,7 @@ record HttpWorkloadConfig(
         symbols = symbols == null ? new String[0] : symbols.clone();
         if (users.length == 0 || symbols.length == 0) throw new IllegalArgumentException("users and symbols required");
         for (long user : users) if (user <= 0) throw new IllegalArgumentException("users must be positive");
-        for (String symbol : symbols) if (symbol == null || symbol.isBlank()) {
+        for (String instrumentId : symbols) if (instrumentId == null || instrumentId.isBlank()) {
             throw new IllegalArgumentException("symbols must be non-blank");
         }
         traffic = Map.copyOf(traffic);

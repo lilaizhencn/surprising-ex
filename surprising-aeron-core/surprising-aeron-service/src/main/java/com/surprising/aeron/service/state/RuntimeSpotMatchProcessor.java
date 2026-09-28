@@ -46,7 +46,7 @@ public final class RuntimeSpotMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return;
         }
-        CoreInstrument instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
         if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }

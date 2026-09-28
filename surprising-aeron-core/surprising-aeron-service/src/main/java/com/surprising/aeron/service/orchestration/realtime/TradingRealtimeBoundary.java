@@ -79,7 +79,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
                 && frame.kind() == RealtimeFrame.Kind.SNAPSHOT_REQUEST;
         boolean bookRequest = frame.userId() == 0
                 && frame.kind() == RealtimeFrame.Kind.BOOK_REQUEST
-                && frame.symbol().matches("[A-Z0-9][A-Z0-9_-]{1,63}");
+                && com.surprising.product.api.InstrumentIds.valid(frame.instrumentId());
         if (frame.productLine() == productLine && frame.snapshotId() > 0 && frame.payloadLength() == 0
                 && frame.ordinal() == 0 && frame.sequence() == 0 && (snapshotRequest || bookRequest)) {
             requests.offer(frame);
@@ -123,7 +123,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
 
         nextSnapshotNanos = nowNanos + SNAPSHOT_INTERVAL_NANOS;
         if (request.kind() == RealtimeFrame.Kind.BOOK_REQUEST) {
-            state.captureRealtimeBook(request.symbol(), committedPosition, cluster.time());
+            state.captureRealtimeBook(request.instrumentId(), committedPosition, cluster.time());
         } else {
             state.captureRealtimeSnapshot(request.userId(), request.snapshotId(),
                     committedPosition, cluster.time());

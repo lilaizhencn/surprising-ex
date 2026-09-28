@@ -129,10 +129,10 @@ final class HttpOpenLoopWorkload {
             waitUntil(intended);
             WorkloadOperation operation = operation(sequence);
             long userId = user(sequence);
-            String symbol = symbol(sequence);
+            String instrumentId = instrumentId(sequence);
             Optional<Resource> reserved = reservePrerequisite(operation, sequence);
             long intentUserId = reserved.map(Resource::userId).orElse(userId);
-            String intentSymbol = reserved.map(Resource::symbol).orElse(symbol);
+            String intentSymbol = reserved.map(Resource::instrumentId).orElse(instrumentId);
             String targetIdentity = reserved.map(Resource::identity).orElse("");
             StableIdentityLedger.Intent intent = current.intent(sequence, operation, intentUserId, intentSymbol,
                     expected(operation), targetIdentity);
@@ -315,11 +315,11 @@ final class HttpOpenLoopWorkload {
                     ? post("/api/v1/trading/orders", orderJson(intent, "MARKET", "IOC", false))
                     : post("/api/v1/trading/orders/close-position",
                             "{\"userId\":" + intent.userId() + ",\"clientOrderId\":\"" + clientId
-                                    + "\",\"symbol\":\"" + intent.symbol()
+                                    + "\",\"instrumentId\":\"" + intent.instrumentId()
                                     + "\",\"marginMode\":\"CROSS\",\"positionSide\":\"NET\"}");
             case TRIGGER -> post("/api/v1/trading/trigger-orders",
                     "{\"userId\":" + intent.userId() + ",\"clientTriggerOrderId\":\"" + clientId
-                            + "\",\"symbol\":\"" + intent.symbol() + "\",\"side\":\"SELL\","
+                            + "\",\"instrumentId\":\"" + intent.instrumentId() + "\",\"side\":\"SELL\","
                             + "\"triggerType\":\"STOP_LOSS\",\"triggerPriceTicks\":"
                             + config.triggerPriceTicks() + ",\"orderType\":\"MARKET\","
                             + "\"timeInForce\":\"IOC\",\"priceTicks\":0,\"quantitySteps\":1,"
@@ -335,20 +335,20 @@ final class HttpOpenLoopWorkload {
             case 0 -> post("/api/v1/trading/orders/batch", "{\"batchKey\":\"" + intent.clientIdentity()
                     + "\",\"orders\":[" + orderJson(intent, "LIMIT", "GTC", false) + "]}");
             case 1 -> post("/api/v1/trading/orders/algo", "{\"userId\":" + intent.userId()
-                    + ",\"clientAlgoOrderId\":\"" + intent.clientIdentity() + "\",\"symbol\":\""
-                    + intent.symbol() + "\",\"algoType\":\"TWAP\",\"side\":\"BUY\",\"priceTicks\":"
+                    + ",\"clientAlgoOrderId\":\"" + intent.clientIdentity() + "\",\"instrumentId\":\""
+                    + intent.instrumentId() + "\",\"algoType\":\"TWAP\",\"side\":\"BUY\",\"priceTicks\":"
                     + config.limitPriceTicks() + ","
                     + "\"quantitySteps\":1,\"childQuantitySteps\":1,\"intervalSeconds\":1,"
                     + "\"durationSeconds\":1,\"marginMode\":\"CROSS\",\"positionSide\":\"NET\","
                     + "\"reduceOnly\":false,\"postOnly\":false,\"timeInForce\":\"IOC\"}");
             default -> post("/api/v1/trading/orders/cancel-all-after", "{\"userId\":" + intent.userId()
-                    + ",\"symbol\":\"" + intent.symbol() + "\",\"countdownMs\":60000}");
+                    + ",\"instrumentId\":\"" + intent.instrumentId() + "\",\"countdownMs\":60000}");
         };
     }
 
     private String orderJson(StableIdentityLedger.Intent intent, String type, String tif, boolean reduceOnly) {
         return "{\"userId\":" + intent.userId() + ",\"clientOrderId\":\"" + intent.clientIdentity()
-                + "\",\"symbol\":\"" + intent.symbol() + "\",\"side\":\"BUY\",\"orderType\":\""
+                + "\",\"instrumentId\":\"" + intent.instrumentId() + "\",\"side\":\"BUY\",\"orderType\":\""
                 + type + "\",\"timeInForce\":\"" + tif + "\",\"priceTicks\":"
                 + ("MARKET".equals(type) ? 0 : config.limitPriceTicks())
                 + ",\"quantitySteps\":1,\"marginMode\":\"CROSS\","
@@ -494,7 +494,7 @@ final class HttpOpenLoopWorkload {
         return users[Math.floorMod((int) mixed, bound)];
     }
 
-    private String symbol(long sequence) {
+    private String instrumentId(long sequence) {
         String[] symbols = config.symbols();
         long mixed = mix(sequence + config.seed());
         boolean hot = config.skew() == TrafficSkew.HOT_SYMBOL || config.skew() == TrafficSkew.COMBINED_HOT;
@@ -613,7 +613,7 @@ final class HttpOpenLoopWorkload {
     private record RequestSpec(String method, String path, String body) {
     }
 
-    private record Resource(long userId, String symbol, String identity) {
+    private record Resource(long userId, String instrumentId, String identity) {
     }
 
     private final class PrerequisitePools {
@@ -658,26 +658,26 @@ final class HttpOpenLoopWorkload {
 
         synchronized void complete(StableIdentityLedger.Intent intent, String resourceIdentity) {
             if (intent.operation() == WorkloadOperation.PLACE && !resourceIdentity.isBlank()) {
-                orders.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
+                orders.addLast(new Resource(intent.userId(), intent.instrumentId(), resourceIdentity));
             } else if (intent.operation() == WorkloadOperation.TRIGGER && !resourceIdentity.isBlank()
                     && !intent.targetIdentity().isBlank()) {
-                triggers.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
+                triggers.addLast(new Resource(intent.userId(), intent.instrumentId(), resourceIdentity));
                 triggerPositions.put(resourceIdentity, intent.targetIdentity());
             } else if (intent.operation() == WorkloadOperation.MARKET_IOC_CLOSE
                     && !isPositionCloseIntent(intent.sequence()) && !resourceIdentity.isBlank()) {
-                positions.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
+                positions.addLast(new Resource(intent.userId(), intent.instrumentId(), resourceIdentity));
             } else if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
                 Resource trigger = reservedTriggers.remove(intent.targetIdentity());
                 String positionIdentity = triggerPositions.remove(intent.targetIdentity());
                 if (trigger != null && positionIdentity != null) {
-                    positions.addLast(new Resource(trigger.userId(), trigger.symbol(), positionIdentity));
+                    positions.addLast(new Resource(trigger.userId(), trigger.instrumentId(), positionIdentity));
                 }
             }
         }
 
         synchronized void release(StableIdentityLedger.Intent intent) {
             if (intent.targetIdentity().isBlank()) return;
-            Resource resource = new Resource(intent.userId(), intent.symbol(), intent.targetIdentity());
+            Resource resource = new Resource(intent.userId(), intent.instrumentId(), intent.targetIdentity());
             if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
                 Resource trigger = reservedTriggers.remove(intent.targetIdentity());
                 if (trigger != null) triggers.addFirst(trigger);

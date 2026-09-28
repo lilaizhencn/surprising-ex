@@ -30,8 +30,8 @@ public class AdminMaintenanceRequestService {
         return service.list(beforeId);
     }
 
-    public MaintenanceService.Preview preview(String symbol, long userId, long afterUserId) {
-        return service.preview(symbol, userId, afterUserId);
+    public MaintenanceService.Preview preview(String instrumentId, long userId, long afterUserId) {
+        return service.preview(instrumentId, userId, afterUserId);
     }
 
     public MaintenanceTask get(long id) {

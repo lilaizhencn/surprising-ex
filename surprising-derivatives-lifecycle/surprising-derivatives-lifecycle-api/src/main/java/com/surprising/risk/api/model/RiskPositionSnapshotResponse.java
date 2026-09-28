@@ -7,7 +7,7 @@ import java.time.Instant;
 public record RiskPositionSnapshotResponse(
         long snapshotId,
         long userId,
-        String symbol,
+        String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
         String settleAsset,
@@ -29,7 +29,7 @@ public record RiskPositionSnapshotResponse(
 
     public RiskPositionSnapshotResponse(long snapshotId,
                                         long userId,
-                                        String symbol,
+                                        String instrumentId,
                                         MarginMode marginMode,
                                         String settleAsset,
                                         long signedQuantitySteps,
@@ -42,14 +42,14 @@ public record RiskPositionSnapshotResponse(
                                         long marginRatioPpm,
                                         RiskStatus status,
                                         Instant eventTime) {
-        this(snapshotId, userId, symbol, marginMode, PositionSide.NET, settleAsset,
+        this(snapshotId, userId, instrumentId, marginMode, PositionSide.NET, settleAsset,
                 signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
                 maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime);
     }
 
     public RiskPositionSnapshotResponse(long snapshotId,
                                         long userId,
-                                        String symbol,
+                                        String instrumentId,
                                         String settleAsset,
                                         long signedQuantitySteps,
                                         long entryPriceTicks,
@@ -60,7 +60,7 @@ public record RiskPositionSnapshotResponse(
                                         long marginRatioPpm,
                                         RiskStatus status,
                                         Instant eventTime) {
-        this(snapshotId, userId, symbol, MarginMode.CROSS, PositionSide.NET, settleAsset, signedQuantitySteps,
+        this(snapshotId, userId, instrumentId, MarginMode.CROSS, PositionSide.NET, settleAsset, signedQuantitySteps,
                 entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits, 0L,
                 marginRatioPpm, status, eventTime);
     }

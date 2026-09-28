@@ -13,7 +13,7 @@ public interface MarketMakerReferenceSampleRepository {
     record MarketMakerReferenceSampleWrite(
             String strategyId,
             ProductLine productLine,
-            String symbol,
+            String instrumentId,
             String nodeId,
             long cycleSequence,
             String sourceName,

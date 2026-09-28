@@ -22,7 +22,7 @@ public final class RuntimeTriggerOrderStateTransitions {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime trigger order update");
         }
-        int symbolId = identities.symbolId(view.symbol());
+        int symbolId = identities.symbolId(view.instrumentId());
         long positionKey = positionKey(identities, runtime.productLine(), userId, view);
         boolean instrumentSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
         upsert(runtime, userId, view, symbolId, positionKey, instrumentSettled);
@@ -53,7 +53,7 @@ public final class RuntimeTriggerOrderStateTransitions {
     public static void validateOcoPair(CoreTriggerOrderStateView first, CoreTriggerOrderStateView second) {
         if (first == null || second == null || first.ocoGroupId().isBlank()
                 || !first.ocoGroupId().equals(second.ocoGroupId()) || first.userId() != second.userId()
-                || first.productLine() != second.productLine() || !first.symbol().equals(second.symbol())
+                || first.productLine() != second.productLine() || !first.instrumentId().equals(second.instrumentId())
                 || first.side() != second.side() || first.marginMode() != second.marginMode()
                 || first.positionSide() != second.positionSide() || first.quantitySteps() != second.quantitySteps()
                 || first.triggerOrderId() == second.triggerOrderId()
@@ -80,7 +80,7 @@ public final class RuntimeTriggerOrderStateTransitions {
         if (view.clientTriggerOrderId().isBlank()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
         }
-        CoreInstrument instrument = runtime.instrument(view.symbol());
+        CoreInstrument instrument = runtime.instrument(view.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
         }
@@ -151,7 +151,7 @@ public final class RuntimeTriggerOrderStateTransitions {
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
         runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(),
                 current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
@@ -188,7 +188,7 @@ public final class RuntimeTriggerOrderStateTransitions {
     public static long positionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
                             long userId, CoreTriggerOrderStateView view) {
         if (!productLine.isDerivative()) return 0;
-        return identities.positionKey(userId, OrderReservation.normalizeSymbol(view.symbol()),
+        return identities.positionKey(userId, OrderReservation.requireInstrumentId(view.instrumentId()),
                 view.positionSide());
     }
 
@@ -255,7 +255,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                                                     long triggerSequence, long triggeredPriceTicks,
                                                     String rejectReason, long updatedAt) {
         return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(), current.userId(),
-                current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.instrument(), current.side(),
+                current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(), current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
                 current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(),

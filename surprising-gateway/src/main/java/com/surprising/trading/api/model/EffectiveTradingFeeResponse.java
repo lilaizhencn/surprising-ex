@@ -6,7 +6,7 @@ import java.time.Instant;
 public record EffectiveTradingFeeResponse(
         long userId,
         ProductLine productLine,
-        String symbol,
+        String instrumentId,
         long instrumentChangeId,
         long makerFeeRatePpm,
         long takerFeeRatePpm,

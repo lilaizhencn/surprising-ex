@@ -26,15 +26,15 @@ public class MarkPriceCoordinationService {
         this.encodingService = encodingService;
     }
 
-    public long nextSequence(String module, String symbol) {
-        return sequenceRepository.next(module, symbol);
+    public long nextSequence(String module, String instrumentId) {
+        return sequenceRepository.next(module, instrumentId);
     }
 
-    public boolean acquireLease(String module, String symbol, String ownerId, Duration leaseDuration) {
-        return leaseRepository.acquire(module, symbol, ownerId, leaseDuration);
+    public boolean acquireLease(String module, String instrumentId, String ownerId, Duration leaseDuration) {
+        return leaseRepository.acquire(module, instrumentId, ownerId, leaseDuration);
     }
 
-    public MarkPriceEncoding currentEncoding(String symbol) {
-        return encodingService.currentEncoding(symbol);
+    public MarkPriceEncoding currentEncoding(String instrumentId) {
+        return encodingService.currentEncoding(instrumentId);
     }
 }

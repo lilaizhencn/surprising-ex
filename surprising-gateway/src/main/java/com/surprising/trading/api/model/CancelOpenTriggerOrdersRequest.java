@@ -7,6 +7,6 @@ import jakarta.validation.constraints.Size;
 
 public record CancelOpenTriggerOrdersRequest(
         @Positive long userId,
-        @Size(max = 64) String symbol,
+        @Size(max = 64) String instrumentId,
         @Min(1) @Max(1000) Integer limit) {
 }

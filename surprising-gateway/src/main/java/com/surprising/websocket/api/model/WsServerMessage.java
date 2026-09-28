@@ -7,7 +7,7 @@ public record WsServerMessage(
         String op,
         String id,
         String channel,
-        String symbol,
+        String instrumentId,
         String period,
         Long userId,
         ProductLine productLine,
@@ -16,17 +16,17 @@ public record WsServerMessage(
         Instant eventTime) {
 
     public static WsServerMessage ack(String id, SubscriptionTopic topic) {
-        return new WsServerMessage("subscribed", id, topic.channel().code(), topic.symbol(), topic.period(),
+        return new WsServerMessage("subscribed", id, topic.channel().code(), topic.instrumentId(), topic.period(),
                 topic.userId(), topic.productLine(), null, null, Instant.now());
     }
 
     public static WsServerMessage unack(String id, SubscriptionTopic topic) {
-        return new WsServerMessage("unsubscribed", id, topic.channel().code(), topic.symbol(), topic.period(),
+        return new WsServerMessage("unsubscribed", id, topic.channel().code(), topic.instrumentId(), topic.period(),
                 topic.userId(), topic.productLine(), null, null, Instant.now());
     }
 
     public static WsServerMessage event(SubscriptionTopic topic, Object data, Instant eventTime) {
-        return new WsServerMessage("event", null, topic.channel().code(), topic.symbol(), topic.period(),
+        return new WsServerMessage("event", null, topic.channel().code(), topic.instrumentId(), topic.period(),
                 topic.userId(), topic.productLine(), data, null, eventTime);
     }
 

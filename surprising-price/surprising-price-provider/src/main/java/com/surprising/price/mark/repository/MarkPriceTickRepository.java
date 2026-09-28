@@ -18,7 +18,7 @@ public class MarkPriceTickRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO price_mark_ticks (
-                product_line, symbol, instrument_change_id, sequence, mark_price, mark_price_units,
+                product_line, instrument_id, instrument_change_id, sequence, mark_price, mark_price_units,
                 mark_price_ticks, index_price, price1, price2, last_trade_price,
                 best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds,
                 basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time, published_at,
@@ -43,7 +43,7 @@ public class MarkPriceTickRepository {
                 MarkPriceAuditRecord record = records.get(index);
                 MarkPriceEvent event = record.event().result();
                 statement.setString(1, event.productLine().name());
-                statement.setString(2, event.symbol());
+                statement.setString(2, event.instrumentId());
                 statement.setLong(3, event.instrumentChangeId());
                 statement.setLong(4, event.sequence());
                 statement.setBigDecimal(5, event.markPrice());
@@ -87,17 +87,17 @@ public class MarkPriceTickRepository {
                 """, Timestamp.from(cutoff), batchSize);
     }
 
-    public List<MarkPriceResponse> history(String symbol, Instant startTime, Instant endTime, int limit) {
+    public List<MarkPriceResponse> history(String instrumentId, Instant startTime, Instant endTime, int limit) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM price_mark_ticks
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                    AND event_time >= ?
                    AND event_time < ?
                  ORDER BY event_time ASC
                  LIMIT ?
                 """, (rs, rowNum) -> new MarkPriceResponse(
-                        rs.getString("symbol"),
+                        rs.getString("instrument_id"),
                         rs.getBigDecimal("mark_price"),
                         rs.getLong("mark_price_units"),
                         rs.getBigDecimal("index_price"),
@@ -116,6 +116,6 @@ public class MarkPriceTickRepository {
                         rs.getLong("sequence"),
                         PriceStatus.valueOf(rs.getString("status")),
                         rs.getTimestamp("event_time").toInstant()),
-                symbol, Timestamp.from(startTime), Timestamp.from(endTime), limit);
+                instrumentId, Timestamp.from(startTime), Timestamp.from(endTime), limit);
     }
 }

@@ -4,7 +4,7 @@ import java.time.Instant;
 
 public record CancelAllAfterResponse(
         long userId,
-        String symbol,
+        String instrumentId,
         long countdownMs,
         boolean active,
         Instant triggerAt,

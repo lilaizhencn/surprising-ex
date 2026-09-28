@@ -24,7 +24,7 @@ public final class RiskCommands {
         RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(command, owner.runtimeState(), owner.identities());
         owner.initializeTriggerScan(command);
         owner.requestCommitPublication();
-        owner.logRiskScan("mark-price", command.symbol(), owner.runtimeState().riskScanControl().scanBatchSize(),
+        owner.logRiskScan("mark-price", command.instrumentId(), owner.runtimeState().riskScanControl().scanBatchSize(),
                 pendingBefore, startedAt);
     }
 
@@ -39,7 +39,7 @@ public final class RiskCommands {
         var activeScan = activeRiskScan == null
                 ? owner.runtimeState().firstIncompleteRiskScan() : activeRiskScan;
         if (activeScan == null) return;
-        String symbol = owner.identities().symbol(activeScan.symbolId());
+        String instrumentId = owner.identities().instrumentId(activeScan.symbolId());
         int pendingBefore = owner.pendingRiskScanCount();
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState().revision();
@@ -48,7 +48,7 @@ public final class RiskCommands {
             if (!activeScan.riskComplete()) {
                 risk = owner.reusableRiskScanCoordinator(command.maxUsers());
             }
-            owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), symbol, command.maxUsers(),
+            owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, command.maxUsers(),
                     pendingBefore, startedAt, beforeRevision);
             return;
         }
@@ -60,9 +60,9 @@ public final class RiskCommands {
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
         int remainingWork = command.maxUsers() - completedRiskWork;
         if (remainingWork > 0 && owner.runtimeState().riskScan(activeScan.symbolId()).riskComplete()) {
-            owner.evaluatePendingTriggerScan(symbol, remainingWork);
+            owner.evaluatePendingTriggerScan(instrumentId, remainingWork);
         }
-        owner.logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
+        owner.logRiskScan("continuation", instrumentId, command.maxUsers(), pendingBefore, startedAt);
     }
 
     public void executeUpdateRiskScanControl(CoreMessage message, long clusterTimestamp) {

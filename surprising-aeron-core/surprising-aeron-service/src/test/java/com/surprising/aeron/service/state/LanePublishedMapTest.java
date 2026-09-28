@@ -9,13 +9,13 @@ class LanePublishedMapTest {
         for (boolean prepared : new boolean[]{true}) {
             try (var runtime = new TradingRuntimeState()) {
                 var identities = new RuntimeIdentityRegistry();
-                int symbol = identities.symbolId("BTC-USDT");
+                int instrumentId = identities.symbolId("1");
                 int asset = identities.assetId("USDT");
                 var outbox = new com.surprising.aeron.client.RealtimeOutbox(32, 65536);
                 var capture = new com.surprising.aeron.service.state.realtime.RealtimeStateCapture(
                         outbox, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, identities);
                 runtime.realtimeCapture(capture);
-                var position = new PositionRuntime(7, symbol, asset,
+                var position = new PositionRuntime(7, instrumentId, asset,
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
                         CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 17, 20);

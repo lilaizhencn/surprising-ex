@@ -14,7 +14,7 @@ public record CoreOrderState(
         long orderId,
         ProductLine productLine,
         long userId,
-        String symbol,
+        String instrumentId,
         CoreOrderSide side,
         long priceTicks,
         long matchingPriceTicks,
@@ -43,7 +43,7 @@ public record CoreOrderState(
         long orderId,
         ProductLine productLine,
         long userId,
-        String symbol,
+        String instrumentId,
         CoreOrderSide side,
         long priceTicks,
         long matchingPriceTicks,
@@ -66,7 +66,7 @@ public record CoreOrderState(
         long clusterPosition,
         CoreOrderStatus status,
         long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
 
@@ -82,13 +82,13 @@ public record CoreOrderState(
                 || status == null || revision <= 0) {
             throw new IllegalArgumentException("invalid order state");
         }
-        symbol = OrderReservation.normalizeSymbol(symbol);
+        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         if (status == CoreOrderStatus.OPEN && remainingQuantitySteps == 0) {
             throw new IllegalArgumentException("open order must have remaining quantity");
         }
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long matchingPriceTicks,
                           long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                           boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
@@ -96,66 +96,66 @@ public record CoreOrderState(
                           String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                           long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                           CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, matchingPriceTicks,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long quantitySteps,
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
                 "", new UUID(0, orderId), 0, 0, 0, 0, 0, status, revision);
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long quantitySteps,
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
                           CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
                           long makerFeeRatePpm, long takerFeeRatePpm, long createdAtEpochMillis,
                           long updatedAtEpochMillis, long clusterPosition, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long quantitySteps,
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
                           CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
                           long makerFeeRatePpm, long takerFeeRatePpm, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 0, 0, 0, status, revision);
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long matchingPriceTicks,
                           long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                           boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
                           CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
                           String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                           CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, matchingPriceTicks,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 0, 0, 0, status, revision);
     }
 
-    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String instrumentId,
                           CoreOrderSide side, long priceTicks, long quantitySteps,
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreMarginMode marginMode, CorePositionSide positionSide,
                           CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, side, priceTicks, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
                 "", new UUID(0, orderId), 0, 0, 0, 0, 0, status, revision);
@@ -165,7 +165,7 @@ public record CoreOrderState(
         if (status.terminal()) {
             return this;
         }
-        return new CoreOrderState(orderId, productLine, userId, symbol,
+        return new CoreOrderState(orderId, productLine, userId, instrumentId,
                 side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
@@ -178,7 +178,7 @@ public record CoreOrderState(
         if (status.terminal()) {
             return this;
         }
-        return new CoreOrderState(orderId, productLine, userId, symbol,
+        return new CoreOrderState(orderId, productLine, userId, instrumentId,
                 side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
@@ -197,7 +197,7 @@ public record CoreOrderState(
         }
         long nextExecuted = Math.addExact(executedQuantitySteps, quantitySteps);
         long nextRemaining = Math.subtractExact(remainingQuantitySteps, quantitySteps);
-        return new CoreOrderState(orderId, productLine, userId, symbol,
+        return new CoreOrderState(orderId, productLine, userId, instrumentId,
                 side, priceTicks, matchingPriceTicks, quantitySteps(), nextExecuted, nextRemaining,
                 reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly,
@@ -212,7 +212,7 @@ public record CoreOrderState(
         if (status != CoreOrderStatus.OPEN || newPriceTicks <= 0) {
             throw new IllegalStateException("invalid order replace");
         }
-        return new CoreOrderState(orderId, productLine, userId, symbol,
+        return new CoreOrderState(orderId, productLine, userId, instrumentId,
                 side, newPriceTicks, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
                 clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
@@ -221,7 +221,7 @@ public record CoreOrderState(
     }
 
     public CoreOrderState withCommitMetadata(long timestamp, long position) {
-        return new CoreOrderState(orderId, productLine, userId, symbol, side, priceTicks,
+        return new CoreOrderState(orderId, productLine, userId, instrumentId, side, priceTicks,
                 matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,

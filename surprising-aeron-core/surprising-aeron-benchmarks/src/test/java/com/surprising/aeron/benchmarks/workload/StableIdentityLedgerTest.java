@@ -22,14 +22,14 @@ class StableIdentityLedgerTest {
         Path ledgerDirectory = temporaryDirectory.resolve("ledger");
         StableIdentityLedger.Intent first;
         try (StableIdentityLedger ledger = StableIdentityLedger.open(ledgerDirectory, "resume-run", 71L)) {
-            first = ledger.intent(17L, WorkloadOperation.PLACE, 9_001L, "BTC-USDT", "OPEN");
+            first = ledger.intent(17L, WorkloadOperation.PLACE, 9_001L, "1", "OPEN");
             ledger.scheduled(first, 123_456L);
             ledger.sent(first.sequence(), 123_999L);
         }
 
         try (StableIdentityLedger resumed = StableIdentityLedger.open(ledgerDirectory, "resume-run", 71L)) {
             StableIdentityLedger.Intent retried = resumed.intent(
-                    17L, WorkloadOperation.PLACE, 9_001L, "BTC-USDT", "OPEN");
+                    17L, WorkloadOperation.PLACE, 9_001L, "1", "OPEN");
             assertThat(retried.intentId()).isEqualTo(first.intentId());
             assertThat(retried.clientIdentity()).isEqualTo(first.clientIdentity());
             assertThat(resumed.outstanding()).extracting(StableIdentityLedger.Intent::sequence).containsExactly(17L);
@@ -42,7 +42,7 @@ class StableIdentityLedgerTest {
         try (StableIdentityLedger ledger = StableIdentityLedger.open(
                 ledgerDirectory, "exclusive-terminal-run", 70L, "config-a")) {
             StableIdentityLedger.Intent intent = ledger.intent(
-                    1L, WorkloadOperation.PLACE, 9_001L, "BTC-USDT", "APPLIED");
+                    1L, WorkloadOperation.PLACE, 9_001L, "1", "APPLIED");
             ledger.scheduled(intent, 10L);
 
             ledger.aborted(intent.sequence(), 20L, "operator interruption");
@@ -59,7 +59,7 @@ class StableIdentityLedgerTest {
     void rejectsCorruptionButReplaysPastAStaleCheckpoint() throws Exception {
         Path staleDirectory = temporaryDirectory.resolve("stale");
         try (StableIdentityLedger ledger = StableIdentityLedger.open(staleDirectory, "stale-run", 72L)) {
-            var intent = ledger.intent(1L, WorkloadOperation.PLACE, 1L, "BTC-USDT", "OPEN");
+            var intent = ledger.intent(1L, WorkloadOperation.PLACE, 1L, "1", "OPEN");
             ledger.scheduled(intent, 10L);
             ledger.sent(intent.sequence(), 20L);
         }
@@ -72,7 +72,7 @@ class StableIdentityLedgerTest {
 
         Path corruptDirectory = temporaryDirectory.resolve("corrupt");
         try (StableIdentityLedger ledger = StableIdentityLedger.open(corruptDirectory, "corrupt-run", 73L)) {
-            var intent = ledger.intent(1L, WorkloadOperation.PLACE, 1L, "BTC-USDT", "OPEN");
+            var intent = ledger.intent(1L, WorkloadOperation.PLACE, 1L, "1", "OPEN");
             ledger.scheduled(intent, 10L);
         }
         Files.writeString(corruptDirectory.resolve("events.jsonl"), "not-json\n",
@@ -87,7 +87,7 @@ class StableIdentityLedgerTest {
         Path directory = temporaryDirectory.resolve("torn-tail");
         StableIdentityLedger.Intent intent;
         try (StableIdentityLedger ledger = StableIdentityLedger.open(directory, "torn-run", 74L, "config-a")) {
-            intent = ledger.intent(1L, WorkloadOperation.PLACE, 7L, "BTC-USDT", "APPLIED");
+            intent = ledger.intent(1L, WorkloadOperation.PLACE, 7L, "1", "APPLIED");
             ledger.scheduled(intent, 10L);
         }
         Files.writeString(directory.resolve("events.jsonl"), "{\"event\":\"SENT\",\"sequence\":1",
@@ -139,7 +139,7 @@ class StableIdentityLedgerTest {
         properties.setProperty("limitPriceTicks", "1");
         properties.setProperty("triggerPriceTicks", "1");
         properties.setProperty("users", "1");
-        properties.setProperty("symbols", "BTC-USDT");
+        properties.setProperty("symbols", "1");
         return properties;
     }
 }

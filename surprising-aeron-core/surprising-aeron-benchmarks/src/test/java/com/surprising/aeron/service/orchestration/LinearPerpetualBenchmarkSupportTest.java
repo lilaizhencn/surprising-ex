@@ -36,8 +36,8 @@ class LinearPerpetualBenchmarkSupportTest {
             long before = harness.executedMessages();
             harness.refreshMarkPricesIfDue(template.symbols());
             assertThat(harness.executedMessages() - before).isEqualTo(template.symbols().size());
-            for (String symbol : template.symbols()) {
-                assertThat(harness.state().runtimeMarkPrice(symbol).generatedAtEpochMillis()).isEqualTo(now);
+            for (String instrumentId : template.symbols()) {
+                assertThat(harness.state().runtimeMarkPrice(instrumentId).generatedAtEpochMillis()).isEqualTo(now);
             }
             long refreshed = harness.executedMessages();
             harness.refreshMarkPricesIfDue(template.symbols());

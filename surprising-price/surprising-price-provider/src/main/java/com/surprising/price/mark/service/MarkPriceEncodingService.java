@@ -31,23 +31,23 @@ public class MarkPriceEncodingService {
         this(properties,cache); this.instrumentRpc=rpc;
     }
 
-    public MarkPriceEncoding currentEncoding(String symbol) {
+    public MarkPriceEncoding currentEncoding(String instrumentId) {
         if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), symbol)
-                .orElseThrow(() -> notFound(symbol));
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.InstrumentIds.parse(instrumentId))
+                .orElseThrow(() -> notFound(instrumentId));
         return encoding(instrument);
     }
 
-    public MarkPriceEncoding encoding(String symbol, long instrumentChangeId) {
+    public MarkPriceEncoding encoding(String instrumentId, long instrumentChangeId) {
         if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), symbol, instrumentChangeId).orElse(null);
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId).orElse(null);
         if (instrument==null) {
-            if (instrumentRpc==null) throw notFound(symbol,instrumentChangeId);
-            var units=instrumentRpc.tradeEncoding(properties.getKafka().getProductLine(),symbol,instrumentChangeId);
+            if (instrumentRpc==null) throw notFound(instrumentId,instrumentChangeId);
+            var units=instrumentRpc.tradeEncoding(properties.getKafka().getProductLine(),com.surprising.product.api.InstrumentIds.parse(instrumentId),instrumentChangeId);
             return new MarkPriceEncoding(instrumentChangeId,units.quoteScaleUnits(),units.priceTickUnits(),units.baseScaleUnits(),units.quantityStepUnits());
         }
         return encoding(instrument);
@@ -55,19 +55,19 @@ public class MarkPriceEncodingService {
 
     private MarkPriceEncoding encoding(com.surprising.instrument.api.model.InstrumentResponse instrument) {
         long quoteScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.quoteAsset())
-                .orElseThrow(() -> notFound(instrument.symbol(), instrument.changeId()));
+                .orElseThrow(() -> notFound(Integer.toString(instrument.instrumentId()), instrument.changeId()));
         long baseScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.baseAsset())
-                .orElseThrow(() -> notFound(instrument.symbol(), instrument.changeId()));
+                .orElseThrow(() -> notFound(Integer.toString(instrument.instrumentId()), instrument.changeId()));
         return new MarkPriceEncoding(instrument.changeId(), quoteScaleUnits, instrument.priceTickUnits(),
                 baseScaleUnits, instrument.quantityStepUnits());
     }
 
-    private IllegalStateException notFound(String symbol) {
-        return new IllegalStateException("mark price encoding not found for " + symbol);
+    private IllegalStateException notFound(String instrumentId) {
+        return new IllegalStateException("mark price encoding not found for " + instrumentId);
     }
 
-    private IllegalStateException notFound(String symbol, long instrumentChangeId) {
-        return new IllegalStateException("mark price encoding not found for " + symbol
+    private IllegalStateException notFound(String instrumentId, long instrumentChangeId) {
+        return new IllegalStateException("mark price encoding not found for " + instrumentId
                 + " version " + instrumentChangeId);
     }
 }

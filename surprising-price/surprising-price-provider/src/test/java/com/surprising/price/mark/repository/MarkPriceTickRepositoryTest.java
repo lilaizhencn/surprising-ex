@@ -51,7 +51,7 @@ class MarkPriceTickRepositoryTest {
         PreparedStatement statement = mock(PreparedStatement.class);
         setter.getValue().setValues(statement, 0);
         verify(statement).setString(1, ProductLine.LINEAR_PERPETUAL.name());
-        verify(statement).setString(2, "BTC-USDT");
+        verify(statement).setString(2, "1");
         verify(statement).setLong(3, 7L);
         verify(statement).setLong(6, 5_900_000_000_000L);
         verify(statement).setLong(7, 5_900_000L);
@@ -84,7 +84,7 @@ class MarkPriceTickRepositoryTest {
 
     private static MarkPriceEvent event() {
         Instant now = Instant.parse("2026-07-17T00:00:00Z");
-        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 7L,
+        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "1", 7L,
                 5_900_000_000_000L, 5_900_000L, new BigDecimal("59000.00"),
                 new BigDecimal("59000.00"), null, new BigDecimal("59000.00"),
                 new BigDecimal("59000.00"), new BigDecimal("59000.00"),

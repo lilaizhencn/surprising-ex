@@ -2,7 +2,7 @@ package com.surprising.aeron.protocol;
 
 public record PlaceOrderCommand(
         long orderId,
-        String symbol,
+        String instrumentId,
         CoreOrderSide side,
         long limitPriceTicks,
         long quantitySteps,
@@ -15,7 +15,7 @@ public record PlaceOrderCommand(
         String clientOrderId) {
 
     public PlaceOrderCommand {
-        if (orderId <= 0 || symbol == null || symbol.isBlank()
+        if (orderId <= 0 || instrumentId == null || instrumentId.isBlank()
                 || side == null || limitPriceTicks < 0
                 || quantitySteps <= 0 || marginMode == null || positionSide == null
                 || orderType == null || timeInForce == null

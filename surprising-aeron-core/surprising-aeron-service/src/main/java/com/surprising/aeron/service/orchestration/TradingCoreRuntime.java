@@ -218,10 +218,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     /** 在已提交位置上登记一个盘口读取请求。 */
-    public void captureRealtimeBook(String symbol, long position, long timestamp) {
+    public void captureRealtimeBook(String instrumentId, long position, long timestamp) {
         if (realtimeReads == null || realtimeReads.realtimeBookPending()) return;
         assertClusterCallbackComplete();
-        realtimeReads.captureRealtimeBook(symbol, position, timestamp);
+        realtimeReads.captureRealtimeBook(instrumentId, position, timestamp);
     }
 
     /** 幂等结果账本允许保留的最大命令数。 */
@@ -409,11 +409,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     @Override public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
         triggers.initializeTriggerScan(command);
     }
-    @Override public java.util.function.BooleanSupplier pendingTriggerScan(String symbol, int maxWork) {
-        return triggers.pendingTriggerScan(symbol, maxWork);
+    @Override public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
+        return triggers.pendingTriggerScan(instrumentId, maxWork);
     }
-    @Override public void evaluatePendingTriggerScan(String symbol, int maxWork) {
-        triggers.evaluatePendingTriggerScan(symbol, maxWork);
+    @Override public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
+        triggers.evaluatePendingTriggerScan(instrumentId, maxWork);
     }
     @Override public int queuedMatchingCount() { return admissions.queuedMatching.size(); }
     @Override public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
@@ -425,12 +425,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return terminalRetention.containsTrigger(triggerOrderId, userId, clientTriggerOrderId);
     }
     @Override public com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
-            lifecycleProgress(String symbol) {
-        return runtimeLifecycleProgress(symbol);
+            lifecycleProgress(String instrumentId) {
+        return runtimeLifecycleProgress(instrumentId);
     }
     @Override public SettlementCommandContext.LifecycleOrderPage settlementLifecycleOrders(
-            long userId, String symbol, long cursorOrderId, int maxOrders) {
-        LifecycleOrderChunk page = matchingFlow.lifecycleOrders(userId, symbol, cursorOrderId, maxOrders);
+            long userId, String instrumentId, long cursorOrderId, int maxOrders) {
+        LifecycleOrderChunk page = matchingFlow.lifecycleOrders(userId, instrumentId, cursorOrderId, maxOrders);
         return new SettlementCommandContext.LifecycleOrderPage(page.orders(), page.nextCursorOrderId());
     }
 
@@ -620,9 +620,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     @Override public void deferRiskScanControl(
             com.surprising.aeron.service.command.risk.RiskCommandContext owner,
-            com.surprising.aeron.service.state.RiskScanCoordinator risk, int symbolId, String symbol,
+            com.surprising.aeron.service.state.RiskScanCoordinator risk, int symbolId, String instrumentId,
             int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-        directCommand.deferRiskScanControl(owner, risk, symbolId, symbol, maxUsers, pendingBefore,
+        directCommand.deferRiskScanControl(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore,
                 startedAt, beforeRevision);
     }
 
@@ -722,9 +722,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     CoreResponse pollDirectCommand() { return directCommand.poll(this); }
 
-    long runtimePositionQuantity(long userId, String symbol) {
+    long runtimePositionQuantity(long userId, String instrumentId) {
         long quantity = 0;
-        var instrument = runtimeState.instrument(symbol);
+        var instrument = runtimeState.instrument(instrumentId);
         if (instrument == null) return 0;
         for (com.surprising.aeron.protocol.CorePositionSide side
                 : com.surprising.aeron.protocol.CorePositionSide.values()) {
@@ -1074,20 +1074,20 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
     long snapshotProjectionSequence() { return commits.publication.publishedSequence(); }
     boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
-    boolean runtimeRiskScanComplete(String symbol) {
-        RiskScanRuntime scan = runtimeRiskScan(symbol);
+    boolean runtimeRiskScanComplete(String instrumentId) {
+        RiskScanRuntime scan = runtimeRiskScan(instrumentId);
         return scan == null || scan.complete();
     }
-    RiskScanRuntime runtimeRiskScan(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+    RiskScanRuntime runtimeRiskScan(String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? null : runtimeState.riskScan(symbolId);
     }
-    MarkPriceRuntime runtimeMarkPrice(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+    MarkPriceRuntime runtimeMarkPrice(String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? null : runtimeState.markPrice(symbolId);
     }
-    long runtimeFundingSettlement(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+    long runtimeFundingSettlement(String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
     }
     long runtimeInsurance(String asset) {
@@ -1178,7 +1178,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         try {
             CoreOrderDecisionResolver.resolveInto(event, runtimeState, identities, userId,
                     command, currentClusterTimestamp);
-            openInterestSteps = openInterestIndex.openInterestSteps(event.symbol());
+            openInterestSteps = openInterestIndex.openInterestSteps(event.instrumentId());
             lifecycleSettled = runtimeState.treasury().lifecycleSettlement(event.symbolId()) != 0;
             fundingInProgress = runtimeState.treasury().fundingProgress(event.symbolId()) != null;
             assetId = identities.assetId(event.reservationAsset());
@@ -1197,7 +1197,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 identities, userId, command, currentClusterTimestamp);
         var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
                 runtimeState, identities, userId, resolved);
-        long openInterestSteps = openInterestIndex.openInterestSteps(command.symbol());
+        long openInterestSteps = openInterestIndex.openInterestSteps(command.instrumentId());
         int symbolId = resolved.symbolId();
         int assetId = identities.assetId(resolved.reservationAsset());
         runtimeState.executeUserSettlement(userId, () -> {
@@ -1243,7 +1243,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     CoreMatchingOrder matchingOrder(long orderId) {
         com.surprising.aeron.service.state.OrderRuntime order = runtimeState.order(orderId);
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "runtime order is missing");
-        return new CoreMatchingOrder(order.orderId(), identities.symbol(order.symbolId()),
+        return new CoreMatchingOrder(order.orderId(), identities.instrumentId(order.symbolId()),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
                 order.remainingQuantitySteps());
     }
@@ -1253,24 +1253,24 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     String runtimeOrderSymbol(OrderRuntime order) {
-        return identities.symbol(order.symbolId());
+        return identities.instrumentId(order.symbolId());
     }
 
     String runtimeLiquidationSymbol(
             com.surprising.aeron.service.state.LiquidationRuntime liquidation) {
-        return identities.symbol(liquidation.symbolId());
+        return identities.instrumentId(liquidation.symbolId());
     }
 
     com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
-            runtimeLifecycleProgress(String symbol) {
-        Integer symbolId = identities.findSymbolId(symbol);
+            runtimeLifecycleProgress(String instrumentId) {
+        Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? null : runtimeState.treasury().lifecycleProgress(symbolId);
     }
 
     CoreMatchingOrder matchingOrder(long userId, PlaceOrderCommand intent) {
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, intent, currentClusterTimestamp);
-        return new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(), resolved.orderType(),
+        return new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(), resolved.orderType(),
                 resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
     }
 
@@ -1435,13 +1435,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return runtimeState.incompleteRiskScanCount();
     }
 
-    @Override public void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt) {
+    @Override public void logRiskScan(String operation, String instrumentId, int batchSize, int pendingBefore, long startedAt) {
         long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
         int pendingAfter = pendingRiskScanCount();
         if (!log.isDebugEnabled()) return;
-        log.debug("risk scan operation={} symbol={} batchSize={} elapsedMicros={} "
+        log.debug("risk scan operation={} instrumentId={} batchSize={} elapsedMicros={} "
                         + "pendingSymbolsBefore={} pendingSymbolsAfter={}",
-                operation, symbol, batchSize, elapsedMicros, pendingBefore, pendingAfter);
+                operation, instrumentId, batchSize, elapsedMicros, pendingBefore, pendingAfter);
     }
 
     @Override
@@ -1563,7 +1563,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             digest = mix(digest, policy.policyId());
             digest = mix(digest, policy.policyRevision());
             digest = mix(digest, policy.userId());
-            digest = mixText(digest, policy.symbol());
+            digest = mixText(digest, policy.instrumentId());
             digest = mix(digest, policy.makerFeeRatePpm());
             digest = mix(digest, policy.takerFeeRatePpm());
             digest = mix(digest, policy.sourcePriority());

@@ -211,17 +211,17 @@ class ClusterFundsReconcileTest {
     void comparesReservationPositionRealizedPnlTreasuryAndFlowConservationExactly() {
         CoreUserStateView state = new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1, 9,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 80, 20)),
-                List.of(new CoreReservationView(91, "BTC-USDT", ReservationKind.DERIVATIVE_MARGIN,
+                List.of(new CoreReservationView(91, "1", ReservationKind.DERIVATIVE_MARGIN,
                         "USDT", 20, 3, 2, 5)),
-                List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
+                List.of(new CorePositionView("1", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
                         5, 10, 50, 7, 15)), List.of());
         List<String> lines = List.of(
                 row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 80),
                 row("SEED", "USER", 1, "USDT", "-", "LOCKED", 20),
                 row("SEED", "USER", 1, "USDT", "-", "RESERVATION", 15),
-                row("OPERATION", "USER", 1, "USDT", "BTC-USDT", "POSITION_QUANTITY", 5),
-                row("OPERATION", "USER", 1, "USDT", "BTC-USDT", "POSITION_MARGIN", 15),
-                row("OPERATION", "USER", 1, "USDT", "BTC-USDT", "REALIZED_PNL", 7),
+                row("OPERATION", "USER", 1, "USDT", "1", "POSITION_QUANTITY", 5),
+                row("OPERATION", "USER", 1, "USDT", "1", "POSITION_MARGIN", 15),
+                row("OPERATION", "USER", 1, "USDT", "1", "REALIZED_PNL", 7),
                 row("OPERATION", "USER", 1, "USDT", "-", "FEE", -2),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "FEE", 2),
                 row("OPERATION", "USER", 1, "USDT", "-", "FUNDING", -3),
@@ -373,9 +373,9 @@ class ClusterFundsReconcileTest {
                 row("SEED", "USER", 1, "USDT", "-", "LOCKED", 0));
     }
 
-    private static String row(String kind, String role, long userId, String asset, String symbol,
+    private static String row(String kind, String role, long userId, String asset, String instrumentId,
                               String metric, long delta) {
-        return String.join("\t", kind, role, Long.toString(userId), asset, symbol, metric, Long.toString(delta));
+        return String.join("\t", kind, role, Long.toString(userId), asset, instrumentId, metric, Long.toString(delta));
     }
 
     private static CoreUserStateView user(long userId, List<CoreBalanceView> balances) {
@@ -391,7 +391,7 @@ class ClusterFundsReconcileTest {
             int count, CoreLiquidationWorkView.Purpose purpose) {
         List<CoreLiquidationWorkView.Resolution> values = new ArrayList<>();
         for (int index = 1; index <= count; index++) {
-            values.add(new CoreLiquidationWorkView.Resolution(index, 1, "BTC-USDT", "USDT",
+            values.add(new CoreLiquidationWorkView.Resolution(index, 1, "1", "USDT",
                     CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1,
                     purpose == CoreLiquidationWorkView.Purpose.ADL ? 0 : 1, purpose));
         }

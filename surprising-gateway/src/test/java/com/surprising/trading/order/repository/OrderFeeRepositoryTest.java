@@ -29,7 +29,7 @@ class OrderFeeRepositoryTest {
         when(jdbcTemplate.query(contains("FROM trading_fee_schedules"), any(RowMapper.class),
                 eq(ProductLine.LINEAR_PERPETUAL.name()))).thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
-                    return List.of(mapper.mapRow(row(7L, ProductLine.LINEAR_PERPETUAL, 200L, "BTC-USDT",
+                    return List.of(mapper.mapRow(row(7L, ProductLine.LINEAR_PERPETUAL, 200L, "1",
                             200L, 500L, "VIP"), 0));
                 });
 
@@ -39,7 +39,7 @@ class OrderFeeRepositoryTest {
     @Test
     void validatesVipScheduleWithMakerRebate() {
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(71L, ProductLine.LINEAR_PERPETUAL,
-                1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
+                1001L, "1", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
                 FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
 
         OrderFeeRepository.validateSchedule(request);
@@ -48,7 +48,7 @@ class OrderFeeRepositoryTest {
     @Test
     void rejectsScheduleWhenMakerRateIsWorseThanTakerRate() {
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(72L, ProductLine.LINEAR_PERPETUAL,
-                1001L, "BTC-USDT", 600L, 500L, FeeScheduleSourceType.USER_OVERRIDE, null, "bad fee",
+                1001L, "1", 600L, 500L, FeeScheduleSourceType.USER_OVERRIDE, null, "bad fee",
                 FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> OrderFeeRepository.validateSchedule(request))
@@ -59,7 +59,7 @@ class OrderFeeRepositoryTest {
     private ResultSet row(long id,
                           ProductLine productLine,
                           long userId,
-                          String symbol,
+                          String instrumentId,
                           long makerFeeRatePpm,
                           long takerFeeRatePpm,
                           String source) throws Exception {
@@ -67,7 +67,7 @@ class OrderFeeRepositoryTest {
         when(rs.getLong("fee_schedule_id")).thenReturn(id);
         when(rs.getString("product_line")).thenReturn(productLine.name());
         when(rs.getLong("user_id")).thenReturn(userId);
-        when(rs.getString("symbol")).thenReturn(symbol);
+        when(rs.getString("instrument_id")).thenReturn(instrumentId);
         when(rs.getLong("maker_fee_rate_ppm")).thenReturn(makerFeeRatePpm);
         when(rs.getLong("taker_fee_rate_ppm")).thenReturn(takerFeeRatePpm);
         when(rs.getString("source_type")).thenReturn(source);

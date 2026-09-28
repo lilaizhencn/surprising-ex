@@ -23,9 +23,9 @@ class LiquidationAeronGatewayTest {
                         1,CoreLiquidationBatchResultCodec.encode(result)));
         var gateway=new LiquidationAeronGateway(properties,client);
         var risk=new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,0,true,
-                new CoreRiskScanContinuation("BTC-USDT",1,0),List.of(),List.of());
+                new CoreRiskScanContinuation("1",1,0),List.of(),List.of());
         gateway.executeBatch(risk,0,1);gateway.executeBatch(risk,0,1);
-        var action=new CoreLiquidationActionView(1,7,"BTC-USDT",CoreMarginMode.CROSS,
+        var action=new CoreLiquidationActionView(1,7,"1",CoreMarginMode.CROSS,
                 CorePositionSide.NET,1,1,1,100);
         var work=new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,1,true,null,List.of(action),List.of());
         gateway.executeBatch(work,0,0);gateway.executeBatch(work,0,0);

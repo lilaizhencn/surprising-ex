@@ -39,11 +39,11 @@ public class OrderAdmissionAllocationBenchmark {
 
     @Setup public void setup() {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         reservation = new ReservationRuntime(11, 7, 0, ReservationKind.DERIVATIVE_MARGIN,
                 0, 100, 0, 0, 1);
-        var intent = new PlaceOrderCommand(11, "BTC-USDT", CoreOrderSide.BUY, 100, 1,
+        var intent = new PlaceOrderCommand(11, "1", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
         resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,

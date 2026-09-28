@@ -48,7 +48,7 @@ public class AdlService {
         int executed = 0;
         for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
             executed += process(new CoreAdlLiquidationProjection(resolution.liquidationId(), resolution.userId(),
-                    resolution.symbol(), resolution.asset(), resolution.signedQuantitySteps(),
+                    resolution.instrumentId(), resolution.asset(), resolution.signedQuantitySteps(),
                     resolution.deficitUnits()));
         }
         return new AdlCycle(true, work.resolutions().size(), executed);
@@ -82,10 +82,10 @@ public class AdlService {
             long covered = Math.min(remaining, realized);
             if (closeSteps <= 0 || covered <= 0) continue;
             UUID commandId = UUID.nameUUIDFromBytes((properties.getKafka().getProductLine() + ":ADL:"
-                    + liquidation.liquidationId() + ':' + candidate.userId() + ':' + candidate.symbol() + ':'
+                    + liquidation.liquidationId() + ':' + candidate.userId() + ':' + candidate.instrumentId() + ':'
                     + candidate.markPriceSequence() + ':' + closeSteps).getBytes(StandardCharsets.UTF_8));
             aeron.execute(commandId, TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
-                    liquidation.liquidationId(), candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                    liquidation.liquidationId(), candidate.userId(), candidate.instrumentId(), candidate.marginMode(),
                     candidate.positionSide(), candidate.signedQuantitySteps(), candidate.entryPriceTicks(),
                     candidate.markPriceSequence(), closeSteps, covered)));
             remaining = Math.subtractExact(remaining, covered);
@@ -114,22 +114,22 @@ public class AdlService {
                 "priorityScorePpm.desc", safeLimit);
     }
 
-    public AdlEventQueryResponse events(Long userId, String asset, String symbol, int limit) {
-        return events(userId, asset, symbol, limit, null, null);
+    public AdlEventQueryResponse events(Long userId, String asset, String instrumentId, int limit) {
+        return events(userId, asset, instrumentId, limit, null, null);
     }
 
-    public AdlEventQueryResponse events(Long userId, String asset, String symbol, int limit,
+    public AdlEventQueryResponse events(Long userId, String asset, String instrumentId, int limit,
                                         String cursor, String sort) {
         AdminCursorPage.CursorPage<AdlEventResponse> page = events.page(accountType(), userId,
                 asset == null || asset.isBlank() ? null : normalizeAsset(asset),
-                symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase(),
+                instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(),
                 normalizeLimit(limit), cursor, sort);
         return new AdlEventQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
     private AdlQueuePositionResponse response(CoreAdlCandidateView value) {
-        return new AdlQueuePositionResponse(value.userId(), value.asset(), value.symbol(),
+        return new AdlQueuePositionResponse(value.userId(), value.asset(), value.instrumentId(),
                 positionSide(value.positionSide()), value.signedQuantitySteps() > 0 ? AdlSide.LONG : AdlSide.SHORT,
                 value.signedQuantitySteps(), value.entryPriceTicks(), value.markPriceTicks(), value.notionalUnits(),
                 value.unrealizedProfitUnits(), value.marginUnits(), value.profitRatePpm(),
@@ -142,12 +142,12 @@ public class AdlService {
                 && (value.unrealizedProfitUnits() < cursor.unrealizedProfitUnits()
                 || value.unrealizedProfitUnits() == cursor.unrealizedProfitUnits()
                 && (value.userId() > cursor.userId()
-                || value.userId() == cursor.userId() && value.symbol().compareTo(cursor.symbol()) > 0));
+                || value.userId() == cursor.userId() && value.instrumentId().compareTo(cursor.instrumentId()) > 0));
     }
 
     private static String encodeCursor(CoreAdlCandidateView value) {
         String raw = value.priorityScorePpm() + ":" + value.unrealizedProfitUnits() + ":"
-                + value.userId() + ":" + value.symbol();
+                + value.userId() + ":" + value.instrumentId();
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 

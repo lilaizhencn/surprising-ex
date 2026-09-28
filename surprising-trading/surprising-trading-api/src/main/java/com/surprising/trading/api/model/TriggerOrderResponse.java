@@ -7,7 +7,7 @@ public record TriggerOrderResponse(
         long userId,
         String clientTriggerOrderId,
         String ocoGroupId,
-        String symbol,
+        String instrumentId,
         OrderSide side,
         TriggerOrderType triggerType,
         TriggerCondition triggerCondition,
@@ -43,7 +43,7 @@ public record TriggerOrderResponse(
                                 long userId,
                                 String clientTriggerOrderId,
                                 String ocoGroupId,
-                                String symbol,
+                                String instrumentId,
                                 OrderSide side,
                                 TriggerOrderType triggerType,
                                 TriggerCondition triggerCondition,
@@ -63,7 +63,7 @@ public record TriggerOrderResponse(
                                 Instant triggeredAt,
                                 Instant createdAt,
                                 Instant updatedAt) {
-        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
+        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, PositionSide.NET, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
@@ -73,7 +73,7 @@ public record TriggerOrderResponse(
                                 long userId,
                                 String clientTriggerOrderId,
                                 String ocoGroupId,
-                                String symbol,
+                                String instrumentId,
                                 OrderSide side,
                                 TriggerOrderType triggerType,
                                 TriggerCondition triggerCondition,
@@ -94,7 +94,7 @@ public record TriggerOrderResponse(
                                 Instant triggeredAt,
                                 Instant createdAt,
                                 Instant updatedAt) {
-        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
+        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);

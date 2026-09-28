@@ -280,8 +280,8 @@ final class CommandResultBuilder {
 
     private String responseOrderSymbol(CommandSlot pending, long orderId, OrderRuntime order) {
         if (pending != null && pending.laneResultPrepared()) {
-            String symbol = pending.laneResultSymbol(orderId);
-            if (symbol != null) return symbol;
+            String instrumentId = pending.laneResultSymbol(orderId);
+            if (instrumentId != null) return instrumentId;
         }
         return owner.runtimeOrderSymbol(order);
     }
@@ -421,13 +421,13 @@ final class CommandResultBuilder {
 
         private OrderSourceList(int initialCapacity) { values = new OrderRuntimeSource[initialCapacity]; }
 
-        private void add(OrderRuntime order, String symbol) {
+        private void add(OrderRuntime order, String instrumentId) {
             if (size == values.length) {
                 values = java.util.Arrays.copyOf(values, Math.multiplyExact(values.length, 2));
             }
             OrderRuntimeSource source = values[size];
             if (source == null) values[size] = source = new OrderRuntimeSource();
-            source.set(order, symbol);
+            source.set(order, instrumentId);
             size++;
         }
 
@@ -447,22 +447,22 @@ final class CommandResultBuilder {
     /** Reusable source adapter; the protocol encoder never retains it. */
     private static final class OrderRuntimeSource implements CoreOrderStateSource {
         private OrderRuntime order;
-        private String symbol;
+        private String instrumentId;
 
-        void set(OrderRuntime order, String symbol) {
+        void set(OrderRuntime order, String instrumentId) {
             this.order = order;
-            this.symbol = symbol;
+            this.instrumentId = instrumentId;
         }
 
         void clear() {
             order = null;
-            symbol = null;
+            instrumentId = null;
         }
 
         public long orderId() { return order.orderId(); }
         public ProductLine productLine() { return order.productLine(); }
         public long userId() { return order.userId(); }
-        public String symbol() { return symbol; }
+        public String instrumentId() { return instrumentId; }
         public CoreOrderSide side() { return order.side(); }
         public long priceTicks() { return order.priceTicks(); }
         public long quantitySteps() { return order.quantitySteps(); }

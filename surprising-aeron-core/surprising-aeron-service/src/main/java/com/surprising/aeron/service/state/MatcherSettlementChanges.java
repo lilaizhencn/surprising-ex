@@ -128,7 +128,7 @@ final class MatcherSettlementChanges {
             if (position != null && position.signedQuantitySteps() == 0) {
                 LongHashSet ids = lane.cold.triggerIdsByUser.get(position.userId());
                 if (ids != null && !ids.isEmpty()) {
-                    String symbol = identities.symbol(position.symbolId());
+                    String instrumentId = identities.instrumentId(position.symbolId());
                     var iterator = ids.longIterator();
                     while (iterator.hasNext()) {
                         long id = iterator.next();
@@ -136,7 +136,7 @@ final class MatcherSettlementChanges {
                         if (trigger == null || trigger.status() != CoreTriggerOrderStatus.PENDING
                                 || trigger.positionSide() != position.positionSide()
                                 || trigger.marginMode() != position.marginMode()
-                                || !symbol.equals(trigger.symbol())) continue;
+                                || !instrumentId.equals(trigger.instrumentId())) continue;
                         CoreTriggerOrderState canceled = RuntimeTriggerOrderStateTransitions.preparePendingCancellation(trigger);
                         lane.putTrigger(canceled);
                         changes.putTrigger(id, canceled);

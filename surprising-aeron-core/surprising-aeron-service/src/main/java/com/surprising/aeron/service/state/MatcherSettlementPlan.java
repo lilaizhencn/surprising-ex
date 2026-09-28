@@ -490,7 +490,7 @@ public final class MatcherSettlementPlan {
                 || batch != null && batch.terminalOrderIds.contains(takerOrderId))
             throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
         CoreInstrument instrument = preparedInstrument == null
-                ? runtime.instrument(identities.symbol(taker.symbolId())) : preparedInstrument;
+                ? runtime.instrument(identities.instrumentId(taker.symbolId())) : preparedInstrument;
         int takerSymbolId = taker == null ? resolvedTaker.symbolId() : taker.symbolId();
         long takerRemainingQuantity = taker == null ? resolvedTaker.quantitySteps() : taker.remainingQuantitySteps();
         var takerSide = taker == null ? resolvedTaker.side() : taker.side();

@@ -71,7 +71,7 @@ class HttpOperationPoolLoadTest {
             assertThat(requests).extracting(Request::path).containsExactly(
                     "/api/v1/trading/orders", "/api/v1/trading/orders/close-position");
             assertThat(requests.getFirst().body()).contains("\"reduceOnly\":false");
-            assertThat(requests.getLast().body()).contains("\"userId\":1002", "\"symbol\":\"ETH-USDT\"");
+            assertThat(requests.getLast().body()).contains("\"userId\":1002", "\"instrumentId\":\"ETH-USDT\"");
         }
     }
 
@@ -115,7 +115,7 @@ class HttpOperationPoolLoadTest {
 
             assertThat(requests).extracting(Request::path).containsExactly(
                     "/api/v1/trading/trigger-orders", "/api/v1/trading/trigger-orders");
-            assertThat(requests.getLast().body()).contains("\"userId\":1001", "\"symbol\":\"BTC-USDT\"",
+            assertThat(requests.getLast().body()).contains("\"userId\":1001", "\"instrumentId\":\"BTC-USDT\"",
                     "\"triggerPriceTicks\":700000");
         }
     }
@@ -142,7 +142,7 @@ class HttpOperationPoolLoadTest {
 
             assertThat(requests).extracting(Request::path).containsExactly(
                     "/api/v1/trading/trigger-orders/cancel", "/api/v1/trading/trigger-orders");
-            assertThat(requests.getLast().body()).contains("\"userId\":1001", "\"symbol\":\"BTC-USDT\"");
+            assertThat(requests.getLast().body()).contains("\"userId\":1001", "\"instrumentId\":\"BTC-USDT\"");
         }
     }
 
@@ -228,7 +228,7 @@ class HttpOperationPoolLoadTest {
         try (StableIdentityLedger ledger = StableIdentityLedger.open(config.outputDirectory(), config.runId(),
                 config.seed(), config.fingerprint())) {
             long now = Math.multiplyExact(System.currentTimeMillis(), 1_000_000L);
-            StableIdentityLedger.Intent intent = ledger.intent(sequence, operation, 1001L, "BTC-USDT", finalState,
+            StableIdentityLedger.Intent intent = ledger.intent(sequence, operation, 1001L, "1", finalState,
                     targetIdentity);
             ledger.scheduled(intent, now);
             ledger.sent(sequence, now);
@@ -241,7 +241,7 @@ class HttpOperationPoolLoadTest {
                                       long seed, long rate, Duration duration, int maxInFlight) {
         return new HttpWorkloadConfig(baseUri, output, output.getFileName().toString(), seed, rate, duration,
                 maxInFlight, Duration.ofSeconds(2), Duration.ofMillis(2), 3, 700_000L, 700_000L,
-                new long[] {1001L, 1002L}, new String[] {"BTC-USDT", "ETH-USDT"},
+                new long[] {1001L, 1002L}, new String[] {"1", "2"},
                 TrafficSkew.UNIFORM, traffic);
     }
 

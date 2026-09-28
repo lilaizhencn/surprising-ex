@@ -143,23 +143,23 @@ final class CoreCommandIngress {
             switch (message.header().messageType()) {
                 case PLACE_ORDER -> {
                     var command = decoded.placeOrder();
-                    window.route(decoded.matcherShard(runtime.matchingAdapter, command.symbol()),
+                    window.route(decoded.matcherShard(runtime.matchingAdapter, command.instrumentId()),
                             runtime.runtimeState.topology().accountLaneMask(user));
                     return rememberPipelineRoute(window, true);
                 }
                 case CANCEL_ORDER -> {
                     long orderId = decoded.cancelOrder().orderId();
                     var route = runtime.activeOrderIndex.activeOrderRoute(orderId);
-                    if (route == null || route.userId() != user || route.symbol() == null
-                            || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                    window.route(runtime.matchingAdapter.matcherShardId(route.symbol()),
+                    if (route == null || route.userId() != user || route.instrumentId() == null
+                            || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
+                    window.route(runtime.matchingAdapter.matcherShardId(route.instrumentId()),
                             runtime.runtimeState.topology().accountLaneMask(user));
                     return rememberPipelineRoute(window, true);
                 }
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : decoded.placeOrderBatch().orders()) {
-                        int current = decoded.matcherShard(runtime.matchingAdapter, order.symbol());
+                        int current = decoded.matcherShard(runtime.matchingAdapter, order.instrumentId());
                         if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         if (shard < 0) {
                             shard = current;
@@ -172,9 +172,9 @@ final class CoreCommandIngress {
                     int shard = -1;
                     for (var order : decoded.cancelOrderBatch().orders()) {
                         var route = runtime.activeOrderIndex.activeOrderRoute(order.orderId());
-                        if (route == null || route.userId() != user || route.symbol() == null
-                                || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
-                        int current = runtime.matchingAdapter.matcherShardId(route.symbol());
+                        if (route == null || route.userId() != user || route.instrumentId() == null
+                                || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
+                        int current = runtime.matchingAdapter.matcherShardId(route.instrumentId());
                         if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         shard = current;
                     }

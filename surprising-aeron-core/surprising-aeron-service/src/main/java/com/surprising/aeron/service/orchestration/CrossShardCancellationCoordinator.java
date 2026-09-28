@@ -40,9 +40,9 @@ final class CrossShardCancellationCoordinator {
                     continue;
                 }
                 CoreOrderState order = progress.orders.get(progress.index);
-                progress.shard = owner.matchingAdapter.matcherShardId(order.symbol());
+                progress.shard = owner.matchingAdapter.matcherShardId(order.instrumentId());
                 progress.token = owner.matcherPipeline.submitControl(progress.shard,
-                        () -> owner.matchingAdapter.cancelForContinuation(order.userId(), order.orderId(), order.symbol()));
+                        () -> owner.matchingAdapter.cancelForContinuation(order.userId(), order.orderId(), order.instrumentId()));
                 continue;
             }
             var command = progress.command;

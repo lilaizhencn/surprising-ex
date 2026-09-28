@@ -33,12 +33,12 @@ public final class CoreAdlQueryCodec {
         int length = Integer.BYTES;
         for (var value : candidates) {
             length = Math.addExact(length, Integer.BYTES * 4 + Long.BYTES * 11
-                    + bytes(value.symbol()).length + bytes(value.asset()).length);
+                    + bytes(value.instrumentId()).length + bytes(value.asset()).length);
         }
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(candidates.size());
         candidates.forEach(value -> {
             output.putLong(value.userId());
-            putString(output, value.symbol());
+            putString(output, value.instrumentId());
             putString(output, value.asset());
             output.putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
                     .putLong(value.signedQuantitySteps()).putLong(value.entryPriceTicks())
@@ -59,12 +59,12 @@ public final class CoreAdlQueryCodec {
         for (int index = 0; index < count; index++) {
             if (input.remaining() < Long.BYTES) throw new ProtocolException("ADL candidate is truncated");
             long userId = input.getLong();
-            String symbol = string(input);
+            String instrumentId = string(input);
             String asset = string(input);
             if (input.remaining() < Integer.BYTES * 2 + Long.BYTES * 10) {
                 throw new ProtocolException("ADL candidate is truncated");
             }
-            result.add(new CoreAdlCandidateView(userId, symbol, asset,
+            result.add(new CoreAdlCandidateView(userId, instrumentId, asset,
                     CoreMarginMode.fromWireCode(input.getInt()), CorePositionSide.fromWireCode(input.getInt()),
                     input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(),
                     input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong()));

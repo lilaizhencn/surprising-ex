@@ -60,25 +60,25 @@ public class CandleHotCache {
     }
 
     public void put(CandleUpdatedEvent event) {
-        if (event == null || event.symbol() == null || event.period() == null || event.openTime() == null) {
+        if (event == null || event.instrumentId() == null || event.period() == null || event.openTime() == null) {
             return;
         }
-        String symbol = event.symbol().trim().toUpperCase(Locale.ROOT);
+        String instrumentId = event.instrumentId().trim().toUpperCase(Locale.ROOT);
         CandleResponse candle = new CandleResponse(
-                symbol, event.period(), event.openTime(), event.closeTime(), event.openPrice(),
+                instrumentId, event.period(), event.openTime(), event.closeTime(), event.openPrice(),
                 event.highPrice(), event.lowPrice(), event.closePrice(), event.baseVolume(), event.quoteVolume(),
                 event.tradeCount(), event.firstTradeId(), event.lastTradeId(), event.firstSequence(),
                 event.lastSequence(), event.status(), event.eventTime());
         NavigableMap<Instant, CandleResponse> bucket = buckets.computeIfAbsent(
-                new BucketKey(symbol, event.period()), ignored -> new ConcurrentSkipListMap<>());
+                new BucketKey(instrumentId, event.period()), ignored -> new ConcurrentSkipListMap<>());
         if (bucket.put(event.openTime(), candle) == null) {
             entryCount.incrementAndGet();
         }
         trimIfNeeded();
     }
 
-    public List<CandleResponse> range(String symbol, String period, Instant startTime, Instant endTime, int limit) {
-        NavigableMap<Instant, CandleResponse> bucket = buckets.get(new BucketKey(normalizeSymbol(symbol), period));
+    public List<CandleResponse> range(String instrumentId, String period, Instant startTime, Instant endTime, int limit) {
+        NavigableMap<Instant, CandleResponse> bucket = buckets.get(new BucketKey(normalizeSymbol(instrumentId), period));
         if (bucket == null || bucket.isEmpty()) {
             rangeMisses.increment();
             return List.of();
@@ -90,8 +90,8 @@ public class CandleHotCache {
                 .toList();
     }
 
-    public Optional<CandleResponse> latest(String symbol, String period) {
-        NavigableMap<Instant, CandleResponse> bucket = buckets.get(new BucketKey(normalizeSymbol(symbol), period));
+    public Optional<CandleResponse> latest(String instrumentId, String period) {
+        NavigableMap<Instant, CandleResponse> bucket = buckets.get(new BucketKey(normalizeSymbol(instrumentId), period));
         if (bucket == null) {
             latestMisses.increment();
             return Optional.empty();
@@ -129,8 +129,8 @@ public class CandleHotCache {
         }
     }
 
-    private String normalizeSymbol(String symbol) {
-        return symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+    private String normalizeSymbol(String instrumentId) {
+        return instrumentId == null ? "" : instrumentId.trim().toUpperCase(Locale.ROOT);
     }
 
     private CandleResponse closeIfExpired(CandleResponse value) {
@@ -139,13 +139,13 @@ public class CandleHotCache {
                 || value.closeTime().isAfter(Instant.now())) {
             return value;
         }
-        return new CandleResponse(value.symbol(), value.period(), value.openTime(), value.closeTime(),
+        return new CandleResponse(value.instrumentId(), value.period(), value.openTime(), value.closeTime(),
                 value.openPrice(), value.highPrice(), value.lowPrice(), value.closePrice(), value.baseVolume(),
                 value.quoteVolume(), value.tradeCount(), value.firstTradeId(), value.lastTradeId(),
                 value.firstSequence(), value.lastSequence(), CandleStatus.CLOSED, value.updatedAt());
     }
 
-    private record BucketKey(String symbol, String period) {
+    private record BucketKey(String instrumentId, String period) {
     }
 
     private record OldestEntry(BucketKey key,

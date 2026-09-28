@@ -25,9 +25,10 @@ public class TradeExportService implements SmartLifecycle, HealthIndicator {
     private volatile Thread worker;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public TradeExportService(TradeExportProperties config, CandlestickProperties candles) {
+    public TradeExportService(TradeExportProperties config, CandlestickProperties candles,
+            CommittedOrderProjectionRepository orders) {
         this(config, new CommittedTradeExporter(config, candles.getKafka().getProductLine(),
-                candles.getKafka().getBootstrapServers()));
+                candles.getKafka().getBootstrapServers(), orders));
     }
 
     TradeExportService(TradeExportProperties config, CommittedTradeExporter exporter) {

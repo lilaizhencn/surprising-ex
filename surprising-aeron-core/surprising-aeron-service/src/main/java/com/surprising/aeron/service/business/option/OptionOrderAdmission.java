@@ -63,7 +63,7 @@ public final class OptionOrderAdmission {
             CoreUserState user,
             ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {
-        CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
+        CorePositionState position = user.positions().get(positionKey(instrument.instrumentId(), command.positionSide()));
         long currentQuantity = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = command.side() == CoreOrderSide.BUY
                 ? command.quantitySteps() : Math.negateExact(command.quantitySteps());
@@ -89,11 +89,11 @@ public final class OptionOrderAdmission {
         long pendingSell = activeOrderIndex == null
                 ? userOrders(state, user).stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
-                        && order.symbol().equals(instrument.symbol())
+                        && order.instrumentId().equals(instrument.instrumentId())
                         && order.positionSide() == command.positionSide()
                         && order.side() == CoreOrderSide.SELL)
                 .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact)
-                : activeOrderIndex.pendingQuantity(user.userId(), instrument.symbol(),
+                : activeOrderIndex.pendingQuantity(user.userId(), instrument.instrumentId(),
                 command.positionSide(), CoreOrderSide.SELL);
         long totalSellOrders = Math.addExact(pendingSell, command.quantitySteps());
         long projectedSigned = Math.subtractExact(currentQuantity, totalSellOrders);
@@ -111,8 +111,8 @@ public final class OptionOrderAdmission {
         return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
-    private static String positionKey(String symbol, CorePositionSide side) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+    private static String positionKey(String instrumentId, CorePositionSide side) {
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 

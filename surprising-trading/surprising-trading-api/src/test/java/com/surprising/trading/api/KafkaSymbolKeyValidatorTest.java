@@ -10,14 +10,14 @@ class KafkaSymbolKeyValidatorTest {
     @Test
     void acceptsMatchingKafkaKeyAndPayloadSymbol() {
         assertThatCode(() -> KafkaSymbolKeyValidator.requireMatchingSymbol(
-                "BTC-USDT", "BTC-USDT", "match trade"))
+                "1", "1", "match trade"))
                 .doesNotThrowAnyException();
     }
 
     @Test
     void rejectsMissingKafkaKey() {
         assertThatThrownBy(() -> KafkaSymbolKeyValidator.requireMatchingSymbol(
-                null, "BTC-USDT", "match trade"))
+                null, "1", "match trade"))
                 .isInstanceOf(KafkaSymbolKeyValidator.SymbolKeyMismatchException.class)
                 .hasMessageContaining("Kafka key is required");
     }
@@ -25,7 +25,7 @@ class KafkaSymbolKeyValidatorTest {
     @Test
     void rejectsBlankKafkaKey() {
         assertThatThrownBy(() -> KafkaSymbolKeyValidator.requireMatchingSymbol(
-                " ", "BTC-USDT", "match trade"))
+                " ", "1", "match trade"))
                 .isInstanceOf(KafkaSymbolKeyValidator.SymbolKeyMismatchException.class)
                 .hasMessageContaining("Kafka key is required");
     }
@@ -33,8 +33,8 @@ class KafkaSymbolKeyValidatorTest {
     @Test
     void rejectsMismatchedKafkaKey() {
         assertThatThrownBy(() -> KafkaSymbolKeyValidator.requireMatchingSymbol(
-                "ETH-USDT", "BTC-USDT", "match trade"))
+                "2", "1", "match trade"))
                 .isInstanceOf(KafkaSymbolKeyValidator.SymbolKeyMismatchException.class)
-                .hasMessageContaining("Kafka key must match payload symbol");
+                .hasMessageContaining("Kafka key must match payload instrumentId");
     }
 }

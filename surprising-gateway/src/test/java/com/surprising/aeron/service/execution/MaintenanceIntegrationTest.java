@@ -42,12 +42,12 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(113,CoreOrderSide.SELL,false)));
             long before = total();
             long baseBefore = state.tradingState().users().values().stream().mapToLong(u -> u.totalUnits("BTC")).sum();
-            var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","BTC-USDT",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
+            var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","1",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
                     0,0,0,"","test",0,0,0,0,1,0,0);
             submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodeState(trigger));
-            var request = new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","upgrade test");
+            var request = new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","upgrade test");
             var task = fixture.service.create("1",request);
             assertThat(fixture.service.create("1",request).id()).isEqualTo(task.id());
             fixture.service.tick(); fixture.service.tick(); // gate and durable trigger cancellation intent
@@ -56,7 +56,7 @@ class MaintenanceIntegrationTest {
             var resumed = fixture.newService();
             run(resumed,task.taskId());
             assertThat(resumed.get(task.taskId()).status()).as(resumed.get(task.taskId()).error()).isEqualTo("COMPLETED");
-            var preview = resumed.preview("BTC-USDT",0,0);
+            var preview = resumed.preview("1",0,0);
             assertThat(preview.orderIds()).isEmpty(); assertThat(preview.triggerOrderIds()).isEmpty();
             assertThat(preview.gateMode()).isEqualTo("HALTED");
             assertThat(total()).isEqualTo(before);
@@ -69,7 +69,7 @@ class MaintenanceIntegrationTest {
             assertThat(resumed.release(task.taskId()).status()).isEqualTo("RUNNING");
             run(resumed,task.taskId());
             assertThat(resumed.get(task.taskId()).status()).isEqualTo("RELEASED");
-            assertThat(resumed.preview("BTC-USDT",0,0).gateMode()).isEqualTo("TRADING");
+            assertThat(resumed.preview("1",0,0).gateMode()).isEqualTo("TRADING");
         }
     }
 
@@ -79,7 +79,7 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.SETTLEMENT,"120","delisting test"));
+            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","delisting test"));
             dropSettlementReply.set(true);
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
@@ -87,8 +87,8 @@ class MaintenanceIntegrationTest {
             restartCore();
             var resumed = fixture.newService(); resumed.retry(task.taskId()); run(resumed,task.taskId());
             assertThat(resumed.get(task.taskId()).status()).isEqualTo("COMPLETED");
-            assertThat(resumed.preview("BTC-USDT",0,0).positions()).isEmpty();
-            assertThat(resumed.preview("BTC-USDT",0,0).gateMode()).isEqualTo("CLOSED");
+            assertThat(resumed.preview("1",0,0).positions()).isEmpty();
+            assertThat(resumed.preview("1",0,0).gateMode()).isEqualTo("CLOSED");
             assertThat(total()).isEqualTo(initial);
             assertThatThrownBy(() -> resumed.release(task.taskId())).isInstanceOf(IllegalArgumentException.class);
         }
@@ -100,11 +100,11 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","22",MaintenanceRequest.Mode.MARKET,"0","partial close test"));
+            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","22",MaintenanceRequest.Mode.MARKET,"0","partial close test"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(fixture.service.get(task.taskId()).phase()).isEqualTo("VERIFY");
-            assertThat(fixture.service.preview("BTC-USDT",22,0).positions()).isNotEmpty();
+            assertThat(fixture.service.preview("1",22,0).positions()).isNotEmpty();
             assertThat(total()).isEqualTo(initial);
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
@@ -121,14 +121,14 @@ class MaintenanceIntegrationTest {
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(113,CoreOrderSide.BUY,true,2)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","22",mode,mode==MaintenanceRequest.Mode.LIMIT?"100":"0","partial matching close"));
+            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","22",mode,mode==MaintenanceRequest.Mode.LIMIT?"100":"0","partial matching close"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("BLOCKED");
-            assertThat(fixture.service.preview("BTC-USDT",22,0).positions()).singleElement().satisfies(p -> assertThat(p.signedQuantitySteps()).isEqualTo("2"));
+            assertThat(fixture.service.preview("1",22,0).positions()).singleElement().satisfies(p -> assertThat(p.signedQuantitySteps()).isEqualTo("2"));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(114,CoreOrderSide.BUY,true,2)));
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
-            assertThat(fixture.service.preview("BTC-USDT",22,0).positions()).isEmpty();
+            assertThat(fixture.service.preview("1",22,0).positions()).isEmpty();
             assertThat(total()).isEqualTo(initial);
             assertThat(fixture.service.actions(task.taskId(),"")).hasSize(2);
         }
@@ -149,12 +149,12 @@ class MaintenanceIntegrationTest {
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(hedgedOrder(112,CoreOrderSide.BUY,CorePositionSide.LONG,4)));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(hedgedOrder(113,CoreOrderSide.BUY,CorePositionSide.LONG,3)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(hedgedOrder(114,CoreOrderSide.SELL,CorePositionSide.SHORT,3)));
-            assertThat(fixture.service.preview("BTC-USDT",0,0).positions()).hasSize(4);
+            assertThat(fixture.service.preview("1",0,0).positions()).hasSize(4);
             long initial=total();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.SETTLEMENT,"120","hedged clearance"));
+            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","hedged clearance"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
-            assertThat(fixture.service.preview("BTC-USDT",0,0).positions()).isEmpty();
+            assertThat(fixture.service.preview("1",0,0).positions()).isEmpty();
             assertThat(total()).isEqualTo(initial);
         }
     }
@@ -164,16 +164,16 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             var progress=CoreFundingProgressCodec.decode(submit(0,CoreMessageType.APPLY_FUNDING,
-                    TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",10_000,0,1))).data());
+                    TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"1",10_000,0,1))).data());
             assertThat(progress.complete()).isFalse();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","wait for funding"));
+            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","wait for funding"));
             fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(fixture.service.get(task.taskId()).roundNo()).isEqualTo(1);
             for(int n=0;!progress.complete();n++) {
                 assertThat(n).isLessThan(10);
                 progress=CoreFundingProgressCodec.decode(submit(0,CoreMessageType.APPLY_FUNDING,
-                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"BTC-USDT",10_000,progress.nextCursorUserId(),1))).data());
+                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"1",10_000,progress.nextCursorUserId(),1))).data());
             }
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
@@ -185,22 +185,22 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(0,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("BTC-USDT",10_000,2,1_700_000_000_100L)));
+                    new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_100L)));
             submit(0,CoreMessageType.CONTINUE_RISK_SCAN,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16)));
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.SETTLEMENT,"120","wait for liquidation"));
+            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","wait for liquidation"));
             fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).phase()).isEqualTo("GATE_REJECTED");
-            assertThat(fixture.service.preview("BTC-USDT",0,0).gateMode()).isEqualTo("TRADING");
+            assertThat(fixture.service.preview("1",0,0).gateMode()).isEqualTo("TRADING");
             assertThat(fixture.service.release(task.taskId()).status()).isEqualTo("RELEASED");
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
-            assertThat(fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","new task")).id()).isNotEqualTo(task.id());
+            assertThat(fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","new task")).id()).isNotEqualTo(task.id());
         }
     }
 
     @Test void unknownGateAndReleaseOutcomesResumeTheirOwnPhaseAndIdentity() throws Exception {
         try(var fixture=fixture(ProductLine.LINEAR_PERPETUAL)) {
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","gate recovery"));
+            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","gate recovery"));
             dropGateReply.set(true); fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(fixture.service.get(task.taskId()).roundNo()).isZero();
@@ -211,7 +211,7 @@ class MaintenanceIntegrationTest {
             resumed.release(task.taskId()); dropGateReply.set(true); resumed.tick();
             assertThat(resumed.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(resumed.get(task.taskId()).phase()).isEqualTo("RELEASE");
-            assertThat(resumed.preview("BTC-USDT",0,0).gateMode()).isEqualTo("TRADING");
+            assertThat(resumed.preview("1",0,0).gateMode()).isEqualTo("TRADING");
             resumed.retry(task.taskId()); run(resumed,task.taskId());
             assertThat(resumed.get(task.taskId()).status()).isEqualTo("RELEASED");
         }
@@ -220,8 +220,8 @@ class MaintenanceIntegrationTest {
     @Test void providerReplicasSkipLockedTasksAndCannotMixProductLines() throws Exception {
         try(var fixture=fixture(ProductLine.LINEAR_PERPETUAL);
             var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-            var first=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.CANCEL,"0","first"));
-            var second=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"ETH-USDT","",MaintenanceRequest.Mode.CANCEL,"0","second"));
+            var first=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","first"));
+            var second=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"2","",MaintenanceRequest.Mode.CANCEL,"0","second"));
             assertThatThrownBy(()->fixture.repository.get(ProductLine.SPOT,first.taskId(),false)).isInstanceOf(IllegalArgumentException.class);
             var locked=new java.util.concurrent.CountDownLatch(1);
             var release=new java.util.concurrent.CountDownLatch(1);
@@ -242,16 +242,16 @@ class MaintenanceIntegrationTest {
     }
 
     @Test void rejectsUnsafeScopesAndPrices() {
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","22",MaintenanceRequest.Mode.SETTLEMENT,"120","test")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.LIMIT,"0","test")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"BTC-USDT","",MaintenanceRequest.Mode.MARKET,"0","test").validate(ProductLine.SPOT)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","22",MaintenanceRequest.Mode.SETTLEMENT,"120","test")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.LIMIT,"0","test")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.MARKET,"0","test").validate(ProductLine.SPOT)).isInstanceOf(IllegalArgumentException.class);
     }
 
     private Fixture fixture(ProductLine product) throws Exception {
         line=product; sequence=0; state=new TradingCoreRuntime(line);
         var type=ContractType.valueOf(line.contractTypeCode()); String asset=type.isInverse()?"BTC":"USDT";
-        submit(1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("BTC-USDT",type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0)));
-        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("BTC-USDT",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("BTC-USDT",100,1,1_700_000_000_000L)));
+        submit(1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0)));
+        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L)));
         submit(11,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(line==ProductLine.SPOT?"BTC":asset,20_000)));
         submit(22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000)));
         return new Fixture();
@@ -263,7 +263,7 @@ class MaintenanceIntegrationTest {
         final MaintenanceRepository repository;
         final MaintenanceService service;
         Fixture() throws Exception {
-            source.setUrl(System.getenv("MAINTENANCE_TEST_JDBC_URL")); source.setUser("maintenance");
+            source.setUrl(System.getenv("MAINTENANCE_TEST_JDBC_URL")); source.setUser(System.getenv("INSTRUMENT_TEST_DB_USER")); source.setPassword(System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
             var jdbc = new JdbcTemplate(source);
             // Dedicated test database must be initialized once with the root init.sql.
             jdbc.execute("TRUNCATE trading_maintenance_action,trading_maintenance_task RESTART IDENTITY CASCADE");
@@ -304,8 +304,8 @@ class MaintenanceIntegrationTest {
         var header=CoreMessageHeader.query(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,998,++sequence,user,1_700_000_000_000L+sequence,sequence);
         var response=state.apply(new CoreMessage(header,bytes)); assertThat(response.status()).as("%s: %s",type,response.resultCode()).isEqualTo(ResponseStatus.OK); return response;
     }
-    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
-    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
-    private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"BTC-USDT",side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"1",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
+    private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private long total() { var s=state.tradingState(); String asset=ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT"; var t=s.treasuryState(); return s.users().values().stream().mapToLong(u -> u.totalUnits(asset)).sum()+t.feeBalances().getOrDefault(asset,0L)+t.insuranceBalances().getOrDefault(asset,0L)+t.clearingPnlBalances().getOrDefault(asset,0L)+t.roundingResidualBalances().getOrDefault(asset,0L); }
 }

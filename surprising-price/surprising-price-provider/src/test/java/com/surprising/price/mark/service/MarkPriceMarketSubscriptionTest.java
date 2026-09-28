@@ -21,11 +21,11 @@ class MarkPriceMarketSubscriptionTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         var service = mock(MarkPriceService.class);
         var encodings = mock(MarkPriceEncodingService.class);
-        when(encodings.currentEncoding("BTC-USDT")).thenReturn(new MarkPriceEncoding(1, 10000, 100, 10000, 1));
+        when(encodings.currentEncoding("1")).thenReturn(new MarkPriceEncoding(1, 10000, 100, 10000, 1));
         var subscription = new MarkPriceMarketSubscription(properties, service, encodings);
         byte[] book = CoreStateQueryCodec.encodeOrderBookView(new CoreOrderBookView(10,
-                List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.BUY, 10001, 2, 1),
-                        new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10003, 3, 1))));
+                List.of(new CoreBookLevelView("1", CoreOrderSide.BUY, 10001, 2, 1),
+                        new CoreBookLevelView("1", CoreOrderSide.SELL, 10003, 3, 1))));
         subscription.receive(frame(ProductLine.INVERSE_PERPETUAL, RealtimeFrame.Kind.BOOK, book));
         verifyNoInteractions(service, encodings);
         subscription.receive(frame(ProductLine.LINEAR_PERPETUAL, RealtimeFrame.Kind.BOOK, book));
@@ -44,6 +44,6 @@ class MarkPriceMarketSubscriptionTest {
     }
 
     private RealtimeFrame frame(ProductLine product, RealtimeFrame.Kind kind, byte[] payload) {
-        return new RealtimeFrame(product, kind, 0, 100, 1, 123456, 0, "BTC-USDT", "trade-1", payload);
+        return new RealtimeFrame(product, kind, 0, 100, 1, 123456, 0, "1", "trade-1", payload);
     }
 }

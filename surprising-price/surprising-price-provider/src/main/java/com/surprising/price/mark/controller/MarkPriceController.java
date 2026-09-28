@@ -24,9 +24,9 @@ public class MarkPriceController {
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/latest")
-    public MarkPriceResponse latestMarkPrice(@RequestParam("symbol") String symbol) {
+    public MarkPriceResponse latestMarkPrice(@RequestParam("instrumentId") String instrumentId) {
         try {
-            return queryService.latest(symbol);
+            return queryService.latest(instrumentId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -35,21 +35,21 @@ public class MarkPriceController {
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/inputs")
-    public com.surprising.price.mark.service.MarkPriceService.MarketInputs inputs(@RequestParam("symbol") String symbol) {
-        if (!symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}"))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid symbol");
-        return prices.inputs(symbol);
+    public com.surprising.price.mark.service.MarkPriceService.MarketInputs inputs(@RequestParam("instrumentId") String instrumentId) {
+        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid instrumentId");
+        return prices.inputs(instrumentId);
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/history")
-    public MarkPriceQueryResponse history(@RequestParam("symbol") String symbol,
+    public MarkPriceQueryResponse history(@RequestParam("instrumentId") String instrumentId,
                                           @RequestParam("startTime")
                                           @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
                                           @RequestParam("endTime")
                                           @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime,
                                           @RequestParam(value = "limit", defaultValue = "500") int limit) {
         try {
-            return queryService.history(symbol, startTime, endTime, limit);
+            return queryService.history(instrumentId, startTime, endTime, limit);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

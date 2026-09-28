@@ -6,7 +6,7 @@ public record OrderResponse(
         long orderId,
         long userId,
         String clientOrderId,
-        String symbol,
+        String instrumentId,
         OrderSide side,
         OrderType orderType,
         TimeInForce timeInForce,
@@ -32,7 +32,7 @@ public record OrderResponse(
         long orderId,
         long userId,
         String clientOrderId,
-        String symbol,
+        String instrumentId,
         OrderSide side,
         OrderType orderType,
         TimeInForce timeInForce,
@@ -50,7 +50,7 @@ public record OrderResponse(
         String rejectReason,
         Instant createdAt,
         Instant updatedAt) {
-        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, positionSide, makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt, 0, null, null);
+        this(orderId, userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, positionSide, makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt, 0, null, null);
     }
 
     public OrderResponse {
@@ -61,7 +61,7 @@ public record OrderResponse(
     public OrderResponse(long orderId,
                          long userId,
                          String clientOrderId,
-                         String symbol,
+                         String instrumentId,
                          OrderSide side,
                          OrderType orderType,
                          TimeInForce timeInForce,
@@ -78,7 +78,7 @@ public record OrderResponse(
                          String rejectReason,
                          Instant createdAt,
                          Instant updatedAt) {
-        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce,
+        this(orderId, userId, clientOrderId, instrumentId, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, PositionSide.NET,
                 makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);
     }
@@ -86,7 +86,7 @@ public record OrderResponse(
     public OrderResponse(long orderId,
                          long userId,
                          String clientOrderId,
-                         String symbol,
+                         String instrumentId,
                          OrderSide side,
                          OrderType orderType,
                          TimeInForce timeInForce,
@@ -100,7 +100,7 @@ public record OrderResponse(
                          String rejectReason,
                          Instant createdAt,
                          Instant updatedAt) {
-        this(orderId, userId, clientOrderId, symbol, side, orderType, timeInForce,
+        this(orderId, userId, clientOrderId, instrumentId, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, MarginMode.CROSS,
                 PositionSide.NET,
                 0L, 0L, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);

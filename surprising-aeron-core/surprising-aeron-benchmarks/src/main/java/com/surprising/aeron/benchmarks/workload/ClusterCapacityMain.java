@@ -137,9 +137,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
                         "surprising.aeron.hostnames", "localhost,localhost,localhost").split(","))
                 .map(String::trim).toList();
         String egress = System.getProperty("surprising.aeron.egress-hostname", "localhost");
-        String symbolPrefix = System.getProperty("surprising.aeron.symbol", "P9-CAPACITY-BTC-USDT")
+        String symbolPrefix = System.getProperty("surprising.aeron.instrumentId", "15")
                 .trim().toUpperCase();
-        int symbolCount = positiveInt("surprising.aeron.capacity-symbol-count", 128);
+        int symbolCount = positiveInt("surprising.aeron.capacity-instrumentId-count", 128);
         List<String> symbols = java.util.stream.IntStream.range(0, symbolCount)
                 .mapToObj(index -> symbolCount == 1 ? symbolPrefix : symbolPrefix + '-' + (index + 1))
                 .toList();
@@ -239,9 +239,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void setup() {
-        for (String symbol : symbols) {
+        for (String instrumentId : symbols) {
             applied(CoreMessageType.REGISTER_INSTRUMENT, 1,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(symbol)), stableId("instrument:" + symbol));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)), stableId("instrument:" + instrumentId));
         }
         for (int pair = 0; pair < pairCount; pair++) {
             long first = firstUser(pair);
@@ -325,8 +325,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void matchCycle(int worker, long cycle, boolean measured) {
-        String symbol = symbol(worker, cycle);
-        synchronized (symbolLocks[symbols.indexOf(symbol)]) {
+        String instrumentId = instrumentId(worker, cycle);
+        synchronized (symbolLocks[symbols.indexOf(instrumentId)]) {
             boolean reverse = (cycle & 1L) != 0;
             int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
             long makerUser = firstUser(pair);
@@ -335,8 +335,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
             CoreOrderSide takerSide = reverse ? CoreOrderSide.SELL : CoreOrderSide.BUY;
             long makerOrder = nextOrderId.incrementAndGet();
             long takerOrder = nextOrderId.incrementAndGet();
-            submitOrder(makerUser, order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC), measured);
-            submitOrder(takerUser, order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC), measured);
+            submitOrder(makerUser, order(instrumentId, makerOrder, makerSide, CoreTimeInForce.GTC), measured);
+            submitOrder(takerUser, order(instrumentId, takerOrder, takerSide, CoreTimeInForce.IOC), measured);
             if (measured) {
                 matches.incrementAndGet();
             }
@@ -360,20 +360,20 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 }
                 if (pending[slot] != null || System.nanoTime() >= deadline) continue;
                 int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
-                String symbol = symbol(worker, cycle);
+                String instrumentId = instrumentId(worker, cycle);
                 long makerOrder = nextOrderId.incrementAndGet();
                 long takerOrder = nextOrderId.incrementAndGet();
                 throttle();
-                pending[slot] = ClusterAsyncPair.start(refreshMarkAsync(symbol, measured), () -> {
+                pending[slot] = ClusterAsyncPair.start(refreshMarkAsync(instrumentId, measured), () -> {
                     if (measured) capacityMetrics.recordOffered();
                     return commandAsync(
                         CoreMessageType.PLACE_ORDER, stableId("async-maker:" + makerOrder), firstUser(pair),
-                        TradingCommandCodec.encodePlaceOrder(order(symbol, makerOrder, CoreOrderSide.SELL, CoreTimeInForce.GTC)));
+                        TradingCommandCodec.encodePlaceOrder(order(instrumentId, makerOrder, CoreOrderSide.SELL, CoreTimeInForce.GTC)));
                 }, () -> {
                     if (measured) capacityMetrics.recordOffered();
                     return commandAsync(CoreMessageType.PLACE_ORDER,
                             stableId("async-taker:" + takerOrder), secondUser(pair),
-                            TradingCommandCodec.encodePlaceOrder(order(symbol, takerOrder, CoreOrderSide.BUY, CoreTimeInForce.IOC)));
+                            TradingCommandCodec.encodePlaceOrder(order(instrumentId, takerOrder, CoreOrderSide.BUY, CoreTimeInForce.IOC)));
                 }, (response, nanos) -> {
                     record(response, nanos, measured);
                     if (measured) makerMetrics.recordFinalized(nanos);
@@ -407,26 +407,26 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 }
                 if (pending[slot] != null || (!buyDue && System.nanoTime() >= deadline)) continue;
                 int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
-                String symbol = symbol(worker, cycle);
+                String instrumentId = instrumentId(worker, cycle);
                 boolean buy = buyDue;
                 long user = buy ? secondUser(pair) : firstUser(pair);
                 long firstOrderId = nextOrderId.getAndAdd(ordersPerRequest) + 1;
                 // Both sides are GTC: separate sessions may deliver either side first. No order
                 // waits for its counterpart's terminal. An already-started pair is balanced at
                 // the deadline, then every outstanding order is drained before verification.
-                pending[slot] = ClusterAsyncPair.independent(refreshMarkAsync(symbol, measured), () -> {
+                pending[slot] = ClusterAsyncPair.independent(refreshMarkAsync(instrumentId, measured), () -> {
                     if (measured) for (int item = 0; item < ordersPerRequest; item++) capacityMetrics.recordOffered();
                     boolean batch = workload == Workload.MATCH_BATCH_STREAM;
                     byte[] payload;
                     if (batch) {
                         var orders = new java.util.ArrayList<PlaceOrderCommand>(ordersPerRequest);
                         for (int item = 0; item < ordersPerRequest; item++) {
-                            orders.add(order(symbol, firstOrderId + item,
+                            orders.add(order(instrumentId, firstOrderId + item,
                                     buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC));
                         }
                         payload = TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders));
                     } else {
-                        payload = TradingCommandCodec.encodePlaceOrder(order(symbol, firstOrderId,
+                        payload = TradingCommandCodec.encodePlaceOrder(order(instrumentId, firstOrderId,
                                 buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC));
                     }
                     return commandAsync(batch ? CoreMessageType.PLACE_ORDER_BATCH : CoreMessageType.PLACE_ORDER,
@@ -526,8 +526,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
         int pair = Math.floorMod(worker, pairCount);
         long userId = firstUser(pair);
         long orderId = nextOrderId.incrementAndGet();
-        String symbol = symbol(worker, orderId);
-        submitOrder(userId, order(symbol, orderId, CoreOrderSide.SELL, CoreTimeInForce.GTC, 110), measured);
+        String instrumentId = instrumentId(worker, orderId);
+        submitOrder(userId, order(instrumentId, orderId, CoreOrderSide.SELL, CoreTimeInForce.GTC, 110), measured);
         throttle();
         long started = System.nanoTime();
         if (measured) capacityMetrics.recordOffered();
@@ -540,13 +540,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
         int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
         long userId = firstUser(pair);
         long orderId = nextOrderId.incrementAndGet();
-        String symbol = symbol(worker, cycle);
-        submitOrder(userId, order(symbol, orderId, CoreOrderSide.BUY, CoreTimeInForce.IOC, 90), measured);
+        String instrumentId = instrumentId(worker, cycle);
+        submitOrder(userId, order(instrumentId, orderId, CoreOrderSide.BUY, CoreTimeInForce.IOC, 90), measured);
     }
 
     private void markPriceCycle(int worker, long cycle, boolean measured) {
-        String symbol = symbol(worker, cycle);
-        synchronized (symbolLocks[symbols.indexOf(symbol)]) {
+        String instrumentId = instrumentId(worker, cycle);
+        synchronized (symbolLocks[symbols.indexOf(instrumentId)]) {
             throttle();
             long started = System.nanoTime();
             if (measured) capacityMetrics.recordOffered();
@@ -554,13 +554,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
+                            instrumentId, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
             record(response, System.nanoTime() - started, measured);
         }
     }
 
     private void submitOrder(long userId, PlaceOrderCommand command, boolean measured) {
-        refreshMarkIfDue(command.symbol(), measured);
+        refreshMarkIfDue(command.instrumentId(), measured);
         throttle();
         long started = System.nanoTime();
         if (measured) capacityMetrics.recordOffered();
@@ -596,17 +596,17 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
     }
 
-    private void refreshMarkIfDue(String symbol, boolean measured) {
-        refreshMarkAsync(symbol, measured).join();
+    private void refreshMarkIfDue(String instrumentId, boolean measured) {
+        refreshMarkAsync(instrumentId, measured).join();
     }
 
-    private CompletableFuture<Void> refreshMarkAsync(String symbol, boolean measured) {
+    private CompletableFuture<Void> refreshMarkAsync(String instrumentId, boolean measured) {
         if (productLine == ProductLine.SPOT) return CompletableFuture.completedFuture(null);
-        int index = symbols.indexOf(symbol);
+        int index = symbols.indexOf(instrumentId);
         return markGates[index].refresh(System.currentTimeMillis(), now -> {
             long sequence = nextPriceSequence.incrementAndGet();
             return commandAsync(CoreMessageType.APPLY_MARK_PRICE, stableId("feed:" + seed + ':' + sequence), 1,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol, PRICE_TICKS, sequence, now)))
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, PRICE_TICKS, sequence, now)))
                     .thenAccept(response -> {
                         if (response.commandStatus() != ResponseStatus.APPLIED) throw new IllegalStateException("mark rejected " + response.resultCode());
                         if (measured) marketDataCommands.incrementAndGet();
@@ -624,7 +624,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             return response.data();
         });
         long unexpectedLevels = book.levels().stream()
-                .filter(level -> symbols.contains(level.symbol()))
+                .filter(level -> symbols.contains(level.instrumentId()))
                 .count();
         if (unexpectedLevels != 0) {
             throw new IllegalStateException("capacity book is not empty symbols=" + symbols
@@ -654,26 +654,26 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 .mapToLong(value -> Math.addExact(value.availableUnits(), value.lockedUnits())).sum();
     }
 
-    private String symbol(int worker, long cycle) {
+    private String instrumentId(int worker, long cycle) {
         return symbols.get(Math.floorMod(worker + cycle, symbols.size()));
     }
 
     private PlaceOrderCommand order(
-            String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce) {
-        return order(symbol, orderId, side, timeInForce, PRICE_TICKS);
+            String instrumentId, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce) {
+        return order(instrumentId, orderId, side, timeInForce, PRICE_TICKS);
     }
 
     private PlaceOrderCommand order(
-            String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
+            String instrumentId, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
         String reservationAsset = productLine == ProductLine.SPOT
                 ? (side == CoreOrderSide.BUY ? "USDT" : "BTC") : settleAsset();
-        return new PlaceOrderCommand(orderId, symbol, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
+        return new PlaceOrderCommand(orderId, instrumentId, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
     }
 
-    private RegisterInstrumentCommand instrument(String symbol) {
+    private RegisterInstrumentCommand instrument(String instrumentId) {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC", "USDT", settleAsset(), 1, 1,
+        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset(), 1, 1,
                 type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

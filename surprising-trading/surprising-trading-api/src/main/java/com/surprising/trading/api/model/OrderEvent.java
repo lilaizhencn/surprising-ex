@@ -6,7 +6,7 @@ public record OrderEvent(
         long eventId,
         long orderId,
         long userId,
-        String symbol,
+        String instrumentId,
         OrderEventType eventType,
         OrderStatus status,
         String reason,
@@ -16,11 +16,11 @@ public record OrderEvent(
     public OrderEvent(long eventId,
                       long orderId,
                       long userId,
-                      String symbol,
+                      String instrumentId,
                       OrderEventType eventType,
                       OrderStatus status,
                       String reason,
                       Instant eventTime) {
-        this(eventId, orderId, userId, symbol, eventType, status, reason, eventTime, null);
+        this(eventId, orderId, userId, instrumentId, eventType, status, reason, eventTime, null);
     }
 }

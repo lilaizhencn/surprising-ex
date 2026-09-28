@@ -47,9 +47,9 @@ public class MarkPriceAuditConsumer {
                 }
                 MarkPricePublishedEvent event = publication.markPrice();
                 if (event == null || event.result() == null || record.key() == null
-                        || !record.key().equals(publication.symbol())
-                        || !record.key().equals(event.result().symbol())) {
-                    throw new IllegalArgumentException("mark price audit Kafka key must match payload symbol");
+                        || !record.key().equals(publication.instrumentId())
+                        || !record.key().equals(event.result().instrumentId())) {
+                    throw new IllegalArgumentException("mark price audit Kafka key must match payload instrumentId");
                 }
                 auditRecords.add(new MarkPriceAuditRecord(event, record.value()));
             } catch (Exception ex) {

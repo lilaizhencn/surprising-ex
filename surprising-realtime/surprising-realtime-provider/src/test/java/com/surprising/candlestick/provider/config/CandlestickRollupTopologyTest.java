@@ -42,11 +42,11 @@ class CandlestickRollupTopologyTest {
         doThrow(new IllegalStateException("database unavailable")).doNothing()
                 .when(sink).upsertBatch(org.mockito.ArgumentMatchers.anyList());
         SymbolRegistryService symbols = mock(SymbolRegistryService.class);
-        when(symbols.isEnabled("BTC-USDT")).thenReturn(true);
+        when(symbols.isEnabled("1")).thenReturn(true);
         PublicTradeEventMapper mapper = mock(PublicTradeEventMapper.class);
         Instant tradeTime = Instant.parse("2026-08-25T10:00:01Z");
         when(mapper.toTradeEvent(org.mockito.ArgumentMatchers.any())).thenReturn(new TradeEvent(
-                "BTC-USDT", "t1", 1, tradeTime, BigDecimal.TWO, BigDecimal.ONE,
+                "1", "t1", 1, tradeTime, BigDecimal.TWO, BigDecimal.ONE,
                 TradeSide.BUY, null, null));
         StreamsBuilder builder = new StreamsBuilder();
         var router = mock(com.surprising.realtime.provider.RealtimeRouter.class);
@@ -68,12 +68,12 @@ class CandlestickRollupTopologyTest {
             TestOutputTopic<String, CandleUpdatedEvent> output = driver.createOutputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
-            trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace"));
+            trades.pipeInput("1", new PublicTradeEvent(
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
             // Export can repeat the same identity after Kafka commit / checkpoint crash window.
-            trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace"));
+            trades.pipeInput("1", new PublicTradeEvent(
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
             assertThat(output.isEmpty()).isTrue();
 
 
@@ -113,21 +113,21 @@ class CandlestickRollupTopologyTest {
             TestOutputTopic<String, CandleUpdatedEvent> output = driver.createOutputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
 
-            input.pipeInput("BTC-USDT", minute(CandleStatus.PARTIAL), 1L);
+            input.pipeInput("1", minute(CandleStatus.PARTIAL), 1L);
             assertThat(output.isEmpty()).isTrue();
 
-            input.pipeInput("BTC-USDT", minute(CandleStatus.CLOSED), 2L);
+            input.pipeInput("1", minute(CandleStatus.CLOSED), 2L);
             CandleUpdatedEvent rollup = output.readValue();
             assertThat(rollup.period()).isEqualTo("5m");
             assertThat(rollup.status()).isEqualTo(CandleStatus.PARTIAL);
 
-            input.pipeInput("BTC-USDT", rollup, 3L);
+            input.pipeInput("1", rollup, 3L);
             assertThat(output.isEmpty()).isTrue();
 
-            input.pipeInput("BTC-USDT", minute(CandleStatus.CLOSED), 4L);
+            input.pipeInput("1", minute(CandleStatus.CLOSED), 4L);
             assertThat(output.isEmpty()).isTrue();
 
-            input.pipeInput("BTC-USDT", minuteAt("2026-08-25T10:05:00Z", CandleStatus.CLOSED), 5L);
+            input.pipeInput("1", minuteAt("2026-08-25T10:05:00Z", CandleStatus.CLOSED), 5L);
             CandleUpdatedEvent closedPrevious = output.readValue();
             CandleUpdatedEvent nextBucket = output.readValue();
             assertThat(closedPrevious.period()).isEqualTo("5m");
@@ -156,12 +156,12 @@ class CandlestickRollupTopologyTest {
             TestOutputTopic<String, CandleUpdatedEvent> output = driver.createOutputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
 
-            input.pipeInput("BTC-USDT", minuteAt("2026-08-25T10:05:00Z", CandleStatus.CLOSED), 1L);
+            input.pipeInput("1", minuteAt("2026-08-25T10:05:00Z", CandleStatus.CLOSED), 1L);
             CandleUpdatedEvent active = output.readValue();
             assertThat(active.openTime()).isEqualTo(Instant.parse("2026-08-25T10:05:00Z"));
             assertThat(active.status()).isEqualTo(CandleStatus.PARTIAL);
 
-            input.pipeInput("BTC-USDT", minuteAt("2026-08-25T10:00:00Z", CandleStatus.CLOSED), 2L);
+            input.pipeInput("1", minuteAt("2026-08-25T10:00:00Z", CandleStatus.CLOSED), 2L);
             assertThat(output.isEmpty()).isTrue();
         }
     }
@@ -185,7 +185,7 @@ class CandlestickRollupTopologyTest {
             TestOutputTopic<String, CandleUpdatedEvent> output = driver.createOutputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
 
-            input.pipeInput("BTC-USDT", minute(CandleStatus.CLOSED), 1L);
+            input.pipeInput("1", minute(CandleStatus.CLOSED), 1L);
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
 
             driver.advanceWallClockTime(Duration.ofMinutes(1));
@@ -202,13 +202,13 @@ class CandlestickRollupTopologyTest {
         properties.getFlush().setInterval(Duration.ofSeconds(1));
         CandleSink sink = mock(CandleSink.class);
         SymbolRegistryService symbols = mock(SymbolRegistryService.class);
-        when(symbols.isEnabled("BTC-USDT")).thenReturn(true);
+        when(symbols.isEnabled("1")).thenReturn(true);
         PublicTradeEventMapper mapper = mock(PublicTradeEventMapper.class);
         Instant tradeTime = Instant.parse("2026-08-25T10:00:01Z");
         when(mapper.toTradeEvent(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new TradeEvent("BTC-USDT", "t1", 1, tradeTime, BigDecimal.TWO, BigDecimal.ONE,
+                .thenReturn(new TradeEvent("1", "t1", 1, tradeTime, BigDecimal.TWO, BigDecimal.ONE,
                                 TradeSide.BUY, null, null),
-                        new TradeEvent("BTC-USDT", "t2", 2, tradeTime.plusSeconds(1), BigDecimal.TEN,
+                        new TradeEvent("1", "t2", 2, tradeTime.plusSeconds(1), BigDecimal.TEN,
                                 BigDecimal.ONE, TradeSide.BUY, null, null));
         StreamsBuilder builder = new StreamsBuilder();
         new CandlestickStreamConfiguration().candlestickTopology(builder, properties, sink,
@@ -226,8 +226,8 @@ class CandlestickRollupTopologyTest {
             TestOutputTopic<String, CandleUpdatedEvent> output = driver.createOutputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
-            trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t1", 1, "BTC-USDT", OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
+            trades.pipeInput("1", new PublicTradeEvent(
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.CLOSED);
@@ -235,8 +235,8 @@ class CandlestickRollupTopologyTest {
             assertThat(rollup.period()).isEqualTo("5m");
             assertThat(rollup.status()).isEqualTo(CandleStatus.PARTIAL);
 
-            trades.pipeInput("BTC-USDT", new PublicTradeEvent(
-                    "t2", 2, "BTC-USDT", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
+            trades.pipeInput("1", new PublicTradeEvent(
+                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
             assertThat(output.readValuesToList()).isEmpty();
             verify(sink, times(1)).upsertBatch(org.mockito.ArgumentMatchers.anyList());
         }
@@ -248,7 +248,7 @@ class CandlestickRollupTopologyTest {
 
     private CandleUpdatedEvent minuteAt(String time, CandleStatus status) {
         Instant open = Instant.parse(time);
-        return new CandleUpdatedEvent("BTC-USDT", "1m", open, open.plusSeconds(60),
+        return new CandleUpdatedEvent("1", "1m", open, open.plusSeconds(60),
                 BigDecimal.ONE, BigDecimal.TWO, BigDecimal.ONE, BigDecimal.TWO,
                 BigDecimal.ONE, BigDecimal.TWO, 1, "a", "a", 1L, 1L,
                 status, open.plusSeconds(59), open.plusSeconds(60), 0, 1L);

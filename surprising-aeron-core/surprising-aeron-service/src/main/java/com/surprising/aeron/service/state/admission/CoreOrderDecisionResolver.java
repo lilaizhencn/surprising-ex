@@ -32,12 +32,12 @@ public final class CoreOrderDecisionResolver {
             throw new IllegalArgumentException("invalid order decision input");
         }
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(intent.symbol());
+        CoreInstrument instrument = runtime.instrument(intent.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.symbol());
-        if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
+        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
+        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         return resolveValues(null, instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, intent.symbol(), clusterTimestamp, instrument),
+                runtime.resolveFee(userId, intent.instrumentId(), clusterTimestamp, instrument),
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
     }
 
@@ -50,12 +50,12 @@ public final class CoreOrderDecisionResolver {
             throw new IllegalArgumentException("invalid order decision input");
         }
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(intent.symbol());
+        CoreInstrument instrument = runtime.instrument(intent.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.symbol());
-        if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
+        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
+        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         resolveValues(target, instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, intent.symbol(), clusterTimestamp, instrument),
+                runtime.resolveFee(userId, intent.instrumentId(), clusterTimestamp, instrument),
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
         return target;
     }
@@ -66,14 +66,14 @@ public final class CoreOrderDecisionResolver {
                           boolean fundingInProgress) { }
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                  long userId, String symbol, long clusterTimestamp) {
+                                  long userId, String instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(symbol);
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.symbol());
-        if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
+        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
+        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, symbol, clusterTimestamp, instrument), clusterTimestamp,
+                runtime.resolveFee(userId, instrumentId, clusterTimestamp, instrument), clusterTimestamp,
                 runtime.treasury().lifecycleSettlement(symbolId) != 0,
                 runtime.treasury().fundingProgress(symbolId) != null);
     }
@@ -89,7 +89,7 @@ public final class CoreOrderDecisionResolver {
                                                     MarkPriceRuntime mark, CoreFeeRate fee,
                                                     long clusterTimestamp, boolean lifecycleSettled,
                                                     PlaceOrderCommand intent) {
-        if (!instrument.symbol().equals(intent.symbol())) throw new IllegalArgumentException("decision context symbol mismatch");
+        if (!instrument.instrumentId().equals(intent.instrumentId())) throw new IllegalArgumentException("decision context instrumentId mismatch");
         instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis())
             throw new CoreStateRejectedException(lifecycleSettled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
@@ -121,14 +121,14 @@ public final class CoreOrderDecisionResolver {
 
     public static ResolvedPlaceOrder resolve(TradingCoreState state, PlaceOrderCommand intent) {
         if (state == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
-        CoreInstrument instrument = state.instruments().get(OrderReservation.normalizeSymbol(intent.symbol()));
+        CoreInstrument instrument = state.instruments().get(OrderReservation.requireInstrumentId(intent.instrumentId()));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
         instrument.requireOrderEnabled(intent);
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
-        CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.symbol());
+        CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.instrumentId());
         if (!spotLimit && mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }

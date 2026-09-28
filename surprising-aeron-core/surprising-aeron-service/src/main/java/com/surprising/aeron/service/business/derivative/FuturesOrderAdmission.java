@@ -58,14 +58,14 @@ public final class FuturesOrderAdmission {
             ResolvedPlaceOrder command,
         ActiveOrderIndex activeOrderIndex) {
         CorePositionState position = user.positions().get(
-                positionKey(instrument.symbol(), command.positionSide()));
+                positionKey(instrument.instrumentId(), command.positionSide()));
         long currentQuantity = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = command.side() == CoreOrderSide.BUY
                 ? command.quantitySteps() : Math.negateExact(command.quantitySteps());
 
         long openSteps = command.reduceOnly() ? 0 : command.quantitySteps();
         long leverage = state.leverages().getOrDefault(
-                new CoreLeverageKey(user.userId(), instrument.symbol(), command.marginMode()),
+                new CoreLeverageKey(user.userId(), instrument.instrumentId(), command.marginMode()),
                 instrument.maxLeveragePpm());
         long projectedRiskQuantity = Math.addExact(Math.absExact(currentQuantity), command.quantitySteps());
         long projectedSteps = signedOrder > 0 ? projectedRiskQuantity : Math.negateExact(projectedRiskQuantity);
@@ -80,8 +80,8 @@ public final class FuturesOrderAdmission {
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), Math.max(0, Math.negateExact(fee))));
     }
 
-    private static String positionKey(String symbol, CorePositionSide side) {
-        String normalized = OrderReservation.normalizeSymbol(symbol);
+    private static String positionKey(String instrumentId, CorePositionSide side) {
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 }

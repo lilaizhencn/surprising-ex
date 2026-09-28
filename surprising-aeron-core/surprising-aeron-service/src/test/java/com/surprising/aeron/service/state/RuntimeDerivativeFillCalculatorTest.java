@@ -28,10 +28,10 @@ class RuntimeDerivativeFillCalculatorTest {
     void takerCursorPreservesPerFillRoundingReversalAndRevisionCounts() {
         var identities = new RuntimeIdentityRegistry();
         var instrument = instrument();
-        int symbol = identities.symbolId(instrument.symbol()), asset = identities.assetId(instrument.settleAsset());
-        long key = identities.positionKey(7, instrument.symbol());
-        try (var sequential = runtimeWithPosition(symbol, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100);
-             var batched = runtimeWithPosition(symbol, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100)) {
+        int instrumentId = identities.symbolId(instrument.instrumentId()), asset = identities.assetId(instrument.settleAsset());
+        long key = identities.positionKey(7, instrument.instrumentId());
+        try (var sequential = runtimeWithPosition(instrumentId, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100);
+             var batched = runtimeWithPosition(instrumentId, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100)) {
             var expectedTreasury = new RuntimeTreasuryDelta();
             var actualTreasury = new RuntimeTreasuryDelta();
             var cursor = RuntimeDerivativeFillCalculator.beginTaker(batched, instrument, batched.order(11),
@@ -63,9 +63,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void abortedTakerCursorDoesNotPublishPartialStateOrLeakIntoNextUse() {
         var identities = new RuntimeIdentityRegistry();
         var instrument = instrument();
-        int symbol = identities.symbolId(instrument.symbol()), asset = identities.assetId(instrument.settleAsset());
-        long key = identities.positionKey(7, instrument.symbol());
-        try (var runtime = runtime(symbol, asset, 200)) {
+        int instrumentId = identities.symbolId(instrument.instrumentId()), asset = identities.assetId(instrument.settleAsset());
+        long key = identities.positionKey(7, instrument.instrumentId());
+        try (var runtime = runtime(instrumentId, asset, 200)) {
             var before = RuntimeSnapshotBuilder.capture(runtime, 1);
             var cursor = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
                     key, 10_000_000, asset, 555, 999);
@@ -90,9 +90,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void opensLinearPositionAndPreservesExplainedLockedFunds() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtime(symbolId, assetId, 200);
         OrderRuntime order = runtime.order(11);
 
@@ -118,9 +118,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void rejectsInsufficientReservationBeforeAnyRuntimeMutation() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtime(symbolId, assetId, 21);
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
@@ -135,9 +135,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void partiallyClosesPositionAndRealizesProfit() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 1, false, 800, 120, 100);
 
@@ -162,9 +162,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void addsMarginOnlyForTheNewQuantityAtItsFillPrice() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.BUY, 1, false, 800, 40, 20);
 
@@ -184,9 +184,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void reversesPositionAtFillPrice() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, false, 800, 220, 200);
 
@@ -211,9 +211,9 @@ class RuntimeDerivativeFillCalculatorTest {
     void rejectsReduceOnlyReversalWithoutMutation() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrument instrument = instrument();
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(7, instrument.symbol());
+        long positionKey = identities.positionKey(7, instrument.instrumentId());
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
@@ -252,7 +252,7 @@ class RuntimeDerivativeFillCalculatorTest {
 
     private static CoreInstrument instrument() {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,

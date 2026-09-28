@@ -24,14 +24,14 @@ class CancelAllAfterServiceTest {
     void zeroCountdownDisablesAuthoritativeTimer() {
         AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
         CancelAllAfterService service = service(store, mock(OrderService.class), mock(TriggerOrderService.class));
-        when(store.set(org.mockito.ArgumentMatchers.eq(1001L), org.mockito.ArgumentMatchers.eq("BTC-USDT"),
+        when(store.set(org.mockito.ArgumentMatchers.eq(1001L), org.mockito.ArgumentMatchers.eq("1"),
                 org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.isNull(), any()))
                 .thenReturn(timer("DISABLED", null));
 
-        var response = service.set(new CancelAllAfterRequest(1001L, "btc-usdt", 0L));
+        var response = service.set(new CancelAllAfterRequest(1001L, "1", 0L));
 
         assertThat(response.active()).isFalse();
-        assertThat(response.symbol()).isEqualTo("BTC-USDT");
+        assertThat(response.instrumentId()).isEqualTo("1");
         assertThat(response.triggerAt()).isNull();
     }
 
@@ -79,7 +79,7 @@ class CancelAllAfterServiceTest {
     }
 
     private CancelAllAfterTimer timer(String status, Instant triggerAt) {
-        return new CancelAllAfterTimer(1001L, "BTC-USDT", "DISABLED".equals(status) ? 0 : 1000,
+        return new CancelAllAfterTimer(1001L, "1", "DISABLED".equals(status) ? 0 : 1000,
                 status, triggerAt, Instant.now(), 0, 0);
     }
 }

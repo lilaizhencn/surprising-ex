@@ -65,12 +65,12 @@ public final class RuntimeAdlExecution {
         if (runtime.treasury().fundingProgress(liquidation.symbolId()) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
-        if (!identities.symbol(liquidation.symbolId()).equals(command.symbol())
+        if (!identities.instrumentId(liquidation.symbolId()).equals(command.instrumentId())
                 || command.targetUserId() == liquidation.userId()
                 || command.coveredUnits() > liquidation.deficitUnits()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
         }
-        CoreInstrument instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()));
+        CoreInstrument instrument = requireInstrument(runtime, identities.instrumentId(liquidation.symbolId()));
         MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
         if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
@@ -221,8 +221,8 @@ public final class RuntimeAdlExecution {
         runtime.replaceLiquidation(nextLiquidation);
     }
 
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String symbol) {
-        CoreInstrument instrument = runtime.instrument(symbol);
+    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+        CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }

@@ -172,17 +172,18 @@ class BinanceApiControllerTest {
         scale.setPriceScale(2);
         scale.setQuantityScale(3);
         properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
+        properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
 
         GatewayProxyService proxy = mock(GatewayProxyService.class);
         AuthService authService = mock(AuthService.class);
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
         String payload = "{\"orders\":["
-                + "{\"orderId\":2,\"symbol\":\"BTCUSDT\",\"clientOrderId\":\"b\","
+                + "{\"orderId\":2,\"instrumentId\":\"1\",\"clientOrderId\":\"b\","
                 + "\"createdAt\":\"2026-08-01T00:00:02Z\",\"orderType\":\"LIMIT\","
                 + "\"timeInForce\":\"GTC\",\"side\":\"SELL\",\"status\":\"FILLED\","
                 + "\"priceTicks\":12345,\"quantitySteps\":2000,\"executedQuantitySteps\":2000},"
-                + "{\"orderId\":1,\"symbol\":\"BTCUSDT\",\"clientOrderId\":\"a\","
+                + "{\"orderId\":1,\"instrumentId\":\"1\",\"clientOrderId\":\"a\","
                 + "\"createdAt\":\"2026-08-01T00:00:01Z\",\"orderType\":\"LIMIT\","
                 + "\"timeInForce\":\"GTC\",\"side\":\"BUY\",\"status\":\"CANCELED\","
                 + "\"priceTicks\":12300,\"quantitySteps\":1000,\"executedQuantitySteps\":0}]}";
@@ -245,7 +246,6 @@ class BinanceApiControllerTest {
     void exposesConfiguredCapitalNetworksAndAccountStatus() throws Exception {
         GatewayProperties properties = withdrawalProperties();
         properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setAssetScales(Map.of("USDT", 6L));
         properties.getCustodyWallet().setWithdrawalAddressIds(Map.of(
                 "TRX", UUID.randomUUID().toString(), "ETH", UUID.randomUUID().toString()));
         AuthService authService = bearerAuth();
@@ -287,6 +287,7 @@ class BinanceApiControllerTest {
         scale.setPriceScale(2);
         scale.setQuantityScale(3);
         properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
+        properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
         GatewayProxyService proxy = mock(GatewayProxyService.class);
         when(proxy.proxyCompat(anyString(), eq("/orderbook"), anyString(), eq(HttpMethod.GET),
                 any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((

@@ -26,11 +26,11 @@ public class AdminOrderRequestService {
         this.orderService = orderService;
     }
 
-    public OrderQueryResponse orders(String adminUserId, String productLineHeader, String productLineValue, Long userId, String symbol, String status, Long orderId, int limit, String cursor, String sort) {
+    public OrderQueryResponse orders(String adminUserId, String productLineHeader, String productLineValue, Long userId, String instrumentId, String status, Long orderId, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return orderService.adminOrders(userId, symbol, status, orderId, limit, cursor, sort, productLine);
+            return orderService.adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort, productLine);
         } catch (ProjectionReadResult.ResponseTooLargeException ex) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -52,11 +52,11 @@ public class AdminOrderRequestService {
         }
     }
 
-    public AdminCancelOrdersPreviewResponse cancelPreview(String adminUserId, String productLineHeader, String productLineValue, Long userId, String symbol, int limit) {
+    public AdminCancelOrdersPreviewResponse cancelPreview(String adminUserId, String productLineHeader, String productLineValue, Long userId, String instrumentId, int limit) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return orderService.adminCancelPreview(userId, symbol, limit, productLine);
+            return orderService.adminCancelPreview(userId, instrumentId, limit, productLine);
         } catch (ProjectionReadResult.ResponseTooLargeException ex) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {

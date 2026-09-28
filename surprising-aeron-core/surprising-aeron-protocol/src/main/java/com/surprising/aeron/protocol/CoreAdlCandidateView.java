@@ -2,7 +2,7 @@ package com.surprising.aeron.protocol;
 
 public record CoreAdlCandidateView(
         long userId,
-        String symbol,
+        String instrumentId,
         String asset,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,

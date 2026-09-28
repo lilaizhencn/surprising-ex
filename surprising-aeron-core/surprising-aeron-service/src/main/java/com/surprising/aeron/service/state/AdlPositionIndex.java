@@ -27,7 +27,7 @@ public final class AdlPositionIndex {
         values.forEach(positionKey -> {
             RuntimePositionIndexValue value = positions.get(positionKey);
             if (value != null) captured[cursor[0]++] = new PositionKey(
-                    value.userId(), value.symbol(), value.positionSide());
+                    value.userId(), value.instrumentId(), value.positionSide());
         });
         PositionKey[] ordered = cursor[0] == captured.length
                 ? captured : java.util.Arrays.copyOf(captured, cursor[0]);
@@ -81,13 +81,13 @@ public final class AdlPositionIndex {
         if (values.isEmpty()) keysByAsset.remove(position.asset());
     }
 
-    public record PositionKey(long userId, String symbol, com.surprising.aeron.protocol.CorePositionSide positionSide)
+    public record PositionKey(long userId, String instrumentId, com.surprising.aeron.protocol.CorePositionSide positionSide)
             implements Comparable<PositionKey> {
         @Override
         public int compareTo(PositionKey other) {
             int user = Long.compare(userId, other.userId);
             if (user != 0) return user;
-            int symbolCompare = symbol.compareTo(other.symbol);
+            int symbolCompare = instrumentId.compareTo(other.instrumentId);
             return symbolCompare != 0 ? symbolCompare
                     : Integer.compare(positionSide.ordinal(), other.positionSide.ordinal());
         }

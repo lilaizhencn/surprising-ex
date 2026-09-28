@@ -5,5 +5,5 @@ import java.time.Duration;
 
 public interface MarketMakerLeaseCoordinator {
 
-    boolean tryAcquire(ProductLine productLine, String strategyId, String symbol, String ownerId, Duration leaseDuration);
+    boolean tryAcquire(ProductLine productLine, String strategyId, String instrumentId, String ownerId, Duration leaseDuration);
 }

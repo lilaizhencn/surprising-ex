@@ -50,21 +50,21 @@ final class BatchAdmissionOrderIndex
     @Override
     public void admitted(long userId, ResolvedPlaceOrder order) {
         if (userId != batchUserId) throw new IllegalArgumentException("batch admission crossed user boundary");
-        delta(order.symbol()).add(order.positionSide().ordinal(), order.side().ordinal(),
+        delta(order.instrumentId()).add(order.positionSide().ordinal(), order.side().ordinal(),
                 order.marginMode().ordinal(), order.reduceOnly(), order.quantitySteps(), 1);
     }
 
     @Override
     public AdmissionSummary inspect(
-            long userId, String symbol,
+            long userId, String instrumentId,
             com.surprising.aeron.protocol.CorePositionSide positionSide,
             com.surprising.aeron.protocol.CoreOrderSide side,
             com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
         var baselineSummary = baseline.inspect(
-                userId, symbol, positionSide, side, conflictingMarginMode);
+                userId, instrumentId, positionSide, side, conflictingMarginMode);
         if (userId != batchUserId) return summary.set(baselineSummary.pendingQuantity(),
                 baselineSummary.reduceOnlyQuantity(), baselineSummary.marginModeCount());
-        SymbolAdmissionDelta delta = deltasBySymbol.get(symbol);
+        SymbolAdmissionDelta delta = deltasBySymbol.get(instrumentId);
         if (delta == null) return summary.set(baselineSummary.pendingQuantity(),
                 baselineSummary.reduceOnlyQuantity(), baselineSummary.marginModeCount());
         return summary.set(
@@ -78,12 +78,12 @@ final class BatchAdmissionOrderIndex
     void apply(OrderRuntime order, int direction) {
         if (order == null || order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
                 || order.userId() != batchUserId) return;
-        delta(identities.symbol(order.symbolId())).add(order.positionSide().ordinal(), order.side().ordinal(),
+        delta(identities.instrumentId(order.symbolId())).add(order.positionSide().ordinal(), order.side().ordinal(),
                 order.marginMode().ordinal(), order.reduceOnly(), order.remainingQuantitySteps(), direction);
     }
 
-    SymbolAdmissionDelta delta(String symbol) {
-        return deltasBySymbol.computeIfAbsent(symbol, ignored -> new SymbolAdmissionDelta());
+    SymbolAdmissionDelta delta(String instrumentId) {
+        return deltasBySymbol.computeIfAbsent(instrumentId, ignored -> new SymbolAdmissionDelta());
     }
 
     static final class SymbolAdmissionDelta {

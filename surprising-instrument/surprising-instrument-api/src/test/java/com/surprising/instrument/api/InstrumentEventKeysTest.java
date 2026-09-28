@@ -14,20 +14,20 @@ class InstrumentEventKeysTest {
 
     @Test
     void acceptsOnlyTheCanonicalProductLineKey() {
-        InstrumentEvent event = new InstrumentEvent("btc-usdt", 3L, InstrumentStatus.TRADING,
+        InstrumentEvent event = new InstrumentEvent(1, "btc-usdt", 3L, InstrumentStatus.TRADING,
                 InstrumentEventType.UPSERTED, Instant.EPOCH, null, ProductLine.SPOT, 3L);
 
-        assertThat(InstrumentEventKeys.key(event)).isEqualTo("SPOT:BTC-USDT");
-        assertThat(InstrumentEventKeys.matches("SPOT:BTC-USDT", event)).isTrue();
+        assertThat(InstrumentEventKeys.key(event)).isEqualTo("SPOT:1");
+        assertThat(InstrumentEventKeys.matches("SPOT:1", event)).isTrue();
         assertThat(InstrumentEventKeys.matches("BTC-USDT", event)).isFalse();
     }
 
     @Test
     void rejectsEventsWithoutProductLineOrSequence() {
-        assertThatThrownBy(() -> new InstrumentEvent("BTC-USDT", 3L, InstrumentStatus.TRADING,
+        assertThatThrownBy(() -> new InstrumentEvent(1, "BTC-USDT", 3L, InstrumentStatus.TRADING,
                 InstrumentEventType.UPSERTED, Instant.EPOCH, null, null, 3L))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new InstrumentEvent("BTC-USDT", 3L, InstrumentStatus.TRADING,
+        assertThatThrownBy(() -> new InstrumentEvent(1, "BTC-USDT", 3L, InstrumentStatus.TRADING,
                 InstrumentEventType.UPSERTED, Instant.EPOCH, null, ProductLine.SPOT, 0L))
                 .isInstanceOf(IllegalArgumentException.class);
     }

@@ -28,8 +28,8 @@ public class DerivativeRiskBoundaryBenchmark {
         long core = h.acceptedCoreMessages();
         long terminalCore = h.terminalCoreMessages();
         for (int i = 0; i < state.maxInFlight; i++) {
-            String symbol = (i & 1) == 0 ? "RISK-LONG" : "RISK-SHORT";
-            state.mark(symbol, symbol.equals("RISK-LONG") ? 120 : 300);
+            String instrumentId = (i & 1) == 0 ? "27" : "28";
+            state.mark(instrumentId, instrumentId.equals("27") ? 120 : 300);
         }
         state.drainRisk();
         if (state.productLine != ProductLine.OPTION) {
@@ -67,8 +67,8 @@ public class DerivativeRiskBoundaryBenchmark {
                 default -> throw new IllegalArgumentException("unsupported boundary fixture");
             };
             asset = type.isInverse() ? "BTC" : "USDT";
-            for (String symbol : new String[]{"RISK-LONG", "RISK-SHORT"}) {
-                var instrument = new RegisterInstrumentCommand(symbol, type.ordinal(), "BTC",
+            for (String instrumentId : new String[]{"27", "28"}) {
+                var instrument = new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC",
                         type.isInverse() ? "USD" : "USDT", asset, type.isInverse() ? 100 : 1,
                         1, type.isInverse() ? 100 : 1, 100_000, 50_000, 0, 0,
                         2_000_000_000_000L, type.isOption() ? OptionType.CALL.ordinal() : -1,
@@ -76,43 +76,43 @@ public class DerivativeRiskBoundaryBenchmark {
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS,
                         0, TradingCommandCodec.encodeRegisterInstrument(instrument)));
             }
-            for (String symbol : new String[]{"RISK-LONG", "RISK-SHORT"}) {
-                mark(symbol, 100);
+            for (String instrumentId : new String[]{"27", "28"}) {
+                mark(instrumentId, 100);
             }
             harness.adjust(999, asset, 1_000_000_000L);
-            order(999, "RISK-LONG", CoreOrderSide.SELL, 256, CoreTimeInForce.GTC);
-            order(999, "RISK-SHORT", CoreOrderSide.BUY, 2560, CoreTimeInForce.GTC);
+            order(999, "27", CoreOrderSide.SELL, 256, CoreTimeInForce.GTC);
+            order(999, "28", CoreOrderSide.BUY, 2560, CoreTimeInForce.GTC);
             for (long user = 1000; user < 1256; user++) {
                 harness.adjust(user, asset, 10_000);
-                order(user, "RISK-LONG", CoreOrderSide.BUY, 1, CoreTimeInForce.IOC);
-                order(user, "RISK-SHORT", CoreOrderSide.SELL, 10, CoreTimeInForce.IOC);
+                order(user, "27", CoreOrderSide.BUY, 1, CoreTimeInForce.IOC);
+                order(user, "28", CoreOrderSide.SELL, 10, CoreTimeInForce.IOC);
                 long available = harness.state().tradingState().user(user).balances().get(asset).availableUnits();
                 if (available > 0) harness.adjust(user, asset, -available);
             }
             // Keep maker liquidity present throughout the measurement window.
-            order(999, "RISK-LONG", CoreOrderSide.SELL, 1, CoreTimeInForce.GTC);
+            order(999, "27", CoreOrderSide.SELL, 1, CoreTimeInForce.GTC);
             openingFunds = funds(harness.state().tradingState());
         }
 
-        private void order(long user, String symbol, CoreOrderSide side, long quantity, CoreTimeInForce tif) {
+        private void order(long user, String instrumentId, CoreOrderSide side, long quantity, CoreTimeInForce tif) {
             harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, user,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), symbol, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(harness.nextOrderId(), instrumentId, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, tif, false, ""))));
         }
 
-        private void mark(String symbol, long price) {
+        private void mark(String instrumentId, long price) {
             harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE,
                     0, TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand(symbol, price, 100, 100,
+                            ? new ApplyMarkPriceCommand(instrumentId, price, 100, 100,
                             ++sequence, harness.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand(symbol, price,
+                            : new ApplyMarkPriceCommand(instrumentId, price,
                             ++sequence, harness.nextCommandTimestamp()))));
         }
 
         private void drainRisk() {
             int rounds = 0;
-            while (!harness.state().runtimeRiskScan("RISK-LONG").riskComplete()
-                    || !harness.state().runtimeRiskScan("RISK-SHORT").riskComplete()) {
+            while (!harness.state().runtimeRiskScan("27").riskComplete()
+                    || !harness.state().runtimeRiskScan("28").riskComplete()) {
                 if (++rounds > 1024) throw new IllegalStateException("risk scan did not drain");
                 harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS,
                         0, TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -126,7 +126,7 @@ public class DerivativeRiskBoundaryBenchmark {
                     CoreAdlQueryCodec.encodeQuery(asset, 256)));
             if (response.status() != ResponseStatus.OK
                     || CoreAdlQueryCodec.decodeCandidates(response.data()).stream()
-                    .noneMatch(candidate -> candidate.userId() >= 1000 && candidate.symbol().equals("RISK-LONG"))) {
+                    .noneMatch(candidate -> candidate.userId() >= 1000 && candidate.instrumentId().equals("27"))) {
                 throw new IllegalStateException("profitable delivery users missing from ADL candidates");
             }
         }
@@ -165,8 +165,8 @@ public class DerivativeRiskBoundaryBenchmark {
                 }
                 for (long user = 1000; user < 1256; user++) {
                     var account = state.user(user);
-                    if (account.positions().get("RISK-LONG").signedQuantitySteps() != 1
-                            || account.positions().get("RISK-SHORT").signedQuantitySteps() != -10
+                    if (account.positions().get("27").signedQuantitySteps() != 1
+                            || account.positions().get("28").signedQuantitySteps() != -10
                             || account.balances().get(asset).availableUnits() < 0
                             || account.balances().get(asset).lockedUnits() < 0) {
                         throw new IllegalStateException("position or balance changed during risk scan");

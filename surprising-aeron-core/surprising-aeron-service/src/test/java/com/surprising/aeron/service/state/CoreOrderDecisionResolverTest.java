@@ -29,21 +29,21 @@ class CoreOrderDecisionResolverTest {
     void batchContextKeepsItsMarkAndUsesTheCanonicalInstrumentForEveryOrder() {
         var identities = new RuntimeIdentityRegistry();
         try (var runtime = runtime(linearInstrument())) {
-            int symbolId = identities.symbolId("BTC-USDT");
-            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("BTC-USDT"), 60_000, 9, 1_000));
-            var context = CoreOrderDecisionResolver.context(runtime, identities, 1001, "BTC-USDT", 1_500);
-            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("BTC-USDT"), 80_000, 10, 1_500));
-            var buy = new PlaceOrderCommand(91, "BTC-USDT", CoreOrderSide.BUY, 0, 2,
+            int symbolId = identities.symbolId("1");
+            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
+            var context = CoreOrderDecisionResolver.context(runtime, identities, 1001, "1", 1_500);
+            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 80_000, 10, 1_500));
+            var buy = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, false, "buy");
-            var sell = new PlaceOrderCommand(92, "BTC-USDT", CoreOrderSide.SELL, 0, 2,
+            var sell = new PlaceOrderCommand(92, "1", CoreOrderSide.SELL, 0, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, false, "sell");
             assertThat(CoreOrderDecisionResolver.resolve(context, buy).matchingPriceTicks()).isEqualTo(60_600);
             assertThat(CoreOrderDecisionResolver.resolve(context, sell).matchingPriceTicks()).isEqualTo(59_400);
             assertThat(CoreOrderDecisionResolver.resolve(runtime, identities, 1001, buy, 1_500).markPriceTicks())
                     .isEqualTo(80_000);
-            var limit = new PlaceOrderCommand(93, "BTC-USDT", CoreOrderSide.BUY, 100, 2,
+            var limit = new PlaceOrderCommand(93, "1", CoreOrderSide.BUY, 100, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                     CoreTimeInForce.GTC, false, "limit");
             assertThat(CoreOrderDecisionResolver.resolve(context, limit).matchingPriceTicks()).isEqualTo(100);
@@ -54,11 +54,11 @@ class CoreOrderDecisionResolverTest {
     void resolvesProtectionReservationAndFeeInsideCore() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = runtime(linearInstrument());
-        int symbolId = identities.symbolId("BTC-USDT");
-        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("BTC-USDT"), 60_000, 9, 1_000));
+        int symbolId = identities.symbolId("1");
+        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
         runtime.upsertFeePolicy(new UpsertFeePolicyCommand(
-                71, 2, 1001, "BTC-USDT", -25, 75, 4, true, 900, 0));
-        PlaceOrderCommand intent = new PlaceOrderCommand(91, "BTC-USDT", CoreOrderSide.BUY, 0, 2,
+                71, 2, 1001, "1", -25, 75, 4, true, 900, 0));
+        PlaceOrderCommand intent = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, false, "client-91");
 
@@ -77,9 +77,9 @@ class CoreOrderDecisionResolverTest {
     void rejectsAStaleCoreMarkWithoutReadingProviderState() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = runtime(linearInstrument());
-        runtime.putMarkPrice(new MarkPriceRuntime(identities.symbolId("BTC-USDT"),
-                runtime.instrument("BTC-USDT"), 60_000, 9, 1_000));
-        PlaceOrderCommand intent = new PlaceOrderCommand(91, "BTC-USDT", CoreOrderSide.SELL, 59_000, 2,
+        runtime.putMarkPrice(new MarkPriceRuntime(identities.symbolId("1"),
+                runtime.instrument("1"), 60_000, 9, 1_000));
+        PlaceOrderCommand intent = new PlaceOrderCommand(91, "1", CoreOrderSide.SELL, 59_000, 2,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-91");
 
@@ -98,8 +98,8 @@ class CoreOrderDecisionResolverTest {
     void spotLimitUsesItsLimitAndInstrumentDefaultWithoutAMark() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = runtime(spotInstrument());
-        identities.symbolId("BTC-USDT");
-        PlaceOrderCommand intent = new PlaceOrderCommand(91, "BTC-USDT", CoreOrderSide.SELL, 60_000, 2,
+        identities.symbolId("1");
+        PlaceOrderCommand intent = new PlaceOrderCommand(91, "1", CoreOrderSide.SELL, 60_000, 2,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-91");
 
@@ -141,7 +141,7 @@ class CoreOrderDecisionResolverTest {
     }
 
     private static CoreInstrument instrument(ContractType contractType) {
-        return new CoreInstrument("BTC-USDT", contractType, "BTC", "USDT", "USDT",
+        return new CoreInstrument("1", contractType, "BTC", "USDT", "USDT",
                 1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
                 10_000_000, Long.MAX_VALUE, 0, 1,
                 List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,

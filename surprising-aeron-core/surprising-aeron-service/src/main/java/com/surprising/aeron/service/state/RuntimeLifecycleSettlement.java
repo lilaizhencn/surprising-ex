@@ -47,7 +47,7 @@ public final class RuntimeLifecycleSettlement {
             throw new IllegalArgumentException("invalid runtime settlement");
         }
         CoreInstrument instrument = requireInstrument(runtime, command);
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "lifecycle settlement id must increase");
@@ -64,12 +64,12 @@ public final class RuntimeLifecycleSettlement {
         List<CoreOrderState> selectedOrders = List.of();
         boolean moreOrders = false;
         if (!chunked) {
-            selectedOrders = openOrders(runtime, identities, activeOrderIndex, instrument.symbol());
+            selectedOrders = openOrders(runtime, identities, activeOrderIndex, instrument.instrumentId());
             cancelOrders(runtime, selectedOrders);
             ordersComplete = true;
         } else if (!ordersComplete) {
             int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
-            OrderPage page = selectOrders(runtime, identities, activeOrderIndex, instrument.symbol(),
+            OrderPage page = selectOrders(runtime, identities, activeOrderIndex, instrument.instrumentId(),
                     accountLaneId, command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
             moreOrders = !page.complete();
@@ -170,7 +170,7 @@ public final class RuntimeLifecycleSettlement {
         CoreInstrument instrument = requireInstrument(runtime, command);
         ProductTradingRulesRegistry.forInstrument(instrument)
                 .validateLifecycleSettlement(instrument, command);
-        int symbolId = identities.symbolId(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.instrumentId());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
         cancelOrders(runtime, orders);
@@ -261,9 +261,9 @@ public final class RuntimeLifecycleSettlement {
     }
 
     static OrderPage selectOrders(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                  ActiveOrderIndex index, String symbol, int startLaneId,
+                                  ActiveOrderIndex index, String instrumentId, int startLaneId,
                                   long startCursorOrderId, int limit) {
-        var page = index.page(0, symbol, startCursorOrderId, limit);
+        var page = index.page(0, instrumentId, startCursorOrderId, limit);
         ArrayList<CoreOrderState> selected = new ArrayList<>(page.orderIds().size());
         for (long orderId : page.orderIds()) {
             OrderRuntime order = runtime.order(orderId);
@@ -277,8 +277,8 @@ public final class RuntimeLifecycleSettlement {
 
     private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities,
-                                                   ActiveOrderIndex index, String symbol) {
-        long[] orderIds = index.sortedIdsDescending(symbol);
+                                                   ActiveOrderIndex index, String instrumentId) {
+        long[] orderIds = index.sortedIdsDescending(instrumentId);
         ArrayList<CoreOrderState> result = new ArrayList<>(orderIds.length);
         for (long orderId : orderIds) {
             OrderRuntime order = runtime.order(orderId);
@@ -345,7 +345,7 @@ public final class RuntimeLifecycleSettlement {
 
     static CoreInstrument requireInstrument(TradingRuntimeState runtime,
                                                  SettleInstrumentCommand command) {
-        CoreInstrument instrument = runtime.instrument(command.symbol());
+        CoreInstrument instrument = runtime.instrument(command.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }

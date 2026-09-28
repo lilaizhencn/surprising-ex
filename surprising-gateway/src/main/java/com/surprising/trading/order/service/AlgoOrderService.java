@@ -65,7 +65,7 @@ public class AlgoOrderService {
                 normalized.clientAlgoOrderId());
         AlgoOrderRecord record = new AlgoOrderRecord(
                 algoOrderId, productLine, normalized.userId(), normalized.clientAlgoOrderId(),
-                normalized.symbol(), normalized.algoType(), normalized.side(), normalized.priceTicks(),
+                normalized.instrumentId(), normalized.algoType(), normalized.side(), normalized.priceTicks(),
                 normalized.quantitySteps(), normalized.childQuantitySteps(), normalized.intervalSeconds(),
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
@@ -95,9 +95,9 @@ public class AlgoOrderService {
         if (limit < 1 || limit > MAX_OPEN_CANCEL_LIMIT) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String symbol = request.symbol() == null || request.symbol().isBlank()
-                ? null : normalizeSymbol(request.symbol());
-        List<AlgoOrderResponse> canceled = store.query(request.userId(), symbol, 0, limit).stream()
+        String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
+                ? null : normalizeSymbol(request.instrumentId());
+        List<AlgoOrderResponse> canceled = store.query(request.userId(), instrumentId, 0, limit).stream()
                 .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
                 .map(store::response)
                 .map(value -> cancel(new CancelAlgoOrderRequest(value.userId(), value.algoOrderId())))
@@ -117,8 +117,8 @@ public class AlgoOrderService {
         return store.response(store.get(record.userId(), record.algoOrderId()));
     }
 
-    public int cancelLifecycleOrders(String symbol, int limit) {
-        String normalizedSymbol = normalizeSymbol(symbol);
+    public int cancelLifecycleOrders(String instrumentId, int limit) {
+        String normalizedSymbol = normalizeSymbol(instrumentId);
         List<AlgoOrderRecord> orders = store.query(0, normalizedSymbol, 0,
                         Math.max(1, Math.min(limit, MAX_OPEN_CANCEL_LIMIT))).stream()
                 .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
@@ -127,19 +127,19 @@ public class AlgoOrderService {
         return orders.size();
     }
 
-    public boolean hasLifecycleActiveOrders(String symbol) {
-        return store.query(0, normalizeSymbol(symbol), 0, 1).stream()
+    public boolean hasLifecycleActiveOrders(String instrumentId) {
+        return store.query(0, normalizeSymbol(instrumentId), 0, 1).stream()
                 .anyMatch(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]));
     }
 
-    public AlgoOrderQueryResponse openOrders(long userId, String symbol, int limit) {
+    public AlgoOrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
         if (limit < 1 || limit > MAX_OPEN_CANCEL_LIMIT) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        List<AlgoOrderResponse> orders = store.query(userId, symbol, 0, limit).stream()
+        List<AlgoOrderResponse> orders = store.query(userId, instrumentId, 0, limit).stream()
                 .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
                 .map(store::response).toList();
         return new AlgoOrderQueryResponse(orders.size(), orders);
@@ -236,7 +236,7 @@ public class AlgoOrderService {
         OrderType orderType = record.priceTicks() > 0 ? OrderType.LIMIT : OrderType.MARKET;
         TimeInForce timeInForce = orderType == OrderType.MARKET ? TimeInForce.IOC : record.timeInForce();
         return new PlaceOrderRequest(record.userId(), childClientOrderId(record.algoOrderId(), sliceIndex),
-                record.symbol(), record.side(), orderType, timeInForce,
+                record.instrumentId(), record.side(), orderType, timeInForce,
                 orderType == OrderType.MARKET ? 0L : record.priceTicks(), quantitySteps,
                 record.marginMode(), record.positionSide(), record.reduceOnly(), record.postOnly());
     }
@@ -261,7 +261,7 @@ public class AlgoOrderService {
                                        Instant now,
                                        Long currentOrderId) {
         return new AlgoOrderRecord(order.algoOrderId(), order.productLine(), order.userId(),
-                order.clientAlgoOrderId(), order.symbol(), order.algoType(), order.side(), order.priceTicks(),
+                order.clientAlgoOrderId(), order.instrumentId(), order.algoType(), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
                 order.marginMode(), order.positionSide(), order.reduceOnly(), order.postOnly(), order.timeInForce(),
                 status, currentOrderId, reason, order.traceId(), order.startAt(), nextSliceAt, completedAt,
@@ -272,7 +272,7 @@ public class AlgoOrderService {
         if (request == null || request.userId() <= 0) {
             throw new IllegalArgumentException("algo order request and userId are required");
         }
-        String symbol = normalizeSymbol(request.symbol());
+        String instrumentId = normalizeSymbol(request.instrumentId());
         if (request.algoType() == null || request.side() == null) {
             throw new IllegalArgumentException("algoType and side are required");
         }
@@ -310,7 +310,7 @@ public class AlgoOrderService {
         if (clientAlgoOrderId.length() > 64) {
             throw new IllegalArgumentException("clientAlgoOrderId length must be <= 64");
         }
-        return new PlaceAlgoOrderRequest(request.userId(), clientAlgoOrderId, symbol,
+        return new PlaceAlgoOrderRequest(request.userId(), clientAlgoOrderId, instrumentId,
                 request.algoType(), request.side(), request.priceTicks(), request.quantitySteps(),
                 request.childQuantitySteps(), request.intervalSeconds(), request.durationSeconds(), marginMode,
                 positionSide, request.reduceOnly(), postOnly, tif, request.startAt());
@@ -353,13 +353,13 @@ public class AlgoOrderService {
         return "algo-" + algoOrderId + "-" + sliceIndex;
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

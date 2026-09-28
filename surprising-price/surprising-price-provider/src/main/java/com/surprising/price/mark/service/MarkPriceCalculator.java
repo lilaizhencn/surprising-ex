@@ -25,7 +25,7 @@ public class MarkPriceCalculator {
         this.properties = properties;
     }
 
-    public MarkPriceEvent calculate(String symbol,
+    public MarkPriceEvent calculate(String instrumentId,
                                     long sequence,
                                     IndexPriceEvent index,
                                     PerpBookTickerEvent book,
@@ -72,7 +72,7 @@ public class MarkPriceCalculator {
                 .longValueExact();
         long markPriceTicks = Math.floorDiv(
                 Math.addExact(markPriceUnits, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
-        return new MarkPriceEvent(properties.getKafka().getProductLine(), symbol, encoding.instrumentChangeId(),
+        return new MarkPriceEvent(properties.getKafka().getProductLine(), instrumentId, encoding.instrumentChangeId(),
                 markPriceUnits, markPriceTicks, markPrice, indexPrice, null, price1, price2, lastTradePrice,
                 book == null ? null : book.bestBidPrice(), book == null ? null : book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
                 basisAverage, properties.getCalculation().getBasisWindow().toSeconds(), clampLow, clampHigh,

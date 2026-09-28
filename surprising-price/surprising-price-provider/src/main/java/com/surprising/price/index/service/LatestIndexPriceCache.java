@@ -33,26 +33,26 @@ public class LatestIndexPriceCache {
 
     public boolean update(IndexPriceEvent event) {
         validate(event, clock.instant());
-        String symbol = normalizeSymbol(event.symbol());
-        IndexPriceEvent updated = latestBySymbol.compute(symbol, (ignored, current) ->
+        String instrumentId = normalizeSymbol(event.instrumentId());
+        IndexPriceEvent updated = latestBySymbol.compute(instrumentId, (ignored, current) ->
                 current == null || newer(event, current) ? event : current);
         return updated == event;
     }
 
-    public IndexPriceResponse requireFresh(String symbol) {
-        IndexPriceEvent event = latestBySymbol.get(normalizeSymbol(symbol));
+    public IndexPriceResponse requireFresh(String instrumentId) {
+        IndexPriceEvent event = latestBySymbol.get(normalizeSymbol(instrumentId));
         if (event == null) {
-            throw new StaleIndexPriceException("index price unavailable: " + symbol);
+            throw new StaleIndexPriceException("index price unavailable: " + instrumentId);
         }
         if (!isFresh(event)) {
-            throw new StaleIndexPriceException("index price is stale: " + event.symbol()
+            throw new StaleIndexPriceException("index price is stale: " + event.instrumentId()
                     + " eventTime=" + event.eventTime());
         }
         if (!usable(event.status()) || event.indexPrice() == null) {
-            throw new StaleIndexPriceException("index price is unavailable: " + event.symbol()
+            throw new StaleIndexPriceException("index price is unavailable: " + event.instrumentId()
                     + " status=" + event.status());
         }
-        return new IndexPriceResponse(event.symbol(), event.indexPrice(), event.sequence(), event.status(),
+        return new IndexPriceResponse(event.instrumentId(), event.indexPrice(), event.sequence(), event.status(),
                 event.componentCount(), event.validComponentCount(), event.eventTime(), event.components());
     }
 
@@ -71,7 +71,7 @@ public class LatestIndexPriceCache {
         if (event.eventTime().isAfter(now.plusSeconds(1))) {
             throw new IllegalArgumentException("index price eventTime is in the future: " + event.eventTime());
         }
-        normalizeSymbol(event.symbol());
+        normalizeSymbol(event.instrumentId());
     }
 
     private boolean newer(IndexPriceEvent candidate, IndexPriceEvent current) {
@@ -84,13 +84,13 @@ public class LatestIndexPriceCache {
         return status == PriceStatus.HEALTHY || status == PriceStatus.DEGRADED;
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

@@ -26,33 +26,33 @@ public class IndexPriceController {
     }
 
     @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/latest")
-    public IndexPriceResponse latestIndexPrice(@RequestParam("symbol") String symbol) {
+    public IndexPriceResponse latestIndexPrice(@RequestParam("instrumentId") String instrumentId) {
         try {
-            return latestIndexPriceCache.requireFresh(normalizeSymbol(symbol));
+            return latestIndexPriceCache.requireFresh(normalizeSymbol(instrumentId));
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
     @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/history")
-    public IndexPriceQueryResponse history(@RequestParam("symbol") String symbol,
+    public IndexPriceQueryResponse history(@RequestParam("instrumentId") String instrumentId,
                                            @RequestParam("startTime")
                                            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
                                            @RequestParam("endTime")
                                            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime,
                                            @RequestParam(value = "limit", defaultValue = "500") int limit) {
         validateRange(startTime, endTime);
-        String normalized = normalizeSymbol(symbol);
+        String normalized = normalizeSymbol(instrumentId);
         int safeLimit = Math.min(limit, 5000);
         return new IndexPriceQueryResponse(normalized, safeLimit,
                 indexPriceQueryService.history(normalized, startTime, endTime, safeLimit));
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid symbol");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid instrumentId");
         }
-        return symbol;
+        return instrumentId;
     }
 
     private void validateRange(Instant startTime, Instant endTime) {

@@ -23,7 +23,7 @@ public final class RuntimeOrderStateTransitions {
         }
         runtime.assertOwner();
         long clientKey = identities.clientKey(userId, command.clientOrderId());
-        int symbolId = identities.symbolId(command.symbol());
+        int symbolId = identities.symbolId(command.instrumentId());
         int assetId = identities.assetId(command.reservationAsset());
         placePrepared(runtime, userId, command, commandId, requiredReservation,
                 clientKey, symbolId, assetId);

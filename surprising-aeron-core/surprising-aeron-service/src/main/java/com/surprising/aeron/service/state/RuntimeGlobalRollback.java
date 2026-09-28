@@ -86,16 +86,16 @@ final class RuntimeGlobalRollback {
         riskScans.computeIfAbsent(symbolId, id -> new Before<>(state.riskScans.get(id)));
     }
 
-    void captureRegisteredInstrument(String symbol) {
-        registeredInstruments.add(symbol);
+    void captureRegisteredInstrument(String instrumentId) {
+        registeredInstruments.add(instrumentId);
     }
 
     void captureInstrumentMaintenance(CoreInstrument instrument) {
-        instrumentMaintenance.computeIfAbsent(instrument.symbol(), symbol -> instrument.maintenance());
+        instrumentMaintenance.computeIfAbsent(instrument.instrumentId(), instrumentId -> instrument.maintenance());
     }
 
     void captureInstrumentConfiguration(CoreInstrument instrument) {
-        instrumentConfigurations.computeIfAbsent(instrument.symbol(), symbol -> instrument.configuration());
+        instrumentConfigurations.computeIfAbsent(instrument.instrumentId(), instrumentId -> instrument.configuration());
     }
 
     void capturePendingTransfer(long transferId, TransferRuntime current) {
@@ -198,12 +198,12 @@ final class RuntimeGlobalRollback {
         markPrices.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.markPrices, id, before.value()));
         riskScans.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.riskScans, id, before.value()));
         registeredInstruments.forEach(state.instruments::remove);
-        instrumentMaintenance.forEach((symbol, maintenance) -> {
-            CoreInstrument instrument = state.instruments.get(symbol);
+        instrumentMaintenance.forEach((instrumentId, maintenance) -> {
+            CoreInstrument instrument = state.instruments.get(instrumentId);
             if (instrument != null) instrument.updateMaintenance(maintenance);
         });
-        instrumentConfigurations.forEach((symbol, configuration) -> {
-            CoreInstrument instrument = state.instruments.get(symbol);
+        instrumentConfigurations.forEach((instrumentId, configuration) -> {
+            CoreInstrument instrument = state.instruments.get(instrumentId);
             if (instrument != null) instrument.restoreConfiguration(configuration);
         });
         pendingTransfers.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.pendingTransfers, id, before.value()));

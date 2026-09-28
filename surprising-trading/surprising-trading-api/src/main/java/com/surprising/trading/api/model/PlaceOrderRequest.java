@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
 public record PlaceOrderRequest(
         @Positive long userId,
         @NotBlank @Size(max = 64) String clientOrderId,
-        @NotBlank @Size(max = 64) String symbol,
+        @NotBlank @Size(max = 64) String instrumentId,
         @NotNull OrderSide side,
         @NotNull OrderType orderType,
         @NotNull TimeInForce timeInForce,
@@ -26,17 +26,17 @@ public record PlaceOrderRequest(
         positionSide = PositionSide.defaultIfNull(positionSide);
     }
 
-    public PlaceOrderRequest(long userId, String clientOrderId, String symbol, OrderSide side,
+    public PlaceOrderRequest(long userId, String clientOrderId, String instrumentId, OrderSide side,
                              OrderType orderType, TimeInForce timeInForce, long priceTicks,
                              long quantitySteps, MarginMode marginMode, PositionSide positionSide,
                              boolean reduceOnly, boolean postOnly) {
-        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+        this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
                 marginMode, positionSide, reduceOnly, postOnly, null);
     }
 
     public PlaceOrderRequest(long userId,
                              String clientOrderId,
-                             String symbol,
+                             String instrumentId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -45,13 +45,13 @@ public record PlaceOrderRequest(
                              MarginMode marginMode,
                              boolean reduceOnly,
                              boolean postOnly) {
-        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+        this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
                 marginMode, PositionSide.NET, reduceOnly, postOnly);
     }
 
     public PlaceOrderRequest(long userId,
                              String clientOrderId,
-                             String symbol,
+                             String instrumentId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -59,7 +59,7 @@ public record PlaceOrderRequest(
                              long quantitySteps,
                              boolean reduceOnly,
                              boolean postOnly) {
-        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+        this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
                 MarginMode.CROSS, PositionSide.NET, reduceOnly, postOnly);
     }
 }

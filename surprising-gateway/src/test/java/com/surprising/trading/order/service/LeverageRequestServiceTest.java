@@ -20,7 +20,7 @@ class LeverageRequestServiceTest {
         LeverageService leverage = mock(LeverageService.class);
         LeverageRequestService requests = new LeverageRequestService(leverage);
         LeverageSettingRequest request = new LeverageSettingRequest(900001L,
-                ProductLine.LINEAR_PERPETUAL, "BTC-USDT-SWAP", MarginMode.CROSS,
+                ProductLine.LINEAR_PERPETUAL, "49", MarginMode.CROSS,
                 10_000_000L, "maker depth QA");
 
         assertThatThrownBy(() -> requests.adminSet(null, request, null, null))

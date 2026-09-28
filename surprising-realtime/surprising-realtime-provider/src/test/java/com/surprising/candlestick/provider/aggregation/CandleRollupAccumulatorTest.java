@@ -14,7 +14,7 @@ class CandleRollupAccumulatorTest {
     @Test
     void aggregatesClosedMinutesDeterministicallyWhenTheyArriveOutOfOrder() {
         Instant bucket = Instant.parse("2026-08-25T10:00:00Z");
-        CandleRollupAccumulator accumulator = CandleRollupAccumulator.create("BTC-USDT", CandlePeriod.M5, bucket);
+        CandleRollupAccumulator accumulator = CandleRollupAccumulator.create("1", CandlePeriod.M5, bucket);
 
         accumulator.add(minute("2026-08-25T10:01:00Z", "101", "104", "98", "103", "2", "206", 3, "b", "c", 2, 4));
         accumulator.add(minute("2026-08-25T10:00:00Z", "100", "102", "99", "101", "1", "101", 2, "a", "b", 1, 2));
@@ -48,7 +48,7 @@ class CandleRollupAccumulatorTest {
                                        String base, String quote, long count, String firstId, String lastId,
                                        long firstSequence, long lastSequence) {
         Instant openTime = Instant.parse(time);
-        return new CandleUpdatedEvent("BTC-USDT", "1m", openTime, openTime.plusSeconds(60),
+        return new CandleUpdatedEvent("1", "1m", openTime, openTime.plusSeconds(60),
                 new BigDecimal(open), new BigDecimal(high), new BigDecimal(low), new BigDecimal(close),
                 new BigDecimal(base), new BigDecimal(quote), count, firstId, lastId, firstSequence, lastSequence,
                 CandleStatus.CLOSED, openTime.plusSeconds(59), openTime.plusSeconds(60), 0, lastSequence);

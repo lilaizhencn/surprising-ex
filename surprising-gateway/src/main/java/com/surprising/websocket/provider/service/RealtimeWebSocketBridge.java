@@ -66,7 +66,7 @@ public final class RealtimeWebSocketBridge
         long now = System.currentTimeMillis();
         if (route.userId() > 0) refresh.renew(route.productLine(), route.userId(), now + 30000);
         else if (route.channel().equals("BOOK"))
-            refresh.renewBook(route.productLine(), route.symbol(), now + 30000);
+            refresh.renewBook(route.productLine(), route.instrumentId(), now + 30000);
         directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
         directory.register(route, node, now + 15000);
         memberships.merge(route, 1, Integer::sum);
@@ -106,7 +106,7 @@ public final class RealtimeWebSocketBridge
                             if (route.userId() > 0)
                                 refresh.renew(route.productLine(), route.userId(), now + 30000);
                             else if (route.channel().equals("BOOK"))
-                                refresh.renewBook(route.productLine(), route.symbol(), now + 30000);
+                                refresh.renewBook(route.productLine(), route.instrumentId(), now + 30000);
                         });
     }
 
@@ -200,11 +200,11 @@ public final class RealtimeWebSocketBridge
                     }
                     default -> mapper.readTree(f.payload());
                 };
-        String symbol = f.symbol().isBlank() ? SubscriptionTopic.WILDCARD : f.symbol();
+        String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
         var topic =
                 new SubscriptionTopic(
                         channel,
-                        symbol,
+                        instrumentId,
                         channel == WsChannel.CANDLES ? f.entityId() : null,
                         f.userId() > 0 ? f.userId() : null,
                         f.productLine());
@@ -244,7 +244,7 @@ public final class RealtimeWebSocketBridge
             var ticker = new BookTicker(bid, ask);
             registry.publish(
                     new SubscriptionTopic(
-                            WsChannel.BOOK_TICKER, symbol, null, null, f.productLine()),
+                            WsChannel.BOOK_TICKER, instrumentId, null, null, f.productLine()),
                     new VersionedEvent(
                             RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), ticker),
                     Instant.ofEpochMilli(f.timestamp()));
@@ -269,7 +269,7 @@ public final class RealtimeWebSocketBridge
                 topic.productLine(),
                 topic.userId() == null ? 0 : topic.userId(),
                 channel,
-                topic.symbol());
+                topic.instrumentId());
     }
 
     public record BookTicker(CoreBookLevelView bid, CoreBookLevelView ask) {}

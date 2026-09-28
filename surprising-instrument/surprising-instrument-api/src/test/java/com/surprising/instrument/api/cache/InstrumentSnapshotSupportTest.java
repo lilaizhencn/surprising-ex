@@ -26,7 +26,7 @@ class InstrumentSnapshotSupportTest {
     @Test
     void ignoresEventsFromOtherProductLinesInSharedTopic() throws Exception {
         InstrumentEvent event = new InstrumentEvent(
-                "BTC-USDT-260925",
+                1, "BTC-USDT-260925",
                 1L,
                 InstrumentStatus.TRADING,
                 InstrumentEventType.UPSERTED,
@@ -56,7 +56,7 @@ class InstrumentSnapshotSupportTest {
 
     private InstrumentResponse instrument(String symbol) {
         return new InstrumentResponse(
-                symbol,
+                1, 3, 1, 1, 1, symbol,
                 1L,
                 InstrumentType.OPTION,
                 ContractType.VANILLA_OPTION,
@@ -95,7 +95,7 @@ class InstrumentSnapshotSupportTest {
                 1,
                 Instant.parse("2026-09-03T00:00:00Z"),
                 Instant.parse("2026-09-03T00:00:00Z"),
-                "BTC-USDT",
+                "BTC-USDT", com.surprising.product.api.ProductLine.SPOT,
                 5_900_000_000_000L,
                 OptionType.CALL,
                 OptionExerciseStyle.EUROPEAN,

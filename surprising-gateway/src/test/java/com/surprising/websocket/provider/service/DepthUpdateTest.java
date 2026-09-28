@@ -12,8 +12,8 @@ class DepthUpdateTest {
     @Test
     void initialSnapshotIncludesBothSidesAndEmptyBook() {
         var update = DepthUpdate.between(null, new CoreOrderBookView(1, List.of(
-                new CoreBookLevelView("BTC-USDT", BUY, 100, 2, 1),
-                new CoreBookLevelView("BTC-USDT", SELL, 101, 3, 1))));
+                new CoreBookLevelView("1", BUY, 100, 2, 1),
+                new CoreBookLevelView("1", SELL, 101, 3, 1))));
         assertThat(update.updateType()).isEqualTo("SNAPSHOT");
         assertThat(update.previousSequence()).isNull();
         assertThat(update.sequence()).isEqualTo("1");
@@ -26,13 +26,13 @@ class DepthUpdateTest {
     @Test
     void changedLevelsUseAbsoluteQuantityAndRemovedLevelsUseZero() {
         var before = new CoreOrderBookView(10, List.of(
-                new CoreBookLevelView("BTC-USDT", BUY, 100, 2, 1),
-                new CoreBookLevelView("BTC-USDT", BUY, 99, 5, 1),
-                new CoreBookLevelView("BTC-USDT", SELL, 101, 3, 1)));
+                new CoreBookLevelView("1", BUY, 100, 2, 1),
+                new CoreBookLevelView("1", BUY, 99, 5, 1),
+                new CoreBookLevelView("1", SELL, 101, 3, 1)));
         var after = new CoreOrderBookView(14, List.of(
-                new CoreBookLevelView("BTC-USDT", BUY, 100, 8, 2),
-                new CoreBookLevelView("BTC-USDT", BUY, 98, 4, 1),
-                new CoreBookLevelView("BTC-USDT", SELL, 101, 3, 1)));
+                new CoreBookLevelView("1", BUY, 100, 8, 2),
+                new CoreBookLevelView("1", BUY, 98, 4, 1),
+                new CoreBookLevelView("1", SELL, 101, 3, 1)));
         var delta = DepthUpdate.between(before, after);
         assertThat(delta.updateType()).isEqualTo("DELTA");
         assertThat(delta.previousSequence()).isEqualTo("10");

@@ -60,21 +60,21 @@ final class StableIdentityLedger implements AutoCloseable {
     }
 
     synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
-                               String symbol, String expectedFinalState) {
-        return intent(sequence, operation, userId, symbol, expectedFinalState, "");
+                               String instrumentId, String expectedFinalState) {
+        return intent(sequence, operation, userId, instrumentId, expectedFinalState, "");
     }
 
     synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
-                               String symbol, String expectedFinalState, String targetIdentity) {
+                               String instrumentId, String expectedFinalState, String targetIdentity) {
         State existing = states.get(sequence);
         if (existing != null) {
-            Intent candidate = createIntent(sequence, operation, userId, symbol, expectedFinalState, targetIdentity);
+            Intent candidate = createIntent(sequence, operation, userId, instrumentId, expectedFinalState, targetIdentity);
             if (!existing.intent.equals(candidate)) {
                 throw new IllegalStateException("intent mismatch at sequence " + sequence);
             }
             return existing.intent;
         }
-        return createIntent(sequence, operation, userId, symbol, expectedFinalState, targetIdentity);
+        return createIntent(sequence, operation, userId, instrumentId, expectedFinalState, targetIdentity);
     }
 
     synchronized void scheduled(Intent intent, long intendedNanos) {
@@ -84,7 +84,7 @@ final class StableIdentityLedger implements AutoCloseable {
         append("{\"event\":\"SCHEDULED\",\"sequence\":" + intent.sequence()
                 + ",\"intentId\":\"" + intent.intentId() + "\",\"clientIdentity\":\""
                 + escape(intent.clientIdentity()) + "\",\"operation\":\"" + intent.operation()
-                + "\",\"userId\":" + intent.userId() + ",\"symbol\":\"" + escape(intent.symbol())
+                + "\",\"userId\":" + intent.userId() + ",\"instrumentId\":\"" + escape(intent.instrumentId())
                 + "\",\"expected\":\"" + escape(intent.expectedFinalState()) + "\",\"target\":\""
                 + escape(intent.targetIdentity()) + "\",\"intendedNanos\":" + intendedNanos + "}");
     }
@@ -180,15 +180,15 @@ final class StableIdentityLedger implements AutoCloseable {
     }
 
     private Intent createIntent(long sequence, WorkloadOperation operation, long userId,
-                                String symbol, String expectedFinalState, String targetIdentity) {
-        if (sequence <= 0 || operation == null || userId <= 0 || symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("valid sequence, operation, user and symbol required");
+                                String instrumentId, String expectedFinalState, String targetIdentity) {
+        if (sequence <= 0 || operation == null || userId <= 0 || instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("valid sequence, operation, user and instrumentId required");
         }
         String domain = runId + ':' + seed + ':' + sequence + ':' + operation;
         UUID intentId = UUID.nameUUIDFromBytes(("intent:" + domain).getBytes(StandardCharsets.UTF_8));
         String client = operation.name().toLowerCase(java.util.Locale.ROOT) + '-'
                 + UUID.nameUUIDFromBytes(("client:" + domain).getBytes(StandardCharsets.UTF_8));
-        return new Intent(sequence, intentId, client, operation, userId, symbol, expectedFinalState,
+        return new Intent(sequence, intentId, client, operation, userId, instrumentId, expectedFinalState,
                 targetIdentity == null ? "" : targetIdentity);
     }
 
@@ -278,8 +278,8 @@ final class StableIdentityLedger implements AutoCloseable {
             WorkloadOperation operation = WorkloadOperation.valueOf(required(fields, "operation"));
             Intent intent = new Intent(sequence, UUID.fromString(required(fields, "intentId")),
                     required(fields, "clientIdentity"), operation, number(fields, "userId"),
-                    required(fields, "symbol"), required(fields, "expected"), required(fields, "target"));
-            Intent deterministic = createIntent(sequence, operation, intent.userId(), intent.symbol(),
+                    required(fields, "instrumentId"), required(fields, "expected"), required(fields, "target"));
+            Intent deterministic = createIntent(sequence, operation, intent.userId(), intent.instrumentId(),
                     intent.expectedFinalState(), intent.targetIdentity());
             if (!intent.intentId().equals(deterministic.intentId())
                     || !intent.clientIdentity().equals(deterministic.clientIdentity())) {
@@ -397,7 +397,7 @@ final class StableIdentityLedger implements AutoCloseable {
     }
 
     record Intent(long sequence, UUID intentId, String clientIdentity, WorkloadOperation operation,
-                  long userId, String symbol, String expectedFinalState, String targetIdentity) {
+                  long userId, String instrumentId, String expectedFinalState, String targetIdentity) {
     }
 
     record Snapshot(Intent intent, long intendedNanos, long sendNanos, long httpNanos, long finalNanos,

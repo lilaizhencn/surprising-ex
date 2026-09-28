@@ -81,13 +81,13 @@ public class AccountInternalController {
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")
-    public PositionResponse position(@RequestParam("userId") long userId, @RequestParam("symbol") String symbol, @RequestParam(value = "marginMode", required = false) String marginMode, @RequestParam(value = "positionSide", required = false) String positionSide) {
-        return requests.position(userId, symbol, marginMode, positionSide);
+    public PositionResponse position(@RequestParam("userId") long userId, @RequestParam("instrumentId") String instrumentId, @RequestParam(value = "marginMode", required = false) String marginMode, @RequestParam(value = "positionSide", required = false) String positionSide) {
+        return requests.position(userId, instrumentId, marginMode, positionSide);
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin")
-    public PositionMarginResponse positionMargin(@RequestParam("userId") long userId, @RequestParam("symbol") String symbol, @RequestParam(value = "marginMode", required = false) String marginMode) {
-        return requests.positionMargin(userId, symbol, marginMode);
+    public PositionMarginResponse positionMargin(@RequestParam("userId") long userId, @RequestParam("instrumentId") String instrumentId, @RequestParam(value = "marginMode", required = false) String marginMode) {
+        return requests.positionMargin(userId, instrumentId, marginMode);
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin-adjustments")

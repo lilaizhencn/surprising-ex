@@ -8,7 +8,7 @@ public record AdlEventResponse(
         long deficitUserId,
         long targetUserId,
         String asset,
-        String symbol,
+        String instrumentId,
         AdlSide targetSide,
         PositionSide targetPositionSide,
         long closedQuantitySteps,
@@ -30,7 +30,7 @@ public record AdlEventResponse(
                             long deficitUserId,
                             long targetUserId,
                             String asset,
-                            String symbol,
+                            String instrumentId,
                             AdlSide targetSide,
                             long closedQuantitySteps,
                             long entryPriceTicks,
@@ -42,7 +42,7 @@ public record AdlEventResponse(
                             long priorityScorePpm,
                             String reason,
                             Instant createdAt) {
-        this(eventId, deficitUserId, targetUserId, asset, symbol, targetSide, PositionSide.NET,
+        this(eventId, deficitUserId, targetUserId, asset, instrumentId, targetSide, PositionSide.NET,
                 closedQuantitySteps, entryPriceTicks, markPriceTicks, requestedDeficitUnits, realizedProfitUnits,
                 coveredUnits, remainingDeficitUnits, priorityScorePpm, reason, createdAt);
     }

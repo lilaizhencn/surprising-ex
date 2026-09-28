@@ -10,7 +10,7 @@ class CoreOpenInterestCodecTest {
 
     @Test
     void roundTripsSortedOpenInterest() {
-        var values = List.of(new CoreOpenInterestView("BTC-USDT", 11, 9));
+        var values = List.of(new CoreOpenInterestView("1", 11, 9));
         assertThat(CoreOpenInterestCodec.decode(CoreOpenInterestCodec.encode(values)))
                 .containsExactlyElementsOf(values);
     }

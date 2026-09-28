@@ -4,7 +4,7 @@ import java.time.Instant;
 
 public record FundingSettlementResponse(
         long settlementId,
-        String symbol,
+        String instrumentId,
         Instant fundingTime,
         long fundingRatePpm,
         long totalLongPaymentUnits,

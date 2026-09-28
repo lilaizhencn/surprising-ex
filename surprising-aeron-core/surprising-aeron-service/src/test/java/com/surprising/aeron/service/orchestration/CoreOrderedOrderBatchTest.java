@@ -60,7 +60,7 @@ class CoreOrderedOrderBatchTest {
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(86_200, "cancel-rejected-maker", CoreOrderSide.SELL, 1_000, 1)))) ,1002));
-            var rejected = new PlaceOrderCommand(86_201, "BTC-USDT", CoreOrderSide.BUY, 1000, 1,
+            var rejected = new PlaceOrderCommand(86_201, "1", CoreOrderSide.BUY, 1000, 1,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                     CoreTimeInForce.GTX, true, "cancel-rejected");
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
@@ -783,7 +783,7 @@ class CoreOrderedOrderBatchTest {
     @Test
     void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                     ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0,
                     10_000_000, 1_500, 0, 1_500,
@@ -794,16 +794,16 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_MARK_PRICE,
                     UUID.randomUUID(), 2, TradingCommandCodec.encodeApplyMarkPrice(
-                            new ApplyMarkPriceCommand("BTC-USDT", 1_000, 1, 1_000)))).status())
+                            new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.ADJUST_BALANCE,
                     UUID.randomUUID(), 3, TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", 1_000_000)))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            PlaceOrderCommand first = new PlaceOrderCommand(10_601, "BTC-USDT",
+            PlaceOrderCommand first = new PlaceOrderCommand(10_601, "1",
                     CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "risk-first");
-            PlaceOrderCommand exceedsBatchLimit = new PlaceOrderCommand(10_602, "BTC-USDT",
+            PlaceOrderCommand exceedsBatchLimit = new PlaceOrderCommand(10_602, "1",
                     CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "risk-second");
             CoreMessage batch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
@@ -1177,7 +1177,7 @@ class CoreOrderedOrderBatchTest {
             applyBalance(state, 1001, 20_000);
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
-            int symbolId = identities.symbolId("BTC-USDT");
+            int symbolId = identities.symbolId("1");
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(15_101, "guard-first", 1_000)))));
@@ -1187,7 +1187,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
 
             assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPriceRuntime(
-                    symbolId, runtime.instrument("BTC-USDT"), 50_000, 2, 2)))
+                    symbolId, runtime.instrument("1"), 50_000, 2, 2)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("order batch cannot mutate mark-price state");
 
@@ -1266,8 +1266,8 @@ class CoreOrderedOrderBatchTest {
             var first = awaitMatching(state, sequence);
             assertThat(first.matcherEvents()).as(first.resultCode()).isNotEmpty();
             CoreFaults.afterSettlement(state, () -> {
-                Long takerPositionKey = identities.findPositionKey(1001, "BTC-USDT");
-                Long makerPositionKey = identities.findPositionKey(1002, "BTC-USDT");
+                Long takerPositionKey = identities.findPositionKey(1001, "1");
+                Long makerPositionKey = identities.findPositionKey(1002, "1");
                 assertThat(takerPositionKey).isNotNull();
                 assertThat(makerPositionKey).isNotNull();
                 assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
@@ -1280,8 +1280,8 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class);
             long[] observedSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(java.util.Arrays.stream(observedSequences).anyMatch(value -> value > 0)).isTrue();
-            Long takerPositionKey = identities.findPositionKey(1001, "BTC-USDT");
-            Long makerPositionKey = identities.findPositionKey(1002, "BTC-USDT");
+            Long takerPositionKey = identities.findPositionKey(1001, "1");
+            Long makerPositionKey = identities.findPositionKey(1002, "1");
             assertThat(takerPositionKey).isNotNull();
             assertThat(makerPositionKey).isNotNull();
             assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
@@ -1363,7 +1363,7 @@ class CoreOrderedOrderBatchTest {
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(97_000, "reject-maker", 1000)))), 1002));
-            var postOnly = new PlaceOrderCommand(97_001, "BTC-USDT", CoreOrderSide.SELL, 1000, 1, false,
+            var postOnly = new PlaceOrderCommand(97_001, "1", CoreOrderSide.SELL, 1000, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
                     true, "reject-post-only");
             var message = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
@@ -1457,17 +1457,17 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static PlaceOrderCommand place(long orderId, String clientOrderId, long reservedUnits) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
+        return new PlaceOrderCommand(orderId, "1", CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
     private static PlaceOrderCommand spotOrder(long orderId, String clientOrderId, CoreOrderSide side,
                                                 long priceTicks, long quantitySteps, String reservationAsset,
                                                 long reservedUnits, long makerFeeRatePpm, long takerFeeRatePpm) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
+        return new PlaceOrderCommand(orderId, "1", side, priceTicks, quantitySteps, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
     private static void applySpotInstrument(TradingCoreRuntime state) {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(
@@ -1478,7 +1478,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static void applyLinearPerpetualInstrument(TradingCoreRuntime state) {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0,
                 10_000_000, 1_500, 0, 1_500,
@@ -1491,14 +1491,14 @@ class CoreOrderedOrderBatchTest {
         assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.KAFKA_INPUT_BRIDGE,
                 89, 1, 0, 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("BTC-USDT", 1_000, 1, 1_000)))).status())
+                        new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
     }
 
     private static PlaceOrderCommand linearOrder(long orderId, String clientOrderId,
                                                   CoreOrderSide side, long priceTicks,
                                                   long quantitySteps) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", side, priceTicks, quantitySteps,
+        return new PlaceOrderCommand(orderId, "1", side, priceTicks, quantitySteps,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, clientOrderId);
     }

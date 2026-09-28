@@ -19,14 +19,14 @@ public class IndexPriceComponentRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO price_index_components (
-                symbol, sequence, source, source_symbol, price, bid_price, ask_price,
+                instrument_id, sequence, source, source_symbol, price, bid_price, ask_price,
                 configured_weight, effective_weight, status, reason, source_time, received_at, latency_millis
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, sequence, source) DO NOTHING
+            ON CONFLICT (instrument_id, sequence, source) DO NOTHING
             """;
     private static final String DELETE_SQL = """
             DELETE FROM price_index_components
-             WHERE symbol = ?
+             WHERE instrument_id = ?
                AND sequence = ?
             """;
 
@@ -46,7 +46,7 @@ public class IndexPriceComponentRepository {
             public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
                 IndexComponentRow row = rows.get(index);
                 IndexComponentSnapshot component = row.component();
-                statement.setString(1, row.event().symbol());
+                statement.setString(1, row.event().instrumentId());
                 statement.setLong(2, row.event().sequence());
                 statement.setString(3, component.source());
                 statement.setString(4, component.sourceSymbol());
@@ -73,12 +73,12 @@ public class IndexPriceComponentRepository {
         });
     }
 
-    public List<IndexComponentSnapshot> find(String symbol, long sequence) {
+    public List<IndexComponentSnapshot> find(String instrumentId, long sequence) {
         return jdbcTemplate.query("""
                 SELECT source, source_symbol, price, bid_price, ask_price,
                        configured_weight, effective_weight, status, reason, source_time, received_at, latency_millis
                   FROM price_index_components
-                 WHERE symbol = ?
+                 WHERE instrument_id = ?
                    AND sequence = ?
                  ORDER BY source ASC
                 """, (rs, rowNum) -> new IndexComponentSnapshot(
@@ -93,7 +93,7 @@ public class IndexPriceComponentRepository {
                 rs.getString("reason"),
                 timestamp(rs.getTimestamp("source_time")),
                 timestamp(rs.getTimestamp("received_at")),
-                nullableLong(rs, "latency_millis"), null), symbol, sequence);
+                nullableLong(rs, "latency_millis"), null), instrumentId, sequence);
     }
 
     public int deleteByKeys(List<TickKey> keys) {
@@ -154,7 +154,7 @@ public class IndexPriceComponentRepository {
         @Override
         public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
             TickKey key = keys.get(index);
-            statement.setString(1, key.symbol());
+            statement.setString(1, key.instrumentId());
             statement.setLong(2, key.sequence());
         }
 

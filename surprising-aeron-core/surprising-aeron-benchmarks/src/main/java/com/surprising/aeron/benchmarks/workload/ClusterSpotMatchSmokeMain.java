@@ -68,7 +68,7 @@ public final class ClusterSpotMatchSmokeMain {
     }
 
     private static CoreMessage instrumentCommand(long sourceId, long sequence) {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("BTC-USDT",
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return command(sourceId, sequence, 1, CoreMessageType.REGISTER_INSTRUMENT,
@@ -76,7 +76,7 @@ public final class ClusterSpotMatchSmokeMain {
     }
 
     private static byte[] order(long orderId, CoreOrderSide side, long quantity, String asset, long reserved) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1", side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private static CoreMessage command(long sourceId, long sequence, long userId,

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 /** A separate control producer; its response dependencies never drain the trading producer. */
 @Slf4j
 final class OperationalLifecycle implements AutoCloseable {
-    private static final String ACTIVE="OPS-ACT-USDT", RISK="OPS-RISK-USDT";
+    private static final String ACTIVE="17", RISK="18";
     /** JMH 控制页参数；0 沿用原资金费页大小和运行中的风险预算。 */
     private final int controlPageSize;
     private final OperationalEndpoint endpoint;
@@ -36,8 +36,8 @@ final class OperationalLifecycle implements AutoCloseable {
         return Math.addExact(3*ClusterMixedCapacityMain.BALANCE,Math.multiplyExact(cycles,125));
     }
     void setup() {
-        for(String symbol:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
+        for(String instrumentId:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
                         ContractType.LINEAR_PERPETUAL.ordinal(),"OPS","USDT","USDT",1,1,1,
                         100_000,50_000,0,0,0,-1,0)));
         for(long account:new long[]{maker,user,riskMaker})deposit(account,ClusterMixedCapacityMain.BALANCE);
@@ -48,15 +48,15 @@ final class OperationalLifecycle implements AutoCloseable {
                 new BalanceAdjustmentCommand("USDT",amount)));
         deposits=Math.addExact(deposits,amount);
     }
-    private void price(String symbol,long value) {
-        long seq=symbol.equals(ACTIVE)?++activeSequence:++riskSequence;
+    private void price(String instrumentId,long value) {
+        long seq=instrumentId.equals(ACTIVE)?++activeSequence:++riskSequence;
         endpoint.command(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol,value,seq,GeneratedPriceClock.timestamp())));
+                new ApplyMarkPriceCommand(instrumentId,value,seq,GeneratedPriceClock.timestamp())));
     }
-    private void place(long account,String symbol,CoreOrderSide side,long price,long quantity,
+    private void place(long account,String instrumentId,CoreOrderSide side,long price,long quantity,
                        CoreTimeInForce tif,boolean reduceOnly) {
         endpoint.command(CoreMessageType.PLACE_ORDER,account,TradingCommandCodec.encodePlaceOrder(
-                new PlaceOrderCommand(++id,symbol,side,price,quantity,reduceOnly,CoreMarginMode.CROSS,
+                new PlaceOrderCommand(++id,instrumentId,side,price,quantity,reduceOnly,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,"ops-"+id)));
     }
     void cycle() {
@@ -106,7 +106,7 @@ final class OperationalLifecycle implements AutoCloseable {
     private void openActive() {
         place(maker,ACTIVE,CoreOrderSide.SELL,100,1,CoreTimeInForce.GTC,false);
         place(user,ACTIVE,CoreOrderSide.BUY,100,1,CoreTimeInForce.IOC,false);
-        long quantity=endpoint.user(user).positions().stream().filter(p->p.symbol().equals(ACTIVE))
+        long quantity=endpoint.user(user).positions().stream().filter(p->p.instrumentId().equals(ACTIVE))
                 .mapToLong(CorePositionView::signedQuantitySteps).sum();
         if(quantity!=1)throw new IllegalStateException("manual/trigger position not opened");
     }
@@ -164,7 +164,7 @@ final class OperationalLifecycle implements AutoCloseable {
                 new ResolveLiquidationCommand(liquidationId,ResolveLiquidationCommand.Resolution.INSURANCE,coverage)));
         var adl=work(CoreLiquidationWorkView.Purpose.ADL).resolutions().stream()
                 .filter(a->a.liquidationId()==expectedId).findFirst().orElseThrow();
-        var position=endpoint.user(riskMaker).positions().stream().filter(p->p.symbol().equals(RISK)).findFirst().orElseThrow();
+        var position=endpoint.user(riskMaker).positions().stream().filter(p->p.instrumentId().equals(RISK)).findFirst().orElseThrow();
         long profit=position.entryPriceTicks()-1;
         long quantity=Math.floorDiv(Math.addExact(adl.deficitUnits(),profit-1),profit);
         endpoint.command(CoreMessageType.EXECUTE_ADL,0,TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(

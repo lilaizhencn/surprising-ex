@@ -5,22 +5,22 @@ import java.util.Locale;
 
 public record SubscriptionTopic(
         WsChannel channel,
-        String symbol,
+        String instrumentId,
         String period,
         Long userId,
         ProductLine productLine) {
 
     public static final String WILDCARD = "*";
 
-    public SubscriptionTopic(WsChannel channel, String symbol, String period, Long userId) {
-        this(channel, symbol, period, userId, null);
+    public SubscriptionTopic(WsChannel channel, String instrumentId, String period, Long userId) {
+        this(channel, instrumentId, period, userId, null);
     }
 
     public SubscriptionTopic {
         if (channel == null) {
             throw new IllegalArgumentException("channel is required");
         }
-        symbol = normalizeSymbol(symbol, channel);
+        instrumentId = normalizeSymbol(instrumentId, channel);
         period = normalizePeriod(period, channel);
         if (!channel.isPublicChannel() && userId == null) {
             throw new IllegalArgumentException("private channel requires userId");
@@ -30,20 +30,20 @@ public record SubscriptionTopic(
     public static SubscriptionTopic fromCommand(WsClientCommand command, Long authenticatedUserId) {
         WsChannel channel = WsChannel.fromCode(command.channel());
         Long userId = channel.isPublicChannel() ? null : privateUserId(command.userId(), authenticatedUserId);
-        return new SubscriptionTopic(channel, command.symbol(), command.period(), userId,
+        return new SubscriptionTopic(channel, command.instrumentId(), command.period(), userId,
                 parseProductLine(command.productLine()));
     }
 
     public SubscriptionTopic withUserId(long userId) {
-        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
+        return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 
-    public SubscriptionTopic withSymbol(String symbol) {
-        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
+    public SubscriptionTopic withSymbol(String instrumentId) {
+        return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 
     public SubscriptionTopic withProductLine(ProductLine productLine) {
-        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
+        return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 
     private static Long privateUserId(Long requestedUserId, Long authenticatedUserId) {
@@ -56,19 +56,19 @@ public record SubscriptionTopic(
         return authenticatedUserId;
     }
 
-    private static String normalizeSymbol(String symbol, WsChannel channel) {
-        if (!channel.isPublicChannel() && (symbol == null || symbol.isBlank())) {
+    private static String normalizeSymbol(String instrumentId, WsChannel channel) {
+        if (!channel.isPublicChannel() && (instrumentId == null || instrumentId.isBlank())) {
             return WILDCARD;
         }
-        if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("symbol is required for channel " + channel.code());
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required for channel " + channel.code());
         }
-        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
+        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
         if (!channel.isPublicChannel() && WILDCARD.equals(normalized)) {
             return WILDCARD;
         }
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
+        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;
     }

@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 public interface MarketDataRpcApi {
 
     @GetMapping("/orderbook")
-    OrderBookSnapshotResponse orderBook(@RequestParam("symbol") @NotBlank String symbol,
+    OrderBookSnapshotResponse orderBook(@RequestParam("instrumentId") @NotBlank String instrumentId,
                                         @RequestParam(value = "depth", defaultValue = "30")
                                         @Min(1) @Max(100) int depth);
 

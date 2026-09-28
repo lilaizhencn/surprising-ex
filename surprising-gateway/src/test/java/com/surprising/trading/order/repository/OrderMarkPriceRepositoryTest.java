@@ -19,11 +19,11 @@ class OrderMarkPriceRepositoryTest {
         MarkPriceEvent event = mock(MarkPriceEvent.class);
         when(event.instrumentChangeId()).thenReturn(7L);
         when(event.markPriceTicks()).thenReturn(65_001L);
-        when(cache.fresh("BTC-USDT", Duration.ofSeconds(5))).thenReturn(Optional.of(event));
+        when(cache.fresh("1", Duration.ofSeconds(5))).thenReturn(Optional.of(event));
         OrderMarkPriceRepository repository = new OrderMarkPriceRepository(cache);
 
-        assertThat(repository.latestMarkPriceTicks("BTC-USDT", 7L, 5_000L)).hasValue(65_001L);
-        verify(cache).fresh("BTC-USDT", Duration.ofSeconds(5));
+        assertThat(repository.latestMarkPriceTicks("1", 7L, 5_000L)).hasValue(65_001L);
+        verify(cache).fresh("1", Duration.ofSeconds(5));
     }
 
     @Test
@@ -31,9 +31,9 @@ class OrderMarkPriceRepositoryTest {
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent event = mock(MarkPriceEvent.class);
         when(event.instrumentChangeId()).thenReturn(8L);
-        when(cache.fresh("BTC-USDT", Duration.ofMillis(1))).thenReturn(Optional.of(event));
+        when(cache.fresh("1", Duration.ofMillis(1))).thenReturn(Optional.of(event));
         OrderMarkPriceRepository repository = new OrderMarkPriceRepository(cache);
 
-        assertThat(repository.latestMarkPriceTicks("BTC-USDT", 7L, 0L)).isEmpty();
+        assertThat(repository.latestMarkPriceTicks("1", 7L, 0L)).isEmpty();
     }
 }

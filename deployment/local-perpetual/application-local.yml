@@ -29,7 +29,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [BTC-USDT-SWAP]
+        instrument-ids: ["@BTC-USDT@"]
       - strategy-id: local-eth-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -37,7 +37,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [ETH-USDT-SWAP]
+        instrument-ids: ["@ETH-USDT@"]
       - strategy-id: local-sol-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -45,7 +45,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [SOL-USDT-SWAP]
+        instrument-ids: ["@SOL-USDT@"]
       - strategy-id: local-xrp-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -53,7 +53,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [XRP-USDT-SWAP]
+        instrument-ids: ["@XRP-USDT@"]
       - strategy-id: local-doge-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -61,7 +61,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [DOGE-USDT-SWAP]
+        instrument-ids: ["@DOGE-USDT@"]
       - strategy-id: local-ada-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -69,7 +69,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [ADA-USDT-SWAP]
+        instrument-ids: ["@ADA-USDT@"]
       - strategy-id: local-bnb-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -77,7 +77,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [BNB-USDT-SWAP]
+        instrument-ids: ["@BNB-USDT@"]
       - strategy-id: local-avax-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -85,7 +85,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [AVAX-USDT-SWAP]
+        instrument-ids: ["@AVAX-USDT@"]
       - strategy-id: local-link-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -93,7 +93,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [LINK-USDT-SWAP]
+        instrument-ids: ["@LINK-USDT@"]
       - strategy-id: local-dot-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -101,7 +101,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [DOT-USDT-SWAP]
+        instrument-ids: ["@DOT-USDT@"]
       - strategy-id: local-ltc-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -109,7 +109,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [LTC-USDT-SWAP]
+        instrument-ids: ["@LTC-USDT@"]
       - strategy-id: local-bch-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -117,7 +117,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [BCH-USDT-SWAP]
+        instrument-ids: ["@BCH-USDT@"]
       - strategy-id: local-uni-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -125,7 +125,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [UNI-USDT-SWAP]
+        instrument-ids: ["@UNI-USDT@"]
       - strategy-id: local-aave-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -133,7 +133,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [AAVE-USDT-SWAP]
+        instrument-ids: ["@AAVE-USDT@"]
       - strategy-id: local-near-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -141,7 +141,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [NEAR-USDT-SWAP]
+        instrument-ids: ["@NEAR-USDT@"]
       - strategy-id: local-sui-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -149,7 +149,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [SUI-USDT-SWAP]
+        instrument-ids: ["@SUI-USDT@"]
       - strategy-id: local-trx-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -157,7 +157,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [TRX-USDT-SWAP]
+        instrument-ids: ["@TRX-USDT@"]
       - strategy-id: local-op-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -165,7 +165,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [OP-USDT-SWAP]
+        instrument-ids: ["@OP-USDT@"]
       - strategy-id: local-etc-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -173,7 +173,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [ETC-USDT-SWAP]
+        instrument-ids: ["@ETC-USDT@"]
       - strategy-id: local-fil-usdt-maker
         product-line: LINEAR_PERPETUAL
         enabled: true
@@ -181,7 +181,7 @@ surprising:
         base-quantity-steps: 1000
         order-levels: 50
         margin-mode: CROSS
-        symbols: [FIL-USDT-SWAP]
+        instrument-ids: ["@FIL-USDT@"]
     reference-market:
       enabled: true
       websocket-enabled: true
@@ -190,180 +190,180 @@ surprising:
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: BTC-USDT-SWAP
+          instrument-id: "@BTC-USDT@"
           external-symbol: BTCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: ETH-USDT-SWAP
+          instrument-id: "@ETH-USDT@"
           external-symbol: ETHUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: SOL-USDT-SWAP
+          instrument-id: "@SOL-USDT@"
           external-symbol: SOLUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: XRP-USDT-SWAP
+          instrument-id: "@XRP-USDT@"
           external-symbol: XRPUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: DOGE-USDT-SWAP
+          instrument-id: "@DOGE-USDT@"
           external-symbol: DOGEUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: ADA-USDT-SWAP
+          instrument-id: "@ADA-USDT@"
           external-symbol: ADAUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: BNB-USDT-SWAP
+          instrument-id: "@BNB-USDT@"
           external-symbol: BNBUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: AVAX-USDT-SWAP
+          instrument-id: "@AVAX-USDT@"
           external-symbol: AVAXUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: LINK-USDT-SWAP
+          instrument-id: "@LINK-USDT@"
           external-symbol: LINKUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: DOT-USDT-SWAP
+          instrument-id: "@DOT-USDT@"
           external-symbol: DOTUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: LTC-USDT-SWAP
+          instrument-id: "@LTC-USDT@"
           external-symbol: LTCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: BCH-USDT-SWAP
+          instrument-id: "@BCH-USDT@"
           external-symbol: BCHUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: UNI-USDT-SWAP
+          instrument-id: "@UNI-USDT@"
           external-symbol: UNIUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: AAVE-USDT-SWAP
+          instrument-id: "@AAVE-USDT@"
           external-symbol: AAVEUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: NEAR-USDT-SWAP
+          instrument-id: "@NEAR-USDT@"
           external-symbol: NEARUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: SUI-USDT-SWAP
+          instrument-id: "@SUI-USDT@"
           external-symbol: SUIUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: TRX-USDT-SWAP
+          instrument-id: "@TRX-USDT@"
           external-symbol: TRXUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: OP-USDT-SWAP
+          instrument-id: "@OP-USDT@"
           external-symbol: OPUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: ETC-USDT-SWAP
+          instrument-id: "@ETC-USDT@"
           external-symbol: ETCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: BINANCE_USDM
           enabled: true
           product-line: LINEAR_PERPETUAL
-          symbol: FIL-USDT-SWAP
+          instrument-id: "@FIL-USDT@"
           external-symbol: FILUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
           parser: BINANCE_DEPTH
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM

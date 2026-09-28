@@ -283,3 +283,16 @@ status=UNAVAILABLE，不用零代替失败。注册表拥有订阅生命周期�
 Chrome 桌面及 390px 手机检查双语三验证码弹窗、设置开关及导航；5174/9094 实际部署后使用独立临时账号验证两步 TOTP 登录、缺码拒绝、重放拒绝、设置密码检查、旧接口不能绕过，结束后删除该账号及认证记录。
 没有向外部真实收件人发送验证码；邮件/短信发送失败和多因素逻辑以可控发送器测试，短信真实投递待服务商配置。
 未重跑撮合/结算路径，因为仅修改认证域和前端认证页面，不改变交易协议、资金或持仓。运行证据位于本地 `verification/login-mfa-20260928/`。
+
+## 币种主目录与充提网络
+
+`com.surprising.asset` 在现有 Gateway MVC 中提供币种配置：`AssetConfigurationController` 校验管理员权限和原始请求审批，`AssetConfigurationService` 按币种加行锁、校验版本和业务规则，同一事务保存配置与审计。三个 Repository 分别管理 `assets`、`asset_networks`、`asset_configuration_changes`，没有新增运行时缓存。
+
+- `GET/POST /api/v1/admin/assets`：币种列表及新增/修改；`listedOnly=true` 返回已上线且允许配置市场的币种。
+- `GET/POST /api/v1/admin/assets/{assetId}/networks`：同一币种的多个网络配置。
+- 写操作携带配置 `revision`、`reason`，使用现有 `X-Admin-Approval-Id` 审批；新建的 revision 为 0。旧版本写入返回 409。
+- `assets.scale_units` 是账务精度唯一来源；删除钱包网关配置中的 `asset-scales-json`，充值入账和提现金额换算由币种目录读取。网络 `chain_decimals` 独立，网络金额必须同时可用账务单位与链上单位精确表达。
+- 币种 ID、账务代码、账务精度不可变；显示名称和 Logo 可调整。网络 ID、币种归属、网络标识、合约和链上精度不可变。启用网络要求币种上线，下线币种前必须关闭其所有充提网络。
+- 合约配置改用四个币种 ID；数据库外键拒绝不存在的币种，创建及重新启用市场时进一步校验上线资格。现有市场的交易状态仍由各产品线合约状态控制，币种目录开关不隐式清退持仓。
+
+数据库定义统一位于根 `init.sql`。项目未上线，使用空库初始化目标结构，不在运行时保留名称身份兼容分支。

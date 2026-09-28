@@ -77,7 +77,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         if(realtime!=null && topic.userId()!=null) {
             var view=realtime.snapshot(topic.productLine(),topic.userId());
             connection.send(objectMapper.writeValueAsString(new WsServerMessage("snapshot",command.id(),topic.channel().code(),
-                    topic.symbol(),topic.period(),topic.userId(),topic.productLine(),view,null,java.time.Instant.now())));
+                    topic.instrumentId(),topic.period(),topic.userId(),topic.productLine(),view,null,java.time.Instant.now())));
         }
     }
 

@@ -14,11 +14,11 @@ class SubscriptionTopicTest {
     @Test
     void publicCandleSubscriptionNormalizesSymbolAndPeriod() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-1", "candles", "btc-usdt", "1M", null),
+                new WsClientCommand("subscribe", "req-1", "candles", "1", "1M", null),
                 null);
 
         assertThat(topic.channel()).isEqualTo(WsChannel.CANDLES);
-        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.instrumentId()).isEqualTo("1");
         assertThat(topic.period()).isEqualTo("1m");
         assertThat(topic.userId()).isNull();
     }
@@ -26,7 +26,7 @@ class SubscriptionTopicTest {
     @Test
     void subscriptionCarriesProductLineFromCommand() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-product", "index", "btc-usdt", null, null,
+                new WsClientCommand("subscribe", "req-product", "index", "1", null, null,
                         "linear-delivery"),
                 null);
 
@@ -40,7 +40,7 @@ class SubscriptionTopicTest {
                 42L);
 
         assertThat(topic.channel()).isEqualTo(WsChannel.POSITIONS);
-        assertThat(topic.symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
         assertThat(topic.userId()).isEqualTo(42L);
     }
 
@@ -50,42 +50,42 @@ class SubscriptionTopicTest {
                 new WsClientCommand("subscribe", "req-risk-1", "accountRisk", null, null, null),
                 42L);
         SubscriptionTopic positionRisk = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-risk-2", "positionRisk", "btc-usdt", null, null),
+                new WsClientCommand("subscribe", "req-risk-2", "positionRisk", "1", null, null),
                 42L);
 
         assertThat(accountRisk.channel()).isEqualTo(WsChannel.ACCOUNT_RISK);
-        assertThat(accountRisk.symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(accountRisk.instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
         assertThat(accountRisk.userId()).isEqualTo(42L);
         assertThat(positionRisk.channel()).isEqualTo(WsChannel.POSITION_RISK);
-        assertThat(positionRisk.symbol()).isEqualTo("BTC-USDT");
+        assertThat(positionRisk.instrumentId()).isEqualTo("1");
         assertThat(positionRisk.userId()).isEqualTo(42L);
     }
 
     @Test
     void privateExecutionReportsChannelUsesAuthenticatedUser() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-exec", "executionReports", "btc-usdt", null, null),
+                new WsClientCommand("subscribe", "req-exec", "executionReports", "1", null, null),
                 42L);
 
         assertThat(topic.channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
-        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.instrumentId()).isEqualTo("1");
         assertThat(topic.userId()).isEqualTo(42L);
     }
 
     @Test
     void privateTriggerOrdersChannelUsesAuthenticatedUser() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-trigger", "triggerOrders", "btc-usdt", null, null),
+                new WsClientCommand("subscribe", "req-trigger", "triggerOrders", "1", null, null),
                 42L);
 
         assertThat(topic.channel()).isEqualTo(WsChannel.TRIGGER_ORDERS);
-        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.instrumentId()).isEqualTo("1");
         assertThat(topic.userId()).isEqualTo(42L);
     }
 
     @Test
     void privateChannelRejectsMissingAuthentication() {
-        WsClientCommand command = new WsClientCommand("subscribe", "req-3", "orders", "BTC-USDT", null, null);
+        WsClientCommand command = new WsClientCommand("subscribe", "req-3", "orders", "1", null, null);
 
         assertThatThrownBy(() -> SubscriptionTopic.fromCommand(command, null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -94,7 +94,7 @@ class SubscriptionTopicTest {
 
     @Test
     void privateChannelRejectsUserIdMismatch() {
-        WsClientCommand command = new WsClientCommand("subscribe", "req-4", "orders", "BTC-USDT", null, 7L);
+        WsClientCommand command = new WsClientCommand("subscribe", "req-4", "orders", "1", null, 7L);
 
         assertThatThrownBy(() -> SubscriptionTopic.fromCommand(command, 8L))
                 .isInstanceOf(IllegalArgumentException.class)

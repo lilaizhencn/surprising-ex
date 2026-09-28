@@ -28,10 +28,10 @@ public class ActiveOrderIndexBenchmark {
         identities = new RuntimeIdentityRegistry();
         index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("BTC-USDT", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         for (int i = 0; i < open.length; i++) {
-            var order = new CoreOrderState(i + 1, ProductLine.LINEAR_PERPETUAL, i % users + 1, "BTC-USDT",
+            var order = new CoreOrderState(i + 1, ProductLine.LINEAR_PERPETUAL, i % users + 1, "1",
                     CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
             open[i] = RuntimeStateProjector.toRuntimeOrder(order, identities, instrument);
             terminal[i] = open[i].withStatus(CoreOrderStatus.CANCELED, 2);
@@ -47,7 +47,7 @@ public class ActiveOrderIndexBenchmark {
     }
 
     @TearDown public void verifyEmpty() {
-        if (index.count() != 0 || !index.ids("BTC-USDT").isEmpty())
+        if (index.count() != 0 || !index.ids("1").isEmpty())
             throw new IllegalStateException("terminal orders remain in admission indexes");
         for (int user = 1; user <= users; user++) if (!index.ids(user).isEmpty())
             throw new IllegalStateException("terminal orders remain in account index");

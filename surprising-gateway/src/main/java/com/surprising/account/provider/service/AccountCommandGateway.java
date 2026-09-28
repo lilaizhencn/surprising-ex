@@ -120,16 +120,16 @@ public class AccountCommandGateway {
         UUID commandId = commandId("position-margin", request.userId(), request.referenceId());
         aeron.command(CoreMessageType.ADJUST_POSITION_MARGIN, commandId, request.userId(),
                 TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
-                        request.symbol(), CoreMarginMode.valueOf(request.marginMode().name()),
+                        request.instrumentId(), CoreMarginMode.valueOf(request.marginMode().name()),
                         CorePositionSide.valueOf(request.positionSide().name()), request.amountUnits())));
         CoreUserStateView state = requireUserState(request.userId());
         var position = state.positions().stream()
-                .filter(value -> value.symbol().equalsIgnoreCase(request.symbol()))
+                .filter(value -> value.instrumentId().equalsIgnoreCase(request.instrumentId()))
                 .filter(value -> value.marginMode().name().equals(request.marginMode().name()))
                 .filter(value -> value.positionSide().name().equals(request.positionSide().name()))
                 .findFirst().orElseThrow(() -> new AccountStateUnavailableException("Aeron position missing"));
         BalanceResponse balance = balance(state, position.marginAsset());
-        return new PositionMarginAdjustmentResponse(request.userId(), position.symbol(), position.marginAsset(),
+        return new PositionMarginAdjustmentResponse(request.userId(), position.instrumentId(), position.marginAsset(),
                 MarginMode.valueOf(position.marginMode().name()), PositionSide.valueOf(position.positionSide().name()),
                 request.amountUnits(), position.positionMarginUnits(), balance.availableUnits(),
                 balance.lockedUnits(), balance.equityUnits(), request.referenceId(), Instant.now());

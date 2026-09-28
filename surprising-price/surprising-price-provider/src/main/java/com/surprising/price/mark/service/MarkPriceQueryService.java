@@ -23,16 +23,16 @@ public class MarkPriceQueryService {
         this.markPriceCache = markPriceCache;
     }
 
-    public MarkPriceResponse latest(String symbol) {
-        return toResponse(markPriceCache.requireFresh(normalizeSymbol(symbol)));
+    public MarkPriceResponse latest(String instrumentId) {
+        return toResponse(markPriceCache.requireFresh(normalizeSymbol(instrumentId)));
     }
 
-    public MarkPriceQueryResponse history(String symbol,
+    public MarkPriceQueryResponse history(String instrumentId,
                                           Instant startTime,
                                           Instant endTime,
                                           int limit) {
         validateRange(startTime, endTime);
-        String normalized = normalizeSymbol(symbol);
+        String normalized = normalizeSymbol(instrumentId);
         int safeLimit = Math.min(limit, 5000);
         return new MarkPriceQueryResponse(
                 normalized,
@@ -40,15 +40,15 @@ public class MarkPriceQueryService {
                 tickRepository.history(normalized, startTime, endTime, safeLimit));
     }
 
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol");
+    private String normalizeSymbol(String instrumentId) {
+        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId)) {
+            throw new IllegalArgumentException("invalid instrumentId");
         }
-        return symbol;
+        return instrumentId;
     }
 
     private MarkPriceResponse toResponse(MarkPriceEvent event) {
-        return new MarkPriceResponse(event.symbol(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
+        return new MarkPriceResponse(event.instrumentId(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
                 event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
                 event.fundingRate(), event.nextFundingTime(), event.timeUntilFundingSeconds(), event.basisAverage(),
                 event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.sequence(), event.status(),

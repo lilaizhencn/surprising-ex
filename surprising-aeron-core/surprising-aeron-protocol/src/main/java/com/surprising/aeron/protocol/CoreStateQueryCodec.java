@@ -41,21 +41,21 @@ public final class CoreStateQueryCodec {
         return clientOrderId;
     }
 
-    public static byte[] encodeFundingProgressQuery(String symbol) {
+    public static byte[] encodeFundingProgressQuery(String instrumentId) {
         Writer writer = new Writer();
-        writer.text(symbol);
+        writer.text(instrumentId);
         return writer.toByteArray();
     }
 
     public static String decodeFundingProgressQuery(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        String symbol = reader.text();
+        String instrumentId = reader.text();
         reader.requireConsumed();
-        return symbol;
+        return instrumentId;
     }
 
-    public static byte[] encodeSettlementProgressQuery(String symbol) {
-        return encodeFundingProgressQuery(symbol);
+    public static byte[] encodeSettlementProgressQuery(String instrumentId) {
+        return encodeFundingProgressQuery(instrumentId);
     }
 
     public static String decodeSettlementProgressQuery(byte[] encoded) {
@@ -125,7 +125,7 @@ public final class CoreStateQueryCodec {
         writer.intValue(state.reservations().size());
         state.reservations().forEach(reservation -> {
             writer.longValue(reservation.orderId());
-            writer.text(reservation.symbol());
+            writer.text(reservation.instrumentId());
             writer.intValue(reservation.kind().wireCode());
             writer.text(reservation.asset());
             writer.longValue(reservation.reservedUnits());
@@ -135,7 +135,7 @@ public final class CoreStateQueryCodec {
         });
         writer.intValue(state.positions().size());
         state.positions().forEach(position -> {
-            writer.text(position.symbol());
+            writer.text(position.instrumentId());
             writer.text(position.marginAsset());
             writer.intValue(position.marginMode().wireCode());
             writer.intValue(position.positionSide().wireCode());
@@ -147,7 +147,7 @@ public final class CoreStateQueryCodec {
         });
         writer.intValue(state.leverages().size());
         state.leverages().forEach(leverage -> {
-            writer.text(leverage.symbol());
+            writer.text(leverage.instrumentId());
             writer.intValue(leverage.marginMode().wireCode());
             writer.longValue(leverage.leveragePpm());
         });
@@ -162,17 +162,17 @@ public final class CoreStateQueryCodec {
         }
         length = Math.addExact(length, Integer.BYTES);
         for (CoreReservationView reservation : state.reservations()) {
-            length = Math.addExact(length, Long.BYTES + textLength(reservation.symbol())
+            length = Math.addExact(length, Long.BYTES + textLength(reservation.instrumentId())
                     + Integer.BYTES + textLength(reservation.asset()) + Long.BYTES * 4L);
         }
         length = Math.addExact(length, Integer.BYTES);
         for (CorePositionView position : state.positions()) {
-            length = Math.addExact(length, textLength(position.symbol()) + textLength(position.marginAsset())
+            length = Math.addExact(length, textLength(position.instrumentId()) + textLength(position.marginAsset())
                     + Integer.BYTES * 2L + Long.BYTES * 5L);
         }
         length = Math.addExact(length, Integer.BYTES);
         for (CoreLeverageView leverage : state.leverages()) {
-            length = Math.addExact(length, textLength(leverage.symbol()) + Integer.BYTES + Long.BYTES);
+            length = Math.addExact(length, textLength(leverage.instrumentId()) + Integer.BYTES + Long.BYTES);
         }
         return Math.toIntExact(length);
     }
@@ -191,7 +191,7 @@ public final class CoreStateQueryCodec {
         output.putInt(state.reservations().size());
         for (CoreReservationView reservation : state.reservations()) {
             output.putLong(reservation.orderId());
-            putText(output, reservation.symbol(), false);
+            putText(output, reservation.instrumentId(), false);
             output.putInt(reservation.kind().wireCode());
             putText(output, reservation.asset(), false);
             output.putLong(reservation.reservedUnits()).putLong(reservation.releasedUnits())
@@ -199,7 +199,7 @@ public final class CoreStateQueryCodec {
         }
         output.putInt(state.positions().size());
         for (CorePositionView position : state.positions()) {
-            putText(output, position.symbol(), false);
+            putText(output, position.instrumentId(), false);
             putText(output, position.marginAsset(), false);
             output.putInt(position.marginMode().wireCode()).putInt(position.positionSide().wireCode())
                     .putLong(position.signedQuantitySteps())
@@ -208,7 +208,7 @@ public final class CoreStateQueryCodec {
         }
         output.putInt(state.leverages().size());
         for (CoreLeverageView leverage : state.leverages()) {
-            putText(output, leverage.symbol(), false);
+            putText(output, leverage.instrumentId(), false);
             output.putInt(leverage.marginMode().wireCode()).putLong(leverage.leveragePpm());
         }
     }
@@ -234,11 +234,11 @@ public final class CoreStateQueryCodec {
         }
         List<CorePositionView> positions = new ArrayList<>();
         for (int index = 0, count = reader.count("positions"); index < count; index++) {
-            String symbol = reader.text();
+            String instrumentId = reader.text();
             String marginAsset = reader.text();
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-            positions.add(new CorePositionView(symbol, marginAsset, marginMode, positionSide,
+            positions.add(new CorePositionView(instrumentId, marginAsset, marginMode, positionSide,
                     reader.longValue(),
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
@@ -263,7 +263,7 @@ public final class CoreStateQueryCodec {
     public static int encodedOrderStateLength(CoreOrderStateSource state) {
         if (state == null) throw new IllegalArgumentException("order state is required");
         long length = Integer.BYTES + Long.BYTES + Integer.BYTES + Long.BYTES;
-        length = Math.addExact(length, textLength(state.symbol()));
+        length = Math.addExact(length, textLength(state.instrumentId()));
         length = Math.addExact(length, Integer.BYTES + Long.BYTES * 4L);
         length = Math.addExact(length, Byte.BYTES + Integer.BYTES * 4L + Byte.BYTES);
         length = Math.addExact(length, optionalTextLength(state.clientOrderId()));
@@ -276,7 +276,7 @@ public final class CoreStateQueryCodec {
     static void writeOrderState(java.nio.ByteBuffer output, CoreOrderStateSource state) {
         output.putInt(VERSION).putLong(state.orderId())
                 .putInt(ProductLineWireCode.encode(state.productLine())).putLong(state.userId());
-        putText(output, state.symbol(), false);
+        putText(output, state.instrumentId(), false);
         output.putInt(state.side().wireCode())
                 .putLong(state.priceTicks()).putLong(state.quantitySteps())
                 .putLong(state.executedQuantitySteps()).putLong(state.remainingQuantitySteps())
@@ -368,7 +368,7 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.orderId());
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
-        writer.text(state.symbol());
+        writer.text(state.instrumentId());
         writer.intValue(state.side().wireCode());
         writer.longValue(state.priceTicks());
         writer.longValue(state.quantitySteps());
@@ -411,7 +411,7 @@ public final class CoreStateQueryCodec {
         long orderId = reader.positiveLong("orderId");
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
-        String symbol = reader.text();
+        String instrumentId = reader.text();
         CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long priceTicks = reader.nonNegativeLong("priceTicks");
         long quantitySteps = reader.positiveLong("quantitySteps");
@@ -433,7 +433,7 @@ public final class CoreStateQueryCodec {
         long createdAt = reader.nonNegativeLong("createdAt");
         long updatedAt = reader.nonNegativeLong("updatedAt");
         long clusterPosition = reader.nonNegativeLong("clusterPosition");
-        return new CoreOrderStateView(orderId, productLine, userId, symbol,
+        return new CoreOrderStateView(orderId, productLine, userId, instrumentId,
                 side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFee, takerFee, cumulativeFee, valueHigh, valueLow, createdAt, updatedAt, clusterPosition,
@@ -443,7 +443,7 @@ public final class CoreStateQueryCodec {
     public static byte[] encodeOpenOrdersQuery(CoreOpenOrdersQuery query) {
         Writer writer = new Writer();
         writer.intValue(1);
-        writer.optionalText(query.symbol());
+        writer.optionalText(query.instrumentId());
         writer.longValue(query.beforeOrderId());
         writer.intValue(query.limit());
         return writer.toByteArray();
@@ -492,7 +492,7 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.exportSequence());
         writer.intValue(state.levels().size());
         for (CoreBookLevelView level : state.levels()) {
-            writer.text(level.symbol());
+            writer.text(level.instrumentId());
             writer.intValue(level.side().wireCode());
             writer.longValue(level.priceTicks());
             writer.longValue(level.quantitySteps());
@@ -504,7 +504,7 @@ public final class CoreStateQueryCodec {
     public static byte[] encodeOrderBookQuery(CoreOrderBookQuery query) {
         Writer writer = new Writer();
         writer.intValue(1);
-        writer.optionalText(query.symbol());
+        writer.optionalText(query.instrumentId());
         writer.intValue(query.depth());
         return writer.toByteArray();
     }
@@ -545,7 +545,7 @@ public final class CoreStateQueryCodec {
         writer.intValue(page.complete() ? 1 : 0);
         writer.intValue(page.levels().size());
         for (CoreBookLevelView level : page.levels()) {
-            writer.text(level.symbol());
+            writer.text(level.instrumentId());
             writer.intValue(level.side().wireCode());
             writer.longValue(level.priceTicks());
             writer.longValue(level.quantitySteps());

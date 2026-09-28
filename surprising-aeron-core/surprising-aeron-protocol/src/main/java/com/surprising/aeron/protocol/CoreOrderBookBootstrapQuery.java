@@ -23,14 +23,14 @@ public record CoreOrderBookBootstrapQuery(
             }
         }
         if (!symbolCursor.isEmpty() && !CoreOrderBookQuery.validSymbol(symbolCursor)) {
-            throw new IllegalArgumentException("invalid bootstrap symbol cursor");
+            throw new IllegalArgumentException("invalid bootstrap instrumentId cursor");
         }
         if (snapshotId.isEmpty() && !symbolCursor.isEmpty()) {
             throw new IllegalArgumentException("bootstrap cursor requires snapshot id");
         }
         if (limit == 0) limit = DEFAULT_LIMIT;
         if (limit < 1 || limit > MAX_LIMIT) {
-            throw new IllegalArgumentException("invalid bootstrap symbol limit");
+            throw new IllegalArgumentException("invalid bootstrap instrumentId limit");
         }
         if (depth == 0) depth = CoreOrderBookQuery.DEFAULT_DEPTH;
         if (depth < 1 || depth > CoreOrderBookQuery.MAX_DEPTH) {

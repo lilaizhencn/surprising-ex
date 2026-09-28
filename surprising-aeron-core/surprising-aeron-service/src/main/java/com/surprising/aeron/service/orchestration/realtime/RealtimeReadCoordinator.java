@@ -75,14 +75,14 @@ public final class RealtimeReadCoordinator {
     public boolean realtimeBookPending() { return realtimeBook != null; }
 
     /** 在指定提交水位上发起一次盘口读取。 */
-    public void captureRealtimeBook(String symbol, long position, long timestamp) {
+    public void captureRealtimeBook(String instrumentId, long position, long timestamp) {
         if (realtimeCapture == null || realtimeBook != null) return;
-        realtimeBookSymbol = symbol;
+        realtimeBookSymbol = instrumentId;
         realtimeBookPosition = position;
         realtimeBookTimestamp = timestamp;
         try {
-            realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(symbol),
-                    () -> matchingAdapter.orderBookLevelsAsync(symbol, 50).join());
+            realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(instrumentId),
+                    () -> matchingAdapter.orderBookLevelsAsync(instrumentId, 50).join());
         } catch (RuntimeException failure) {
             realtimeCapture.failed();
         }

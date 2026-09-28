@@ -13,16 +13,16 @@ public class LatestSourceQuoteStore {
 
     private final ConcurrentMap<String, SourceQuote> quotes = new ConcurrentHashMap<>();
 
-    public void put(String symbol, IndexPriceProperties.SourceConfig source, SourceQuote quote) {
-        quotes.put(key(symbol, source), quote);
+    public void put(String instrumentId, IndexPriceProperties.SourceConfig source, SourceQuote quote) {
+        quotes.put(key(instrumentId, source), quote);
     }
 
-    public Optional<SourceQuote> latest(String symbol, IndexPriceProperties.SourceConfig source) {
-        return Optional.ofNullable(quotes.get(key(symbol, source)));
+    public Optional<SourceQuote> latest(String instrumentId, IndexPriceProperties.SourceConfig source) {
+        return Optional.ofNullable(quotes.get(key(instrumentId, source)));
     }
 
-    private String key(String symbol, IndexPriceProperties.SourceConfig source) {
-        return normalize(symbol) + "|" + normalize(source.getName()) + "|" + normalize(source.getSourceSymbol());
+    private String key(String instrumentId, IndexPriceProperties.SourceConfig source) {
+        return normalize(instrumentId) + "|" + normalize(source.getName()) + "|" + normalize(source.getSourceSymbol());
     }
 
     private String normalize(String value) {

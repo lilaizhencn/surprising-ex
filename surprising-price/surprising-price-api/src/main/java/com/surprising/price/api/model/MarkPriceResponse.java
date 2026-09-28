@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 public record MarkPriceResponse(
-        String symbol,
+        String instrumentId,
         BigDecimal markPrice,
         long markPriceUnits,
         BigDecimal indexPrice,
