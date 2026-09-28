@@ -17,6 +17,9 @@ LOCK_DIR="$RUNTIME_ROOT/active.lock"
 LOCK_OWNER="$LOCK_DIR/owner"
 JVM_XMS="${JVM_XMS:-512m}"
 JVM_XMX="${JVM_XMX:-512m}"
+JVM_CORE_XMX="${JVM_CORE_XMX:-$JVM_XMX}"
+JVM_GATEWAY_XMX="${JVM_GATEWAY_XMX:-$JVM_XMX}"
+JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-$JVM_XMX}"
 JVM_GC="${JVM_GC:-ZGC}"
 JFR_ENABLED="${JFR_ENABLED:-false}"
 JFR_SETTINGS="${JFR_SETTINGS:-profile}"
@@ -272,12 +275,17 @@ claim_runtime() {
 }
 
 java_args_for() {
-  local service="$1"
+  local service="$1" service_xmx="$JVM_XMX"
   [[ "$JVM_IMPLEMENTATION" == HOTSPOT && "$JVM_TELEMETRY_MODE" == UNIFIED_LOGGING ]] || \
     fail 'JVM compatibility was not initialized for startup'
+  case "$service" in
+    core-node*) service_xmx="$JVM_CORE_XMX" ;;
+    gateway) service_xmx="$JVM_GATEWAY_XMX" ;;
+    price|realtime|derivatives-lifecycle|maker) service_xmx="$JVM_PROVIDER_XMX" ;;
+  esac
   JVM_ARGS=(
     "-Xms$JVM_XMS"
-    "-Xmx$JVM_XMX"
+    "-Xmx$service_xmx"
     "-Dsurprising.launcher.identity=$RUN_ID/$service"
     "-XX:+AlwaysPreTouch"
     "--enable-native-access=ALL-UNNAMED"

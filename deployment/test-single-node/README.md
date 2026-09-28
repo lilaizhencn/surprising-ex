@@ -55,6 +55,8 @@ Core 只按 `exchange-core.version` 解析 Maven 依赖，不再在 `surprising-
 
 本测试 unit 默认设置 `GATEWAY_PRODUCT_TRANSFER_ENABLED=false`，因为只部署永续 provider，没有可供 Gateway 轮询的现货账户路由；这只关闭跨产品转账后台对账，不关闭永续下单、账户、撮合或风险链路。
 
+测试服务器的堆上限通过 `JVM_CORE_XMX=8g`、`JVM_GATEWAY_XMX=4g`、`JVM_PROVIDER_XMX=2g` 分别设置 Core、Gateway 和 price/realtime/derivatives-lifecycle/maker；统一初始堆为 `JVM_XMS=512m`。未配置分组上限时沿用 `JVM_XMX`。这些是 Java 堆上限，Aeron、Kafka、线程栈及映射内存仍需计入服务器总内存。调整后应重启 unit，并检查每个进程的 `-Xmx`、服务就绪和可用内存。
+
 ## 启停与验收
 
 先在服务器上执行只读预检：
