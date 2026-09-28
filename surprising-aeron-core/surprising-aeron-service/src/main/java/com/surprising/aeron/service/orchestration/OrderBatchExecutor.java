@@ -157,10 +157,14 @@ final class OrderBatchExecutor {
     }
 
     boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, CommandSlot pending) {
-        // A cancel batch must validate its current active-order route at the ordered head.
-        // An earlier command can fill or cancel that order after ingress routing; submitting
-        // the batch early would make a missing first route an unrecoverable matcher failure.
-        if (batch.kind == OrderBatchKind.CANCEL) return false;
+        if (pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL && !batch.sequentialAdmission) {
+            if (batch.admissionOrderIndex == null)
+                batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
+            batch.admissionOrderIndex.reset(pending.command().header().userId());
+            batch.activated(true);
+            owner.matchingFlow.submitMatching(pending);
+            return true;
+        }
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE
                 || owner.pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
@@ -468,6 +472,9 @@ final class OrderBatchExecutor {
                     if (order.userId() != userId) {
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
                     }
+                    var route = owner.activeOrderIndex.activeOrderRoute(command.orderId());
+                    if (route == null || route.runtime() == null)
+                        throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order route does not exist");
                 }
                 case AMEND -> {
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
@@ -524,7 +531,7 @@ final class OrderBatchExecutor {
         batch.lastMatchingResult = null;
         if (batch.kind == OrderBatchKind.CANCEL) {
             submitCancelBatchChunk(pending, batch);
-            if (pending.clusterIndependent) pending.matchingSubmitted();
+            if (pending.clusterIndependent && batch.activated()) pending.matchingSubmitted();
             return;
         }
         int shard = orderBatchMatcherShard(batch);
@@ -576,7 +583,14 @@ final class OrderBatchExecutor {
             item.cancelSymbol = instrumentId;
             end++;
         }
-        if (end == start) throw new IllegalStateException("validated cancel chunk is empty");
+        if (end == start) {
+            // The ingress route can become stale while earlier matching commands finish.
+            // Retry this batch at the ordered head, where prepareOrderBatchItem can reject
+            // the missing order without mutating funds or submitting a matcher command.
+            batch.sequentialAdmission = true;
+            batch.activated(false);
+            return;
+        }
         batch.cancellationChunkStart = start;
         batch.cancellationChunkEnd = end;
         int chunkEnd = end;

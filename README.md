@@ -169,7 +169,7 @@ flowchart TB
 
 测试服务器单节点永续部署见 [deployment/test-single-node/README.md](deployment/test-single-node/README.md)。该入口只启用 `LINEAR_PERPETUAL`，不启动 wallet；生产高可用仍需三节点切主和资金链路验收。
 
-Core 的批量撤单在有序提交位置逐项校验当前有效订单，再提交同撮合分片的撤单块。此前过早提交会让已被前序命令撤销的订单在 Aeron 日志恢复时触发空撤单块异常；该修正由 `OrderBatchExecutor` 承担，不改变单笔撤单或其他产品线的订单规则。
+Core 的批量撤单保持同撮合分片的批处理；若实际提交时发现首个订单路由已被前序命令失效，`OrderBatchExecutor` 会退回有序提交位置逐项校验并拒绝失效订单，避免 Aeron 日志恢复时触发空撤单块异常。单笔撤单和各产品线的订单规则不变。
 
 本机六 JAR 联调记录见 [2026-09-25 验证报告](docs/validation/local-six-jar-aeron-single-node-20260925.md)。单节点脚本默认交易对为 `BTC-USDT-SWAP`，成交在 Core 有序提交后由 realtime 可靠导出至当前产品线 Kafka 成交 topic，再生成 K 线；WebSocket 的公共逐笔与私有执行报告由 gateway 解码并按订阅发送。该联调仅覆盖 U 本位永续单产品线。
 
