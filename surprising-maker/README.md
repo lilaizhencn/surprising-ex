@@ -227,6 +227,10 @@ JDK 27：maker 54 项测试通过，新增自身旧盘口锁价、同价其他�
 保留已经成功的订单，将策略标为 `DEGRADED`，记录带核心拒绝原因的 `CYCLE_FAILED`，
 不记录该轮 `CYCLE_SUCCESS`。后续正常周期继续按原风控重试，补单成功后才恢复 `RUNNING`。
 余额不足不能用 RPC 正常返回掩盖，也不会触发自动补资。
+`MarketMakerService.placeMissingQuotes` 补成交缺档时，先扣除仍未撤销的同侧旧报价张数，
+新旧报价合计不能超过该侧目标梯度的总张数；旧报价分批撤销后再补齐。
+这避免旧报价临时占满 Core 的未平仓量额度时反复触发 `OPEN_INTEREST_LIMIT_EXCEEDED`，
+Core 的实际下单风控仍是最终校验。
 
 ### 逐单模拟负载（2026-09-27）
 

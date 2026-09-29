@@ -428,6 +428,21 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void oversizedOldQuoteIsCanceledBeforeNewQuotesConsumeItsRiskBudget() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
+        OrderResponse oldBid = order(77L, 900001L, prefix + "b0-1", OrderSide.BUY,
+                49_000L, 10_000L, OrderStatus.ACCEPTED);
+        Fixtures fixtures = new Fixtures(List.of(oldBid));
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .contains(77L);
+        assertThat(fixtures.orderRpc.bidPlacesAtFirstCancel).isZero();
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
+    }
+
+    @Test
     void replacesStaleLadderWithoutDrainingTheBook() {
         Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
         fixtures.orderLevels = 20;
@@ -927,6 +942,7 @@ class MarketMakerServiceTest {
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
         private int cancelBatchCalls;
+        private long bidPlacesAtFirstCancel = -1;
         private final List<Integer> liveCountsAfterCancel = new ArrayList<>();
 
         private FakeOrderRpc(List<OrderResponse> openOrders) {
@@ -1003,6 +1019,8 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderCommandReceipt cancelBatch(BatchCancelOrdersRequest request) {
+            if (cancelBatchCalls == 0)
+                bidPlacesAtFirstCancel = placeRequests.stream().filter(order -> order.side() == OrderSide.BUY).count();
             cancelBatchCalls++;
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {

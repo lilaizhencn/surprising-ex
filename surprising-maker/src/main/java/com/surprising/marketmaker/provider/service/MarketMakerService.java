@@ -860,6 +860,18 @@ public class MarketMakerService {
         String rejectionReason = null;
         int maxOpenOrders = properties.getQuoting().getMaxOpenOrdersPerAccountSymbol();
         List<DesiredQuote> missingQuotes = new ArrayList<>();
+        // Existing orders still consume Core's pending-position limit until cancellation completes.
+        // Never briefly exceed this side's planned ladder while refilling traded slots.
+        long bidCapacity = Math.subtractExact(
+                plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)
+                        .mapToLong(DesiredQuote::quantitySteps).reduce(0L, Math::addExact),
+                kept.stream().filter(order -> order != null && order.side() == OrderSide.BUY)
+                        .mapToLong(OrderResponse::remainingQuantitySteps).reduce(0L, Math::addExact));
+        long askCapacity = Math.subtractExact(
+                plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL)
+                        .mapToLong(DesiredQuote::quantitySteps).reduce(0L, Math::addExact),
+                kept.stream().filter(order -> order != null && order.side() == OrderSide.SELL)
+                        .mapToLong(OrderResponse::remainingQuantitySteps).reduce(0L, Math::addExact));
         for (DesiredQuote quote : plan.quotes()) {
             if (kept.size() >= maxOpenOrders) {
                 break;
@@ -871,8 +883,14 @@ public class MarketMakerService {
             if (blockedByOwnQuote || hasOwnedQuoteSlot(kept, quote, accountPrefix)) {
                 continue;
             }
+            if (quote.side() == OrderSide.BUY && quote.quantitySteps() > bidCapacity
+                    || quote.side() == OrderSide.SELL && quote.quantitySteps() > askCapacity) {
+                continue;
+            }
             missingQuotes.add(quote);
             kept.add(null);
+            if (quote.side() == OrderSide.BUY) bidCapacity -= quote.quantitySteps();
+            else askCapacity -= quote.quantitySteps();
         }
         if (!missingQuotes.isEmpty()) {
             List<PlaceOrderRequest> requests = missingQuotes.stream()
