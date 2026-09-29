@@ -52,7 +52,7 @@ public class QuotePlanner {
                           long volatilityTicks,
                           ReferenceOrderBookSnapshot referenceOrderBook) {
         long anchor = anchorPriceTicks(strategy, instrument, orderBook, markPrice, referenceOrderBook);
-        int levels = orderLevels(strategy, quoting, referenceOrderBook);
+        int levels = orderLevels(strategy, quoting);
         long halfSpread = Math.max(Math.max(1L, spreadTicks(strategy, quoting) / 2L),
                 volatilitySpreadTicks(quoting, volatilityTicks));
         halfSpread = Math.max(halfSpread, multiplyDiv(anchor, quoting.getHalfSpreadPpm(), ONE_PPM));
@@ -254,15 +254,9 @@ public class QuotePlanner {
         return (markPrice.markPriceUnits() + instrument.priceTickUnits() / 2L) / instrument.priceTickUnits();
     }
 
-    private int orderLevels(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting,
-                            ReferenceOrderBookSnapshot reference) {
-        int configured = strategy.getOrderLevels() != null && strategy.getOrderLevels() > 0
+    private int orderLevels(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting) {
+        return strategy.getOrderLevels() != null && strategy.getOrderLevels() > 0
                 ? Math.min(strategy.getOrderLevels(), 50) : quoting.getOrderLevels();
-        if (reference != null && reference.hasTwoSidedDepth()
-                && Math.min(reference.bids().size(), reference.asks().size()) >= 5) {
-            return Math.min(configured, Math.min(reference.bids().size(), reference.asks().size()));
-        }
-        return configured;
     }
 
     private long spreadTicks(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting) {
@@ -329,13 +323,16 @@ public class QuotePlanner {
         long external = referenceQuantity(reference, side, level);
         long variation = quoting.getQuantityVariationPpm();
         long base = Math.max(1L, strategy.getBaseQuantitySteps());
-        if (external > 0) return Math.min(base, Math.max(Math.max(1L, base / 200L), external));
-        if (variation == 0) return base;
-        // Extend our own ladder using the source's distribution, not a fixed large outer quantity.
-        if (reference != null && reference.hasTwoSidedDepth()) {
+        boolean outerLevel = external <= 0;
+        // Partial external books can contain fewer usable levels than the configured ladder.
+        // Reuse observed sizes for outer levels while price spacing extends the reference shape.
+        if (external <= 0 && reference != null && reference.hasTwoSidedDepth()) {
             var source = side == OrderSide.BUY ? reference.bids() : reference.asks();
             external = source.get(level % source.size()).quantitySteps();
         }
+        if (external > 0 && (!outerLevel || variation == 0))
+            return Math.min(base, Math.max(Math.max(1L, base / 200L), external));
+        if (variation == 0) return base;
         long seed = ((long) strategy.getStrategyId().hashCode() << 32)
                 ^ (side == OrderSide.BUY ? 0x1234abcdL : 0x5678ef01L) ^ level;
         var random = new java.util.SplittableRandom(seed);
