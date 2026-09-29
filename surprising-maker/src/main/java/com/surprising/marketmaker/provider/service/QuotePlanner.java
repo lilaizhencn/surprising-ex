@@ -75,11 +75,16 @@ public class QuotePlanner {
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
+            boolean referenceBid = bidDistance > 0;
+            boolean referenceAsk = askDistance > 0;
             bidDistance = bidDistance > 0 ? Math.max(halfSpread, bidDistance) : halfSpread + spacing * level;
             askDistance = askDistance > 0 ? Math.max(halfSpread, askDistance) : halfSpread + spacing * level;
             if (level > 0) {
-                bidDistance = Math.max(bidDistance, previousBidDistance + spacing);
-                askDistance = Math.max(askDistance, previousAskDistance + spacing);
+                // Preserve the source's adjacent gap; configured spacing only extends missing depth.
+                bidDistance = Math.max(bidDistance, previousBidDistance
+                        + (referenceBid ? 1L : spacing));
+                askDistance = Math.max(askDistance, previousAskDistance
+                        + (referenceAsk ? 1L : spacing));
             }
             long bidGap = level == 0 ? 0 : bidDistance - previousBidDistance;
             long askGap = level == 0 ? 0 : askDistance - previousAskDistance;

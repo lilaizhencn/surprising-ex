@@ -170,7 +170,7 @@ surprising:
 2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
 3. 优先使用 mark price 作为报价锚点；mark 不可用时回退盘口中价。
 4. 根据锚点的绝对价格变动维护进程内 EWMA 波动值，用它扩大报价半价差；波动价差始终受配置上限和本地价格偏离限制。
-5. 如果 `reference-market.enabled=true`，使用新鲜参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps。`RestReferenceMarketProvider` 按行情源的 `quantity-scale-ppm` 转换外部数量单位；BTC-USDT-SWAP 的 OKX 合约每张为 0.01 BTC，因此使用 10000 ppm。参考盘口双边均不少于 5 档时，`QuotePlanner` 的报价档数不超过外部可用档数，按外部各档数量报价并保留基础数量 0.5% 的流动性下限；最终仍由合约单用户持仓名义上限按比例收敛。没有参考档位时按 spacing 向外补足，保持同侧报价价格依次递增且不重复，同时仍受本地价格偏离、post-only、数量和库存上限保护。
+5. 如果 `reference-market.enabled=true`，使用新鲜参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps。`RestReferenceMarketProvider` 按行情源的 `quantity-scale-ppm` 转换外部数量单位；BTC-USDT-SWAP 的 OKX 合约每张为 0.01 BTC，因此使用 10000 ppm。参考盘口双边均不少于 5 档时，`QuotePlanner` 的报价档数不超过外部可用档数，按外部相邻档距和各档数量报价，并保留基础数量 0.5% 的流动性下限；最终仍由合约单用户持仓名义上限按比例收敛。没有参考档位时按配置 spacing 向外补足，保持同侧报价价格依次递增且不重复，同时仍受本地价格偏离、post-only、数量和库存上限保护。
 6. 没有新鲜参考盘口时，按配置的 spread 和 spacing 围绕锚点生成对称 post-only 报价。
 7. 按库存偏移和库存上限调整报价数量和方向。
 8. 首次读取开放订单后在本地缓存；缓存更新由下单、批量撤单结果和短周期 REST 对账共同驱动。撤单结果不完整或请求超时时，保留未确认订单，不在同一轮重复补单。

@@ -27,6 +27,26 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void followsAdjacentReferencePriceTicks() {
+        var strategy = strategy();
+        strategy.setOrderLevels(5);
+        var quoting = quoting();
+        quoting.setMinSpreadTicks(2L);
+        var bids = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        var asks = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        for (int level = 1; level <= 5; level++) {
+            bids.add(new ReferenceOrderBookLevel(50_000L - level, 10L));
+            asks.add(new ReferenceOrderBookLevel(50_000L + level, 10L));
+        }
+        var reference = new ReferenceOrderBookSnapshot("source", "1", bids, asks, Instant.now());
+        var plan = quotePlanner.plan(strategy, quoting, risk(), instrument(),
+                orderBook(49_900L, 50_100L), mark(5_000_000L), 0L, reference);
+        assertThat(plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY)
+                .map(q -> q.priceTicks()).toList()).containsExactly(49_999L, 49_998L,
+                        49_997L, 49_996L, 49_995L);
+    }
+
+    @Test
     void externalTwentyLevelsDetermineQuoteCountAndKeepDepthShape() {
         var strategy = strategy();
         strategy.setOrderLevels(50);
