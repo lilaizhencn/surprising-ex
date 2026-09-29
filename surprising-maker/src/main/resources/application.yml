@@ -110,6 +110,7 @@ surprising:
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
+          quantity-scale-ppm: 10000
           product-line: ${PRODUCT_LINE}
           instrument-id: ${MM_INSTRUMENT_ID:}
           external-symbol: BTC-USDT-SWAP

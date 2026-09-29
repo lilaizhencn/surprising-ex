@@ -249,6 +249,11 @@ public class MarketMakerProperties {
         public static class Source {
             @Setter
             private boolean enabled = true;
+            /** External contracts converted into our base-asset quantity; 1_000_000 means 1:1. */
+            @Setter
+            @Min(1)
+            @Max(1_000_000)
+            private long quantityScalePpm = 1_000_000L;
             private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
             @Setter
             @NotBlank

@@ -99,8 +99,8 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         try {
             JsonNode root = objectMapper.readTree(payload);
             ParsedBook book = parseBook(source.getParser(), root);
-            List<ReferenceOrderBookLevel> bids = convert(book.bids(), instrument);
-            List<ReferenceOrderBookLevel> asks = convert(book.asks(), instrument);
+            List<ReferenceOrderBookLevel> bids = convert(book.bids(), instrument, source);
+            List<ReferenceOrderBookLevel> asks = convert(book.asks(), instrument, source);
             if (bids.isEmpty() || asks.isEmpty()) {
                 return null;
             }
@@ -127,9 +127,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 if (liveBook.isEmpty()) {
                     return null;
                 }
-                liveBook.applyDeltas(convertDelta(update.bids(), instrument), convertDelta(update.asks(), instrument));
+                liveBook.applyDeltas(convertDelta(update.bids(), instrument, source), convertDelta(update.asks(), instrument, source));
             } else {
-                liveBook.replace(convert(update.bids(), instrument), convert(update.asks(), instrument));
+                liveBook.replace(convert(update.bids(), instrument, source), convert(update.asks(), instrument, source));
             }
             ReferenceOrderBookSnapshot snapshot = liveBook.snapshot(source.getName(), normalizedSymbol, receivedAt,
                     Math.max(1, properties.getReferenceMarket().getDepthLevels()));
@@ -227,11 +227,12 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return result;
     }
 
-    private List<ReferenceOrderBookLevel> convertDelta(List<ParsedLevel> levels, InstrumentResponse instrument) {
+    private List<ReferenceOrderBookLevel> convertDelta(List<ParsedLevel> levels, InstrumentResponse instrument,
+                                                        MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision());
+            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision(), source);
             if (priceTicks > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -239,11 +240,12 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return result;
     }
 
-    private List<ReferenceOrderBookLevel> convert(List<ParsedLevel> levels, InstrumentResponse instrument) {
+    private List<ReferenceOrderBookLevel> convert(List<ParsedLevel> levels, InstrumentResponse instrument,
+                                                   MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision());
+            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision(), source);
             if (priceTicks > 0 && quantitySteps > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -257,10 +259,12 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 .longValueExact();
     }
 
-    private long toSteps(BigDecimal quantity, int quantityPrecision) {
+    private long toSteps(BigDecimal quantity, int quantityPrecision,
+                         MarketMakerProperties.ReferenceMarket.Source source) {
         long rawSteps = quantity.movePointRight(Math.max(0, quantityPrecision))
                 .multiply(BigDecimal.valueOf(Math.max(1L, properties.getReferenceMarket().getQuantityScalePpm())))
-                .divide(ONE_PPM, 0, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(source.getQuantityScalePpm()))
+                .divide(ONE_PPM.multiply(ONE_PPM), 0, RoundingMode.HALF_UP)
                 .longValueExact();
         MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
         long minQuantity = Math.max(1L, referenceMarket.getMinQuantitySteps());

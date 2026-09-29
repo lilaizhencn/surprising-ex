@@ -27,6 +27,32 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void externalTwentyLevelsDetermineQuoteCountAndKeepDepthShape() {
+        var strategy = strategy();
+        strategy.setOrderLevels(50);
+        strategy.setBaseQuantitySteps(1_000L);
+        var bids = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        var asks = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        for (int level = 0; level < 20; level++) {
+            bids.add(new ReferenceOrderBookLevel(49_990L - level * 10L, level == 0 ? 90L : 1L));
+            asks.add(new ReferenceOrderBookLevel(50_010L + level * 10L, level == 0 ? 80L : 2L));
+        }
+        var reference = new ReferenceOrderBookSnapshot("source", "1", bids, asks, Instant.now());
+        var spec = instrument();
+        var plan = quotePlanner.plan(strategy, quoting(), risk(), spec,
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference);
+        assertThat(plan.quotes()).hasSize(40);
+        assertThat(plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY)
+                .mapToLong(q -> q.quantitySteps()).distinct().count()).isGreaterThan(1);
+        for (OrderSide side : OrderSide.values()) {
+            long worstPrice = plan.quotes().stream().mapToLong(q -> q.priceTicks()).max().orElseThrow();
+            long notional = plan.quotes().stream().filter(q -> q.side() == side)
+                    .mapToLong(q -> q.quantitySteps()).sum() * worstPrice * spec.notionalMultiplierUnits();
+            assertThat(notional).isLessThanOrEqualTo(spec.userOpenInterestLimitFloorUnits());
+        }
+    }
+
+    @Test
     void variedFiftyLevelLadderKeepsDistinctSizesAndConservativeBudget() {
         var strategy = strategy();
         strategy.setOrderLevels(50);

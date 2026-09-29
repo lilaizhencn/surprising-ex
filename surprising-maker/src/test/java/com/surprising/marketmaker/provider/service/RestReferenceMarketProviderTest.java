@@ -13,6 +13,19 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class RestReferenceMarketProviderTest {
+    @Test
+    void convertsOkxBtcSwapContractsToBtcQuantity() {
+        var source = source("OKX_BOOKS");
+        source.setQuantityScalePpm(10_000L); // OKX BTC-USDT-SWAP ctVal is 0.01 BTC.
+        var snapshot = provider().parsePayload(source, "BTC-USDT", instrument(), """
+                {"code":"0","data":[{"bids":[["60000.1","91.03","0","1"]],
+                 "asks":[["60000.3","1","0","1"]]}]}
+                """, Instant.parse("2026-07-04T00:00:00Z"));
+        assertThat(snapshot.bids()).singleElement().satisfies(level ->
+                assertThat(level.quantitySteps()).isEqualTo(910L));
+        assertThat(snapshot.asks()).singleElement().satisfies(level ->
+                assertThat(level.quantitySteps()).isEqualTo(10L));
+    }
 
     @Test
     void parsesBinanceDepthIntoTicksAndSteps() {
