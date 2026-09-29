@@ -500,6 +500,9 @@ start_core() {
     -Dsurprising.aeron.egress-hostname="$AERON_EGRESS_HOSTNAME" \
     -Dsurprising.aeron.probe-mode=query -Dsurprising.aeron.source-id=910001 \
     -cp "$(jar_path tools)" com.surprising.aeron.tools.diagnostics.ClusterProbeMain >"$LOG_DIR/core-probe.log" 2>&1; do
+    for ((node = 0; node < member_count; node++)); do
+      verify_owned_process "core-node$node" >/dev/null || fail "Aeron Core exited during readiness probe log=$LOG_DIR/core-node$node.log"
+    done
     (( SECONDS < deadline )) || fail "Aeron Core readiness timeout log=$LOG_DIR/core-probe.log"
     sleep 2
   done
