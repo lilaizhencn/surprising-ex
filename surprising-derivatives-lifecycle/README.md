@@ -10,6 +10,7 @@
 1. `FundingRateInputRepository` 读取当前产品共享的合约快照和标记价，按合约版本校验输入。
 2. `FundingService.publishRates` 获取原有数据库租约、计算费率并发布产品专属资金费事件。
 3. 到结算时间后，`FundingService.settleDueRates` 校验维护状态、使用原有结算 ID 分页发起 Core 命令，保存进度。
+   Core 查询可能返回上一期的进度；上一期已完成且结算 ID 更小时，本期从游标 0 开始。上一期未完成或 Core 进度比本期更新时继续拒绝，避免重复扣款。
 4. `FundingAeronGateway` 使用 `DerivativesAeronClient`，保留资金费拒绝码和幂等结果处理。网络结果未知继续向上传递，不盲目重试或当成成功。
 
 合并不改变费率公式、结算 ID、数据库租约、产品 topic 和 Core 资金记账边界。

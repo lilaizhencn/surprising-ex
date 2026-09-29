@@ -186,6 +186,9 @@ public class FundingService {
         }
         CoreFundingProgressView progress = CoreFundingProgressCodec.decode(effective.data());
         if (progress.settlementId() != 0 && progress.settlementId() != settlement.settlementId()) {
+            // The progress query returns the most recent settlement for this instrument.
+            // A finished earlier funding interval does not belong to the new interval.
+            if (progress.complete() && progress.settlementId() < settlement.settlementId()) return null;
             throw new IllegalStateException("Aeron funding settlement progress mismatch");
         }
         return progress;

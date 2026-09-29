@@ -38,6 +38,32 @@ import org.springframework.kafka.core.KafkaTemplate;
 class FundingServiceTest {
 
     @Test
+    void startsNextIntervalAfterEarlierCoreSettlementCompleted() {
+        var fixture = new Fixture(new FundingProperties());
+        Instant fundingTime = Instant.now().minusSeconds(1);
+        var due = new FundingRateResponse("1", 11, 100, 90, 10,
+                fundingTime, 8, "PREDICTED", Instant.now());
+        fixture.cache.update(due);
+        long settlementId = fundingTime.toEpochMilli();
+        when(fixture.settlementRepository.reserveCore(due))
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+        when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(
+                                settlementId - 3_600_000L, true, 0, 1))));
+        when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 2,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(
+                                settlementId, true, 0, 1))));
+
+        var cycle = fixture.service.settleDueRates();
+
+        assertThat(cycle.failedRates()).isZero();
+        verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
+        verify(fixture.rateRepository).saveFinal(due);
+    }
+
+    @Test
     void publishesPredictedFundingDirectlyToKafka() {
         FundingProperties properties = new FundingProperties();
         Fixture fixture = new Fixture(properties);
