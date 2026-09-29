@@ -39,14 +39,14 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     public CoreResponse command(CoreMessageType type, UUID id, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, id, userId, payload);
         if (response.commandStatus() != ResponseStatus.APPLIED) {
-            throw new IllegalStateException(response.resultCode().name() + ": Aeron trigger command rejected");
+            throw new IllegalStateException(response.resultCode().name());
         }
         return response;
     }
     public CompletionStage<CoreResponse> commandAsync(CoreMessageType type, UUID id, long userId, byte[] payload) {
         return clients.commandAsync(type, id, userId, payload).thenApply(response -> {
             if (response.commandStatus() != ResponseStatus.APPLIED) {
-                throw new IllegalStateException(response.resultCode().name() + ": Aeron trigger command rejected");
+                throw new IllegalStateException(response.resultCode().name());
             }
             return response;
         });
