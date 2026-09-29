@@ -54,8 +54,14 @@ public class FundingController {
     @GetMapping("/payments")
     public FundingPaymentQueryResponse payments(@RequestParam long userId,
                                                 @RequestParam(required = false) String instrumentId,
-                                                @RequestParam(defaultValue = "100") int limit) {
-        return fundingService.payments(userId, instrumentId, limit);
+                                                @RequestParam(defaultValue = "100") int limit,
+                                                @RequestParam(required = false) String cursor,
+                                                @RequestParam(required = false) String sort) {
+        try {
+            return fundingService.payments(userId, instrumentId, limit, cursor, sort);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping("/admin/rates/latest")

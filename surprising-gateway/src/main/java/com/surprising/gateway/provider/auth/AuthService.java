@@ -25,8 +25,11 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Service
 public class AuthService {
@@ -39,6 +42,8 @@ public class AuthService {
     private final JwtTokenService jwtTokenService;
     private final EmailVerificationService emailVerificationService;
     private final LoginVerificationService loginVerification;
+    private final GatewayUserAccessBlockRepository accessBlocks;
+    private final ClientIpResolver clientIpResolver;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
@@ -46,13 +51,16 @@ public class AuthService {
                        PasswordHasher passwordHasher,
                        JwtTokenService jwtTokenService,
                        EmailVerificationService emailVerificationService,
-                       LoginVerificationService loginVerification) {
+                       LoginVerificationService loginVerification,
+                       GatewayUserAccessBlockRepository accessBlocks) {
         this.properties = properties;
         this.repository = repository;
         this.passwordHasher = passwordHasher;
         this.jwtTokenService = jwtTokenService;
         this.emailVerificationService = emailVerificationService;
         this.loginVerification = loginVerification;
+        this.accessBlocks = accessBlocks;
+        this.clientIpResolver = new ClientIpResolver(properties);
     }
 
     @Transactional
@@ -106,6 +114,7 @@ public class AuthService {
         }
         AuthenticatedUser user = repository.user(credential.userId())
                 .orElseThrow(() -> new IllegalStateException("user not found"));
+        requireAccessAllowed(user.userId(), deviceId(httpRequest), ipAddress(httpRequest));
         var challenge = loginVerification.begin(user.userId(), credential.passwordHash(), now);
         if (challenge != null) return challenge;
         repository.loginLog(user.userId(), "SUCCESS", "LOGIN", userAgent(httpRequest), ipAddress(httpRequest), now);
@@ -121,6 +130,10 @@ public class AuthService {
         if (session.revokedAt() != null || !session.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("invalid refresh token");
         }
+        if (session.deviceId() != null && !session.deviceId().equals(deviceId(httpRequest))) {
+            throw new IllegalArgumentException("refresh token belongs to another device");
+        }
+        requireAccessAllowed(session.userId(), session.deviceId(), ipAddress(httpRequest));
         if (repository.consumeRefreshSession(session.sessionId(), now) != 1) {
             throw new IllegalArgumentException("invalid refresh token");
         }
@@ -175,6 +188,10 @@ public class AuthService {
         }
         if ("FROZEN".equals(user.status())) {
             throw new IllegalStateException("user is not active");
+        }
+        var attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servlet) {
+            requireAccessAllowed(user.userId(), null, ipAddress(servlet.getRequest()));
         }
         return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
                 principal.sessionId());
@@ -370,6 +387,7 @@ public class AuthService {
         long userId = loginVerification.verify(request, now);
         AuthenticatedUser user = repository.user(userId).orElseThrow();
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        requireAccessAllowed(userId, deviceId(httpRequest), ipAddress(httpRequest));
         repository.loginLog(userId, "SUCCESS", "LOGIN", userAgent(httpRequest), ipAddress(httpRequest), now);
         return authResponse(user, httpRequest, now);
     }
@@ -440,8 +458,10 @@ public class AuthService {
                                       boolean requiresEmailVerification) {
         String refreshToken = newRefreshToken();
         Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
+        String deviceId = deviceId(request);
+        requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
         long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
-                userAgent(request), ipAddress(request), now);
+                userAgent(request), ipAddress(request), deviceId, now);
         String accessToken = sessionId > 0
                 ? jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), sessionId, now)
                 : jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
@@ -538,14 +558,29 @@ public class AuthService {
     }
 
     private String ipAddress(HttpServletRequest request) {
-        if (request == null) {
-            return null;
+        return truncate(clientIpResolver.resolve(request), 80);
+    }
+
+    private String deviceId(HttpServletRequest request) {
+        if (request == null || request.getHeader("X-Device-Id") == null) return null;
+        String value = request.getHeader("X-Device-Id").trim();
+        try {
+            String canonical = UUID.fromString(value).toString();
+            if (!canonical.equalsIgnoreCase(value)) throw new IllegalArgumentException("invalid device ID");
+            return canonical;
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid device ID", ex);
         }
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return truncate(forwarded.split(",")[0].trim(), 80);
+    }
+
+    private void requireAccessAllowed(long userId, String deviceId, String ipAddress) {
+        if (accessBlocks.blocked(userId, "DEVICE", deviceId) || accessBlocks.blocked(userId, "IP", ipAddress)) {
+            throw new IllegalStateException("device or IP is blocked for this account");
         }
-        return truncate(request.getRemoteAddr(), 80);
+    }
+
+    public void requireIpAccessAllowed(long userId, String ipAddress) {
+        requireAccessAllowed(userId, null, ipAddress);
     }
 
     private String truncate(String value, int max) {

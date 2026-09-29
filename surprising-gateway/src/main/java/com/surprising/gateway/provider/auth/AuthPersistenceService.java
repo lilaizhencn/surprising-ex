@@ -197,8 +197,9 @@ public class AuthPersistenceService {
                                    Instant expiresAt,
                                    String userAgent,
                                    String ipAddress,
+                                   String deviceId,
                                    Instant now) {
-        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, now);
+        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now);
     }
 
     public boolean activeRefreshSession(long userId, long sessionId, Instant now) {
@@ -243,6 +244,22 @@ public class AuthPersistenceService {
 
     public int revokeRefreshSessionForUser(long userId, long sessionId, Instant now) {
         return refreshSessionRepository.revokeActiveForUserSession(userId, sessionId, now);
+    }
+
+    public int revokeDeviceSessions(long userId, String deviceId, Instant now) {
+        return refreshSessionRepository.revokeActiveForDevice(userId, deviceId, now);
+    }
+
+    public int revokeIpSessions(long userId, String ipAddress, Instant now) {
+        return refreshSessionRepository.revokeActiveForIp(userId, ipAddress, now);
+    }
+
+    public List<GatewayRefreshSessionRepository.DeviceView> devices(long userId) {
+        return refreshSessionRepository.devices(userId);
+    }
+
+    public Optional<String> deviceIdForSession(long userId, long sessionId) {
+        return refreshSessionRepository.deviceIdForSession(userId, sessionId);
     }
 
     public int updatePasswordHash(long userId, String passwordHash, Instant now) {

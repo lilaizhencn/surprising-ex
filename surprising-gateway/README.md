@@ -9,6 +9,12 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 
 面向前端和 BFF 的无状态 REST API 网关。
 
+## 用户安全与设备限制
+
+`AuthService` 在登录、二次验证、刷新令牌和签发会话时校验当前账户的设备 ID 与客户端 IP。Web 客户端以 `X-Device-Id` 发送浏览器安装 ID；`GatewayRefreshSessionRepository` 将它保存在 `gateway_refresh_sessions.device_id`。历史会话没有设备 ID 时仍可按会话踢出。`ClientIpResolver` 仅信任配置的代理地址发送的转发头。部署新 Gateway 前，应先执行 `init.sql` 中 `gateway_refresh_sessions.device_id` 和 `gateway_user_access_blocks` 的增量 DDL，并配置可信代理 IP 列表。
+
+`UserSecurityController` 提供 `/api/v1/security/devices`、`/ips` 列表，设备踢出，以及设备/IP 的禁止和解除接口。禁止操作需 `SECURITY_SETTINGS` 邮件验证码和已启用时的 TOTP 验证；禁止后立即撤销对应的活跃刷新会话。`AuthService.authenticateBearer` 拒绝被禁 IP 的现有会话请求，`GatewayApiKeyService` 也拒绝被禁 IP 的签名请求。禁止记录按用户隔离，设备 ID 是浏览器存储标识，清理浏览器存储会生成新 ID；如需物理设备级封禁，需要另接可信设备识别机制。
+
 主流交易系统通常在边缘放一个统一 public gateway 或 BFF，各业务模块仍维护自己的内部 API 和配置。这个模块采用同样方式：前端只访问一个 gateway 前缀，gateway 只代理白名单里的内部服务。
 
 ## 模块

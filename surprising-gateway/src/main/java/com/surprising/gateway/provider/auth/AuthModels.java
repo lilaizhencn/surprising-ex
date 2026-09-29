@@ -188,8 +188,15 @@ public final class AuthModels {
             Instant revokedAt,
             String userAgent,
             String ipAddress,
+            String deviceId,
             Instant createdAt,
             Instant updatedAt) {
+        public AdminRefreshSessionResponse(long sessionId, long userId, boolean active, Instant expiresAt,
+                                           Instant revokedAt, String userAgent, String ipAddress,
+                                           Instant createdAt, Instant updatedAt) {
+            this(sessionId, userId, active, expiresAt, revokedAt, userAgent, ipAddress, null,
+                    createdAt, updatedAt);
+        }
     }
 
     public record AdminRefreshSessionQueryResponse(

@@ -21,6 +21,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/security")
@@ -30,15 +34,21 @@ public class UserSecurityController {
     private final UserSecurityService securityService;
     private final SensitiveActionVerificationService verificationService;
     private final AuthPersistenceService persistence;
+    private final GatewayUserAccessBlockRepository accessBlocks;
+    private final ClientIpResolver clientIpResolver;
 
     public UserSecurityController(AuthService authService,
                                   UserSecurityService securityService,
                                   SensitiveActionVerificationService verificationService,
-                                  AuthPersistenceService persistence) {
+                                  AuthPersistenceService persistence,
+                                  GatewayUserAccessBlockRepository accessBlocks,
+                                  com.surprising.gateway.provider.config.GatewayProperties properties) {
         this.authService = authService;
         this.securityService = securityService;
         this.verificationService = verificationService;
         this.persistence = persistence;
+        this.accessBlocks = accessBlocks;
+        this.clientIpResolver = new ClientIpResolver(properties);
     }
 
     @GetMapping("/mfa")
@@ -100,6 +110,84 @@ public class UserSecurityController {
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }
+    }
+
+    @GetMapping("/devices")
+    public List<DeviceStatus> devices(@RequestHeader("Authorization") String authorization) {
+        var principal = principal(authorization);
+        String currentDeviceId = persistence.deviceIdForSession(principal.userId(), principal.sessionId()).orElse(null);
+        return persistence.devices(principal.userId()).stream().map(device -> new DeviceStatus(
+                device.sessionId(), device.deviceId(), device.userAgent(), device.ipAddress(),
+                device.lastSeen(), device.active(), device.deviceId() == null
+                        ? device.sessionId() == principal.sessionId()
+                        : device.deviceId().equals(currentDeviceId),
+                accessBlocks.blocked(principal.userId(), "DEVICE", device.deviceId()))).toList();
+    }
+
+    @PostMapping("/devices/{deviceId}/revoke")
+    public AuthModels.AdminSessionRevokeResponse revokeDevice(
+            @RequestHeader("Authorization") String authorization, @PathVariable String deviceId) {
+        long userId = principal(authorization).userId();
+        Instant now = Instant.now();
+        int revoked = persistence.revokeDeviceSessions(userId, normalizedDeviceId(deviceId), now);
+        return new AuthModels.AdminSessionRevokeResponse(revoked, now);
+    }
+
+    @PostMapping("/devices/{deviceId}/block")
+    @Transactional
+    public void blockDevice(@RequestHeader("Authorization") String authorization,
+                            @PathVariable String deviceId, @RequestBody AccessChangeRequest request) {
+        var principal = principal(authorization);
+        String normalized = normalizedDeviceId(deviceId);
+        if (normalized.equals(persistence.deviceIdForSession(principal.userId(), principal.sessionId()).orElse(null))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot block the current device");
+        }
+        requireSecurity(principal.userId(), request);
+        Instant now = Instant.now();
+        accessBlocks.block(principal.userId(), "DEVICE", normalized, now);
+        persistence.revokeDeviceSessions(principal.userId(), normalized, now);
+    }
+
+    @PostMapping("/devices/{deviceId}/unblock")
+    @Transactional
+    public void unblockDevice(@RequestHeader("Authorization") String authorization,
+                              @PathVariable String deviceId, @RequestBody AccessChangeRequest request) {
+        long userId = principal(authorization).userId();
+        requireSecurity(userId, request);
+        accessBlocks.unblock(userId, "DEVICE", normalizedDeviceId(deviceId), Instant.now());
+    }
+
+    @GetMapping("/ips")
+    public List<IpStatus> ips(@RequestHeader("Authorization") String authorization) {
+        long userId = principal(authorization).userId();
+        return accessBlocks.knownIps(userId).stream().map(ip -> new IpStatus(
+                ip.ipAddress(), ip.loginCount(), ip.lastSeen(),
+                accessBlocks.blocked(userId, "IP", ip.ipAddress()))).toList();
+    }
+
+    @PostMapping("/ips/block")
+    @Transactional
+    public void blockIp(@RequestHeader("Authorization") String authorization,
+                        @RequestBody IpAccessChangeRequest request,
+                        jakarta.servlet.http.HttpServletRequest httpRequest) {
+        long userId = principal(authorization).userId();
+        String ip = normalizedIp(request.ipAddress());
+        if (ip.equals(clientIpResolver.resolve(httpRequest))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot block the current IP");
+        }
+        requireSecurity(userId, new AccessChangeRequest(request.emailCode(), request.totpCode()));
+        Instant now = Instant.now();
+        accessBlocks.block(userId, "IP", ip, now);
+        persistence.revokeIpSessions(userId, ip, now);
+    }
+
+    @PostMapping("/ips/unblock")
+    @Transactional
+    public void unblockIp(@RequestHeader("Authorization") String authorization,
+                          @RequestBody IpAccessChangeRequest request) {
+        long userId = principal(authorization).userId();
+        requireSecurity(userId, new AccessChangeRequest(request.emailCode(), request.totpCode()));
+        accessBlocks.unblock(userId, "IP", normalizedIp(request.ipAddress()), Instant.now());
     }
 
     @PostMapping("/sessions/{sessionId}/revoke")
@@ -195,6 +283,38 @@ public class UserSecurityController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
     }
+
+    private void requireSecurity(long userId, AccessChangeRequest request) {
+        if (request == null || !verificationService.verify(userId, "SECURITY_SETTINGS",
+                request.emailCode(), request.totpCode(), Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "security verification is required or invalid");
+        }
+    }
+
+    private String normalizedDeviceId(String deviceId) {
+        try {
+            String canonical = UUID.fromString(deviceId).toString();
+            if (!canonical.equalsIgnoreCase(deviceId)) throw new IllegalArgumentException();
+            return canonical;
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid device ID", ex);
+        }
+    }
+
+    private String normalizedIp(String ipAddress) {
+        String value = ipAddress == null ? "" : ipAddress.trim();
+        if (value.contains("/") || !clientIpResolver.isValidRule(value)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid IP address");
+        }
+        return value;
+    }
+
+    public record AccessChangeRequest(String emailCode, String totpCode) {}
+    public record IpAccessChangeRequest(String ipAddress, String emailCode, String totpCode) {}
+    public record DeviceStatus(long sessionId, String deviceId, String userAgent, String ipAddress,
+                               Instant lastSeen, boolean active, boolean current, boolean blocked) {}
+    public record IpStatus(String ipAddress, long loginCount, Instant lastSeen, boolean blocked) {}
 
     private ResponseStatusException badRequest(IllegalArgumentException ex) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

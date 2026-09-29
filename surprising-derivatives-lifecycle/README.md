@@ -5,6 +5,8 @@
 
 ## 资金费业务顺序
 
+用户资金费流水由 `FundingController.payments` 接收可选合约 ID、`cursor` 和 `sort`，交给 `FundingService.payments` 与 `FundingPaymentRepository.corePage` 按当前产品线查询。账户流水页因此能按永续产品线分页查看资金费，不需逐币对发请求。
+
 1. `FundingRateInputRepository` 读取当前产品共享的合约快照和标记价，按合约版本校验输入。
 2. `FundingService.publishRates` 获取原有数据库租约、计算费率并发布产品专属资金费事件。
 3. 到结算时间后，`FundingService.settleDueRates` 校验维护状态、使用原有结算 ID 分页发起 Core 命令，保存进度。

@@ -33,26 +33,27 @@ public class GatewayRefreshSessionRepository {
                      Instant expiresAt,
                      String userAgent,
                      String ipAddress,
+                     String deviceId,
                      Instant now) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_refresh_sessions (
-                    user_id, token_hash, expires_at, user_agent, ip_address, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    user_id, token_hash, expires_at, user_agent, ip_address, device_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, CAST(? AS uuid), ?, ?)
                 RETURNING session_id
-                """, Long.class, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress,
+                """, Long.class, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress, deviceId,
                 Timestamp.from(now), Timestamp.from(now));
     }
 
     public Optional<RefreshSession> find(String tokenHash) {
         return jdbcTemplate.query("""
-                SELECT session_id, user_id, expires_at, revoked_at
+                SELECT session_id, user_id, expires_at, revoked_at, device_id, ip_address
                   FROM gateway_refresh_sessions
                  WHERE token_hash = ?
                 """, (rs, rowNum) -> new RefreshSession(
                         rs.getLong("session_id"),
                         rs.getLong("user_id"),
                         rs.getTimestamp("expires_at").toInstant(),
-                        nullableInstant(rs, "revoked_at")),
+                        nullableInstant(rs, "revoked_at"), rs.getString("device_id"), rs.getString("ip_address")),
                 tokenHash).stream().findFirst();
     }
 
@@ -108,7 +109,7 @@ public class GatewayRefreshSessionRepository {
         args.add(active);
         args.add(active);
         String sql = """
-                SELECT session_id, user_id, expires_at, revoked_at, user_agent, ip_address, created_at, updated_at
+                SELECT session_id, user_id, expires_at, revoked_at, user_agent, ip_address, device_id, created_at, updated_at
                   FROM gateway_refresh_sessions
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR (? = TRUE AND revoked_at IS NULL AND expires_at > now())
@@ -184,6 +185,46 @@ public class GatewayRefreshSessionRepository {
                 """, Timestamp.from(now), Timestamp.from(now), userId, sessionId, Timestamp.from(now));
     }
 
+    public int revokeActiveForDevice(long userId, String deviceId, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
+                 WHERE user_id = ? AND device_id = CAST(? AS uuid)
+                   AND revoked_at IS NULL AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, deviceId, Timestamp.from(now));
+    }
+
+    public int revokeActiveForIp(long userId, String ipAddress, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
+                 WHERE user_id = ? AND ip_address = ?
+                   AND revoked_at IS NULL AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, ipAddress, Timestamp.from(now));
+    }
+
+    public List<DeviceView> devices(long userId) {
+        return jdbcTemplate.query("""
+                WITH ranked AS (
+                    SELECT session_id, device_id, user_agent, ip_address, created_at,
+                           row_number() OVER (PARTITION BY COALESCE(device_id::text, 'session:' || session_id::text)
+                                              ORDER BY created_at DESC, session_id DESC) AS rank,
+                           bool_or(revoked_at IS NULL AND expires_at > now()) OVER
+                               (PARTITION BY COALESCE(device_id::text, 'session:' || session_id::text)) AS active
+                      FROM gateway_refresh_sessions WHERE user_id = ?
+                )
+                SELECT session_id, device_id, user_agent, ip_address, created_at, active
+                  FROM ranked WHERE rank = 1 ORDER BY created_at DESC
+                """, (rs, rowNum) -> new DeviceView(rs.getLong("session_id"), rs.getString("device_id"),
+                rs.getString("user_agent"), rs.getString("ip_address"),
+                rs.getTimestamp("created_at").toInstant(), rs.getBoolean("active")), userId);
+    }
+
+    public Optional<String> deviceIdForSession(long userId, long sessionId) {
+        return jdbcTemplate.query("""
+                SELECT device_id FROM gateway_refresh_sessions WHERE user_id = ? AND session_id = ?
+                """, (rs, rowNum) -> rs.getString("device_id"), userId, sessionId)
+                .stream().filter(java.util.Objects::nonNull).findFirst();
+    }
+
     private AdminRefreshSessionResponse toResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
         Instant revokedAt = nullableInstant(rs, "revoked_at");
         Instant expiresAt = rs.getTimestamp("expires_at").toInstant();
@@ -195,6 +236,7 @@ public class GatewayRefreshSessionRepository {
                 revokedAt,
                 rs.getString("user_agent"),
                 rs.getString("ip_address"),
+                rs.getString("device_id"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant());
     }
@@ -208,6 +250,14 @@ public class GatewayRefreshSessionRepository {
             long sessionId,
             long userId,
             Instant expiresAt,
-            Instant revokedAt) {
+            Instant revokedAt,
+            String deviceId,
+            String ipAddress) {
+        public RefreshSession(long sessionId, long userId, Instant expiresAt, Instant revokedAt) {
+            this(sessionId, userId, expiresAt, revokedAt, null, null);
+        }
     }
+
+    public record DeviceView(long sessionId, String deviceId, String userAgent, String ipAddress,
+                             Instant lastSeen, boolean active) {}
 }

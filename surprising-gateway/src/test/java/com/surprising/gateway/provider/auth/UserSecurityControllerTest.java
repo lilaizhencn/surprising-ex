@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionResponse;
@@ -13,6 +14,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 class UserSecurityControllerTest {
 
@@ -21,8 +23,59 @@ class UserSecurityControllerTest {
     private final SensitiveActionVerificationService verificationService =
             mock(SensitiveActionVerificationService.class);
     private final AuthPersistenceService persistence = mock(AuthPersistenceService.class);
+    private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final UserSecurityController controller = new UserSecurityController(
-            authService, securityService, verificationService, persistence);
+            authService, securityService, verificationService, persistence,
+            accessBlocks, new com.surprising.gateway.provider.config.GatewayProperties());
+
+    @Test
+    void devicesShowCurrentAndBlockedStatusFromAccountOwnedHistory() {
+        Instant now = Instant.now();
+        String current = "153a20c8-d24f-4952-b378-5409de885ab5";
+        String other = "fe7b9fee-479b-4986-a1da-4fa0db57aa8b";
+        when(authService.authenticateBearer("Bearer token")).thenReturn(
+                new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60), 77L));
+        when(persistence.deviceIdForSession(42L, 77L)).thenReturn(java.util.Optional.of(current));
+        when(persistence.devices(42L)).thenReturn(List.of(
+                new GatewayRefreshSessionRepository.DeviceView(77L, current, "browser", "127.0.0.1", now, true),
+                new GatewayRefreshSessionRepository.DeviceView(88L, other, "phone", "127.0.0.2", now, false)));
+        when(accessBlocks.blocked(42L, "DEVICE", other)).thenReturn(true);
+
+        var response = controller.devices("Bearer token");
+
+        assertThat(response).hasSize(2);
+        assertThat(response.get(0).current()).isTrue();
+        assertThat(response.get(1).blocked()).isTrue();
+    }
+
+    @Test
+    void cannotBlockCurrentDevice() {
+        Instant now = Instant.now();
+        String current = "153a20c8-d24f-4952-b378-5409de885ab5";
+        when(authService.authenticateBearer("Bearer token")).thenReturn(
+                new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60), 77L));
+        when(persistence.deviceIdForSession(42L, 77L)).thenReturn(java.util.Optional.of(current));
+
+        assertThatThrownBy(() -> controller.blockDevice("Bearer token", current,
+                new UserSecurityController.AccessChangeRequest("123456", "")))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
+        verify(accessBlocks, never()).block(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void cannotBlockCurrentIp() {
+        Instant now = Instant.now();
+        when(authService.authenticateBearer("Bearer token")).thenReturn(
+                new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+
+        assertThatThrownBy(() -> controller.blockIp("Bearer token",
+                new UserSecurityController.IpAccessChangeRequest("127.0.0.1", "123456", ""), request))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
+    }
 
     @Test
     void sessionsAreScopedToAuthenticatedUser() {

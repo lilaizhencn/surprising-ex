@@ -2663,10 +2663,31 @@ CREATE TABLE IF NOT EXISTS gateway_refresh_sessions (
     revoked_at          TIMESTAMPTZ,
     user_agent          TEXT,
     ip_address          TEXT,
+    device_id           UUID,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_refresh_sessions_hash_present CHECK (length(token_hash) > 0)
 );
+
+ALTER TABLE gateway_refresh_sessions ADD COLUMN IF NOT EXISTS device_id UUID;
+
+CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_user_device_idx
+    ON gateway_refresh_sessions (user_id, device_id, created_at DESC)
+    WHERE device_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_user_access_blocks (
+    block_id            BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    block_type          TEXT NOT NULL CHECK (block_type IN ('DEVICE', 'IP')),
+    block_value         TEXT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at          TIMESTAMPTZ,
+    CONSTRAINT gateway_access_block_value_present CHECK (length(block_value) BETWEEN 1 AND 128)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_user_access_blocks_active_uidx
+    ON gateway_user_access_blocks (user_id, block_type, block_value)
+    WHERE revoked_at IS NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_refresh_sessions_hash_uidx
     ON gateway_refresh_sessions (token_hash);

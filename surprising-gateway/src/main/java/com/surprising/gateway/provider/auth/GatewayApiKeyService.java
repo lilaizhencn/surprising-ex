@@ -102,6 +102,12 @@ public class GatewayApiKeyService {
         String apiKey = requireApiKey(request.getHeader("X-MBX-APIKEY"));
         GatewayApiKeyRepository.ApiKeyRecord record = repository.active(apiKey)
                 .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
+        try {
+            authService.requireIpAccessAllowed(record.userId(), clientIpResolver.resolve(request));
+        } catch (IllegalStateException ex) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
         requireIpAllowlist(record.ipAllowlist(), clientIpResolver.resolve(request));
         requirePermission(record.permissions(), requiredPermission);
         String timestamp = request.getParameter("timestamp");

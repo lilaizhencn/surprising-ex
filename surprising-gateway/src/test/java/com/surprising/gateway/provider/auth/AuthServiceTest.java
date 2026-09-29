@@ -31,8 +31,18 @@ class AuthServiceTest {
     private final TotpService totpService = mock(TotpService.class);
     private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
     private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
+    private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification);
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks);
+
+    @Test
+    void blockedIpCannotUseApiKeyAccess() {
+        when(accessBlocks.blocked(42L, "IP", "203.0.113.7")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.requireIpAccessAllowed(42L, "203.0.113.7"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("blocked");
+    }
 
     @Test
     void adminRefreshSessionsReturnsRepositoryRows() {
@@ -195,7 +205,7 @@ class AuthServiceTest {
         when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
         assertThat(service.login(new LoginRequest("admin","password"),new MockHttpServletRequest())).isSameAs(challenge);
         verifyNoInteractions(jwtTokenService);
-        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(any(Long.class),any(),any(),any(),any(),any());
+        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(any(Long.class),any(),any(),any(),any(),any(),any());
     }
 
     @Test
