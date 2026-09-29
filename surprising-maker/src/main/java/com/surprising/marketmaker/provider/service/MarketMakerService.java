@@ -986,7 +986,17 @@ public class MarketMakerService {
                         java.math.BigInteger.valueOf(quote.priceTicks())
                                 .multiply(java.math.BigInteger.valueOf(properties.getQuoting().getRefreshTolerancePpm()))
                                 .divide(java.math.BigInteger.valueOf(1_000_000L)).longValueExact())
-                && order.remainingQuantitySteps() == quote.quantitySteps();
+                && quantityWithinRefreshTolerance(order.remainingQuantitySteps(), quote.quantitySteps());
+    }
+
+    private boolean quantityWithinRefreshTolerance(long resting, long desired) {
+        long ppm = properties.getQuoting().getQuantityRefreshTolerancePpm();
+        if (ppm == 0L) return resting == desired;
+        if (resting < 0L || desired <= 0L) return false;
+        long tolerance = (desired / 1_000_000L) * ppm
+                + (desired % 1_000_000L) * ppm / 1_000_000L;
+        long difference = resting >= desired ? resting - desired : desired - resting;
+        return difference <= tolerance;
     }
 
     private boolean isLive(OrderResponse order) {

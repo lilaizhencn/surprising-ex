@@ -129,6 +129,10 @@ public class MarketMakerProperties {
         @Min(0)
         @Max(100_000)
         private long refreshTolerancePpm = 0L;
+        /** Permitted size drift before a resting quote is canceled and replaced. */
+        @Min(0)
+        @Max(900_000)
+        private long quantityRefreshTolerancePpm = 0L;
         /** Stable per-level size variation, blended with the external depth. Zero keeps direct sizing. */
         @Min(0)
         @Max(900_000)

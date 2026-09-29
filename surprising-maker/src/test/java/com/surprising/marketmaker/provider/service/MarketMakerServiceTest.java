@@ -382,6 +382,21 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void smallReferenceSizeChangeKeepsRestingQuoteUntilRefreshThreshold() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
+        OrderResponse existingBid = orderAt(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
+                49_995L, 9L, OrderStatus.ACCEPTED, Instant.now());
+        Fixtures fixtures = new Fixtures(List.of(existingBid));
+        fixtures.quantityRefreshTolerancePpm = 250_000L;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .doesNotContain(7L);
+        assertThat(fixtures.orderRpc.openOrders).extracting(OrderResponse::orderId).contains(7L);
+    }
+
+    @Test
     void ownOldAskDoesNotPinRisingReferencePrice() {
         String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         Fixtures fixtures = new Fixtures(List.of(order(77L, 900001L, prefix + "s0-1", OrderSide.SELL,
@@ -752,6 +767,7 @@ class MarketMakerServiceTest {
                 new FakeReferenceSampleRepository();
         private boolean tradeEnabled;
         private boolean referenceMarketEnabled;
+        private long quantityRefreshTolerancePpm;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
@@ -815,6 +831,7 @@ class MarketMakerServiceTest {
             properties.getQuoting().setMinSpreadTicks(10L);
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
+            properties.getQuoting().setQuantityRefreshTolerancePpm(quantityRefreshTolerancePpm);
             properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
