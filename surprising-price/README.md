@@ -310,6 +310,8 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&t
 
 删除未绑定任何属性或调用方的 `surprising.price.index.aeron` 默认配置块。实际向 Core 发布标记价的是 `MarkPriceCorePublisher`，读取 `surprising.price.mark.aeron`；其连接属性和默认值仍保留在 `MarkPriceProperties.Aeron`。
 
+单节点部署时，`surprising.price.mark.aeron.hostnames` 从 `AERON_CLUSTER_HOSTNAMES` 读取唯一 Core 主机，egress 从 `AERON_EGRESS_HOSTNAME` 读取。标记价 HTTP/Kafka 正常不代表 Core 已收到标记价；验收还需检查 Core 风险快照和止盈止损触发。缺少这两个环境变量时沿用三节点默认地址，仅适用于对应三节点部署。
+
 ### 外部行情连接健康
 
 `ExternalSpotWebSocketManager.checkIdleSessions` 同时检查收帧时间和缓存报价的来源时间。如果某连接的全部已配置来源都有报价但均已过期，即使仍收到帧也重连；共享连接尚有新鲜报价时不为单个滞后来源断开整条连接。旧帧不重置重连退避次数。指数计算的最小有效来源数量、过期剔除和异常价格校验不变。

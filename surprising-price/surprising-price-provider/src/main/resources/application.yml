@@ -116,6 +116,9 @@ surprising:
           fallback-rate: 1
     mark:
       market-channel: ${PRICE_MARK_MARKET_CHANNEL:aeron:udp?endpoint=127.0.0.1:21407}
+      aeron:
+        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
