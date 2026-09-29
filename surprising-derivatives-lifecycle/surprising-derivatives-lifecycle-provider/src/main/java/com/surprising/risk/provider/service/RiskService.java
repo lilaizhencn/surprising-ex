@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
@@ -23,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 @Service
 public class RiskService {
@@ -35,12 +37,15 @@ public class RiskService {
     private final RiskProperties properties;
     private final RiskAeronGateway aeron;
     private final CoreRiskLiquidationProjectionRepository liquidations;
+    private final LiquidationPriceCalculator liquidationPrices;
 
     public RiskService(RiskProperties properties, RiskAeronGateway aeron,
-                       CoreRiskLiquidationProjectionRepository liquidations) {
+                       CoreRiskLiquidationProjectionRepository liquidations,
+                       @Qualifier("derivativesInstrumentSnapshotCache") InstrumentSnapshotCache instruments) {
         this.properties = properties;
         this.aeron = aeron;
         this.liquidations = liquidations;
+        this.liquidationPrices = new LiquidationPriceCalculator(instruments, properties.getProductLine());
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
@@ -75,8 +80,9 @@ public class RiskService {
     public RiskPositionQueryResponse latestPositions(long userId) {
         requireUserId(userId);
         Instant now = Instant.now();
-        List<RiskPositionSnapshotResponse> rows = riskState(userId).stream()
-                .map(value -> position(value, now)).toList();
+        List<CoreRiskSnapshotView> snapshots = riskState(userId);
+        List<RiskPositionSnapshotResponse> rows = snapshots.stream()
+                .map(value -> position(value, snapshots, now)).toList();
         return new RiskPositionQueryResponse(rows.size(), rows);
     }
 
@@ -158,13 +164,15 @@ public class RiskService {
                 .toList();
     }
 
-    private RiskPositionSnapshotResponse position(CoreRiskSnapshotView value, Instant eventTime) {
+    private RiskPositionSnapshotResponse position(CoreRiskSnapshotView value,
+                                                  List<CoreRiskSnapshotView> accountPositions, Instant eventTime) {
         return new RiskPositionSnapshotResponse(value.priceSequence(), value.userId(), value.instrumentId(),
                 MarginMode.valueOf(value.marginMode().name()), PositionSide.valueOf(value.positionSide().name()),
                 value.settleAsset(), value.signedQuantitySteps(), value.entryPriceTicks(),
                 value.markPriceTicks(), value.notionalUnits(), value.unrealizedPnlUnits(),
                 value.maintenanceMarginUnits(), value.positionMarginUnits(), value.marginRatioPpm(),
-                RiskStatus.valueOf(value.status()), eventTime);
+                RiskStatus.valueOf(value.status()), eventTime,
+                liquidationPrices.price(value, accountPositions));
     }
 
     private void requireProductLine(ProductLine actual) {

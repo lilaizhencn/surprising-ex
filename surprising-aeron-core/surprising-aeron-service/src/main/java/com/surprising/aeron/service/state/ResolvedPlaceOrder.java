@@ -50,7 +50,7 @@ public class ResolvedPlaceOrder {
         if (this.intent != null || intent == null || instrument == null || symbolId < -1
                 || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
                 || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
-                || (indexPriceTicks == 0) != (forwardPriceTicks == 0)
+                || (forwardPriceTicks > 0 && indexPriceTicks == 0)
                 || reservationKind == null || reservationAsset == null || reservationAsset.isBlank()
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
                 || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000

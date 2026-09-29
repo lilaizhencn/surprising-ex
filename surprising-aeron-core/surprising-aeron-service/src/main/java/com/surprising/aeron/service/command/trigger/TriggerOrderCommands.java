@@ -118,12 +118,28 @@ public final class TriggerOrderCommands {
                         replaceRiskScan(scan);
                     }
                     if (remaining <= 0) return true;
-                        page = owner.triggerOrderIndex().candidatesPage(instrumentId, scan.triggerMarkPriceTicks(), scan.triggerPhase(),
+                    int sourceIndex = scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE;
+                    var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[sourceIndex];
+                    var mark = owner.runtimeState().markPrice(owner.identities().findSymbolId(instrumentId));
+                    long sourcePrice = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
+                            ? scan.triggerMarkPriceTicks()
+                            : mark == null || mark.priceSequence() != scan.priceSequence() ? 0
+                            : source == com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST
+                                    ? mark.lastPriceTicks() : mark.indexPriceTicks();
+                    page = owner.triggerOrderIndex().candidatesPage(instrumentId, source, sourcePrice,
+                            scan.triggerPhase() % TriggerOrderIndex.PHASE_COMPLETE,
                             scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(), remaining);
                 }
                 if (candidate == page.ids().size()) {
-                    replaceRiskScan(scan.withTriggerProgress(page.complete(), page.nextPhase(), page.nextPriceCursor(),
-                            page.nextOrderCursor(), scan.triggerUpperId(), scan.triggerMarkPriceTicks(),
+                    int nextPhase = page.complete()
+                            ? ((scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE) + 1)
+                                    * TriggerOrderIndex.PHASE_COMPLETE
+                            : (scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE)
+                                    * TriggerOrderIndex.PHASE_COMPLETE + page.nextPhase();
+                    replaceRiskScan(scan.withTriggerProgress(nextPhase == 3 * TriggerOrderIndex.PHASE_COMPLETE,
+                            nextPhase, page.complete() ? Long.MAX_VALUE : page.nextPriceCursor(),
+                            page.complete() ? Long.MAX_VALUE : page.nextOrderCursor(),
+                            scan.triggerUpperId(), scan.triggerMarkPriceTicks(),
                             scan.triggerGeneratedAtEpochMillis()).withTriggerOcoProgress(0, 0));
                     finished = true;
                     return true;
@@ -134,7 +150,14 @@ public final class TriggerOrderCommands {
                     candidate++;
                     continue;
                 }
-                long price = scan.triggerMarkPriceTicks(), at = scan.triggerGeneratedAtEpochMillis();
+                var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[
+                        scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE];
+                var mark = owner.runtimeState().markPrice(owner.identities().findSymbolId(instrumentId));
+                long price = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
+                        ? scan.triggerMarkPriceTicks()
+                        : source == com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST
+                                ? mark.lastPriceTicks() : mark.indexPriceTicks();
+                long at = scan.triggerGeneratedAtEpochMillis();
                 if (trigger.expiresAtEpochMillis() > 0 && at > 0 && trigger.expiresAtEpochMillis() <= at) {
                     candidate++;
                     mutateExpire(trigger.userId(), id, at);
@@ -409,8 +432,13 @@ public final class TriggerOrderCommands {
         if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return null;
         Integer symbolId = owner.identities().findSymbolId(trigger.instrumentId());
         var mark = symbolId == null ? null : owner.runtimeState().markPrice(symbolId);
-        if (mark != null && (mark.priceSequence() != sequence || mark.markPriceTicks() != price
-                || !isTriggerConditionSatisfied(trigger, price)))
+        long selectedPrice = mark == null ? 0 : switch (trigger.priceSource()) {
+            case MARK -> mark.markPriceTicks();
+            case LAST -> mark.lastPriceTicks();
+            case INDEX -> mark.indexPriceTicks();
+        };
+        if (mark == null || selectedPrice <= 0 || mark.priceSequence() != sequence
+                || selectedPrice != price || !isTriggerConditionSatisfied(trigger, price))
             throw new CoreStateRejectedException("TRIGGER_CONDITION_NOT_MET", "trigger price is not executable");
         return trigger;
     }

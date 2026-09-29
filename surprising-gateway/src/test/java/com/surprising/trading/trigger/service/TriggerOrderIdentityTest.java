@@ -16,6 +16,7 @@ import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerOrderType;
+import com.surprising.trading.api.model.TriggerPriceSource;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,24 @@ class TriggerOrderIdentityTest {
         assertThat(reconstructed.triggerOrderId()).isEqualTo(first.triggerOrderId());
         assertThat(reconstructed.traceId()).isEqualTo(first.traceId());
         assertThat(reconstructed.createdAt()).isEqualTo(first.createdAt());
+    }
+
+    @Test
+    void selectedIndexSourceReachesCoreAndReturnsToClient() {
+        var gateway = mock(TriggerOrderAeronGateway.class);
+        when(gateway.place(any(UUID.class), eq(1001L), any(CoreTriggerOrderStateView.class)))
+                .thenAnswer(call -> call.<CoreTriggerOrderStateView>getArgument(2)
+                        .materializeCreation(1_700_000_000_000L));
+        var request = new PlaceTriggerOrderRequest(1001L, "index-source", null, "1",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, 70_000L, null, null,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
+                PositionSide.NET, null, TriggerPriceSource.INDEX);
+
+        assertThat(new TriggerOrderService(properties(), gateway).place(request).priceSource())
+                .isEqualTo(TriggerPriceSource.INDEX);
+        org.mockito.Mockito.verify(gateway).place(any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.argThat(view ->
+                        view.priceSource() == com.surprising.aeron.protocol.CoreTriggerPriceSource.INDEX));
     }
 
     @Test

@@ -92,7 +92,7 @@ public final class RuntimeStateProjector {
         source.riskState().markPrices().forEach((instrumentId, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
                 identities.symbolId(instrumentId), requireInstrument(source, instrumentId), mark.markPriceTicks(),
                 mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
-                mark.generatedAtEpochMillis())));
+                mark.generatedAtEpochMillis(), mark.lastPriceTicks())));
         source.riskState().snapshots().forEach((key, risk) -> runtime.putRiskSnapshot(
                 identities.positionKey(risk.userId(), positionKey(risk.instrumentId(), risk.positionSide())),
                 new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),

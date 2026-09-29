@@ -2287,6 +2287,63 @@ class ClusterCommandPipelineTest {
         assertThat(live.service.state().runtimeState.firstIncompleteRiskScan()).isNull();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void evaluatesEachTriggerOnlyAgainstItsSelectedPriceStream(ProductLine product) {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            long maker = 11, user = disjointUser(maker);
+            live.apply(live.place(maker, "1", 701, 100, 10, CoreOrderSide.SELL));
+            live.apply(live.place(user, "1", 702, 100, 10, CoreOrderSide.BUY));
+            live.apply(live.place(maker, "1", 703, 110, 3, CoreOrderSide.BUY));
+            CoreTriggerPriceSource[] sources = CoreTriggerPriceSource.values();
+            for (int i = 0; i < sources.length; i++) {
+                var trigger = new CoreTriggerOrderStateView(8100 + i, product,
+                        user, "source-" + sources[i], "", "1", CoreOrderSide.SELL,
+                        CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        110, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+                        110, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+                        CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "source", 0, 0, 0, 0,
+                        1, 0, 0, sources[i]);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
+                        CoreTriggerOrderCodec.encodeState(trigger)));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+            applyPriceAndFinishTriggerScan(live, new ApplyMarkPriceCommand("1", 100, 80,
+                    product == ProductLine.OPTION ? 80 : 0,
+                    2, TIME, 120));
+            var runtime = live.service.state().runtimeState;
+            assertThat(runtime.triggerOrder(8100).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+            assertThat(runtime.triggerOrder(8101).status())
+                    .as("%s", runtime.triggerOrder(8101).rejectReason()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(runtime.triggerOrder(8102).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+            applyPriceAndFinishTriggerScan(live, new ApplyMarkPriceCommand("1", 120, 120,
+                    product == ProductLine.OPTION ? 120 : 0,
+                    3, TIME, 0));
+            assertThat(runtime.triggerOrder(8100).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(runtime.triggerOrder(8102).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            try (var recovered = TradingCoreRuntime.fromSnapshot(product,
+                    live.service.captureSnapshot(999))) {
+                assertThat(recovered.tradingState().businessStateHash()).isEqualTo(live.hash());
+                assertThat(recovered.tradingState().triggerOrders().get(8101L).priceSource())
+                        .isEqualTo(CoreTriggerPriceSource.LAST);
+            }
+        }
+    }
+
+    private static void applyPriceAndFinishTriggerScan(Fixture live, ApplyMarkPriceCommand command) {
+        live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(command)));
+        for (int i = 0; i < 100 && live.service.state().runtimeState.firstIncompleteRiskScan() != null; i++) {
+            live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1))));
+            assertThat(live.responses.getLast().commandStatus())
+                    .as("%s", live.responses.getLast().resultCode()).isEqualTo(ResponseStatus.APPLIED);
+        }
+        assertThat(live.service.state().runtimeState.firstIncompleteRiskScan()).isNull();
+    }
+
     private static final class Fixture implements AutoCloseable {
         final TradingOwnerTestSupport service;
         final ProductLine product;

@@ -159,6 +159,10 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeRegisterInstrument(instrument))).isEqualTo(instrument);
         assertThat(TradingCommandCodec.decodeApplyMarkPrice(
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice))).isEqualTo(markPrice);
+        byte[] archivedMark = java.util.Arrays.copyOf(
+                TradingCommandCodec.encodeApplyMarkPrice(markPrice),
+                TradingCommandCodec.encodeApplyMarkPrice(markPrice).length - Long.BYTES);
+        assertThat(TradingCommandCodec.decodeApplyMarkPrice(archivedMark).lastPriceTicks()).isZero();
         assertThat(TradingCommandCodec.decodeApplyFunding(
                 TradingCommandCodec.encodeApplyFunding(funding))).isEqualTo(funding);
         assertThat(TradingCommandCodec.decodeApplyFunding(

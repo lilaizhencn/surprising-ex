@@ -316,6 +316,9 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, trigger.triggeredPriceTicks());
             hash = CoreStateHash.mix(hash, trigger.updatedAtEpochMillis());
             hash = CoreStateHash.mix(hash, trigger.revision());
+            if (trigger.priceSource() != com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK) {
+                hash = CoreStateHash.mix(hash, trigger.priceSource().ordinal());
+            }
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
             hash = CoreStateHash.mix(hash, mark.instrumentId());
@@ -324,6 +327,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
             hash = CoreStateHash.mix(hash, mark.priceSequence());
             hash = CoreStateHash.mix(hash, mark.generatedAtEpochMillis());
+            if (mark.lastPriceTicks() > 0) hash = CoreStateHash.mix(hash, mark.lastPriceTicks());
         }
         for (CoreRiskSnapshot risk : riskState.snapshots().values()) {
             hash = CoreStateHash.mix(hash, risk.userId());

@@ -89,7 +89,7 @@ client / internal gateway
   -> POST /api/v1/trading/trigger-orders
   -> surprising-gateway / com.surprising.trading
   -> Aeron Core CoreTriggerOrderState
-  -> Core 接收 APPLY_MARK_PRICE 并按增量索引触发
+  -> Core 接收携带标记价、最新成交价和指数价的 APPLY_MARK_PRICE，并按价格来源及触发价增量索引扫描
   -> Core 原子创建 reduce-only 子订单并撮合
   -> 账户 / WebSocket 链路，状态异步导出投影
 ```
@@ -253,6 +253,10 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&inst
 - `GET /api/v1/trading/trigger-orders/open?userId=...&instrumentId=...&limit=...&cursor=...`：按 Core 游标查询用户待触发条件单，响应包含 `nextCursor` 和 `hasMore`。
 
 触发单事实状态只存在 Aeron Core 的 `CoreTriggerOrderState` 和增量索引中。Provider 不加载数据库、Redis 或 Kafka 触发单仓储。
+`PlaceTriggerOrderRequest.priceSource` 可选 `MARK`、`LAST`、`INDEX`，省略时为 `MARK`；同一 OCO 组合的两腿各自保存来源。
+`surprising-price` 的 `MarkPriceCorePublisher` 将新鲜的成交价与指数价转为合约价格 ticks；缺失来源以零表示，Core 不会用标记价代替。
+`TriggerOrderIndex` 按产品内 instrument 与来源隔离待触发价格档，`TriggerOrderCommands` 逐来源续扫，执行前再次核对来源价格、序号和条件。
+来源写入 Core 触发单状态和快照；归档中的旧版触发单按原来的 `MARK` 语义解码，旧版价格快照的最新成交价为不可用。
 
 ## TraceId 链路追踪
 

@@ -32,11 +32,31 @@ public record TriggerOrderResponse(
         Instant expiresAt,
         Instant triggeredAt,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        TriggerPriceSource priceSource) {
 
     public TriggerOrderResponse {
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+        priceSource = priceSource == null ? TriggerPriceSource.MARK : priceSource;
+    }
+
+    public TriggerOrderResponse(long triggerOrderId, long userId, String clientTriggerOrderId,
+                                String ocoGroupId, String instrumentId, OrderSide side,
+                                TriggerOrderType triggerType, TriggerCondition triggerCondition,
+                                long triggerPriceTicks, Long activationPriceTicks, Long callbackRatePpm,
+                                Long highestPriceTicks, Long lowestPriceTicks, Instant activatedAt,
+                                OrderType orderType, TimeInForce timeInForce, long priceTicks,
+                                long quantitySteps, MarginMode marginMode, PositionSide positionSide,
+                                TriggerOrderStatus status, Long placedOrderId, Long triggerSequence,
+                                Long triggeredPriceTicks, String rejectReason, String traceId,
+                                Instant expiresAt, Instant triggeredAt, Instant createdAt, Instant updatedAt) {
+        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side,
+                triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm,
+                highestPriceTicks, lowestPriceTicks, activatedAt, orderType, timeInForce, priceTicks,
+                quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
+                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt,
+                TriggerPriceSource.MARK);
     }
 
     public TriggerOrderResponse(long triggerOrderId,

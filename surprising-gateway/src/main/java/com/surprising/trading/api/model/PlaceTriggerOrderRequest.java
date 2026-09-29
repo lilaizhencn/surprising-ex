@@ -24,11 +24,24 @@ public record PlaceTriggerOrderRequest(
         @Positive long quantitySteps,
         MarginMode marginMode,
         PositionSide positionSide,
-        Instant expiresAt) {
+        Instant expiresAt,
+        TriggerPriceSource priceSource) {
 
     public PlaceTriggerOrderRequest {
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+        priceSource = priceSource == null ? TriggerPriceSource.MARK : priceSource;
+    }
+
+    public PlaceTriggerOrderRequest(long userId, String clientTriggerOrderId, String ocoGroupId,
+                                    String instrumentId, OrderSide side, TriggerOrderType triggerType,
+                                    long triggerPriceTicks, Long activationPriceTicks, Long callbackRatePpm,
+                                    OrderType orderType, TimeInForce timeInForce, long priceTicks,
+                                    long quantitySteps, MarginMode marginMode, PositionSide positionSide,
+                                    Instant expiresAt) {
+        this(userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType, triggerPriceTicks,
+                activationPriceTicks, callbackRatePpm, orderType, timeInForce, priceTicks, quantitySteps,
+                marginMode, positionSide, expiresAt, TriggerPriceSource.MARK);
     }
 
     public PlaceTriggerOrderRequest(long userId,

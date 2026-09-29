@@ -547,19 +547,23 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
         byte[] instrumentId = text(command.instrumentId());
-        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * 5)
+        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * 6)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) instrumentId.length).put(instrumentId)
                 .putLong(command.markPriceTicks())
                 .putLong(command.indexPriceTicks()).putLong(command.forwardPriceTicks())
-                .putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis()).array();
+                .putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis())
+                .putLong(command.lastPriceTicks()).array();
     }
 
     public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
         requireRemaining(buffer, Long.BYTES * 5);
-        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(instrumentId, buffer.getLong(), buffer.getLong(),
-                buffer.getLong(), buffer.getLong(), buffer.getLong());
+        long mark = buffer.getLong(), index = buffer.getLong(), forward = buffer.getLong();
+        long sequence = buffer.getLong(), generatedAt = buffer.getLong();
+        long last = buffer.remaining() == Long.BYTES ? buffer.getLong() : 0;
+        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(instrumentId, mark, index, forward,
+                sequence, generatedAt, last);
         requireConsumed(buffer);
         return command;
     }

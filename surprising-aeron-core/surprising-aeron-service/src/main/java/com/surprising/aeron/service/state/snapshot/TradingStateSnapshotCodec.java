@@ -42,7 +42,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 35;
+    private static final int VERSION = 36;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -169,6 +169,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(mark.forwardPriceTicks());
             writer.longValue(mark.priceSequence());
             writer.longValue(mark.generatedAtEpochMillis());
+            writer.longValue(mark.lastPriceTicks());
         });
         writer.intValue(state.riskState().snapshots().size());
         state.riskState().snapshots().values().forEach(risk -> {
@@ -332,7 +333,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION) {
+        if (version < 35 || version > VERSION) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -494,7 +495,8 @@ public final class TradingStateSnapshotCodec {
             CoreMarkPriceState mark = new CoreMarkPriceState(instrumentId,
                     reader.positiveLong("mark price"),
                     reader.nonNegativeLong("mark index price"), reader.nonNegativeLong("mark forward price"),
-                    reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"));
+                    reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"),
+                    version < 36 ? 0 : reader.nonNegativeLong("last price"));
             putUnique(marks, instrumentId, mark);
         }
         Map<String, CoreRiskSnapshot> risks = new TreeMap<>();

@@ -100,6 +100,10 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 
 ## 风险续扫与止盈止损调度（2026-09-26）
 
+`RiskService.latestPositions` 为线性和反向永续、交割合约返回 `liquidationPriceTicks`。
+`LiquidationPriceCalculator` 以 Core 风险快照的全仓权益或逐仓保证金为基准，用当前合约精度和维持保证金档位搜索价格边界；
+无持仓、期权和无法形成单一边界的仓位返回 `null`。页面在进入持仓或账户风险区域时读取该查询字段，实时风险状态继续由私有 WebSocket 更新。
+
 `LiquidationService.processWorkInternal` 按 Core 的扫描开关、间隔和工作预算，先提交
 `CONTINUE_RISK_SCAN`，由 Core 在执行时选择当前游标并推进风险及止盈止损；完成后再查询强平任务，
 通过原有批量命令执行强平，不携带查询时的风险游标。只有触发扫描未完成、没有强平候选时也会继续推进。

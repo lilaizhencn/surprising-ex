@@ -144,7 +144,7 @@ class MarkPriceCorePublisherTest {
         assertThatThrownBy(() -> MarkPriceCorePublisher.toCommand(optionEvent(null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("index and forward prices are required");
-        assertThat(MarkPriceCorePublisher.toCommand(event("1", 1)).indexPriceTicks()).isZero();
+        assertThat(MarkPriceCorePublisher.toCommand(event("1", 1)).indexPriceTicks()).isEqualTo(100);
     }
 
     private static MarkPriceEvent event(String instrumentId, long sequence) {

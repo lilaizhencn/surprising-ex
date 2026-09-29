@@ -161,7 +161,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
                 Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
-                current.takerFeeRatePpm()));
+                current.takerFeeRatePpm(), current.priceSource()));
         runtime.incrementCommandRevision();
         return true;
     }
@@ -265,7 +265,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
                         ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.makerFeeRatePpm(), current.takerFeeRatePpm());
+                current.makerFeeRatePpm(), current.takerFeeRatePpm(), current.priceSource());
     }
 
     private static CoreTriggerOrderState require(TradingRuntimeState runtime, long triggerOrderId) {

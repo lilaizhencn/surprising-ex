@@ -19,6 +19,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.protocol.CoreTriggerPriceSource;
 
 public final class TriggerOrderIndex {
 
@@ -30,7 +31,10 @@ public final class TriggerOrderIndex {
     private final Map<ClientTriggerKey, Long> idsByClient = new java.util.HashMap<>();
     private final Map<TriggerPositionKey, NavigableSet<Long>> idsByPosition = new java.util.HashMap<>();
     private final Map<TriggerOcoKey, NavigableSet<Long>> idsByOco = new java.util.HashMap<>();
-    private final Map<String, NavigableMapByPrice> idsByPrice = new TreeMap<>();
+    private final Map<PriceKey, NavigableMapByPrice> idsByPrice = new TreeMap<>((left, right) -> {
+        int symbol = left.instrumentId().compareTo(right.instrumentId());
+        return symbol == 0 ? left.source().compareTo(right.source()) : symbol;
+    });
     private final NavigableMap<Long, NavigableSet<Long>> idsByExpiry = new TreeMap<>();
     private final Map<Long, CoreTriggerOrderState> valuesById = new TreeMap<>();
 
@@ -74,12 +78,19 @@ public final class TriggerOrderIndex {
     public TriggerCandidatePage candidatesPage(String instrumentId, long markPriceTicks,
                                                 int phase, long priceCursor, long orderCursor,
                                                 long upperTriggerId, int limit) {
+        return candidatesPage(instrumentId, CoreTriggerPriceSource.MARK, markPriceTicks, phase,
+                priceCursor, orderCursor, upperTriggerId, limit);
+    }
+
+    public TriggerCandidatePage candidatesPage(String instrumentId, CoreTriggerPriceSource source,
+                                                long markPriceTicks, int phase, long priceCursor,
+                                                long orderCursor, long upperTriggerId, int limit) {
         if (limit <= 0 || limit > 4_096) {
             throw new IllegalArgumentException("candidate page limit must be in [1,4096]");
         }
         String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        NavigableMapByPrice price = idsByPrice.get(normalized);
-        if (price == null || upperTriggerId <= 0 || phase >= PHASE_COMPLETE) {
+        NavigableMapByPrice price = idsByPrice.get(new PriceKey(normalized, source));
+        if (price == null || markPriceTicks <= 0 || upperTriggerId <= 0 || phase >= PHASE_COMPLETE) {
             return TriggerCandidatePage.emptyPage();
         }
         int nextPhase = Math.max(phase, PHASE_GREATER_OR_EQUAL);
@@ -347,7 +358,7 @@ public final class TriggerOrderIndex {
             if (order.expiresAtEpochMillis() > 0) {
                 idsByExpiry.computeIfAbsent(order.expiresAtEpochMillis(), ignored -> new TreeSet<>()).add(id);
             }
-            NavigableMapByPrice price = idsByPrice.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId),
+            NavigableMapByPrice price = idsByPrice.computeIfAbsent(new PriceKey(OrderReservation.requireInstrumentId(instrumentId), order.priceSource()),
                     ignored -> new NavigableMapByPrice());
             if (order.triggerType() == CoreTriggerOrderType.TRAILING_STOP) {
                 indexTrailing(price, order);
@@ -416,7 +427,8 @@ public final class TriggerOrderIndex {
                 if (expiryIds.isEmpty()) idsByExpiry.remove(order.expiresAtEpochMillis());
             }
         }
-        NavigableMapByPrice price = idsByPrice.get(OrderReservation.requireInstrumentId(instrumentId));
+        PriceKey priceKey = new PriceKey(OrderReservation.requireInstrumentId(instrumentId), order.priceSource());
+        NavigableMapByPrice price = idsByPrice.get(priceKey);
         if (price == null) return;
         removeTrailing(price, order, id);
         if (order.triggerPriceTicks() > 0) {
@@ -432,7 +444,7 @@ public final class TriggerOrderIndex {
         if (price.greaterOrEqual.isEmpty() && price.lessOrEqual.isEmpty()
                 && price.trailingGreaterOrEqual.isEmpty() && price.trailingLessOrEqual.isEmpty()
                 && price.trailingAlways.isEmpty()) {
-            idsByPrice.remove(OrderReservation.requireInstrumentId(instrumentId));
+            idsByPrice.remove(priceKey);
         }
     }
 
@@ -503,5 +515,8 @@ public final class TriggerOrderIndex {
     }
 
     private record ClientTriggerKey(long userId, String clientTriggerOrderId) {
+    }
+
+    private record PriceKey(String instrumentId, CoreTriggerPriceSource source) {
     }
 }

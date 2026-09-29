@@ -47,7 +47,7 @@ public final class RuntimeDerivativeRiskProcessor {
         OptionRiskRules.requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument, command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
-                command.generatedAtEpochMillis()));
+                command.generatedAtEpochMillis(), command.lastPriceTicks()));
         RiskScanRuntime currentScan = runtime.riskScan(symbolId);
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();

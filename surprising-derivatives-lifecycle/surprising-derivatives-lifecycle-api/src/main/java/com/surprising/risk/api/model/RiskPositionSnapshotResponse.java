@@ -20,11 +20,33 @@ public record RiskPositionSnapshotResponse(
         long positionMarginUnits,
         long marginRatioPpm,
         RiskStatus status,
-        Instant eventTime) {
+        Instant eventTime,
+        Long liquidationPriceTicks) {
 
     public RiskPositionSnapshotResponse {
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public RiskPositionSnapshotResponse(long snapshotId,
+                                        long userId,
+                                        String instrumentId,
+                                        MarginMode marginMode,
+                                        PositionSide positionSide,
+                                        String settleAsset,
+                                        long signedQuantitySteps,
+                                        long entryPriceTicks,
+                                        long markPriceTicks,
+                                        long notionalUnits,
+                                        long unrealizedPnlUnits,
+                                        long maintenanceMarginUnits,
+                                        long positionMarginUnits,
+                                        long marginRatioPpm,
+                                        RiskStatus status,
+                                        Instant eventTime) {
+        this(snapshotId, userId, instrumentId, marginMode, positionSide, settleAsset, signedQuantitySteps,
+                entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
+                maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime, null);
     }
 
     public RiskPositionSnapshotResponse(long snapshotId,

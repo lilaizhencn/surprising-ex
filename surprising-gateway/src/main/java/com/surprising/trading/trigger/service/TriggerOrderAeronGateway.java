@@ -153,7 +153,8 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                 value.triggerSequence() == 0 ? null : value.triggerSequence(), value.triggeredPriceTicks() == 0 ? null : value.triggeredPriceTicks(),
                 empty(value.rejectReason()), empty(value.traceId()), value.expiresAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.expiresAtEpochMillis()),
                 value.triggeredAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.triggeredAtEpochMillis()),
-                Instant.ofEpochMilli(value.createdAtEpochMillis()), Instant.ofEpochMilli(value.updatedAtEpochMillis()));
+                Instant.ofEpochMilli(value.createdAtEpochMillis()), Instant.ofEpochMilli(value.updatedAtEpochMillis()),
+                com.surprising.trading.api.model.TriggerPriceSource.valueOf(value.priceSource().name()));
     }
     private static String empty(String value) { return value == null || value.isEmpty() ? null : value; }
     @Override @PreDestroy public void close() { clients.close(); }
