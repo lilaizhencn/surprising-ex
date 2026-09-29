@@ -67,9 +67,18 @@ public enum CoreResultCode {
     MATCHING_BACKPRESSURE(73),
     FUNDS_IDEMPOTENCY_RETENTION_FULL(74),
     QUERY_RESPONSE_TOO_LARGE(75),
-    INSTRUMENT_NOT_TRADING(76);
+    INSTRUMENT_NOT_TRADING(76),
+    TRIGGER_POSITION_REQUIRED(77),
+    TRIGGER_SIDE_NOT_REDUCING(78),
+    TRIGGER_CLOSE_CAPACITY_EXCEEDED(79),
+    TRIGGER_ORDER_NOT_FOUND(80),
+    TRIGGER_ORDER_OWNER_MISMATCH(81),
+    TRIGGER_CONDITION_NOT_MET(82),
+    DUPLICATE_TRIGGER_ORDER_ID(83),
+    DUPLICATE_CLIENT_TRIGGER_ORDER_ID(84),
+    USER_NOT_FOUND(85);
 
-    private static final CoreResultCode[] BY_WIRE_CODE = new CoreResultCode[77];
+    private static final CoreResultCode[] BY_WIRE_CODE = new CoreResultCode[86];
 
     static {
         for (CoreResultCode value : values()) {

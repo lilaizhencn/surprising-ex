@@ -5,6 +5,15 @@ import org.junit.jupiter.api.Test;
 
 class CoreResponseTest {
     @Test
+    void triggerRejectionsKeepTheirSpecificWireCodes() {
+        for (String rejection : new String[] {"TRIGGER_POSITION_REQUIRED", "TRIGGER_SIDE_NOT_REDUCING",
+                "TRIGGER_CLOSE_CAPACITY_EXCEEDED", "DUPLICATE_CLIENT_TRIGGER_ORDER_ID"}) {
+            CoreResultCode code = CoreResultCode.fromRejectionCode(rejection);
+            assertThat(code.name()).isEqualTo(rejection);
+            assertThat(CoreResultCode.fromWireCode(code.wireCode())).isEqualTo(code);
+        }
+    }
+    @Test
     void publicConstructionAndReadsRemainDefensive() {
         byte[] input = {3, 5, 8};
         CoreResponse response = new CoreResponse(ResponseStatus.APPLIED, 7, input);
