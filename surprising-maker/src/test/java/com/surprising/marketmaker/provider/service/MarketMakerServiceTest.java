@@ -353,6 +353,16 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void enabledReferenceMarketDoesNotQuoteWithoutFreshBook() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.referenceMarketEnabled = true;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+    }
+
+    @Test
     void runOnceCancelsOffTargetOwnedQuotesBeforeReposting() {
         String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         OrderResponse staleBid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
@@ -726,6 +736,7 @@ class MarketMakerServiceTest {
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
         private boolean tradeEnabled;
+        private boolean referenceMarketEnabled;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
@@ -779,6 +790,7 @@ class MarketMakerServiceTest {
 
         private MarketMakerProperties properties() {
             MarketMakerProperties properties = new MarketMakerProperties();
+            properties.getReferenceMarket().setEnabled(referenceMarketEnabled);
             properties.getTrade().setEnabled(tradeEnabled);
             properties.getTrade().setOrdersPerBatch(tradeBatchSize);
             properties.getTrade().setAccountIds(List.of(900002L));

@@ -423,6 +423,7 @@ public class MarketMakerService {
             MarkPriceResponse markPrice = currentMarkPrice(productLine, instrumentId, instrument.changeId());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
+                    || properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, instrumentId),
@@ -449,6 +450,12 @@ public class MarketMakerService {
             long quoteCoveragePpm = desiredQuotes <= 0 ? 0
                     : Math.round(matchedDesired * 1_000_000.0d / desiredQuotes);
             long markTicks = markPriceTicks(instrument, markPrice);
+
+            if (properties.getReferenceMarket().isEnabled() && referenceOrderBook == null) {
+                rowAnomalies.add(anomaly("CRITICAL", "REFERENCE_BOOK_UNAVAILABLE", strategyId,
+                        productLine, instrumentId, accountId, 0, 1,
+                        "fresh external reference order book is required for quoting"));
+            }
 
             if (inventoryUsagePpm >= 1_000_000L) {
                 rowAnomalies.add(anomaly("CRITICAL", "INVENTORY_LIMIT_REACHED", strategyId, productLine, instrumentId, accountId,
@@ -747,8 +754,10 @@ public class MarketMakerService {
         PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, instrumentId, now);
         OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
-        QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
+        QuotePlan plan = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
+                ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
+                : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
+                        otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
         ReconcileResult result = reconcile(strategy, accountId, instrumentId, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());

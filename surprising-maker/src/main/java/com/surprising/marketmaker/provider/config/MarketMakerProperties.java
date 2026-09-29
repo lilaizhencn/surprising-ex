@@ -212,9 +212,9 @@ public class MarketMakerProperties {
     @Getter
     public static class ReferenceMarket {
         @Setter
-        private boolean enabled;
+        private boolean enabled = true;
         @Setter
-        private boolean webSocketEnabled;
+        private boolean webSocketEnabled = true;
         @Setter
         private Duration refreshInterval = Duration.ofMillis(500);
         @Setter

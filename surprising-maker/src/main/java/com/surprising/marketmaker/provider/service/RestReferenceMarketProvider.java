@@ -232,7 +232,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision(), source);
+            long quantitySteps = toSteps(level.quantity(), instrument, source);
             if (priceTicks > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -245,7 +245,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument.quantityPrecision(), source);
+            long quantitySteps = toSteps(level.quantity(), instrument, source);
             if (priceTicks > 0 && quantitySteps > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -259,9 +259,17 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 .longValueExact();
     }
 
-    private long toSteps(BigDecimal quantity, int quantityPrecision,
+    private long toSteps(BigDecimal quantity, InstrumentResponse instrument,
                          MarketMakerProperties.ReferenceMarket.Source source) {
-        long rawSteps = quantity.movePointRight(Math.max(0, quantityPrecision))
+        BigDecimal size = quantity;
+        if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                || instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY) {
+            size = size.divide(BigDecimal.valueOf(instrument.contractMultiplierPpm()), 18, RoundingMode.HALF_UP)
+                    .multiply(ONE_PPM);
+        } else {
+            size = size.movePointRight(Math.max(0, instrument.quantityPrecision()));
+        }
+        long rawSteps = size
                 .multiply(BigDecimal.valueOf(Math.max(1L, properties.getReferenceMarket().getQuantityScalePpm())))
                 .multiply(BigDecimal.valueOf(source.getQuantityScalePpm()))
                 .divide(ONE_PPM.multiply(ONE_PPM), 0, RoundingMode.HALF_UP)

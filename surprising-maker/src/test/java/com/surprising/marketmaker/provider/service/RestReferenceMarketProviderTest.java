@@ -157,7 +157,7 @@ class RestReferenceMarketProviderTest {
     private InstrumentResponse instrument() {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         return new InstrumentResponse(1, 3, 1, 1, 3, "BTC-USDT", 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
-                "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10_000_000L, 100_000L, 1L,
+                "BTC", "USDT", "USDT", 1_000L, "BTC", 10_000_000L, 100_000L, 1L,
                 1_000_000L, 1L, 1_000_000_000_000L, 1L, 1, 3, List.of("LIMIT"), List.of("GTX"),
                 true, true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,

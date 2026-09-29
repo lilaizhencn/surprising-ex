@@ -88,8 +88,8 @@ surprising:
       max-sweep-levels: 5
       inventory-threshold-steps: 5000
     reference-market:
-      enabled: ${MM_REFERENCE_MARKET_ENABLED:false}
-      websocket-enabled: ${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:false}
+      enabled: ${MM_REFERENCE_MARKET_ENABLED:true}
+      websocket-enabled: ${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:true}
       refresh-interval: 500ms
       max-age: 3s
       request-timeout: 2s
