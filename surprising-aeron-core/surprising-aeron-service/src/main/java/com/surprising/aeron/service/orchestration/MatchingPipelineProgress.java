@@ -28,14 +28,25 @@ final class MatchingPipelineProgress {
         if (shard >= 0) readyShardMask |= 1L << shard;
     }
 
+    void batchCompleted() {
+        for (int shard = 0; shard < owner.matchingAdapter.topology().matchingEngineCount(); shard++) {
+            if (owner.pendingMatching.submissionHead(shard) != null) readyShardMask |= 1L << shard;
+        }
+    }
+
     boolean submissionDeferred(long sequence) {
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending != null) {
             int shardId = owner.matchingFlow.pendingSubmissionShard(pending);
             if (!owner.pendingMatching.isSubmissionHead(sequence, shardId)) return true;
         }
-        if (pending != null && pending.clusterIndependent || !owner.batches.hasPendingBatches()) return false;
-        return sequence > owner.batches.firstBatch().sequence;
+        if (!owner.batches.hasPendingBatches() || sequence <= owner.batches.firstBatch().sequence)
+            return false;
+        // Independent work on an unrelated shard can proceed. A later batch item may still
+        // visit another shard, so fence every shard used by the unfinished item suffix.
+        return pending == null || !pending.clusterIndependent
+                || (owner.batches.remainingMatcherShardMask(owner.batches.firstBatch())
+                    & (1L << owner.matchingFlow.pendingSubmissionShard(pending))) != 0;
     }
 
     void submissionCompleted(CommandSlot pending) {
@@ -87,9 +98,9 @@ final class MatchingPipelineProgress {
                 }
                 if (admission == null && batchAdmission == null) {
                     if (orderBatch != null && pending.clusterIndependent
-                            && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.activated()) {
+                            && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.activated()
+                            && !pending.isMatchingSubmitted()) {
                         owner.matchingFlow.submitMatching(pending);
-                        if (pending.isMatchingSubmitted()) continue;
                     }
                     // A control or matching command may have been held behind an earlier
                     // submission head. Sequential order batches own their item cursor and are
@@ -157,7 +168,14 @@ final class MatchingPipelineProgress {
                     if (!pending.isMatchingSubmitted()) {
                         owner.batches.submitPipelinedPlaceBatch(pending, orderBatch);
                         pending.matchingSubmitted();
-                        submissionCompleted(pending);
+                        if (owner.batches.remainingMatcherShardMask(orderBatch) == 0)
+                            submissionCompleted(pending);
+                    }
+                    if (owner.pendingMatching.isSubmissionHead(pending.sequence(), shard)) {
+                        // More batch items can still submit on this shard. Do not spin on its
+                        // completed admission while Matcher/Lane work runs.
+                        readyShardMask &= ~shardBit;
+                        break;
                     }
                     continue;
                 }

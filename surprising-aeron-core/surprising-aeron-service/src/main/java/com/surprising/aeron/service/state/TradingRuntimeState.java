@@ -459,6 +459,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public boolean pollControlLanes() { return controlLanes.poll(); }
 
+    /** Read the in-flight control Lane handoff only after a Core progress failure. */
+    public String controlLaneDiagnostics() { return controlLanes.diagnostics(); }
+
     public Object controlLaneResult(int laneId) { return controlLanes.result(laneId); }
 
     public void readFence(long userId, long committedCoreSequence) {

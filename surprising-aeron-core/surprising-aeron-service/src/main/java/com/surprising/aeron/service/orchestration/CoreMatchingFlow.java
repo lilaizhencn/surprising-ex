@@ -202,7 +202,12 @@ final class CoreMatchingFlow {
     }
 
     private void submitMatchingInCommandScope(CommandSlot pending) {
-        if (pending.crossShardCancellationStarted || owner.matchingProgress.submissionDeferred(pending.sequence())) return;
+        // A batch keeps its Core sequence across items. Once ordered commit owns its item
+        // cursor, later submissions must not re-enter the initial shard admission gate.
+        boolean batchContinuation = pending.orderBatch != null && pending.orderBatch.commitStarted()
+                && pending.orderBatch.nextIndex > 0 && pending.isMatchingSubmitted();
+        if (pending.crossShardCancellationStarted
+                || !batchContinuation && owner.matchingProgress.submissionDeferred(pending.sequence())) return;
         pending.prepareLaneResultTarget(owner.responseArena);
         if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
             if (!collectPlaceAdmissionIfReady(pending)
@@ -210,7 +215,11 @@ final class CoreMatchingFlow {
         }
         if (pending.orderBatch != null) {
             owner.batches.submitOrderBatchMatching(pending);
-            if (pending.isMatchingSubmitted()) owner.matchingProgress.submissionCompleted(pending);
+            // A batch keeps its shard fence while more Matcher chunks may be submitted.
+            if (pending.isMatchingSubmitted()
+                    && owner.pendingMatching.submissionShard(pending.sequence()) >= 0
+                    && owner.batches.remainingMatcherShardMask(pending.orderBatch) == 0)
+                owner.matchingProgress.submissionCompleted(pending);
             return;
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH

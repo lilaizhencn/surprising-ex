@@ -114,10 +114,17 @@ public final class TradingCoreOwner {
     /** 队列满时暂停日志消费，在原日志上下文内推进已复制命令；不改变业务顺序或拒绝结果。 */
     private void awaitIngressCapacity(CoreMessage request) {
         if (commandPipeline.pendingIngress().hasCapacity(request)) return;
-        long deadline = System.nanoTime() + OwnerCommandPipelineState.COMMAND_TIMEOUT_NANOS;
+        long started = System.nanoTime();
+        long deadline = started + OwnerCommandPipelineState.COMMAND_TIMEOUT_NANOS;
+        boolean reported = false;
         do {
             progressCommands();
             if (commandPipeline.pendingIngress().hasCapacity(request)) return;
+            if (!reported && System.nanoTime() - started >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
+                log.error("Core ingress has made no capacity for 5 seconds productLine={} {}",
+                        productLine, stalledCommandDiagnostics());
+                reported = true;
+            }
             idleCommand(0, deadline);
         } while (true);
     }
@@ -342,7 +349,35 @@ public final class TradingCoreOwner {
     private void checkProgressDeadline() {
         if (Thread.currentThread().isInterrupted()
                 || System.nanoTime() - commandPipeline.progressDeadline() >= 0)
-            throw new IllegalStateException("asynchronous command progress interrupted or timed out");
+            throw new IllegalStateException("asynchronous command progress interrupted or timed out: "
+                    + stalledCommandDiagnostics());
+    }
+
+    /** Capture the existing Owner and worker state only when progress has already failed. */
+    private String stalledCommandDiagnostics() {
+        var window = commandPipeline.commandWindow();
+        var head = window.size() == 0 ? null : window.get(0);
+        var pending = state.pendingMatching.head();
+        var ingress = commandPipeline.pendingIngress().first();
+        var control = commandPipeline.activeControl();
+        return "window=" + window.size()
+                + " ingress=" + commandPipeline.pendingIngress().size()
+                + " control=" + (control == null ? "none" : control.command.header().messageType()
+                        + "/" + control.command.header().commandId())
+                + " head=" + (head == null ? "none" : head.sequence + "/"
+                        + head.request.header().messageType() + "/" + head.request.header().commandId())
+                + " pending=" + (pending == null ? "none" : pending.sequence() + "/"
+                        + pending.command().header().messageType() + "/"
+                        + pending.matchingLifecycleName() + "/"
+                        + CoreMatchingPhaseMetrics.headWaitReason(pending))
+                + " ingressHead=" + (ingress == null ? "none" : ingress.command.header().messageType()
+                        + "/" + ingress.command.header().commandId())
+                + " matcherSubmissionDepth=" + state.matcherPipeline.submissionDepth()
+                + " matcherCompletionDepth=" + state.matcherPipeline.completionDepth()
+                + " controlLanes=" + state.runtimeState.controlLaneDiagnostics()
+                + " completionAvailable=" + ownerCompletionAvailable()
+                + " localMatchingWork=" + state.hasLocalMatchingWork()
+                + " drainWork=" + state.hasMatchingDrainWork();
     }
 
     /** 仅框架快照边界需要等待：快照不能遗漏已经复制但尚未完成的业务。 */
@@ -409,7 +444,8 @@ public final class TradingCoreOwner {
     private void idleCommand(int work, long deadline) {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
             // 这是运行时故障，不是复制的业务拒绝，也不能转换成延迟完成。
-            throw new IllegalStateException("cluster log callback completion interrupted or timed out");
+            throw new IllegalStateException("cluster log callback completion interrupted or timed out: "
+                    + stalledCommandDiagnostics());
         }
         idleStrategy.idle(work);
     }

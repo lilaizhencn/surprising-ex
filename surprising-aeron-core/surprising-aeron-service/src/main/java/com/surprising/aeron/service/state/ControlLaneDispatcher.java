@@ -10,6 +10,18 @@ final class ControlLaneDispatcher {
     ControlLaneDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
     boolean pending() { return controlLaneWorkPending; }
+
+    String diagnostics() {
+        long unfinished = 0;
+        for (int id = 0; id < owner.accountLanes.length; id++) {
+            if ((pendingControlLaneMask & (1L << id)) != 0
+                    && (owner.laneMutationTasks[id] == null || !owner.laneMutationTasks[id].completed)) {
+                unfinished |= 1L << id;
+            }
+        }
+        return "pending=" + controlLaneWorkPending + ",mask=" + pendingControlLaneMask
+                + ",unfinished=" + unfinished + ",operation=" + operationType;
+    }
     boolean targetsLane(int laneId) {
         return controlLaneWorkPending && (pendingControlLaneMask & (1L << laneId)) != 0;
     }

@@ -567,6 +567,43 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder() {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            for (int index = 0; index < 8; index++) {
+                drainBatch(state, command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2 + index,
+                        TradingCommandCodec.encodePlaceOrder(
+                                place(19_001 + index, "async-chunk-" + index, 1_000))));
+            }
+            List<CancelOrderCommand> cancellations = new ArrayList<>();
+            for (int index = 0; index < 6; index++)
+                cancellations.add(new CancelOrderCommand(19_001 + index));
+            cancellations.add(new CancelOrderCommand(99_999));
+            cancellations.add(new CancelOrderCommand(19_007));
+            cancellations.add(new CancelOrderCommand(19_008));
+            CoreResponse response = CoreTestCompletion.applyAsynchronously(state,
+                    command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 10,
+                            TradingOrderBatchCodec.encodeCancelOrderBatch(
+                                    new CancelOrderBatchCommand(cancellations))));
+            assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+            assertThat(items).extracting(CoreOrderBatchResult.Item::status).containsExactly(
+                    ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+                    ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+                    ResponseStatus.REJECTED, ResponseStatus.APPLIED, ResponseStatus.APPLIED);
+            assertThat(items.get(6).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(CoreTestCompletion.applyAsynchronously(state,
+                    command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 11,
+                            TradingCommandCodec.encodePlaceOrder(place(19_009, "after-async-chunk", 1_000))))
+                    .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits())
+                    .isEqualTo(99_000);
+        }
+    }
+
+    @Test
     void isolatesOverlappingBatchesUntilTheActiveBatchCompletes() throws Exception {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);

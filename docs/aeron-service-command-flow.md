@@ -260,6 +260,8 @@ Core 路由与分支：`TradingCoreOwner.progressCommandsInScope` 准备路由�
 
 具体资金结果仍需按产品线看各自结算逻辑：现货资产冻结和成交扣减、永续资金费 / 持仓及强平规则、交割结算、期权权利金和行权状态并不共用一套业务规则。上图只说明 Aeron 命令编排和状态交接。
 
+批量撤单可能分成多个 Matcher 片段，中间也可能遇到已不存在的订单。`OrderBatchExecutor.startOrderBatchItem` 逐项校验并推进游标；`CoreMatchingFlow.submitMatching` 对首次提交检查 shard 提交占位，后续片段沿用同一 Core 序号和批次提交上下文投递 Matcher；`OrderedCommitCoordinator` 仍在批次终态按原有顺序提交。批次尚有未投递的 Matcher 片段时保留 shard 提交占位，并挡住以后可能用到的 shard；全部片段已投递后释放占位。这样不相关 shard 可以并行，后续撮合结果也不会在原生序号上越过未投递的批次片段。
+
 ## 建议的源码跟读路线
 
 如果想在 IDE 里从一个入口一路单步跟下去，建议按下面顺序：

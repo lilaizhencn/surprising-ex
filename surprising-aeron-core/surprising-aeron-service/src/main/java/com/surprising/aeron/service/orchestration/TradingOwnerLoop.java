@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 /** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
 @Component
 public final class TradingOwnerLoop implements Runnable {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TradingOwnerLoop.class);
     private static final long DEADLINE_NS = 30_000_000_000L;
     private static final long INPUT_BYTES = 64L * 1024 * 1024;
     private static final String INPUT_BATCH_SIZE_PROPERTY =
@@ -194,8 +195,15 @@ public final class TradingOwnerLoop implements Runnable {
     private void enqueue(Input event) {
         int bytes = event.command == null ? 0 : event.command.payloadLength();
         if (bytes > INPUT_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
-        long deadline = System.nanoTime() + DEADLINE_NS;
+        long started = System.nanoTime();
+        long deadline = started + DEADLINE_NS;
+        boolean reported = false;
         while (bytes > INPUT_BYTES - (inputProduced - inputConsumed) || !input.offer(event)) {
+            if (!reported && System.nanoTime() - started >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
+                LOG.error("Core owner input has made no capacity for 5 seconds queued={} bytes={} ownerFailure={}",
+                        input.size(), inputProduced - inputConsumed, failure);
+                reported = true;
+            }
             awaitProgress(deadline);
         }
         inputProduced += bytes;

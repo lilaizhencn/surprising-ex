@@ -531,7 +531,8 @@ final class OrderBatchExecutor {
         batch.lastMatchingResult = null;
         if (batch.kind == OrderBatchKind.CANCEL) {
             submitCancelBatchChunk(pending, batch);
-            if (pending.clusterIndependent && batch.activated()) pending.matchingSubmitted();
+            if (pending.clusterIndependent && batch.activated() && !pending.isMatchingSubmitted())
+                pending.matchingSubmitted();
             return;
         }
         int shard = orderBatchMatcherShard(batch);
@@ -1069,6 +1070,7 @@ final class OrderBatchExecutor {
         unregisterBatch(pending, batch);
         owner.matchingFlow.removePendingMatching(batch.sequence);
         unregisterPipelinedBatchSymbols(batch);
+        owner.matchingProgress.batchCompleted();
         owner.matchingProgress.submitDeferredMatchingAfterBatch();
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence,
@@ -1101,7 +1103,28 @@ final class OrderBatchExecutor {
         if (batch == null || batch.nextIndex < 0 || batch.nextIndex >= batch.items.size()) {
             throw new IllegalArgumentException("order batch matcher route is unavailable");
         }
-        OrderBatchItem item = batch.items.get(batch.nextIndex);
+        return matcherShardForBatchItem(batch, batch.items.get(batch.nextIndex));
+    }
+
+    long remainingMatcherShardMask(OrderBatchPending batch) {
+        long mask = 0;
+        if (batch.pipelined && batch.sequence != 0
+                && owner.pendingMatching.get(batch.sequence).isMatchingSubmitted()) return 0;
+        int firstUnsubmitted = batch.nextIndex;
+        if (batch.itemSettlementEvent != null) {
+            firstUnsubmitted = batch.kind == OrderBatchKind.CANCEL
+                    ? batch.cancellationChunkEnd : batch.nextIndex + 1;
+        }
+        for (int index = firstUnsubmitted; index < batch.items.size(); index++) {
+            if (batch.kind != OrderBatchKind.PLACE && owner.activeOrderIndex.activeOrderRoute(
+                    batch.kind == OrderBatchKind.CANCEL ? batch.items.get(index).orderId()
+                            : batch.items.get(index).originalOrderId()) == null) continue;
+            mask |= 1L << matcherShardForBatchItem(batch, batch.items.get(index));
+        }
+        return mask;
+    }
+
+    private int matcherShardForBatchItem(OrderBatchPending batch, OrderBatchItem item) {
         String instrumentId = switch (batch.kind) {
             case PLACE -> ((PlaceOrderCommand) item.command).instrumentId();
             case CANCEL -> {
