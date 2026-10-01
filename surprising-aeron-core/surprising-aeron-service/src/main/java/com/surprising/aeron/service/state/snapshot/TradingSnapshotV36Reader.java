@@ -20,7 +20,7 @@ import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreRiskStatus;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
-import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -36,6 +36,8 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -344,7 +346,7 @@ final class TradingSnapshotV36Reader {
         for (int index = 0; index < algoCount; index++) {
             int length = reader.count("algo payload bytes");
             CoreAlgoOrderState algo = CoreAlgoOrderState.from(
-                    com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(reader.bytes(length)));
+                    readPublishedAlgo(reader.bytes(length)));
             putUnique(algoOrders, algo.algoOrderId(), algo);
         }
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
@@ -371,7 +373,7 @@ final class TradingSnapshotV36Reader {
         int triggerCount = reader.count("trigger orders");
         for (int index = 0; index < triggerCount; index++) {
             int length = reader.count("trigger payload bytes");
-            var view = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(reader.bytes(length));
+            var view = readPublishedTrigger(reader.bytes(length));
             CoreInstrument instrument = instruments.get(view.instrumentId());
             if (instrument == null) throw new ProtocolException("trigger instrument is missing");
             CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument);
@@ -380,6 +382,51 @@ final class TradingSnapshotV36Reader {
         reader.requireConsumed();
         return new TradingCoreState(productLine, revision, users, orders, instruments, riskState,
                 treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
+    }
+
+    // Published embedded layouts are frozen here; interface Codec changes must not change disk readers.
+    static CoreAlgoOrderView readPublishedAlgo(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        if (reader.intValue() != 1 || reader.intValue() != 1)
+            throw new ProtocolException("unsupported historical algo snapshot");
+        long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.embeddedText(256), instrumentId = reader.embeddedText(256);
+        int type = reader.intValue(); CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
+        long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
+        long interval = reader.longValue(), duration = reader.longValue();
+        CoreMarginMode margin = CoreMarginMode.fromWireCode(reader.intValue());
+        CorePositionSide position = CorePositionSide.fromWireCode(reader.intValue());
+        boolean reduce = reader.booleanValue(), post = reader.booleanValue(); CoreTimeInForce tif = CoreTimeInForce.fromWireCode(reader.intValue());
+        int status = reader.intValue(); long current = reader.longValue(); String reason = reader.embeddedText(256), trace = reader.embeddedText(256);
+        long start = reader.longValue(), next = reader.longValue(), completed = reader.longValue();
+        long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
+        int childCount = reader.count("algo children"); List<Long> children = new ArrayList<>(childCount);
+        for (int index = 0; index < childCount; index++) children.add(reader.longValue());
+        var result = new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
+                interval, duration, margin, position, reduce, post, tif, status, current, reason, trace,
+                start, next, completed, created, updated, revision, children, reader.longValue(), reader.longValue(), reader.intValue());
+        reader.requireConsumed();
+        return result;
+    }
+
+    static CoreTriggerOrderStateView readPublishedTrigger(byte[] encoded) {
+        Reader reader = new Reader(encoded); int version = reader.intValue();
+        if (version != 2 && version != 3) throw new ProtocolException("unsupported historical trigger snapshot");
+        CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(
+                reader.positiveLong("trigger value"), ProductLineWireCode.decode(reader.intValue()), reader.positiveLong("trigger value"),
+                reader.embeddedText(128), reader.embeddedText(128), reader.embeddedText(128), CoreOrderSide.fromWireCode(reader.intValue()),
+                SnapshotEnumCodes.readCoreTriggerOrderType(reader.intValue()),
+                SnapshotEnumCodes.readCoreTriggerCondition(reader.intValue()), reader.nonNegativeLong("trigger value"),
+                reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"),
+                CoreOrderType.fromWireCode(reader.intValue()), CoreTimeInForce.fromWireCode(reader.intValue()),
+                reader.nonNegativeLong("trigger value"), reader.positiveLong("trigger value"), CoreMarginMode.fromWireCode(reader.intValue()),
+                CorePositionSide.fromWireCode(reader.intValue()),
+                SnapshotEnumCodes.readCoreTriggerOrderStatus(reader.intValue()), reader.nonNegativeLong("trigger value"),
+                reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.embeddedText(128), reader.embeddedText(128), reader.nonNegativeLong("trigger value"),
+                reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"),
+                reader.longValue(), reader.longValue(),
+                version < 3 ? CoreTriggerPriceSource.MARK
+                        : SnapshotEnumCodes.readCoreTriggerPriceSource(reader.intValue()));
+        reader.requireConsumed(); return result;
     }
 
     private static Map<String, Long> readUnits(Reader reader, String name) {
@@ -485,6 +532,15 @@ final class TradingSnapshotV36Reader {
             if (length > MAX_TEXT_BYTES) {
                 throw new ProtocolException("invalid optional snapshot text length: " + length);
             }
+            require(length);
+            String value = new String(input, offset, length, StandardCharsets.UTF_8);
+            offset += length;
+            return value;
+        }
+
+        String embeddedText(int maximumBytes) {
+            int length = count("embedded text");
+            if (length > maximumBytes) throw new ProtocolException("historical embedded text too long");
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);
             offset += length;
