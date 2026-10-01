@@ -55,6 +55,8 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
     public void executeTransferIn(CoreMessage message, long clusterTimestamp) {
         owner.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
+        if (message.header().userId() != command.targetUserId())
+            throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
         if (owner.runtimeState().productLine() != command.targetProductLine())
             throw new CoreStateRejectedException(
                     "PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");

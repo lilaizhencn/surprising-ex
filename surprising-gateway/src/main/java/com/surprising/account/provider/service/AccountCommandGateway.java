@@ -80,9 +80,9 @@ public class AccountCommandGateway {
 
     public ProductBalanceResponse transferIn(ProductTransferOperationRequest request) {
         requireProductLine(request.targetProductLine(), "划转入账");
-        aeron.command(CoreMessageType.TRANSFER_IN, transferCommandId("in", request), request.userId(),
+        aeron.command(CoreMessageType.TRANSFER_IN, transferCommandId("in", request), request.recipientUserId(),
                 TradingCommandCodec.encodeTransferFunds(command(request)));
-        return productBalance(request.userId(), request.targetAccountType(), request.asset());
+        return productBalance(request.recipientUserId(), request.targetAccountType(), request.asset());
     }
 
     public void completeTransfer(ProductTransferOperationRequest request) {
@@ -102,7 +102,7 @@ public class AccountCommandGateway {
             return new ProductTransferOperationRequest(value.transferId(), view.userId(),
                     value.sourceProductLine(), value.targetProductLine(),
                     AccountType.valueOf(value.sourceAccountType()), AccountType.valueOf(value.targetAccountType()),
-                    value.asset(), value.amountUnits(), value.referenceId(), value.reason());
+                    value.asset(), value.amountUnits(), value.referenceId(), value.reason(), value.targetUserId());
         }).toList();
     }
 
@@ -158,7 +158,7 @@ public class AccountCommandGateway {
     private TransferFundsCommand command(ProductTransferOperationRequest request) {
         return new TransferFundsCommand(request.transferId(), request.sourceProductLine(), request.targetProductLine(),
                 request.sourceAccountType().name(), request.targetAccountType().name(), request.asset(),
-                request.amountUnits(), request.referenceId(), request.reason());
+                request.amountUnits(), request.referenceId(), request.reason(), request.userId(), request.recipientUserId());
     }
 
     private UUID transferCommandId(String phase, ProductTransferOperationRequest request) {

@@ -5,6 +5,7 @@ import java.time.Instant;
 public record ProductTransferResult(
         long transferId,
         long userId,
+        long recipientUserId,
         String sourceAccountType,
         String targetAccountType,
         String asset,
@@ -19,7 +20,7 @@ public record ProductTransferResult(
     static ProductTransferResult from(long transferId, ProductTransferCommand command,
                                       ProductTransferStatus status, String errorCode, String errorMessage,
                                       Instant startedAt) {
-        return new ProductTransferResult(transferId, command.userId(), command.sourceAccountType(),
+        return new ProductTransferResult(transferId, command.userId(), command.recipientUserId(), command.sourceAccountType(),
                 command.targetAccountType(), command.asset(), command.amountUnits(), command.referenceId(), status,
                 errorCode, errorMessage, startedAt, Instant.now());
     }

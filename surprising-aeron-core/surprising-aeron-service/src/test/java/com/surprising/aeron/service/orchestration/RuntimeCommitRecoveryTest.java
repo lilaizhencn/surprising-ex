@@ -71,7 +71,7 @@ class RuntimeCommitRecoveryTest {
                 91, 3, 1001, "1", -25, 75, 2, true, 900, 2_000);
         TransferRuntime transfer = new TransferRuntime(1001, new TransferFundsCommand(
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
-                "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity"));
+                "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity", 1001L, 1001L));
         try (TradingCoreRuntime original = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             original.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
             original.restorePendingTransfers(Map.of(transfer.transferId(), transfer));

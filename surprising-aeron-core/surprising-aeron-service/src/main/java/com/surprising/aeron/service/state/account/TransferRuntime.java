@@ -8,6 +8,7 @@ public record TransferRuntime(long userId, TransferFundsCommand command) {
     public TransferRuntime {
         if (userId <= 0) throw new IllegalArgumentException("transfer userId must be positive");
         Objects.requireNonNull(command, "command");
+        if (userId != command.sourceUserId()) throw new IllegalArgumentException("pending transfer sender mismatch");
     }
 
     public long transferId() {

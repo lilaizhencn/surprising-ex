@@ -18,6 +18,25 @@ import org.junit.jupiter.api.Test;
 class RuntimeStateTransitionsTest {
 
     @Test
+    void pendingQueriesAdvancePastPermanentlyPendingPrefixAndWrap() {
+        var before = TradingCoreState.empty(ProductLine.SPOT);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(before, identities)) {
+            var pending = new java.util.TreeMap<Long, com.surprising.aeron.service.state.account.TransferRuntime>();
+            for (long id = 1; id <= 5; id++) pending.put(id,
+                    new com.surprising.aeron.service.state.account.TransferRuntime(7,
+                            new TransferFundsCommand(id, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                                    "SPOT", "USDT_PERPETUAL", "USDT", 1, "r" + id, "", 7L, 7L)));
+            runtime.restorePendingTransfers(pending);
+            assertThat(runtime.pendingTransfers(2)).extracting(t -> t.transferId()).containsExactly(1L, 2L);
+            assertThat(runtime.pendingTransfers(2)).extracting(t -> t.transferId()).containsExactly(3L, 4L);
+            assertThat(runtime.pendingTransfers(2)).extracting(t -> t.transferId()).containsExactly(5L);
+            assertThat(runtime.pendingTransfers(2)).extracting(t -> t.transferId()).containsExactly(1L, 2L);
+            assertThat(runtime.pendingTransfersSnapshot()).isEqualTo(pending);
+        }
+    }
+
+    @Test
     void productTransferUsesOnlyBoundedRuntimeState() {
         TradingCoreState before = new RuntimeTestStateTransitions().adjustBalance(
                 TradingCoreState.empty(ProductLine.SPOT), 7,
@@ -26,7 +45,7 @@ class RuntimeStateTransitionsTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
-                "transfer-91", "product allocation");
+                "transfer-91", "product allocation", 7L, 7L);
 
         assertThat(RuntimeAccountStateTransitions.transferOut(runtime, identities, 7L, transfer)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNotNull();
@@ -45,7 +64,7 @@ class RuntimeStateTransitionsTest {
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
-                "transfer-91", "product allocation");
+                "transfer-91", "product allocation", 7L, 7L);
 
         RuntimeAccountStateTransitions.transferIn(runtime, identities, 7L, transfer);
 

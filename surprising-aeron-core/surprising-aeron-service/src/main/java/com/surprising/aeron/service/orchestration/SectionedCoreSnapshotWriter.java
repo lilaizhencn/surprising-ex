@@ -60,7 +60,7 @@ public final class SectionedCoreSnapshotWriter {
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
                 state.feePolicies(), state.pendingTransfers(),
-                state.terminalRetention().copy(),
+                state.terminalRetention().encode(),
                 state.accountLaneSnapshots(coreSequence, snapshotState));
     }
 
@@ -77,7 +77,7 @@ public final class SectionedCoreSnapshotWriter {
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
         payloads.add(CoreTransferSnapshotCodec.encode(image.pendingTransfers()));
-        payloads.add(image.terminalRetention().encode());
+        payloads.add(image.terminalRetention());
         for (AccountLaneSnapshot lane : image.accountLanes()) {
             payloads.add(accountLane(lane));
         }

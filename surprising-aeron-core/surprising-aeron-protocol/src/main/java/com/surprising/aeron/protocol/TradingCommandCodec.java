@@ -11,7 +11,7 @@ public final class TradingCommandCodec {
     private static final int PLACE_ORDER_VERSION = 4;
     private static final int INSTRUMENT_RISK_V3_MARKER = 0x49525633;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
-    private static final int TRANSFER_FUNDS_VERSION = 1;
+    private static final int TRANSFER_FUNDS_VERSION = 2;
 
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -43,11 +43,12 @@ public final class TradingCommandCodec {
         byte[] asset = transferText(command.asset(), 20, false);
         byte[] reference = transferText(command.referenceId(), 128, false);
         byte[] reason = transferText(command.reason(), 256, true);
-        return ByteBuffer.allocate(Integer.BYTES * 3 + Long.BYTES * 2 + Short.BYTES * 5
+        return ByteBuffer.allocate(Integer.BYTES * 3 + Long.BYTES * 4 + Short.BYTES * 5
                         + sourceAccount.length + targetAccount.length + asset.length + reference.length + reason.length)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(TRANSFER_FUNDS_VERSION)
                 .putLong(command.transferId())
+                .putLong(command.sourceUserId()).putLong(command.targetUserId())
                 .putInt(ProductLineWireCode.encode(command.sourceProductLine()))
                 .putInt(ProductLineWireCode.encode(command.targetProductLine()))
                 .putShort((short) sourceAccount.length).put(sourceAccount)
@@ -61,12 +62,14 @@ public final class TradingCommandCodec {
 
     public static TransferFundsCommand decodeTransferFunds(byte[] payload) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES + Integer.BYTES * 2);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 3 + Integer.BYTES * 2);
         int version = buffer.getInt();
         if (version != TRANSFER_FUNDS_VERSION) {
             throw new ProtocolException("unsupported transfer funds version: " + version);
         }
         long transferId = buffer.getLong();
+        long sourceUserId = buffer.getLong();
+        long targetUserId = buffer.getLong();
         var source = ProductLineWireCode.decode(buffer.getInt());
         var target = ProductLineWireCode.decode(buffer.getInt());
         String sourceAccount = readTransferText(buffer, 32, false);
@@ -78,7 +81,7 @@ public final class TradingCommandCodec {
         String reason = readTransferText(buffer, 256, true);
         requireConsumed(buffer);
         return new TransferFundsCommand(transferId, source, target, sourceAccount, targetAccount,
-                asset, amount, reference, reason);
+                asset, amount, reference, reason, sourceUserId, targetUserId);
     }
 
     public static byte[] encodeCompleteTransfer(CompleteTransferCommand command) {

@@ -267,9 +267,6 @@ final class CoreCommandIngress {
                         com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
                         runtime.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             }
-            if (!runtime.terminalRetention.hasFundsCommandCapacity(message.header().commandId())) {
-                return runtime.rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);
-            }
         }
         return null;
     }

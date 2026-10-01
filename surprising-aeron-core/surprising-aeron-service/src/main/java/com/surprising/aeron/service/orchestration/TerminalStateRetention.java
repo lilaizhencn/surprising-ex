@@ -25,29 +25,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink {
+final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink, AutoCloseable {
 
-    // The live instance is product-owner confined. Snapshot encoding receives a detached copy.
+    // The live instance is product-owner confined. Snapshot encoding receives detached bytes.
 
     static final int MAX_TOMBSTONES = 65_536;
     static final int MAX_PRUNE_PER_ACK = 4_096;
-    static final int MAX_FUNDS_COMMANDS = 131_072;
     private static final int VERSION = 2;
     private static final int MAX_CLIENT_ID_BYTES = 256;
     private final LinkedHashMap<EntityKey, RetainedEntity> candidates;
     private final TerminalTombstoneStore tombstones;
-    private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    private final FundsCommandIndex fundsCommands;
     /** Owner-confined lookup key; candidate keys themselves remain stable Map keys. */
     private final EntityKey candidateLookupKey = new EntityKey(EntityType.ORDER, 1);
     private final ArrayList<Long> sortedScratch = new ArrayList<>();
 
     TerminalStateRetention() {
-        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new LinkedHashMap<>());
+        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex());
     }
 
     private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
                                    TerminalTombstoneStore tombstones,
-                                   LinkedHashMap<UUID, CommandFingerprint> fundsCommands) {
+                                   FundsCommandIndex fundsCommands) {
         this.candidates = candidates;
         this.tombstones = tombstones;
         this.fundsCommands = fundsCommands;
@@ -179,19 +178,14 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         return fundsCommands.get(commandId);
     }
 
-    boolean hasFundsCommandCapacity(UUID commandId) {
-        return fundsCommands.containsKey(commandId) || fundsCommands.size() < MAX_FUNDS_COMMANDS;
+    void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
+        fundsCommands.put(commandId, fingerprint);
     }
 
-    void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
-        if (commandId == null || fingerprint == null || !hasFundsCommandCapacity(commandId)) {
-            throw new IllegalStateException("funds command retention is full");
-        }
-        CommandFingerprint previous = fundsCommands.putIfAbsent(commandId, fingerprint);
-        if (previous != null && !previous.equals(fingerprint)) {
-            throw new IllegalStateException("funds command fingerprint conflict");
-        }
-    }
+    void assertHealthy() { fundsCommands.assertHealthy(); }
+
+    @Override
+    public void close() { fundsCommands.close(); }
 
     byte[] encode() {
         try {
@@ -200,25 +194,12 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             output.writeInt(VERSION);
             write(output, candidates);
             tombstones.write(output);
-            output.writeInt(fundsCommands.size());
-            for (Map.Entry<UUID, CommandFingerprint> entry : fundsCommands.entrySet()) {
-                output.writeLong(entry.getKey().getMostSignificantBits());
-                output.writeLong(entry.getKey().getLeastSignificantBits());
-                output.write(entry.getValue().bytes());
-            }
+            fundsCommands.write(output);
             output.flush();
             return bytes.toByteArray();
         } catch (IOException exception) {
             throw new IllegalStateException("failed to encode terminal retention", exception);
         }
-    }
-
-    TerminalStateRetention copy() {
-        LinkedHashMap<EntityKey, RetainedEntity> copiedCandidates = new LinkedHashMap<>();
-        candidates.forEach((key, value) -> copiedCandidates.put(key,
-                new RetainedEntity(key, value.userId(), value.clientId(), value.exportSequence())));
-        return new TerminalStateRetention(copiedCandidates, tombstones.copy(),
-                new LinkedHashMap<>(fundsCommands));
     }
 
     static TerminalStateRetention decode(byte[] encoded) {
@@ -232,20 +213,26 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             for (var value : decodedTombstones.values()) tombstones.put(value.key().type().ordinal(),
                     value.key().id(), value.userId(), value.clientId(), value.exportSequence());
             int fundsCommandCount = input.readInt();
-            if (fundsCommandCount < 0 || fundsCommandCount > MAX_FUNDS_COMMANDS) {
+            if (fundsCommandCount < 0 || (long) fundsCommandCount * (16 + CommandFingerprint.LENGTH) != input.available()) {
                 throw new IllegalArgumentException("invalid funds command retention count");
             }
-            LinkedHashMap<UUID, CommandFingerprint> fundsCommands = new LinkedHashMap<>();
-            for (int index = 0; index < fundsCommandCount; index++) {
-                UUID commandId = new UUID(input.readLong(), input.readLong());
-                byte[] fingerprint = input.readNBytes(CommandFingerprint.LENGTH);
-                if (fingerprint.length != CommandFingerprint.LENGTH
-                        || fundsCommands.put(commandId, CommandFingerprint.fromBytes(fingerprint)) != null) {
-                    throw new IllegalArgumentException("invalid retained funds command");
+            FundsCommandIndex fundsCommands = new FundsCommandIndex();
+            try {
+                for (int index = 0; index < fundsCommandCount; index++) {
+                    UUID commandId = new UUID(input.readLong(), input.readLong());
+                    byte[] fingerprint = input.readNBytes(CommandFingerprint.LENGTH);
+                    if (fingerprint.length != CommandFingerprint.LENGTH
+                            || fundsCommands.get(commandId) != null) {
+                        throw new IllegalArgumentException("invalid retained funds command");
+                    }
+                    fundsCommands.put(commandId, CommandFingerprint.fromBytes(fingerprint));
                 }
+                if (input.available() != 0) throw new IllegalArgumentException("trailing terminal retention bytes");
+                return new TerminalStateRetention(candidates, tombstones, fundsCommands);
+            } catch (RuntimeException | IOException failure) {
+                fundsCommands.close();
+                throw failure;
             }
-            if (input.available() != 0) throw new IllegalArgumentException("trailing terminal retention bytes");
-            return new TerminalStateRetention(candidates, tombstones, fundsCommands);
         } catch (IOException exception) {
             throw new IllegalArgumentException("invalid terminal retention payload", exception);
         }

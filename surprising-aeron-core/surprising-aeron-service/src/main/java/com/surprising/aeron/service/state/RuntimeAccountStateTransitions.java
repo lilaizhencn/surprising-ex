@@ -64,6 +64,7 @@ public final class RuntimeAccountStateTransitions {
         if (runtime == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime transfer out");
         runtime.assertOwner();
+        if (userId != command.sourceUserId()) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer sender mismatch");
         if (runtime.productLine() != command.sourceProductLine())
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
         TransferRuntime transfer = new TransferRuntime(userId, command);
@@ -98,6 +99,7 @@ public final class RuntimeAccountStateTransitions {
             throw new IllegalArgumentException("invalid runtime transfer in");
         }
         runtime.assertOwner();
+        if (userId != command.targetUserId()) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
         if (runtime.productLine() != command.targetProductLine()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
         }

@@ -35,7 +35,7 @@ public class CommandDecodingBenchmark {
             case "BALANCE" -> TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10));
             case "TRANSFER" -> TradingCommandCodec.encodeTransferFunds(new TransferFundsCommand(91L,
                     ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL",
-                    "USDT", 250L, "transfer-91", "allocation"));
+                    "USDT", 250L, "transfer-91", "allocation", 7L, 7L));
             default -> throw new IllegalArgumentException(command);
         };
     }

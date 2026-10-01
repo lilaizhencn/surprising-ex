@@ -16,5 +16,13 @@ public record ProductTransferOperationRequest(
         @NotBlank @Size(max = 20) String asset,
         @Positive long amountUnits,
         @NotBlank @Size(max = 128) String referenceId,
-        @Size(max = 256) String reason) {
+        @Size(max = 256) String reason,
+        @Positive long recipientUserId) {
+    /** Same-user product allocation. */
+    public ProductTransferOperationRequest(long transferId, long userId, ProductLine sourceProductLine,
+            ProductLine targetProductLine, AccountType sourceAccountType, AccountType targetAccountType,
+            String asset, long amountUnits, String referenceId, String reason) {
+        this(transferId, userId, sourceProductLine, targetProductLine, sourceAccountType, targetAccountType,
+                asset, amountUnits, referenceId, reason, userId);
+    }
 }

@@ -19,6 +19,26 @@ import org.junit.jupiter.api.Test;
 class CoreFundsIdempotencyTest {
 
     @Test
+    void newFundsCommandsRemainExecutableBeyondOldRetentionLimit() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.fromBytes(
+                    new byte[com.surprising.aeron.protocol.CommandFingerprint.LENGTH]);
+            for (int i = 0; i < 131_080; i++) state.terminalRetention().retainFundsCommand(new UUID(77, i), fingerprint);
+            var deposit = command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
+            assertThat(state.apply(deposit).status()).isEqualTo(ResponseStatus.APPLIED);
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.apply(deposit).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(100);
+                var next = command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 50)));
+                assertThat(restored.apply(next).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(150);
+            }
+        }
+    }
+
+    @Test
     void balanceAdjustmentRemainsIdempotentAfterItsCommandResultIsEvicted() {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             UUID adjustmentId = UUID.randomUUID();
@@ -46,7 +66,7 @@ class CoreFundsIdempotencyTest {
     @Test
     void transferLifecycleIsIdempotentAndPendingStateSurvivesSnapshot() {
         var transfer = new TransferFundsCommand(7001L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
-                "FUNDING", "USDT_PERPETUAL", "USDT", 250L, "transfer-7001", "allocation");
+                "FUNDING", "USDT_PERPETUAL", "USDT", 250L, "transfer-7001", "allocation", 1001L, 1001L);
         byte[] transferPayload = TradingCommandCodec.encodeTransferFunds(transfer);
         UUID outId = UUID.randomUUID();
         try (TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT)) {
@@ -79,7 +99,7 @@ class CoreFundsIdempotencyTest {
             assertThat(target.tradingState().user(1001).totalUnits("USDT")).isEqualTo(250L);
 
             var changed = new TransferFundsCommand(7001L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
-                    "FUNDING", "USDT_PERPETUAL", "USDT", 251L, "transfer-7001", "allocation");
+                    "FUNDING", "USDT_PERPETUAL", "USDT", 251L, "transfer-7001", "allocation", 1001L, 1001L);
             assertThat(target.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN,
                     inId, 2, TradingCommandCodec.encodeTransferFunds(changed))).resultCode().name())
                     .isEqualTo("IDEMPOTENCY_CONFLICT");

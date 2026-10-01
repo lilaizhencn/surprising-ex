@@ -6,5 +6,6 @@ public record ProductTransferWireRequest(
         String asset,
         long amountUnits,
         String referenceId,
-        String reason) {
+        String reason,
+        Long recipientUserId) {
 }

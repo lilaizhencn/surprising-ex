@@ -30,7 +30,7 @@ record CoreSnapshotImage(
         Map<UUID, CommandResultLedger.StoredResult> commandResults,
         Map<Long, CoreFeePolicyState> feePolicies,
         Map<Long, TransferRuntime> pendingTransfers,
-        TerminalStateRetention terminalRetention,
+        byte[] terminalRetention,
         List<AccountLaneSnapshot> accountLanes) {
 
     CoreSnapshotImage {

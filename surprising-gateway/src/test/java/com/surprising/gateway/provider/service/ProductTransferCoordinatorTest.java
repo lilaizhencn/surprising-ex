@@ -146,6 +146,54 @@ class ProductTransferCoordinatorTest {
         assertThat(client.calls()).extracting(call -> call.operation().transferId()).containsExactly(1L, 2L);
     }
 
+    @Test
+    void sameProductTransferUsesAuthenticatedSenderAndExplicitRecipient() {
+        var client = new RecordingProductAccountClient();
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
+                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                        42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
+        org.mockito.Mockito.when(users.find(43)).thenReturn(java.util.Optional.of(
+                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                        43, "recipient", "recipient@example.test", "NORMAL", java.time.Instant.now())));
+        var coordinator = new ProductTransferCoordinator(client, users);
+        var command = new ProductTransferCommand(42, "to-user", "SPOT", "SPOT", "USDT", 10,
+                "to-user", "", 43);
+        assertThat(coordinator.transfer(command).status()).isEqualTo(ProductTransferStatus.COMPLETED);
+        assertThat(client.calls()).allSatisfy(call -> {
+            assertThat(call.operation().userId()).isEqualTo(42);
+            assertThat(call.operation().recipientUserId()).isEqualTo(43);
+        });
+    }
+
+    @Test
+    void nonexistentRecipientIsRejectedBeforeSourceDebit() {
+        var client = new RecordingProductAccountClient();
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
+                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                        42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
+        var coordinator = new ProductTransferCoordinator(client, users);
+        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "invalid-user", "SPOT", "SPOT",
+                "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("recipient");
+        assertThat(client.calls()).isEmpty();
+    }
+
+    @Test
+    void withdrawalDisabledSenderCannotMoveFundsToAnotherUser() {
+        var client = new RecordingProductAccountClient();
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
+                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                        42, "sender", "sender@example.test", "WITHDRAW_DISABLED", java.time.Instant.now())));
+        var coordinator = new ProductTransferCoordinator(client, users);
+        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "blocked-user", "SPOT", "SPOT",
+                "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("transfers are disabled");
+        assertThat(client.calls()).isEmpty();
+    }
+
     private ProductTransferCommand command(String key, String source, String target, long amount) {
         return new ProductTransferCommand(42L, key, source, target, "USDT", amount, key, "test transfer");
     }

@@ -13,15 +13,17 @@ public record TransferFundsCommand(
         String asset,
         long amountUnits,
         String referenceId,
-        String reason) {
+        String reason,
+        long sourceUserId,
+        long targetUserId) {
 
     public TransferFundsCommand {
-        if (transferId <= 0 || amountUnits <= 0) {
+        if (transferId <= 0 || amountUnits <= 0 || sourceUserId <= 0 || targetUserId <= 0) {
             throw new IllegalArgumentException("transferId and amountUnits must be positive");
         }
         Objects.requireNonNull(sourceProductLine, "sourceProductLine");
         Objects.requireNonNull(targetProductLine, "targetProductLine");
-        if (sourceProductLine == targetProductLine) {
+        if (sourceProductLine == targetProductLine && sourceUserId == targetUserId) {
             throw new IllegalArgumentException("source and target product lines must differ");
         }
         sourceAccountType = normalized(sourceAccountType, "sourceAccountType", 32);

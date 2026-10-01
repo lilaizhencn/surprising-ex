@@ -25,13 +25,31 @@ public final class ProductTransferCoordinator {
     private final AtomicInteger nextReconciliationLine = new AtomicInteger();
 
     private final ProductAccountClient accountClient;
+    private final com.surprising.gateway.provider.auth.GatewayUserRepository users;
 
     public ProductTransferCoordinator(ProductAccountClient accountClient) {
+        this(accountClient, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProductTransferCoordinator(ProductAccountClient accountClient,
+            com.surprising.gateway.provider.auth.GatewayUserRepository users) {
         this.accountClient = accountClient;
+        this.users = users;
     }
 
     public ProductTransferResult transfer(ProductTransferCommand command) {
         validate(command);
+        if (command.recipientUserId() != command.userId()) {
+            if (users == null || users.find(command.userId())
+                    .filter(user -> "NORMAL".equals(user.status()) || "TRADE_DISABLED".equals(user.status())).isEmpty()) {
+                throw new IllegalArgumentException("sender is unavailable or transfers are disabled");
+            }
+            if (users == null || users.find(command.recipientUserId())
+                    .filter(user -> "NORMAL".equals(user.status())).isEmpty()) {
+                throw new IllegalArgumentException("recipient is unavailable");
+            }
+        }
         Instant startedAt = Instant.now();
         ProductTransferOperationRequest operation = operation(command);
         ProductAccountAdjustment debit = accountClient.transferOut(
@@ -89,7 +107,7 @@ public final class ProductTransferCoordinator {
                     ? request.referenceId() : suppliedIdempotencyKey;
             return transfer(new ProductTransferCommand(userId, key, request.sourceAccountType(),
                     request.targetAccountType(), request.asset(), request.amountUnits(), request.referenceId(),
-                    request.reason()));
+                    request.reason(), request.recipientUserId() == null ? userId : request.recipientUserId()));
         } catch (RuntimeException exception) {
             if (exception instanceof IllegalArgumentException) {
                 throw exception;
@@ -121,17 +139,17 @@ public final class ProductTransferCoordinator {
         AccountType target = accountType(command.targetAccountType());
         ProductLine sourceLine = productLine(source);
         ProductLine targetLine = productLine(target);
-        if (sourceLine == targetLine) throw new IllegalArgumentException("source and target are the same account");
+        if (sourceLine == targetLine && command.userId() == command.recipientUserId()) throw new IllegalArgumentException("source and target are the same account");
         return new ProductTransferOperationRequest(transferId(command.userId(), command.idempotencyKey()),
                 command.userId(), sourceLine, targetLine, source, target,
                 command.asset().trim().toUpperCase(Locale.ROOT), command.amountUnits(),
-                command.referenceId().trim(), command.reason() == null ? "" : command.reason().trim());
+                command.referenceId().trim(), command.reason() == null ? "" : command.reason().trim(), command.recipientUserId());
     }
 
     private ProductTransferCommand command(ProductTransferOperationRequest operation) {
         return new ProductTransferCommand(operation.userId(), Long.toString(operation.transferId()),
                 operation.sourceAccountType().name(), operation.targetAccountType().name(), operation.asset(),
-                operation.amountUnits(), operation.referenceId(), operation.reason());
+                operation.amountUnits(), operation.referenceId(), operation.reason(), operation.recipientUserId());
     }
 
     private ProductTransferResult result(long transferId, ProductTransferCommand command,
@@ -169,7 +187,7 @@ public final class ProductTransferCoordinator {
     }
 
     private void validate(ProductTransferCommand command) {
-        if (command == null || command.userId() <= 0) throw new IllegalArgumentException("userId is required");
+        if (command == null || command.userId() <= 0 || command.recipientUserId() <= 0) throw new IllegalArgumentException("userId is required");
         if (command.idempotencyKey() == null
                 || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{1,128}")) {
             throw new IllegalArgumentException("idempotency key must be 1-128 safe characters");

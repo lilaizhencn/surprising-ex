@@ -67,6 +67,7 @@ final class CoreRuntimeLifecycle {
     }
 
     void assertHealthy() {
+        owner.terminalRetention.assertHealthy();
         if (owner.fatalFailure != null) throw owner.fatalFailure;
         if (owner.commitPublicationFailure != null) throw owner.commitPublicationFailure;
         if (owner.runtimeState != null) owner.runtimeState.assertAccountLanesHealthy();
@@ -107,6 +108,7 @@ final class CoreRuntimeLifecycle {
         owner.crossShardCancellations.clear();
         owner.admissions.pendingLifecycleScopes.clear();
         owner.commits.publication.close();
-        owner.runtimeState.close();
+        try { owner.runtimeState.close(); }
+        finally { owner.terminalRetention.close(); }
     }
 }

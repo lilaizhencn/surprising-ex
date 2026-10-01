@@ -194,7 +194,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 用户手续费策略状态，参与持久化与恢复。 */
     final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
     /** 尚未结束的跨账户资金转账，完成后移除。 */
-    final Map<Long, TransferRuntime> pendingTransfers = new HashMap<>();
+    final java.util.NavigableMap<Long, TransferRuntime> pendingTransfers = new TreeMap<>();
+    /** Owner-only query cursor; not a money fact. Recovery starts a new fair scan from zero. */
+    private long pendingTransferQueryAfterId;
 
     /** 当前执行范围复用的 matcherSettlementRemaining 临时缓冲，不保存第二份业务状态。 */
     final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
@@ -2970,7 +2972,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS) {
             throw new IllegalArgumentException("invalid pending transfer limit");
         }
-        return pendingTransfers.values().stream().limit(limit).toList();
+        var tail = pendingTransfers.tailMap(pendingTransferQueryAfterId, false);
+        if (tail.isEmpty()) tail = pendingTransfers;
+        var page = tail.values().stream().limit(limit).toList();
+        pendingTransferQueryAfterId = page.isEmpty() ? 0 : page.getLast().transferId();
+        return page;
     }
 
     public void restorePendingTransfers(Map<Long, TransferRuntime> restored) {
@@ -2982,6 +2988,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         pendingTransfers.clear();
         pendingTransfers.putAll(restored);
+        pendingTransferQueryAfterId = 0;
     }
 
     boolean hasPendingTransferCapacity() {

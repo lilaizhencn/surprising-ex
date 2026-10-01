@@ -59,7 +59,7 @@ class TradingCommandCodecTest {
         assertThat(restored).isEqualTo(balance);
         var transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
-                "transfer-91", "调拨-é-😀");
+                "transfer-91", "调拨-é-😀", 7L, 7L);
         byte[] bytes = TradingCommandCodec.encodeTransferFunds(transfer);
         var decoded = TradingCommandCodec.decodeTransferFunds(bytes);
         java.util.Arrays.fill(bytes, (byte) 0);
@@ -80,7 +80,7 @@ class TradingCommandCodecTest {
     void roundTripsProductTransferCommands() {
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
-                "transfer-91", "product allocation");
+                "transfer-91", "product allocation", 7L, 7L);
 
         assertThat(TradingCommandCodec.decodeTransferFunds(
                 TradingCommandCodec.encodeTransferFunds(transfer))).isEqualTo(transfer);
@@ -92,7 +92,7 @@ class TradingCommandCodecTest {
                 .containsExactly(pending);
         assertThatThrownBy(() -> new TransferFundsCommand(92L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "USDT_PERPETUAL", "FUNDING", "USDT", 250L,
-                "transfer-92", "invalid route"))
+                "transfer-92", "invalid route", 7L, 7L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not match product line");
     }

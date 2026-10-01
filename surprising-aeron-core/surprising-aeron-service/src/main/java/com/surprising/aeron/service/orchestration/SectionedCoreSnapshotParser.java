@@ -42,7 +42,6 @@ final class SectionedCoreSnapshotParser {
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[4], manifest.productLine());
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[5]);
         Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[6]);
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
         int laneSectionCount = payloads.length - SectionedCoreSnapshotCodec.BASE_SECTION_COUNT;
         if (laneSectionCount != manifest.topology().accountLaneCount()) {
             throw new ProtocolException("snapshot account lane section count mismatch");
@@ -58,6 +57,7 @@ final class SectionedCoreSnapshotParser {
                 manifest.appliedCommandCount(), manifest.businessStateHash());
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
         return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
                 commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
                 pendingTransfers, retention, accountLanes, manifest, checksum);
@@ -212,6 +212,7 @@ final class SectionedCoreSnapshotParser {
                 candidate.activate();
                 return candidate;
             } catch (RuntimeException exception) {
+                if (candidate == null) retention.close();
                 if (candidate != null) {
                     try {
                         candidate.close();

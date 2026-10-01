@@ -9,20 +9,21 @@ import org.junit.jupiter.api.Test;
 
 class TerminalStateRetentionTest {
     @Test
-    void fullFundsRetentionPreservesOldIdentitiesAcrossRecoveryAndRejectsNewOnes() {
-        var retention = new TerminalStateRetention();
-        var fingerprint = CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]);
-        for (int i = 0; i < TerminalStateRetention.MAX_FUNDS_COMMANDS; i++) {
-            retention.retainFundsCommand(new UUID(17, i), fingerprint);
-        }
-        var first = new UUID(17, 0);
-        var next = new UUID(17, TerminalStateRetention.MAX_FUNDS_COMMANDS);
-        for (var state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {
-            assertThat(state.hasFundsCommandCapacity(first)).isTrue();
-            assertThat(state.fundsCommand(first)).isEqualTo(fingerprint);
-            assertThat(state.hasFundsCommandCapacity(next)).isFalse();
-            assertThatThrownBy(() -> state.retainFundsCommand(next, fingerprint))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("retention is full");
+    void fundsHistoryExceedsOldLimitAndPreservesIdentitiesAcrossRecovery() {
+        try (var retention = new TerminalStateRetention()) {
+            var fingerprint = CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]);
+            for (int i = 0; i < 140_000; i++) retention.retainFundsCommand(new UUID(17, i), fingerprint);
+            try (var restored = TerminalStateRetention.decode(retention.encode())) {
+                assertThat(restored.fundsCommand(new UUID(17, 0))).isEqualTo(fingerprint);
+                assertThat(restored.fundsCommand(new UUID(17, 139_999))).isEqualTo(fingerprint);
+                restored.retainFundsCommand(new UUID(17, 140_000), fingerprint);
+                restored.retainFundsCommand(new UUID(17, 0), fingerprint);
+                byte[] conflicting = new byte[CommandFingerprint.LENGTH];
+                conflicting[0] = 1;
+                assertThatThrownBy(() -> restored.retainFundsCommand(new UUID(17, 0),
+                        CommandFingerprint.fromBytes(conflicting)))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("fingerprint conflict");
+            }
         }
     }
 
@@ -74,12 +75,13 @@ class TerminalStateRetentionTest {
         byte[] snapshot = retention.encode();
         retention.retainFundsCommand(command, fingerprint);
         assertThat(retention.encode()).isEqualTo(snapshot);
-        assertThat(retention.copy().encode()).isEqualTo(snapshot);
         var restored = TerminalStateRetention.decode(snapshot);
         assertThat(restored.fundsCommand(command)).isEqualTo(fingerprint);
         bytes[0] = 1;
         assertThatThrownBy(() -> restored.retainFundsCommand(command, CommandFingerprint.fromBytes(bytes)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("fingerprint conflict");
         assertThat(restored.encode()).isEqualTo(snapshot);
+        restored.close();
+        retention.close();
     }
 }

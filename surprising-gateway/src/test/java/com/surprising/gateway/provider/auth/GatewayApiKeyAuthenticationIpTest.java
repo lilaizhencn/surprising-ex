@@ -23,7 +23,7 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, null, totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
         String apiKey = "sx_" + "a".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
@@ -38,7 +38,7 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, null, totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
         String apiKey = "sx_" + "b".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
@@ -54,7 +54,7 @@ class GatewayApiKeyAuthenticationIpTest {
         GatewayProperties properties = new GatewayProperties();
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, null, totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
         String apiKey = "sx_" + "c".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));

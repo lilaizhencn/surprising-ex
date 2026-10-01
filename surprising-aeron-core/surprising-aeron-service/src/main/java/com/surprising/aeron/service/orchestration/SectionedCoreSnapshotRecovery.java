@@ -92,7 +92,9 @@ public final class SectionedCoreSnapshotRecovery {
     }
 
     public CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
-        return components(expectedProductLine).manifest(expectedProductLine);
+        var components = components(expectedProductLine);
+        try { return components.manifest(expectedProductLine); }
+        finally { components.retention().close(); }
     }
 
     public int ownedSectionCount() {
