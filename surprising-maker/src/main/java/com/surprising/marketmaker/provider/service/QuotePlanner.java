@@ -129,7 +129,58 @@ public class QuotePlanner {
             else suppressedDuplicateQuotes++;
         }
         return new QuotePlan(anchor, signedPositionSteps,
-                applyQuoteBudget(strategy, risk, instrument, markPrice, signedPositionSteps, quotes), suppressedDuplicateQuotes);
+                applyQuoteBudget(strategy, risk, instrument, markPrice, signedPositionSteps,
+                        sizeLinearLiquidityBand(strategy, quoting, risk, instrument, signedPositionSteps, quotes)),
+                suppressedDuplicateQuotes);
+    }
+
+    /** Make the configured executable band deep enough before enforcing the existing inventory/Core limits. */
+    private List<DesiredQuote> sizeLinearLiquidityBand(MarketMakerProperties.Strategy strategy,
+            MarketMakerProperties.Quoting quoting, MarketMakerProperties.Risk risk,
+            InstrumentResponse instrument, long position, List<DesiredQuote> quotes) {
+        long target = quoting.getLinearLiquidityTargetNotionalUnits();
+        if (target == 0 || (instrument.contractType()
+                != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                && instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY))
+            return quotes;
+        int accounts = Math.max(1, strategy.getAccountIds().size());
+        long accountTarget = target / accounts + (target % accounts == 0 ? 0 : 1);
+        List<DesiredQuote> sized = new ArrayList<>(quotes);
+        for (OrderSide side : OrderSide.values()) {
+            long best = quotes.stream().filter(q -> q.side() == side).mapToLong(DesiredQuote::priceTicks)
+                    .reduce(side == OrderSide.BUY ? Math::max : Math::min).orElse(0);
+            if (best == 0) continue;
+            long perStep = Math.multiplyExact(best, instrument.notionalMultiplierUnits());
+            long targetSteps = accountTarget / perStep + (accountTarget % perStep == 0 ? 0 : 1);
+            targetSteps = inventoryAdjustedQuantity(strategy, risk, side, position, targetSteps);
+            List<Integer> band = new ArrayList<>();
+            long currentSteps = 0;
+            var distanceLimit = java.math.BigInteger.valueOf(best)
+                    .multiply(java.math.BigInteger.valueOf(quoting.getLiquiditySlippagePpm()));
+            for (int index = 0; index < sized.size(); index++) {
+                DesiredQuote quote = sized.get(index);
+                if (quote.side() != side) continue;
+                long distance = side == OrderSide.BUY ? best - quote.priceTicks() : quote.priceTicks() - best;
+                if (java.math.BigInteger.valueOf(distance).multiply(java.math.BigInteger.valueOf(ONE_PPM))
+                        .compareTo(distanceLimit) > 0) continue;
+                band.add(index);
+                currentSteps = Math.addExact(currentSteps, quote.quantitySteps());
+            }
+            long missing = Math.max(0, Math.subtractExact(targetSteps, currentSteps));
+            for (int slot = 0; slot < band.size() && missing > 0; slot++) {
+                int index = band.get(slot);
+                DesiredQuote quote = sized.get(index);
+                long slotsLeft = band.size() - slot;
+                long extra = missing / slotsLeft + (missing % slotsLeft == 0 ? 0 : 1);
+                long maximum = Math.min(instrument.maxQuantitySteps(), instrument.maxNotionalUnits()
+                        / Math.multiplyExact(quote.priceTicks(), instrument.notionalMultiplierUnits()));
+                extra = Math.min(extra, Math.max(0, maximum - quote.quantitySteps()));
+                sized.set(index, new DesiredQuote(side, quote.level(), quote.priceTicks(),
+                        Math.addExact(quote.quantitySteps(), extra)));
+                missing -= extra;
+            }
+        }
+        return sized;
     }
 
     /** PMM budget sizing: scale each side proportionally; keep external depth proportions and core limits. */
@@ -219,6 +270,12 @@ public class QuotePlanner {
                                   long referenceQuantitySteps) {
         long configuredBase = Math.max(1L, strategy.getBaseQuantitySteps());
         long base = referenceQuantitySteps > 0 ? Math.min(referenceQuantitySteps, configuredBase) : configuredBase;
+        return inventoryAdjustedQuantity(strategy, risk, side, signedPositionSteps, base);
+    }
+
+    private long inventoryAdjustedQuantity(MarketMakerProperties.Strategy strategy,
+                                           MarketMakerProperties.Risk risk,
+                                           OrderSide side, long signedPositionSteps, long base) {
         long maxInventory = maxInventory(strategy, risk);
         long skewPpm = Math.min(maxSkewPpm(strategy, risk),
                 multiplyDiv(Math.abs(signedPositionSteps), ONE_PPM, maxInventory));

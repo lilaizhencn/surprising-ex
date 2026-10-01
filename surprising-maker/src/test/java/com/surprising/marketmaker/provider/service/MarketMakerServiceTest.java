@@ -114,7 +114,7 @@ class MarketMakerServiceTest {
         var service = fixtures.service();
         var strategy = fixtures.properties().getStrategies().getFirst();
         var instrument = new FakeInstrumentRpc(100L).latest(1, ProductLine.LINEAR_PERPETUAL);
-        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("1", 50);
+        var book = new FakeMarketDataRpc(49_990, 50_010, false).orderBook("1", 50);
         var requests = service.simulatedOrders(strategy, "1", 900002L, 1,
                 instrument, book, null, 0, new java.util.Random(42));
         assertThat(requests).hasSize(8);
@@ -132,7 +132,7 @@ class MarketMakerServiceTest {
         var service = fixtures.service();
         var strategy = fixtures.properties().getStrategies().getFirst();
         var instrument = new FakeInstrumentRpc(100L).latest(1, ProductLine.LINEAR_PERPETUAL);
-        var book = new FakeMarketDataRpc(49_990, 50_010).orderBook("1", 50);
+        var book = new FakeMarketDataRpc(49_990, 50_010, false).orderBook("1", 50);
         for (long position : new long[] {4998, -4998, 5000, -5000, 5010, -5010}) {
             var requests = service.simulatedOrders(strategy, "1", 900002L, 1,
                     instrument, book, null, position, new java.util.Random(42));
@@ -644,6 +644,27 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void confirmedRejectionRetriedAfterCancelUsesNewOrderIdentityInSameCycle() {
+        var old = new ArrayList<>(staleOrders(3));
+        old.removeIf(order -> order.clientOrderId().contains("-b0-"));
+        Fixtures fixtures = new Fixtures(old);
+        fixtures.orderRpc.rejectQuoteBatch = true;
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        var requests = fixtures.orderRpc.batchPlaceRequests.stream().flatMap(b -> b.orders().stream()).toList();
+        assertThat(requests.stream().filter(r -> r.clientOrderId().contains("-b0-")).count()).isGreaterThan(1);
+        assertThat(requests).extracting(PlaceOrderRequest::clientOrderId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void liquidityMetricsAcceptNativeAscendingBids() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.ascendingDepth = true;
+        var metrics = fixtures.service().adminMetrics(100);
+        assertThat(metrics.rows()).singleElement().satisfies(row ->
+                assertThat(row.liquidity().bidNotionalWithinBandUnits()).isEqualTo(14_996_800L));
+    }
+
+    @Test
     void liquidityMetricsExposeMissingLargeOrderDepthInsteadOfCountingOnlyLevels() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.liquidityTargetNotionalUnits = 500_000_000L;
@@ -815,6 +836,7 @@ class MarketMakerServiceTest {
         private boolean referenceMarketEnabled;
         private long quantityRefreshTolerancePpm;
         private long liquidityTargetNotionalUnits;
+        private boolean ascendingDepth;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
@@ -845,7 +867,7 @@ class MarketMakerServiceTest {
             snapshotCache.replace(productLine,
                     List.of(new FakeInstrumentRpc(priceTickUnits).latest(Integer.parseInt(instrumentId), productLine)));
             return new MarketMakerService(properties, markPriceCache(),
-                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
+                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
                     new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
         }
@@ -1184,8 +1206,14 @@ class MarketMakerServiceTest {
     private static final class FakeMarketDataRpc implements MarketDataRpcApi {
         private final long bestBidTicks;
         private final long bestAskTicks;
+        private final boolean ascendingDepth;
 
         private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks) {
+            this(bestBidTicks, bestAskTicks, false);
+        }
+
+        private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks, boolean ascendingDepth) {
+            this.ascendingDepth = ascendingDepth;
             this.bestBidTicks = bestBidTicks;
             this.bestAskTicks = bestAskTicks;
         }
@@ -1194,7 +1222,9 @@ class MarketMakerServiceTest {
         public OrderBookSnapshotResponse orderBook(String instrumentId, int depth) {
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
             return new OrderBookSnapshotResponse(instrumentId, 1L, depth,
-                    List.of(new OrderBookLevel(bestBidTicks, 100L, 1L)),
+                    ascendingDepth ? List.of(new OrderBookLevel(bestBidTicks - 1, 200L, 1L),
+                            new OrderBookLevel(bestBidTicks, 100L, 1L))
+                            : List.of(new OrderBookLevel(bestBidTicks, 100L, 1L)),
                     List.of(new OrderBookLevel(bestAskTicks, 100L, 1L)), now);
         }
 

@@ -27,6 +27,52 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void fundedLinearPlanMeetsTargetInsideOneBasisPointWithoutInflatingOuterLevels() {
+        var strategy = strategy(); strategy.setOrderLevels(50);
+        var quoting = quoting(); quoting.setLevelSpacingTicks(1); quoting.setLinearLiquidityTargetNotionalUnits(500_000_000L);
+        var risk = risk(); risk.setMaxInventorySteps(20_000);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).userOpenInterestLimitFloorUnits();
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).maxPositionNotionalUnits();
+        var plan = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100), mark(5_000_000), 0);
+        assertBandCapacity(plan, 500_000_000L);
+        assertThat(plan.quotes().stream().filter(q -> q.level() == 49).mapToLong(q -> q.quantitySteps()))
+                .containsExactly(10L, 10L);
+    }
+
+    @Test
+    void depthTargetIsSharedAcrossConfiguredMakerAccounts() {
+        var strategy = strategy(); strategy.setAccountIds(List.of(900001L, 900002L));
+        var quoting = quoting(); quoting.setLinearLiquidityTargetNotionalUnits(50_000_000L);
+        var plan = quotePlanner.plan(strategy, quoting, risk(), instrument(), orderBook(49900, 50100), mark(5_000_000), 0);
+        assertBandCapacity(plan, 25_000_000L);
+        assertThat(plan.quotes().stream().mapToLong(q -> q.quantitySteps()).max().orElseThrow()).isLessThan(600);
+    }
+
+    @Test
+    void liquidityTargetCannotOverrideInventoryOrIndividualOrderLimits() {
+        var quoting = quoting(); quoting.setLinearLiquidityTargetNotionalUnits(500_000_000L);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(100L).when(spec).maxQuantitySteps();
+        var plan = quotePlanner.plan(strategy(), quoting, risk(), spec, orderBook(49900, 50100), mark(5_000_000), 950);
+        assertThat(plan.quotes()).allSatisfy(q -> assertThat(q.quantitySteps()).isLessThanOrEqualTo(100));
+        assertThat(plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY).mapToLong(q -> q.quantitySteps()).sum())
+                .isLessThanOrEqualTo(50);
+    }
+
+    private static void assertBandCapacity(QuotePlan plan, long target) {
+        for (OrderSide side : OrderSide.values()) {
+            var quotes = plan.quotes().stream().filter(q -> q.side() == side).toList();
+            long best = quotes.stream().mapToLong(q -> q.priceTicks())
+                    .reduce(side == OrderSide.BUY ? Math::max : Math::min).orElseThrow();
+            long steps = quotes.stream().filter(q -> Math.abs(q.priceTicks() - best) * 1_000_000 <= best * 100)
+                    .mapToLong(q -> q.quantitySteps()).sum();
+            // All requested contracts must fit in the band, including ceil rounding of market-order size.
+            assertThat(steps).isGreaterThanOrEqualTo(target / best + (target % best == 0 ? 0 : 1));
+        }
+    }
+
+    @Test
     void linearQuotesCoverPositiveMakerFeeAndConfiguredNetEdge() {
         var spec = org.mockito.Mockito.spy(instrument());
         org.mockito.Mockito.doReturn(200L).when(spec).makerFeeRatePpm();

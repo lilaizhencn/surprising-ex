@@ -36,6 +36,17 @@ class LinearLiquidityTest(unittest.TestCase):
             self.assertFalse(row['fullDepthWithinAverageSlippage'])
             self.assertFalse(row['fullDepthWithinWorstSlippage'])
 
+    def test_native_ascending_bids_are_normalized_without_mutating_input(self):
+        expected = self.assess()
+        self.book['bids'].reverse()
+        self.assertEqual(self.assess(), expected)
+        self.assertEqual(self.book['bids'][0]['priceTicks'], 9998)
+
+    def test_duplicate_prices_still_rejected(self):
+        self.book['bids'].append(dict(self.book['bids'][0]))
+        with self.assertRaisesRegex(ValueError, 'distinct'):
+            self.assess()
+
     def test_worst_price_can_fail_while_average_passes(self):
         self.book['asks'][1]['priceTicks'] = 10002
         buy = self.assess(200000)[0]

@@ -41,7 +41,13 @@ def assess(instrument, book, notionals, scale, max_slippage_ppm=100, max_age_sec
     if age < 0 or age > max_age_seconds:
         raise ValueError('book is stale or future-dated')
     multiplier = positive_int(instrument['notionalMultiplierUnits'], 'notional multiplier')
+    book = dict(book)
     for side, descending in [('bids', True), ('asks', False)]:
+        for level in book[side]:
+            positive_int(level['priceTicks'], 'price ticks')
+            positive_int(level['quantitySteps'], 'quantity steps')
+        # Native depth may serialize bids ascending; normalize at the diagnostic boundary.
+        book[side] = sorted(book[side], key=lambda level: level['priceTicks'], reverse=descending)
         previous = None
         for level in book[side]:
             price = positive_int(level['priceTicks'], 'price ticks')

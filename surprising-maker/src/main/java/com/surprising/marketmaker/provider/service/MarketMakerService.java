@@ -100,6 +100,8 @@ public class MarketMakerService {
     private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
     private final String nodeId;
     private final String orderNonce;
+    // A confirmed rejection can be retried after freeing budget in the same cycle; that is a new order.
+    private final java.util.concurrent.atomic.AtomicLong quoteRequestSequence = new java.util.concurrent.atomic.AtomicLong();
 
     @Autowired
     public MarketMakerService(MarketMakerProperties properties,
@@ -548,6 +550,10 @@ public class MarketMakerService {
 
     private long bandNotional(List<OrderBookLevel> levels, OrderSide takingSide, long ppm, long multiplier) {
         if (levels == null || levels.isEmpty()) return 0;
+        // Native depth can be returned in ascending price order on both sides.
+        levels = levels.stream().sorted(takingSide == OrderSide.SELL
+                ? Comparator.comparingLong(OrderBookLevel::priceTicks).reversed()
+                : Comparator.comparingLong(OrderBookLevel::priceTicks)).toList();
         long best = levels.getFirst().priceTicks();
         if (best <= 0 || multiplier <= 0) throw new IllegalStateException("invalid linear liquidity units");
         var threshold = java.math.BigInteger.valueOf(best).multiply(java.math.BigInteger.valueOf(ppm));
@@ -1074,7 +1080,7 @@ public class MarketMakerService {
                                            long cycleSequence) {
         String accountPrefix = accountPrefix(strategy, instrumentId, accountId);
         String clientOrderId = quotePrefix(accountPrefix, quote.side(), quote.level())
-                + cycleSequence + "-" + orderNonce;
+                + cycleSequence + "-" + Long.toUnsignedString(quoteRequestSequence.incrementAndGet(), 36) + "-" + orderNonce;
         TimeInForce timeInForce = TimeInForce.GTX;
         return new PlaceOrderRequest(accountId, clientOrderId, instrumentId, quote.side(),
                 OrderType.LIMIT, timeInForce, quote.priceTicks(), quote.quantitySteps(),
