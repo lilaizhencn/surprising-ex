@@ -59,6 +59,8 @@ Core 只按 `exchange-core.version` 解析 Maven 依赖，不再在 `surprising-
 
 ## 启停与验收
 
+有旧状态的升级先停止交易写入和后台任务，等待成交导出退出，再由旧 Core 生成快照并正常关闭。保留 Archive、数据库和投影 checkpoint 的备份，不删除余额、持仓或幂等记录。可在本次启动环境中设置 `CORE_EXPECTED_STATE_HASH`（停写后的 `STATE_HASH_QUERY` 返回的 16 位小写十六进制哈希）；启动器会在 Core 就绪后、任何 HTTP 服务启动前核对恢复哈希，不一致则停止启动。成功验收后移除此临时环境变量，避免后续正常重启仍拿历史状态作比较。
+
 先在服务器上执行只读预检：
 
 ```bash
