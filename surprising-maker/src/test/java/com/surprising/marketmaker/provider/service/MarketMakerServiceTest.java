@@ -487,6 +487,25 @@ class MarketMakerServiceTest {
                 .hasSize(40).endsWith(1000L, 2000L);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(OrderSide.class)
+    void improvingBestPriceMovesTheDeepQuoteBeforeSmallQuotes(OrderSide improvingSide) {
+        var orders = new ArrayList<>(staleTwentyLevelOrders());
+        for (int index = 0; index < orders.size(); index++) {
+            var old = orders.get(index);
+            long price = old.priceTicks() + (old.side() != improvingSide ? 0
+                    : improvingSide == OrderSide.BUY ? -1000 : 1000);
+            orders.set(index, order(old.orderId(), old.userId(), old.clientOrderId(), old.side(), price,
+                    index < 2 ? 100 : 10, old.status()));
+        }
+        Fixtures fixtures = new Fixtures(orders);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .hasSize(40).startsWith(improvingSide == OrderSide.BUY ? 1000L : 2000L);
+    }
+
     @Test
     void splitsCancellationAtTheOrderServiceBatchLimit() {
         Fixtures fixtures = new Fixtures(staleOrders(30));

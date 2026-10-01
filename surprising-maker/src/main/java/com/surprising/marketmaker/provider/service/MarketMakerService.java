@@ -865,14 +865,21 @@ public class MarketMakerService {
                 .mapToLong(DesiredQuote::priceTicks).max().orElse(0L);
         long lowestAsk = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL)
                 .mapToLong(DesiredQuote::priceTicks).min().orElse(Long.MAX_VALUE);
+        long previousBid = owned.stream().filter(order -> order.side() == OrderSide.BUY)
+                .mapToLong(OrderResponse::priceTicks).max().orElse(0);
+        long previousAsk = owned.stream().filter(order -> order.side() == OrderSide.SELL)
+                .mapToLong(OrderResponse::priceTicks).min().orElse(Long.MAX_VALUE);
         List<CancelOrderRequest> cancelRequests = owned.stream()
                 .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now))
                 // Move quotes that would cross the new opposite side first, preserving post-only semantics.
                 .sorted(Comparator.<OrderResponse>comparingInt(order ->
                         order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
                                 || order.side() == OrderSide.BUY && order.priceTicks() >= lowestAsk ? 0 : 1)
-                        // Retain the deep quote while replacing the small levels around it.
-                        .thenComparingLong(OrderResponse::remainingQuantitySteps))
+                        // Improving the best price needs the deep quote first; moving it away
+                        // needs it last, so small replacement quotes never lead an empty band.
+                        .thenComparingLong(order -> (order.side() == OrderSide.BUY
+                                ? highestBid > previousBid : lowestAsk < previousAsk)
+                                ? -order.remainingQuantitySteps() : order.remainingQuantitySteps()))
                 .map(order -> new CancelOrderRequest(accountId, order.orderId()))
                 .toList();
         int replacementBatchSize = Math.max(1, Math.min(MAX_BATCH_PLACE_ORDERS, owned.size() / 10));
