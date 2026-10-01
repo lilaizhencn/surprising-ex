@@ -472,6 +472,42 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void liquidityBestQuotesUseAmendInsteadOfSeparateCancellation() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.liquidityTargetNotionalUnits = 25_000_000;
+        fixtures.orderRpc.jsonRoundTripReceipts = true;
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.amendRequests).extracting(AmendOrderRequest::orderId)
+                .containsExactlyInAnyOrder(1000L, 2000L);
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .hasSize(38).doesNotContain(1000L, 2000L);
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+    }
+
+    @Test
+    void uncertainAmendStopsWithdrawalsAndRequeriesTheActualBook() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.liquidityTargetNotionalUnits = 25_000_000;
+        fixtures.orderRpc.loseNextAmendResponse = true;
+        var service = fixtures.service();
+        var first = service.runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(first.strategies()).singleElement().satisfies(s ->
+                assertThat(s.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED));
+        assertThat(fixtures.orderRpc.amendRequests).hasSize(1);
+        assertThat(fixtures.orderRpc.cancelRequests).hasSizeLessThanOrEqualTo(4);
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .doesNotContain(1000L, 2000L);
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.openOrdersCalls).isEqualTo(2);
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+        assertThat(fixtures.orderRpc.openOrders.stream().map(OrderResponse::clientOrderId).distinct()).hasSize(40);
+    }
+
+    @Test
     void replacesSmallStaleQuotesBeforeWithdrawingTheDeepBestQuotes() {
         var orders = new ArrayList<>(staleTwentyLevelOrders());
         for (int index = 0; index < 2; index++) {
@@ -1066,6 +1102,8 @@ class MarketMakerServiceTest {
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
         private int cancelBatchCalls;
+        private final List<AmendOrderRequest> amendRequests = new ArrayList<>();
+        private boolean loseNextAmendResponse;
         private long bidPlacesAtFirstCancel = -1;
         private final List<Integer> liveCountsAfterCancel = new ArrayList<>();
 
@@ -1123,7 +1161,17 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderCommandReceipt amend(AmendOrderRequest request) {
-            throw new UnsupportedOperationException();
+            amendRequests.add(request);
+            var original = openOrders.stream().filter(o -> o.orderId() == request.orderId()).findFirst().orElseThrow();
+            var replacement = orderAt(100_000L + amendRequests.size(), request.userId(), request.newClientOrderId(),
+                    original.side(), request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
+            openOrders.removeIf(o -> o.orderId() == request.orderId());
+            openOrders.add(replacement);
+            if (loseNextAmendResponse) {
+                loseNextAmendResponse = false;
+                return terminal(null);
+            }
+            return terminal(new AmendOrderResponse(original, replacement, true, "amended"));
         }
 
         @Override

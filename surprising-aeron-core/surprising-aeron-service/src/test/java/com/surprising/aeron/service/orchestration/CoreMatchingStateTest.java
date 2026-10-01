@@ -53,7 +53,14 @@ class CoreMatchingStateTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", capital)));
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, quantity, ReservationKind.DERIVATIVE_MARGIN, "USDT", notional));
-            var filled = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            apply(state, 4, 11, CoreMessageType.AMEND_ORDER,
+                    TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(101, 102, "maker-refreshed",
+                            100L, quantity, CoreTimeInForce.GTX, true)));
+            assertThat(state.tradingState().order(102).remainingQuantitySteps()).isEqualTo(quantity);
+            assertThat(state.tradingState().user(11).balances().get("USDT").lockedUnits())
+                    // Admission reserves at the fixture's upper price band (101), at 10x.
+                    .isEqualTo(quantity * 101 / 10);
+            var filled = apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
                     place(201, CoreOrderSide.BUY, 0, quantity, ReservationKind.DERIVATIVE_MARGIN, "USDT", notional,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 101, false));
             assertThat(orderIn(filled, 201).status()).isEqualTo("FILLED");
@@ -64,12 +71,12 @@ class CoreMatchingStateTest {
             byte[] leverage = TradingCommandCodec.encodeUpdateLeverage(
                     new com.surprising.aeron.protocol.UpdateLeverageCommand("1",
                             com.surprising.aeron.protocol.CoreMarginMode.CROSS, 5_000_000, true));
-            apply(state, 5, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
+            apply(state, 6, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
             assertThat(state.tradingState().user(11).positions().get("1").positionMarginUnits()).isEqualTo(capital);
             assertThat(state.tradingState().user(11).balances().get("USDT").availableUnits()).isZero();
             assertThat(total(state, "USDT")).isEqualTo(capital * 2);
             try (var replay = TradingCoreRuntime.fromSnapshot(product, beforeLeverage)) {
-                apply(replay, 5, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
+                apply(replay, 6, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
                 assertThat(replay.tradingState()).isEqualTo(state.tradingState());
             }
             try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {

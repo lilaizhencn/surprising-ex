@@ -31,6 +31,8 @@ import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
+import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
@@ -899,12 +901,34 @@ public class MarketMakerService {
         for (int start = 0; start < Math.max(1, cancelRequests.size()); start += replacementBatchSize) {
             List<CancelOrderRequest> batch = cancelRequests.subList(start,
                     Math.min(start + replacementBatchSize, cancelRequests.size()));
-            CancelResult result = cancelOrders(strategy.getProductLine(), accountId, instrumentId, batch);
-            canceled += result.completed();
+            List<CancelOrderRequest> cancellations = new ArrayList<>();
+            Map<Long, DesiredQuote> amendments = new java.util.LinkedHashMap<>();
             for (CancelOrderRequest request : batch) {
+                OrderResponse old = kept.stream().filter(order -> order.orderId() == request.orderId())
+                        .findFirst().orElse(null);
+                DesiredQuote best = bestQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk);
+                if (best == null) cancellations.add(request);
+                else amendments.put(request.orderId(), best);
+            }
+            CancelResult result = cancelOrders(strategy.getProductLine(), accountId, instrumentId, cancellations);
+            canceled += result.completed();
+            for (CancelOrderRequest request : cancellations) {
                 if (!result.failed().contains(request)) {
                     kept.removeIf(order -> order.orderId() == request.orderId());
                 }
+            }
+            if (!amendments.isEmpty() && !result.failed().isEmpty()) {
+                rejected += result.failed().size();
+                rejectionReason = "cancellation is uncertain; preserve the deep quotes";
+                break;
+            }
+            for (var amendment : amendments.entrySet()) {
+                OrderResponse updated = amendQuote(strategy, accountId, instrumentId, amendment.getKey(),
+                        amendment.getValue(), cycleSequence);
+                kept.removeIf(order -> order.orderId() == amendment.getKey());
+                if (isLive(updated)) kept.add(updated);
+                canceled++;
+                submitted++;
             }
             ReconcileResult replacement = placeMissingQuotes(strategy, accountId, instrumentId, plan,
                     kept, accountPrefix, cycleSequence);
@@ -915,6 +939,39 @@ public class MarketMakerService {
             if (replacement.rejected() > 0 || !result.failed().isEmpty()) break;
         }
         return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+    }
+
+    private DesiredQuote bestQuoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
+            OrderResponse old, String prefix, long bid, long ask) {
+        if (old == null || properties.getQuoting().getLinearLiquidityTargetNotionalUnits() == 0
+                || (strategy.getProductLine() != ProductLine.LINEAR_PERPETUAL
+                && strategy.getProductLine() != ProductLine.LINEAR_DELIVERY)) return null;
+        return plan.quotes().stream().filter(quote -> quote.side() == old.side()
+                && quote.priceTicks() == (quote.side() == OrderSide.BUY ? bid : ask)
+                && old.clientOrderId().startsWith(quotePrefix(prefix, quote.side(), quote.level())))
+                .findFirst().orElse(null);
+    }
+
+    /** The existing Core amend command replaces a quote without a separate cancel/place window. */
+    private OrderResponse amendQuote(MarketMakerProperties.Strategy strategy, long accountId,
+            String instrumentId, long originalOrderId, DesiredQuote quote, long cycleSequence) {
+        var replacement = quoteRequest(strategy, accountId, instrumentId, quote, cycleSequence);
+        try {
+            var receipt = orderRpcApi.amend(new AmendOrderRequest(accountId, originalOrderId,
+                    replacement.clientOrderId(), replacement.priceTicks(), replacement.quantitySteps(),
+                    TimeInForce.GTX, true));
+            var result = receiptResult(receipt, AmendOrderResponse.class);
+            if (result == null || result.replacementOrder() == null
+                    || result.replacementOrder().status() == OrderStatus.REJECTED)
+                throw new IllegalStateException("quote amendment did not confirm replacement: " + receiptMessage(receipt));
+            var updated = result.replacementOrder();
+            forgetOrder(strategy.getProductLine(), accountId, instrumentId, originalOrderId);
+            rememberOrder(strategy.getProductLine(), accountId, instrumentId, updated);
+            return updated;
+        } catch (RuntimeException ex) {
+            openOrderSnapshots.remove(orderSnapshotKey(strategy.getProductLine(), accountId, instrumentId));
+            throw new IllegalStateException("quote amendment outcome requires an actual order query", ex);
+        }
     }
 
     private ReconcileResult placeMissingQuotes(MarketMakerProperties.Strategy strategy,
