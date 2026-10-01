@@ -521,6 +521,12 @@ start_core() {
     (( SECONDS < deadline )) || fail "Aeron Core readiness timeout log=$LOG_DIR/core-probe.log"
     sleep 2
   done
+  if [[ -n "${CORE_EXPECTED_STATE_HASH:-}" ]]; then
+    [[ "$CORE_EXPECTED_STATE_HASH" =~ ^[0-9a-f]{16}$ ]] || fail 'invalid expected Core state hash'
+    [[ "$(<"$LOG_DIR/core-probe.log")" == *"stateHash=$CORE_EXPECTED_STATE_HASH "* ]] || \
+      fail "Core recovery state hash mismatch; HTTP services remain stopped log=$LOG_DIR/core-probe.log"
+    printf 'CORE_RECOVERY_STATE=VERIFIED stateHash=%s\n' "$CORE_EXPECTED_STATE_HASH"
+  fi
   mark_ready core-cluster
 }
 
