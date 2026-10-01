@@ -43,23 +43,26 @@ public final class RiskCommands {
         int pendingBefore = owner.pendingRiskScanCount();
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState().revision();
+        // Busy accounts can keep risk valuation incomplete across price updates. Reserve
+        // bounded work for their TP/SL so closing orders do not wait for a whole risk pass.
+        int riskBudget = activeScan.triggerComplete() ? command.maxUsers() : command.maxUsers() / 2;
         if (owner.asynchronousCommands()) {
             RiskScanCoordinator risk = null;
-            if (!activeScan.riskComplete()) {
-                risk = owner.reusableRiskScanCoordinator(command.maxUsers());
+            if (!activeScan.riskComplete() && riskBudget > 0) {
+                risk = owner.reusableRiskScanCoordinator(riskBudget);
             }
             owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, command.maxUsers(),
                     pendingBefore, startedAt, beforeRevision);
             return;
         }
         int completedRiskWork = 0;
-        if (!activeScan.riskComplete()) {
-            completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(command.maxUsers(),
+        if (!activeScan.riskComplete() && riskBudget > 0) {
+            completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(riskBudget,
                     owner.positionUserIndex(), owner.runtimeState(), owner.identities());
         }
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
         int remainingWork = command.maxUsers() - completedRiskWork;
-        if (remainingWork > 0 && owner.runtimeState().riskScan(activeScan.symbolId()).riskComplete()) {
+        if (remainingWork > 0 && !owner.runtimeState().riskScan(activeScan.symbolId()).triggerComplete()) {
             owner.evaluatePendingTriggerScan(instrumentId, remainingWork);
         }
         owner.logRiskScan("continuation", instrumentId, command.maxUsers(), pendingBefore, startedAt);

@@ -366,7 +366,7 @@ final class DirectCommandSlot {
                 if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
                 int remaining = maxUsers - (risk == null ? 0 : risk.completedWork());
                 var completedScan = owner.runtimeState().riskScan(symbolId);
-                triggers = remaining > 0 && completedScan != null && completedScan.riskComplete()
+                triggers = remaining > 0 && completedScan != null
                         && !completedScan.triggerComplete()
                         ? owner.pendingTriggerScan(instrumentId, remaining) : COMPLETE_CONTROL;
             }

@@ -25,6 +25,45 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
     @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void eligibleTakeProfitDoesNotWaitForBusyMakerRiskScan(ProductLine product) {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            long maker = 11, user = disjointUser(maker);
+            live.apply(live.place(maker, "1", 701, 100, 10, CoreOrderSide.SELL));
+            live.apply(live.place(user, "1", 702, 100, 10, CoreOrderSide.BUY));
+            live.apply(live.place(maker, "1", 703, 100, 4, CoreOrderSide.BUY));
+            for (int i = 0; i < 150; i++)
+                live.apply(live.place(maker, "1", 10000 + i, 80, 1, CoreOrderSide.BUY));
+            long id = 5706833411744856774L;
+            var trigger = new CoreTriggerOrderStateView(id, live.product, user, "busy-risk-tp", "", "1",
+                    CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                    100, 0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 4,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                    0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+            live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+            live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 100,
+                            product == ProductLine.OPTION ? 100 : 0, 2, TIME))));
+            live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(live.service.state().runtimeState.triggerOrder(id).status())
+                    .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            long child = live.service.state().runtimeState.triggerOrder(id).placedOrderId();
+            assertThat(child).as("%s", live.service.state().runtimeState.triggerOrder(id)).isPositive();
+            var userState = CoreStateQueryCodec.decodeUserState(live.service.state().userStateResponse(user).data());
+            assertThat(userState.positions()).singleElement()
+                    .satisfies(position -> assertThat(position.signedQuantitySteps()).isEqualTo(6));
+            assertThat(userState.reservations()).isEmpty();
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(999))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(ProductLine.class)
     void atomicOcoPairPublishesTogetherAndEitherLegCancelsItsSibling(ProductLine product) throws Exception {
         for (boolean takeProfitWins : new boolean[]{true, false}) {

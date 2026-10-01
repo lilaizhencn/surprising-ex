@@ -205,6 +205,8 @@ REST 接口：
 - 多个 trading provider 节点可以同时运行，用户查询和撤单通过 Aeron Core 按用户边界执行；`TRIGGERING` 的重试和投影由 Core 状态机负责。
 - 静态 `TAKE_PROFIT`/`STOP_LOSS`、追踪止损都进入 Core 的增量 instrumentId/position/OCO 索引。索引更新随 Core 状态转换完成，标记价命令只访问命中的价格范围，不使用 Redis 或数据库锁抢单。
 - 触发裁决、过期、OCO 和子订单创建都在 Aeron Core 内完成；trading provider 只负责 API 到 Core 的命令和查询转发。
+- `RiskCommands.executeContinueRiskScan` 在目标合约有未完成条件单扫描时，最多把本轮一半预算用于账户风险估值，其余预算交给 `TriggerOrderCommands`。异步 `DirectCommandSlot` 和同步路径都不再要求整轮风险估值完成后才能触发，避免做市频繁更新挂单使 TP/SL 长期停在 `PENDING`。预算为 1 时先推进一页触发扫描，后续命令继续风险工作；既有价格来源、OCO、reduce-only 和提交边界不变。
+- 2026-10-01 回归：`ClusterCommandPipelineTest` 与 `TriggerOrderIndexTest` 全类通过（1 项既有跳过）；拥挤风险扫描新增用例覆盖五类衍生品，验证 150 笔挂单下 4 张触发平仓、仓位从 10 降为 6 及快照业务哈希一致。`RiskBatchBudgetTest`、`CoreRiskStateTest`、`ParallelRiskScanTest` 共 36 项通过。JDK 27 的 JMH/JFR 冒烟采样：4 Account Lane、1000 风险账户固定扫描工作负载，1 秒预热、2 次 1 秒测量，平均 54.012 ms/次；这是批量扫描工作负载，不是单笔触发延迟或线上容量承诺。
 - 触发后的真实子订单继续走 Core 撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trading provider 不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
 - 可选 `ocoGroupId` 支持成对 TP/SL 互撤。Core 在同一个命令状态转换内通过 OCO 索引取消其它 pending sibling，再生成 reduce-only 平仓单。
