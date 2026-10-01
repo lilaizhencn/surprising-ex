@@ -65,6 +65,15 @@ public class InternalLiquidityOperationsController {
         return execute(request, body, request.getHeader("X-Operation-Id"), body.reason(), () -> leverage.set(body));
     }
 
+    @GetMapping("/leverage")
+    public Object leverage(@RequestParam long userId, @RequestParam String instrumentId,
+            @RequestParam ProductLine productLine, @RequestParam com.surprising.trading.api.model.MarginMode marginMode,
+            HttpServletRequest request) {
+        authorize(request);
+        requireProduct(productLine);
+        return leverage.get(userId, instrumentId, marginMode, productLine);
+    }
+
     @PostMapping("/instruments")
     public Object instrument(@Valid @RequestBody InstrumentUpsertRequest body,
                              @RequestParam String reason, HttpServletRequest request) {

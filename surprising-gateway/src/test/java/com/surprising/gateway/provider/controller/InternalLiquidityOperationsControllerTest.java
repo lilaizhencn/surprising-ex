@@ -91,4 +91,16 @@ class InternalLiquidityOperationsControllerTest {
         controller(token).leverage(correct, request());
         verify(leverage).set(correct);
     }
+
+    @Test void leverageReadRequiresHostAuthenticationAndMatchingProduct() {
+        var c = controller(token);
+        var missing = request(); missing.removeHeader("X-Operations-Token");
+        assertThatThrownBy(() -> c.leverage(2, "604", ProductLine.LINEAR_PERPETUAL, MarginMode.CROSS, missing))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> c.leverage(2, "604", ProductLine.INVERSE_PERPETUAL, MarginMode.CROSS, request()))
+                .isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(leverage);
+        c.leverage(2, "604", ProductLine.LINEAR_PERPETUAL, MarginMode.CROSS, request());
+        verify(leverage).get(2, "604", MarginMode.CROSS, ProductLine.LINEAR_PERPETUAL);
+    }
 }

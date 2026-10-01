@@ -11,6 +11,24 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void leverageRepricingRequiresAnExplicitVersionAndKeepsOldJournalBytes() {
+        byte[] original = java.nio.ByteBuffer.allocate(15).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .putShort((short) 1).put((byte) '1').putInt(CoreMarginMode.CROSS.wireCode())
+                .putLong(5_000_000).array();
+        var old = TradingCommandCodec.decodeUpdateLeverage(original);
+        assertThat(old.repriceCrossMargin()).isFalse();
+        assertThat(TradingCommandCodec.encodeUpdateLeverage(old)).isEqualTo(original);
+        var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000, true);
+        byte[] encoded = TradingCommandCodec.encodeUpdateLeverage(command);
+        assertThat(TradingCommandCodec.decodeUpdateLeverage(encoded)).isEqualTo(command);
+        encoded[15] = 3;
+        assertThatThrownBy(() -> TradingCommandCodec.decodeUpdateLeverage(encoded))
+                .hasMessageContaining("unsupported leverage command version");
+        assertThatThrownBy(() -> TradingCommandCodec.decodeUpdateLeverage(java.util.Arrays.copyOf(original, 16)))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
     void decodedTextOwnsItsBytesAndRespectsAnEmbeddedAmendFrame() {
         for (String clientId : new String[]{"", "client-71", "订单-é-😀"}) {
             var command = new AmendOrderCommand(71, 72, clientId, null, null, null, null);

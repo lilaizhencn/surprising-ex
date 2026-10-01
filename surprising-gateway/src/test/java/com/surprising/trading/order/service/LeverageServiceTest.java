@@ -26,6 +26,18 @@ import org.junit.jupiter.api.Test;
 class LeverageServiceTest {
 
     @Test
+    void explicitCrossMarginRepricingIsEncodedInTheJournalCommand() {
+        OrderAeronGateway aeron = mock(OrderAeronGateway.class);
+        LeverageService service = new LeverageService(id -> Optional.of(rule(id)), aeron);
+        service.set(new LeverageSettingRequest(1001, ProductLine.LINEAR_PERPETUAL, "1", MarginMode.CROSS,
+                5_000_000, "fund maker margin", true));
+        ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
+        verify(aeron).command(org.mockito.ArgumentMatchers.eq(CoreMessageType.UPDATE_LEVERAGE),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(1001L), payload.capture());
+        assertThat(TradingCommandCodec.decodeUpdateLeverage(payload.getValue()).repriceCrossMargin()).isTrue();
+    }
+
+    @Test
     void setLeverageNormalizesSymbolAndPublishesFactWithoutDatabaseWrite() {
         InstrumentRuleLookup lookup = instrumentId -> Optional.of(rule(instrumentId));
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);

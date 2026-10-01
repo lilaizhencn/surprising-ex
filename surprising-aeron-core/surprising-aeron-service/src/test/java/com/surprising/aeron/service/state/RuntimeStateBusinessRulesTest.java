@@ -425,6 +425,71 @@ class RuntimeStateBusinessRulesTest {
                 ProductLine.LINEAR_PERPETUAL)).isEqualTo(leveraged);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
+            names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_PERPETUAL", "INVERSE_DELIVERY"})
+    void lowerCrossLeverageFundsPositionsAtomicallyAndSurvivesLanePublicationAndSnapshot(ProductLine line) {
+        String asset = CoreStateTestFixtures.settleAsset(line);
+        TradingCoreState before = leveragePosition(line);
+        var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
+        assertThatThrownBy(() -> reducer.updateLeverage(before, 101,
+                new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000)))
+                .hasMessageContaining("open orders or positions exist");
+        TradingCoreState expected = reducer.updateLeverage(before, 101, command);
+        assertThat(expected.user(101).totalUnits(asset)).isEqualTo(before.user(101).totalUnits(asset));
+        assertThat(expected.user(202)).isEqualTo(before.user(202));
+        assertThat(expected.user(101).positions().get("1").positionMarginUnits())
+                .isGreaterThan(before.user(101).positions().get("1").positionMarginUnits());
+        assertThat(expected.user(101).balances().get(asset).lockedUnits())
+                .isEqualTo(expected.user(101).positions().get("1").positionMarginUnits());
+        assertThat(reducer.updateLeverage(expected, 101, command)).isEqualTo(expected);
+        assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(expected), line)).isEqualTo(expected);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(before, identities)) {
+            runtime.startAccountLanes();
+            var work = new AccountLeverageChange(runtime, identities, 101, command);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            boolean done = false;
+            while (!(done = work.poll()) && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(done).isTrue();
+            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+        }
+    }
+
+    @Test
+    void rejectedLeverageRepricingLeavesMoneyPositionsAndLeverageUnchanged() {
+        TradingCoreState before = leveragePosition(ProductLine.LINEAR_PERPETUAL);
+        before = reducer.adjustBalance(before, 101, new BalanceAdjustmentCommand("USDT",
+                -before.user(101).balances().get("USDT").availableUnits()));
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(before, identities)) {
+            var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
+            assertThatThrownBy(() -> DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, 101, command))
+                    .hasMessageContaining("insufficient available funds");
+            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
+        }
+        TradingCoreState withOrder = reducer.placeOrder(leveragePosition(ProductLine.LINEAR_PERPETUAL), 101,
+                order(3, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+        var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
+        assertThatThrownBy(() -> reducer.updateLeverage(withOrder, 101, command)).hasMessageContaining("cancel open orders");
+        assertThatThrownBy(() -> reducer.updateLeverage(withOrder, 101,
+                new UpdateLeverageCommand("1", CoreMarginMode.ISOLATED, 2_000_000, true)))
+                .hasMessageContaining("cross margin is required");
+        TradingCoreState lowered = reducer.updateLeverage(leveragePosition(ProductLine.LINEAR_PERPETUAL), 101, command);
+        assertThatThrownBy(() -> reducer.updateLeverage(lowered, 101,
+                new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000, true)))
+                .hasMessageContaining("only lowering leverage");
+    }
+
+    private TradingCoreState leveragePosition(ProductLine line) {
+        String asset = CoreStateTestFixtures.settleAsset(line);
+        TradingCoreState state = funded(line, asset, 10_000);
+        state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand(asset, 10_000));
+        state = reducer.placeOrder(state, 202, order(2, CoreOrderSide.SELL, ReservationKind.DERIVATIVE_MARGIN, asset, 0));
+        state = reducer.placeOrder(state, 101, order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, asset, 0));
+        return reducer.applyMatches(state, 1, "BTC", "USDT", List.of(trade(2, 202, 10, 10, true, true)));
+    }
+
     @Test
     void algoParentUsesAuthoritativeChildOrdersAndSurvivesSnapshot() {
         TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);

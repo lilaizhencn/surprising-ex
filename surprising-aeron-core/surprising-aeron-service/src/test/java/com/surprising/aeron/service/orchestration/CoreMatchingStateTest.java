@@ -60,6 +60,18 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps()).isEqualTo(-quantity);
             assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(quantity);
             assertThat(total(state, "USDT")).isEqualTo(capital * 2);
+            byte[] beforeLeverage = state.snapshot();
+            byte[] leverage = TradingCommandCodec.encodeUpdateLeverage(
+                    new com.surprising.aeron.protocol.UpdateLeverageCommand("1",
+                            com.surprising.aeron.protocol.CoreMarginMode.CROSS, 5_000_000, true));
+            apply(state, 5, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
+            assertThat(state.tradingState().user(11).positions().get("1").positionMarginUnits()).isEqualTo(capital);
+            assertThat(state.tradingState().user(11).balances().get("USDT").availableUnits()).isZero();
+            assertThat(total(state, "USDT")).isEqualTo(capital * 2);
+            try (var replay = TradingCoreRuntime.fromSnapshot(product, beforeLeverage)) {
+                apply(replay, 5, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
+                assertThat(replay.tradingState()).isEqualTo(state.tradingState());
+            }
             try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
             }

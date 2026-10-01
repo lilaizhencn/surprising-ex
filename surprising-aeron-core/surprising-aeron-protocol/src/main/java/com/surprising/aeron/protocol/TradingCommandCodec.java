@@ -159,19 +159,29 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeUpdateLeverage(UpdateLeverageCommand command) {
         byte[] instrumentId = text(command.instrumentId());
-        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Integer.BYTES + Long.BYTES)
+        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES + instrumentId.length + Integer.BYTES + Long.BYTES
+                        + (command.repriceCrossMargin() ? Integer.BYTES : 0))
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) instrumentId.length).put(instrumentId)
                 .putInt(command.marginMode().wireCode())
-                .putLong(command.leveragePpm()).array();
+                .putLong(command.leveragePpm());
+        // Existing journal payloads retain their original exposure-blocking semantics.
+        if (command.repriceCrossMargin()) buffer.putInt(2);
+        return buffer.array();
     }
 
     public static UpdateLeverageCommand decodeUpdateLeverage(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
         requireRemaining(buffer, Integer.BYTES + Long.BYTES);
-        UpdateLeverageCommand command = new UpdateLeverageCommand(instrumentId,
-                CoreMarginMode.fromWireCode(buffer.getInt()), buffer.getLong());
+        CoreMarginMode marginMode = CoreMarginMode.fromWireCode(buffer.getInt());
+        long leveragePpm = buffer.getLong();
+        boolean reprice = buffer.hasRemaining();
+        if (reprice) {
+            requireRemaining(buffer, Integer.BYTES);
+            if (buffer.getInt() != 2) throw new IllegalArgumentException("unsupported leverage command version");
+        }
+        UpdateLeverageCommand command = new UpdateLeverageCommand(instrumentId, marginMode, leveragePpm, reprice);
         requireConsumed(buffer);
         return command;
     }

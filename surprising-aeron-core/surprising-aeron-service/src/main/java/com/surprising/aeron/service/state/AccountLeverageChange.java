@@ -11,6 +11,7 @@ public final class AccountLeverageChange implements java.util.function.IntFuncti
     private CoreLeverageKey key;
     /** 目标杠杆，Lane 完成后用于发布不可变变更。 */
     private long leveragePpm;
+    private boolean repriceCrossMargin;
     /** 账户唯一所属 Lane。 */
     private int laneId;
     private int symbolId;
@@ -35,6 +36,7 @@ public final class AccountLeverageChange implements java.util.function.IntFuncti
         this.runtime = runtime;
         this.key = DerivativeAccountCommandProcessor.leverageKey(runtime, identities, userId, command);
         this.leveragePpm = command.leveragePpm();
+        this.repriceCrossMargin = command.repriceCrossMargin();
         this.laneId = runtime.topology().accountLaneId(userId);
         this.symbolId = identities.symbolId(key.instrumentId());
         this.completed = false;
@@ -42,7 +44,8 @@ public final class AccountLeverageChange implements java.util.function.IntFuncti
     }
 
     @Override public Object apply(int ignoredLaneId) {
-        return DerivativeAccountCommandProcessor.updateAccountLeverage(runtime, key, symbolId, leveragePpm);
+        return DerivativeAccountCommandProcessor.updateAccountLeverage(runtime, key, symbolId, leveragePpm,
+                repriceCrossMargin);
     }
 
     public boolean poll() {

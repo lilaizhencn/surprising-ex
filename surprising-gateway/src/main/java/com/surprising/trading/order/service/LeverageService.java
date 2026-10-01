@@ -52,7 +52,7 @@ public class LeverageService {
         UUID commandId = UUID.randomUUID();
         aeron.command(CoreMessageType.UPDATE_LEVERAGE, commandId, request.userId(),
                 TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(instrumentId,
-                        CoreMarginMode.valueOf(marginMode.name()), request.leveragePpm())));
+                        CoreMarginMode.valueOf(marginMode.name()), request.leveragePpm(), request.repriceCrossMargin())));
         return new LeverageSettingResponse(request.userId(), productLine, instrumentId, marginMode,
                 request.leveragePpm(), rule.maxLeveragePpm(),
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(request.leveragePpm()),

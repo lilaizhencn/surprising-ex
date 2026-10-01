@@ -53,7 +53,7 @@ public class LeverageRequestService {
         if (request == null || request.productLine() != null || productLine == null) {
             return request;
         }
-        return new LeverageSettingRequest(request.userId(), productLine, request.instrumentId(), request.marginMode(), request.leveragePpm(), request.reason());
+        return new LeverageSettingRequest(request.userId(), productLine, request.instrumentId(), request.marginMode(), request.leveragePpm(), request.reason(), request.repriceCrossMargin());
     }
 
     private ProductLine productLine(String queryValue, String headerValue) {
