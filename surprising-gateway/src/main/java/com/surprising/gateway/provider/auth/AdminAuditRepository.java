@@ -31,34 +31,39 @@ public class AdminAuditRepository {
 
     public void record(AdminOperationRecord record) {
         try {
-            jdbcTemplate.update("""
-                    INSERT INTO gateway_admin_operation_logs (
-                        admin_user_id, admin_username, admin_roles, service, http_method, request_path,
-                        query_string, target_uri, request_body_sha256, response_status, duration_ms, success,
-                        error_message, trace_id, user_agent, ip_address, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    record.adminUserId(),
-                    record.adminUsername(),
-                    record.adminRoles() == null ? null : String.join(",", record.adminRoles()),
-                    normalizeService(record.service()),
-                    normalizeMethod(record.httpMethod()),
-                    truncate(record.requestPath(), 2048),
-                    truncate(record.queryString(), 2048),
-                    truncate(record.targetUri(), 4096),
-                    record.requestBodySha256(),
-                    record.responseStatus(),
-                    record.durationMs(),
-                    record.success(),
-                    truncate(record.errorMessage(), 1024),
-                    truncate(record.traceId(), 128),
-                    truncate(record.userAgent(), 512),
-                    truncate(record.ipAddress(), 128),
-                    Timestamp.from(record.createdAt() == null ? Instant.now() : record.createdAt()));
+            recordRequired(record);
         } catch (DataAccessException ex) {
             log.warn("admin operation audit write failed service={} method={} path={}",
                     record.service(), record.httpMethod(), record.requestPath(), ex);
         }
+    }
+
+    /** Internal financial operations must record intent before issuing a Core command. */
+    public void recordRequired(AdminOperationRecord record) {
+        jdbcTemplate.update("""
+                INSERT INTO gateway_admin_operation_logs (
+                    admin_user_id, admin_username, admin_roles, service, http_method, request_path,
+                    query_string, target_uri, request_body_sha256, response_status, duration_ms, success,
+                    error_message, trace_id, user_agent, ip_address, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                record.adminUserId(),
+                record.adminUsername(),
+                record.adminRoles() == null ? null : String.join(",", record.adminRoles()),
+                normalizeService(record.service()),
+                normalizeMethod(record.httpMethod()),
+                truncate(record.requestPath(), 2048),
+                truncate(record.queryString(), 2048),
+                truncate(record.targetUri(), 4096),
+                record.requestBodySha256(),
+                record.responseStatus(),
+                record.durationMs(),
+                record.success(),
+                truncate(record.errorMessage(), 1024),
+                truncate(record.traceId(), 128),
+                truncate(record.userAgent(), 512),
+                truncate(record.ipAddress(), 128),
+                Timestamp.from(record.createdAt() == null ? Instant.now() : record.createdAt()));
     }
 
     public List<AdminOperationLogResponse> operationLogs(Long adminUserId,

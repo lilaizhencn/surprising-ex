@@ -108,6 +108,18 @@ class LocalBusinessApiTest {
     }
 
     @Test
+    void adminCanReadMakerLeverageWithoutImpersonatingUser() {
+        String path = "/api/v1/admin/trading/leverage/settings?userId=2&instrumentId=604&marginMode=CROSS";
+        assertThat(invoke("trading-leverage", path, HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(leverage);
+        var headers = userHeaders(); headers.set("X-Admin-User-Id", "7");
+        assertThat(invoke("trading-leverage", path, HttpMethod.GET, headers, null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        verify(leverage).get(2, "604", com.surprising.trading.api.model.MarginMode.CROSS, "LINEAR_PERPETUAL", null);
+    }
+
+    @Test
     void missingBookSymbolDoesNotReachController() {
         var response = invoke("trading-market", "/api/v1/trading/market/orderbook", HttpMethod.GET, new HttpHeaders(), null);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);

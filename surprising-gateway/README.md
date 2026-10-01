@@ -318,3 +318,30 @@ Chrome 桌面及 390px 手机检查双语三验证码弹窗、设置开关及导
 - 合约配置改用四个币种 ID；数据库外键拒绝不存在的币种，创建及重新启用市场时进一步校验上线资格。现有市场的交易状态仍由各产品线合约状态控制，币种目录开关不隐式清退持仓。
 
 数据库定义统一位于根 `init.sql`。项目未上线，使用空库初始化目标结构，不在运行时保留名称身份兼容分支。
+
+
+## 本机流动性运维接口
+
+缺少后台交互账号的服务器运维使用 `/internal/v1/operations/liquidity`，复用正式业务服务，
+无需伪造用户 JWT。默认关闭；显式配置 `SURPRISING_GATEWAY_OPERATIONS_TOKEN`（至少 32 字符）后，
+请求须携带 `X-Operations-Token`，并从 127.0.0.1/::1 直连。带 Forwarded/X-Forwarded-For 的代理请求一律拒绝。
+密钥只保存在服务器权限为 600 的运维配置中，不放在浏览器、仓库或日志里。
+
+- POST `/balance-adjustments`：`ProductBalanceAdjustmentRequest`，必须指定当前产品线的 accountType、
+  userId、asset、amountUnits、referenceId、reason。沿用 AccountCommandGateway 的确定性资金命令 ID。
+  超时先查账户/命令结果；需重试时保持相同 referenceId 和金额，禁止换引用重复充值。
+- POST `/leverage`：`LeverageSettingRequest`，显式 productLine、userId、instrumentId、marginMode、leveragePpm、reason。
+- POST `/instruments?reason=...`：完整 `InstrumentUpsertRequest`，沿用 InstrumentService 的校验、变更记录和发布流程。
+  contractType 必须属于当前服务产品线。只在核对当前配置后修改所需字段；网络超时先查 latest/changeId，避免重复版本发布。
+
+杠杆及合约请求须携带 `X-Operation-Id`；业务引用及原因均为 1–128 字符。审计记录以
+`SYSTEM:LIQUIDITY_OPERATIONS` 为操作者，写入 `gateway_admin_operation_logs`，执行前强制落下意图记录，
+失败则不发业务命令；完成后记录结果。完成记录失败可能返回失败但命令已执行，资金重试仍由 Core 幂等保护。
+金额、冻结、持仓仍由 Core 掌管，接口不直接写余额表，也不自动绕过保证金和风险档位。
+
+后台管理员使用既有鉴权/审批入口；新增 GET `/api/v1/admin/gateway/trading-leverage/settings`
+可按当前产品线读取指定做市账号的杠杆，不必冒充该用户。管理页面不使用上述运维密钥。
+
+验证（JDK 27）：gateway 676 项，0 失败，42 项既有环境相关跳过；包含内部运维鉴权、
+产品线隔离、审计失败时不发资金命令、资金引用透传及管理员读取杠杆。直接依赖 Core 1004 项，
+0 失败，2 项既有跳过。未把跳过的数据库/外部环境测试记为通过；线上资金调整另做前后核对。

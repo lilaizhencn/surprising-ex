@@ -259,7 +259,8 @@ public final class TradingLocalRoutes {
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false));
         }
-        if (r.matches(HttpMethod.GET, LEVERAGE_CONTROLLER_GET)) {
+        if (r.matches(HttpMethod.GET, LEVERAGE_CONTROLLER_GET)
+                || r.matches(HttpMethod.GET, ADMIN_LEVERAGE_CONTROLLER_SET)) {
             return leverageRequests.get(r.query("userId", long.class, null, true),
                     r.query("instrumentId", String.class, null, true),
                     r.query("marginMode", MarginMode.class, null, false),
