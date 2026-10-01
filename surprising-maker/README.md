@@ -285,13 +285,25 @@ python3 scripts/check-linear-liquidity.py \
 
 当前源码和配置检查结论：
 
-- `QuotePlanner.applyLinearQuoteBudget` 取最大持仓名义额度和用户 OI 保底额度的较小值，并预留约 10%。
+- `QuotePlanner.applyQuoteBudget` 取最大持仓名义额度和用户 OI 保底额度的较小值，并预留约 10%。
   `init.sql` 的 USDT 倍率为 1e8、OI 保底为 25000000000000 units，即 25 万 USDT。
   零净仓位且配置未改时，单个账号单边整梯度预算不超过约 22.5 万 USDT；本地每币对一个报价账号，
   通用默认两个。1bp 以内的可成交深度只是整梯度的一部分，当前配置不足以承诺百万级订单。
-- 报价跟随外部深度、库存和波动，但没有跨市场对冲或完整净盈利门禁。种子合约 maker 费率为 200ppm；
-  `QuotePlanner` 未把该费用作为价差下限，参考价差不能直接当作净利润。必须核对账号实际费率、
-  已实现/未实现损益、资金费、手续费及对冲成本。不能承诺做市账号必然盈利。
+- `QuotePlanner` 在线性合约上按 instrument maker 费率和 `MM_MAKER_FEE_RESERVE_PPM` 的较大值
+  计算最低价差，再加入 `MM_MIN_NET_HALF_SPREAD_PPM`（通用线性启动默认 100ppm）的目标净边际。
+  报价价格带无法覆盖成本时停止生成该批报价；负费率返佣不预支为收益。
+  整侧所有挂单数量共同占用库存预算，不能每档各自通过却合计超限。此约束不替代 Core 保证金校验。
+  策略尚无跨市场对冲，行情跳变、资金费和库存损益仍可能亏损，不能承诺账号必然盈利。
+- maker 后台 metrics 新增 `liquidity`：1bp 内买卖可成交名义金额、盘口序号/时间、新鲜度和目标。
+  `MM_LINEAR_LIQUIDITY_TARGET_NOTIONAL_UNITS` 默认关闭；通用线性脚本按种子 USDT 倍率设置
+  500000000000000（500 万 U）。其他资产必须按实际倍率配置。深度不足或盘口过期会使策略
+  qualityStatus 为 CRITICAL，即使工作线程仍 RUNNING。该目标用于验收和告警，不增加账户余额或 OI。
+- 线性 MARKET 在 `DeterministicExchangeCoreAdapter` 同一撮合线程内读取实时最优对手价，
+  把实际成交价格限制到该价的 100ppm，且仍受原标记价风控边界约束；取整向最优价收紧。
+  IOC 只成交价格带内数量、余量取消。原生引擎尚不支持普通 FOK，本次不把其拒绝行为当作全成能力；
+  限价单沿用用户限价。
+  这是撮合时最优价口径，不能防止从客户端发单到撮合期间的整体行情移动，也不含价差和手续费。
+  深度不足时不会为追求全成而越过价格边界，不能把此保护称为百万订单全额成交保证。
 - 2026-10-01 本机 `127.0.0.1:9094` 未监听，未启动或改变已有运行环境；尚无本轮真实百万级成交、
   连续扫单、补单延迟或 1bp 深度持续覆盖率证据。不得把单元测试或静态预算计算写成实盘验收通过。
 
@@ -299,5 +311,30 @@ python3 scripts/check-linear-liquidity.py \
 `python3 -B -m unittest discover -s scripts/tests -p test_linear_liquidity.py` 覆盖 1bp 边界、
 部分成交、均价达标但最差价超限、单笔限制、过期/错误盘口和资产倍率。
 
-本轮最终结果：maker 相关 62 项 Java 测试、盘口计算 6 项 Python 测试通过；同时相关 Core 36 项、
+前一轮结果：maker 相关 62 项 Java 测试、盘口计算 6 项 Python 测试通过；同时相关 Core 36 项、
 gateway 15 项测试通过。没有运行真实大额订单，没有把配置变更部署到已有进程；临时文本日志记录结果后清理。
+
+本轮最终验证：maker 全部 77 项通过，Core 980 项通过/2 项跳过，gateway 627 项通过/42 项跳过。
+新增覆盖手续费下限、整侧挂单库存预算、深度不足告警、买卖两侧 1bp 边界与 tick 取整、
+部分成交的账户守恒及线性永续/交割快照恢复；另以合成资金和充足盘口覆盖两条线的 500 万 U 名义金额全成交、持仓和恢复。普通 FOK 不受支持，没有计为全成能力验收。
+
+`MarketSlippageGuardBenchmark` 本机短时 JMH/JFR（1 fork，1×1s 预热、2×1s 测量），
+单次为挂一笔 maker 单再由 market 单吃完：未启用价格带约 4,214,510 次/秒，100ppm 约
+2,565,407 次/秒；吞吐下降约 39%，折合这段局部串行路径每次增加约 153ns。
+JFR 可见新增 `L2MarketData` 和 `MatcherResult`/数组分配；保护不是零成本。
+样本短且含 profiling 开销，不包括网关、账户结算、复制、大额多档成交或网络，不能据此承诺生产 TPS。
+
+重现局部性能采样（JDK 27；先构建 benchmarks 包）：
+
+```bash
+java --enable-native-access=ALL-UNNAMED \
+  --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
+  --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
+  -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
+  '.*(FundsCommandIndexBenchmark|MarketSlippageGuardBenchmark).*' \
+  -f 1 -wi 1 -i 2 -w 1s -r 1s -prof jfr:dir=/tmp/maker-funds-profile
+```
+
+本轮临时文本日志、JSON 和 JFR 记录结果后清理，原有测试报告和运行目录保留。
+当前仍未提供真实做市资金预算、与资金匹配的合约/OI 额度以及多进程大额成交环境，
+因此百万级立即全成、持续 1bp 深度覆盖和净盈利均未验收通过。

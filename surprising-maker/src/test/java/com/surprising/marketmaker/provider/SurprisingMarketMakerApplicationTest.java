@@ -16,6 +16,7 @@ class SurprisingMarketMakerApplicationTest {
     void logsTheEffectiveInternalMarkDrivenMakerMatrix(CapturedOutput output) {
         MarketMakerProperties properties = new MarketMakerProperties();
         properties.getQuoting().setOrderLevels(50);
+        properties.getReferenceMarket().setEnabled(false);
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
         strategy.setAccountIds(List.of(900001L, 900002L, 900003L, 900004L));
         properties.setStrategies(List.of(strategy));

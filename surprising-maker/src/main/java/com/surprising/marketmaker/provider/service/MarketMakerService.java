@@ -489,6 +489,18 @@ public class MarketMakerService {
                 rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, productLine, instrumentId, accountId,
                         1, 0, "instrument is unavailable or not TRADING"));
             }
+            MarketMakerLiquidityMetric liquidity = linearLiquidity(instrument, orderBook, now);
+            if (liquidity != null && liquidity.targetNotionalUnits() > 0) {
+                if (!liquidity.fresh()) rowAnomalies.add(anomaly("CRITICAL", "LIQUIDITY_BOOK_STALE", strategyId,
+                        productLine, instrumentId, accountId, 0, 1, "fresh two-sided depth is required for liquidity verification"));
+                if (liquidity.bidNotionalWithinBandUnits() < liquidity.targetNotionalUnits()
+                        || liquidity.askNotionalWithinBandUnits() < liquidity.targetNotionalUnits()) {
+                    rowAnomalies.add(anomaly("CRITICAL", "INSUFFICIENT_EXECUTABLE_DEPTH", strategyId,
+                            productLine, instrumentId, accountId,
+                            Math.min(liquidity.bidNotionalWithinBandUnits(), liquidity.askNotionalWithinBandUnits()),
+                            liquidity.targetNotionalUnits(), "displayed depth inside the slippage band is below the configured target"));
+                }
+            }
             anomalies.addAll(rowAnomalies);
             return new MarketMakerStrategyMetric(
                     strategyId, productLine, instrumentId, accountId, strategyStatus, qualityStatus(rowAnomalies),
@@ -503,7 +515,7 @@ public class MarketMakerService {
                     plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL).count(),
                     matchedDesired, missingDesired, staleOwned, offTargetOwned, bestBid, bestAsk,
                     spreadTicks, spreadPpm, markTicks, quoteCoveragePpm, state.lastTraceId(),
-                    state.lastError(), state.lastCycleTime(), null);
+                    state.lastError(), state.lastCycleTime(), null, liquidity);
         } catch (RuntimeException ex) {
             String message = ex.getMessage();
             anomalies.add(anomaly("CRITICAL", "METRIC_COLLECTION_FAILED", strategyId, productLine, instrumentId, accountId,
@@ -514,11 +526,53 @@ public class MarketMakerService {
                     state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
                     state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    state.lastTraceId(), state.lastError(), state.lastCycleTime(), message);
+                    state.lastTraceId(), state.lastError(), state.lastCycleTime(), message, null);
         } finally {
             MarketMakerProductLineContext.set(previousProductLine);
         }
     }
+
+    private MarketMakerLiquidityMetric linearLiquidity(InstrumentResponse instrument,
+                                                       OrderBookSnapshotResponse book, Instant now) {
+        if (instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                && instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY) return null;
+        long ppm = properties.getQuoting().getLiquiditySlippagePpm();
+        boolean fresh = book.eventTime() != null && !book.eventTime().isAfter(now)
+                && !book.eventTime().plus(properties.getReferenceMarket().getMaxAge()).isBefore(now)
+                && bestBid(book) > 0 && bestAsk(book) > bestBid(book);
+        return new MarketMakerLiquidityMetric(ppm, properties.getQuoting().getLinearLiquidityTargetNotionalUnits(),
+                bandNotional(book.bids(), OrderSide.SELL, ppm, instrument.notionalMultiplierUnits()),
+                bandNotional(book.asks(), OrderSide.BUY, ppm, instrument.notionalMultiplierUnits()),
+                book.sequence(), book.eventTime(), fresh);
+    }
+
+    private long bandNotional(List<OrderBookLevel> levels, OrderSide takingSide, long ppm, long multiplier) {
+        if (levels == null || levels.isEmpty()) return 0;
+        long best = levels.getFirst().priceTicks();
+        if (best <= 0 || multiplier <= 0) throw new IllegalStateException("invalid linear liquidity units");
+        var threshold = java.math.BigInteger.valueOf(best).multiply(java.math.BigInteger.valueOf(ppm));
+        var notional = java.math.BigInteger.ZERO;
+        long previous = best;
+        for (OrderBookLevel level : levels) {
+            long price = level.priceTicks();
+            if (price <= 0 || level.quantitySteps() < 0
+                    || takingSide == OrderSide.BUY && price < previous
+                    || takingSide == OrderSide.SELL && price > previous)
+                throw new IllegalStateException("invalid liquidity book ordering or amount");
+            previous = price;
+            var distance = java.math.BigInteger.valueOf(takingSide == OrderSide.BUY ? price - best : best - price)
+                    .multiply(java.math.BigInteger.valueOf(1_000_000L));
+            if (distance.compareTo(threshold) > 0) break;
+            notional = notional.add(java.math.BigInteger.valueOf(price)
+                    .multiply(java.math.BigInteger.valueOf(level.quantitySteps()))
+                    .multiply(java.math.BigInteger.valueOf(multiplier)));
+        }
+        return notional.longValueExact();
+    }
+
+    public record MarketMakerLiquidityMetric(long slippagePpm, long targetNotionalUnits,
+            long bidNotionalWithinBandUnits, long askNotionalWithinBandUnits,
+            long bookSequence, Instant bookEventTime, boolean fresh) { }
 
     private MarketMakerMetricsTotals totals(ProductLine productLine,
                                             List<MarketMakerStrategyMetric> rows,
@@ -1799,7 +1853,8 @@ public class MarketMakerService {
                                             String lastTraceId,
                                             String lastError,
                                             Instant lastCycleTime,
-                                            String error) {
+                                            String error,
+                                            MarketMakerLiquidityMetric liquidity) {
     }
 
     public record MarketMakerAnomaly(String severity,

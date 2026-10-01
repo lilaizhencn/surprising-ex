@@ -1245,7 +1245,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "runtime order is missing");
         return new CoreMatchingOrder(order.orderId(), identities.instrumentId(order.symbolId()),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
-                order.remainingQuantitySteps());
+                order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(productLine));
     }
 
     OrderRuntime runtimeOrder(long orderId) {
@@ -1271,7 +1271,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, intent, currentClusterTimestamp);
         return new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(), resolved.orderType(),
-                resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
+                resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps(),
+                CoreMatchingOrder.slippagePpm(productLine));
     }
 
     void stampOrderChangesRuntime(long timestamp, long clusterPosition,

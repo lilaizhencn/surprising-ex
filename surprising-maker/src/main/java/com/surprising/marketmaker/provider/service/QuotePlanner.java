@@ -56,8 +56,24 @@ public class QuotePlanner {
         long halfSpread = Math.max(Math.max(1L, spreadTicks(strategy, quoting) / 2L),
                 volatilitySpreadTicks(quoting, volatilityTicks));
         halfSpread = Math.max(halfSpread, multiplyDiv(anchor, quoting.getHalfSpreadPpm(), ONE_PPM));
+        boolean linear = instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                || instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY;
+        if (linear) {
+            long feePpm = Math.max(0L, Math.max(instrument.makerFeeRatePpm(), quoting.getMakerFeeReservePpm()));
+            if (feePpm >= ONE_PPM) throw new IllegalStateException("maker fee leaves no executable quote margin");
+            long requiredEdgePpm = Math.addExact(feePpm, quoting.getMinNetHalfSpreadPpm());
+            if (requiredEdgePpm > 0) {
+                var numerator = java.math.BigInteger.valueOf(anchor).multiply(java.math.BigInteger.valueOf(requiredEdgePpm));
+                var denominator = java.math.BigInteger.valueOf(ONE_PPM - feePpm);
+                long feeCoveredDistance = numerator.add(denominator).subtract(java.math.BigInteger.ONE)
+                        .divide(denominator).longValueExact();
+                halfSpread = Math.max(halfSpread, Math.addExact(feeCoveredDistance, 1L));
+            }
+        }
         long spacing = levelSpacingTicks(strategy, quoting);
         long maxDeviationTicks = Math.max(1L, multiplyDiv(anchor, quoting.getMaxPriceDeviationPpm(), ONE_PPM));
+        if (linear && (Math.max(instrument.makerFeeRatePpm(), quoting.getMakerFeeReservePpm()) > 0
+                || quoting.getMinNetHalfSpreadPpm() > 0) && halfSpread > maxDeviationTicks) throw new IllegalStateException("quote price bound cannot cover required spread and maker fee");
         long minPrice = Math.max(1L, anchor - maxDeviationTicks);
         long maxPrice = anchor + maxDeviationTicks;
         long bestBid = bestBid(orderBook);
@@ -113,28 +129,29 @@ public class QuotePlanner {
             else suppressedDuplicateQuotes++;
         }
         return new QuotePlan(anchor, signedPositionSteps,
-                applyLinearQuoteBudget(instrument, markPrice, signedPositionSteps, quotes), suppressedDuplicateQuotes);
+                applyQuoteBudget(strategy, risk, instrument, markPrice, signedPositionSteps, quotes), suppressedDuplicateQuotes);
     }
 
     /** PMM budget sizing: scale each side proportionally; keep external depth proportions and core limits. */
-    private List<DesiredQuote> applyLinearQuoteBudget(InstrumentResponse instrument, MarkPriceResponse mark,
+    private List<DesiredQuote> applyQuoteBudget(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Risk risk,
+                                                     InstrumentResponse instrument, MarkPriceResponse mark,
                                                      long position, List<DesiredQuote> quotes) {
-        if (instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
-                && instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY)
-            return List.copyOf(quotes);
-        long markTicks = markToTicks(instrument, mark);
-        if (markTicks <= 0) throw new IllegalStateException("mark price required for linear quote budget");
-        long budgetTicks = Math.max(markTicks, quotes.stream().mapToLong(DesiredQuote::priceTicks).max().orElse(markTicks));
-        long perStep = Math.multiplyExact(budgetTicks, instrument.notionalMultiplierUnits());
-        // The floor is a conservative guaranteed ceiling; the core also checks current OI and account funds.
-        long limit = Math.min(instrument.maxPositionNotionalUnits(), instrument.userOpenInterestLimitFloorUnits());
-        long maxSteps = limit / perStep;
-        // Leave 10% headroom for price movement and fills while a ladder is being refreshed.
-        maxSteps = maxSteps / 10 * 9;
+        if (strategy.getProductLine() == ProductLine.SPOT) return List.copyOf(quotes);
+        long maxSteps = maxInventory(strategy, risk);
+        if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
+                || instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY) {
+            long markTicks = markToTicks(instrument, mark);
+            if (markTicks <= 0) throw new IllegalStateException("mark price required for linear quote budget");
+            long budgetTicks = Math.max(markTicks, quotes.stream().mapToLong(DesiredQuote::priceTicks).max().orElse(markTicks));
+            long perStep = Math.multiplyExact(budgetTicks, instrument.notionalMultiplierUnits());
+            long limit = Math.min(instrument.maxPositionNotionalUnits(), instrument.userOpenInterestLimitFloorUnits());
+            long oiSteps = limit / perStep;
+            maxSteps = Math.min(maxSteps, oiSteps / 10 * 9);
+        }
         List<DesiredQuote> sized = new ArrayList<>(quotes.size());
         for (OrderSide side : OrderSide.values()) {
-            long capacity = side == OrderSide.BUY ? Math.max(0, maxSteps - position)
-                    : Math.max(0, maxSteps + position);
+            long capacity = side == OrderSide.BUY ? Math.max(0, Math.subtractExact(maxSteps, position))
+                    : Math.max(0, Math.addExact(maxSteps, position));
             long total = quotes.stream().filter(q -> q.side() == side).mapToLong(DesiredQuote::quantitySteps).sum();
             long minimum = instrument.minQuantitySteps();
             long count = quotes.stream().filter(q -> q.side() == side).count();

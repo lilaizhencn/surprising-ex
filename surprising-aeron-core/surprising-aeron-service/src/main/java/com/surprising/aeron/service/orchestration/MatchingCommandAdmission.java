@@ -333,7 +333,7 @@ final class MatchingCommandAdmission {
         var user = owner.runtimeState.user(message.header().userId());
         var matchingOrder = new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(),
                 resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(),
-                resolved.quantitySteps());
+                resolved.quantitySteps(), CoreMatchingOrder.slippagePpm(owner.productLine));
         return new ResolvedMatchingAdmission(message.header().userId(), originalOrderId, order.revision(),
                 user == null ? 0 : user.revision(), replacement, resolved, matchingOrder, requiredReservation);
     }

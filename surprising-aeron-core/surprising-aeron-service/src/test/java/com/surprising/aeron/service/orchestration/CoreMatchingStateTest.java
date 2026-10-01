@@ -37,6 +37,63 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 class CoreMatchingStateTest {
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
+            names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY"})
+    void fiveMillionNotionalCanFormPositionsWhenTestCapitalAndDepthAreAvailable(ProductLine product) {
+        // Synthetic quote-asset scale 1e8; the fixture has unrestricted OI, unlike production seed limits.
+        long notional = 5_000_000L * 100_000_000L;
+        long quantity = notional / 100;
+        long capital = 1_000_000L * 100_000_000L;
+        try (var state = new TradingCoreRuntime(product)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", capital)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", capital)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, quantity, ReservationKind.DERIVATIVE_MARGIN, "USDT", notional));
+            var filled = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(201, CoreOrderSide.BUY, 0, quantity, ReservationKind.DERIVATIVE_MARGIN, "USDT", notional,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 101, false));
+            assertThat(orderIn(filled, 201).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps()).isEqualTo(-quantity);
+            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(quantity);
+            assertThat(total(state, "USDT")).isEqualTo(capital * 2);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState()).isEqualTo(state.tradingState());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
+            names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY"})
+    void marketPriceBandProducesOnlyFundedPositionsAndSurvivesSnapshot(ProductLine product) {
+        try (var state = new TradingCoreRuntime(product)) {
+            applyInstrument(state);
+            for (int user : new int[]{11, 22}) {
+                apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            }
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+            apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
+                    place(102, CoreOrderSide.SELL, 101, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 202));
+            long before = total(state, "USDT");
+            var result = apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(201, CoreOrderSide.BUY, 0, 3, ReservationKind.DERIVATIVE_MARGIN, "USDT", 303,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 101, false));
+            assertThat(orderIn(result, 201).executedQuantitySteps()).isEqualTo(1);
+            assertThat(state.tradingState().order(102).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(total(state, "USDT")).isEqualTo(before);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState()).isEqualTo(state.tradingState());
+                assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
+            }
+        }
+    }
+
     @Test
     void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {

@@ -141,6 +141,17 @@ public class MarketMakerProperties {
         @Min(0)
         @Max(100_000)
         private long halfSpreadPpm = 0L;
+        /** Conservative linear maker fee when the account fee policy exceeds the instrument default. */
+        @Min(0) @Max(999_999)
+        private long makerFeeReservePpm;
+        @Min(0) @Max(100_000)
+        private long minNetHalfSpreadPpm;
+        /** Quote-asset units; zero disables the deployment-specific depth target. */
+        @PositiveOrZero
+        private long linearLiquidityTargetNotionalUnits;
+        @Min(1) @Max(100_000)
+        private long liquiditySlippagePpm = 100;
+
         @Min(2)
         @Max(1000)
         private int maxOpenOrdersPerAccountSymbol = 30;

@@ -644,6 +644,21 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void liquidityMetricsExposeMissingLargeOrderDepthInsteadOfCountingOnlyLevels() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.liquidityTargetNotionalUnits = 500_000_000L;
+        var metrics = fixtures.service().adminMetrics(100);
+        assertThat(metrics.rows()).singleElement().satisfies(row -> {
+            assertThat(row.liquidity().slippagePpm()).isEqualTo(100);
+            assertThat(row.liquidity().bidNotionalWithinBandUnits()).isEqualTo(4_999_000L);
+            assertThat(row.liquidity().askNotionalWithinBandUnits()).isEqualTo(5_001_000L);
+            assertThat(row.qualityStatus()).isEqualTo("CRITICAL");
+        });
+        assertThat(metrics.anomalies()).anySatisfy(anomaly ->
+                assertThat(anomaly.type()).isEqualTo("INSUFFICIENT_EXECUTABLE_DEPTH"));
+    }
+
+    @Test
     void adminMetricsReportsQuoteQualityAndAnomalies() {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
@@ -799,6 +814,7 @@ class MarketMakerServiceTest {
         private boolean tradeEnabled;
         private boolean referenceMarketEnabled;
         private long quantityRefreshTolerancePpm;
+        private long liquidityTargetNotionalUnits;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
@@ -863,6 +879,7 @@ class MarketMakerServiceTest {
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
             properties.getQuoting().setQuantityRefreshTolerancePpm(quantityRefreshTolerancePpm);
+            properties.getQuoting().setLinearLiquidityTargetNotionalUnits(liquidityTargetNotionalUnits);
             properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();

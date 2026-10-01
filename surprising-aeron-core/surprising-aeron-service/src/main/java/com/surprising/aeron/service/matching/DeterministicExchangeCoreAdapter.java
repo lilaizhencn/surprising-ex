@@ -262,9 +262,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private exchange.core2.core.common.MatcherResult placeNative(long userId, CoreMatchingOrder command) {
         int symbolId = ensureSymbol(command.instrumentId());
         recordUser(userId);
+        long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
+                command.matchingPriceTicks(), command.maxSlippagePpm());
         return engine(symbolId).place(
                 commandScope.get().aeronTimestamp, command.orderId(), 0,
-                command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
+                price, command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId);
     }
@@ -272,9 +274,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private exchange.core2.core.common.MatcherResult placeNative(long userId, ResolvedPlaceOrder command) {
         int symbolId = ensureSymbol(command.instrumentId());
         recordUser(userId);
+        long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
+                command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.instrument().contractType().productLine()));
         return engine(symbolId).place(
                 commandScope.get().aeronTimestamp, command.orderId(), 0,
-                command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
+                price, command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command.orderType(), command.timeInForce()), symbolId, userId);
     }
@@ -823,11 +827,29 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> submitDirectPlace(
             long userId, int symbolId, CoreMatchingOrder command) {
-        return completedMatcher(() -> engine(symbolId).place(
-                commandScope.get().aeronTimestamp, command.orderId(), 0,
-                command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
-                command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                orderType(command), symbolId, userId));
+        return completedMatcher(() -> {
+            long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
+                    command.matchingPriceTicks(), command.maxSlippagePpm());
+            return engine(symbolId).place(commandScope.get().aeronTimestamp, command.orderId(), 0,
+                    price, command.matchingPriceTicks(), command.quantitySteps(),
+                    command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                    orderType(command), symbolId, userId);
+        });
+    }
+
+    /** Read and place on the same matcher thread: no other order can consume the quoted top between them. */
+    private long protectedMarketPrice(int symbolId, CoreOrderSide side,
+            com.surprising.aeron.protocol.CoreOrderType type, long originalBound, long slippagePpm) {
+        if (type != com.surprising.aeron.protocol.CoreOrderType.MARKET || slippagePpm == 0) return originalBound;
+        L2MarketData top = engine(symbolId).orderBook(symbolId, 1);
+        boolean buy = side == CoreOrderSide.BUY;
+        if (buy ? top.askSize == 0 : top.bidSize == 0) return originalBound;
+        long best = buy ? top.askPrices[0] : top.bidPrices[0];
+        // Round toward the best price; outward rounding can exceed 1bp by a whole tick.
+        long distance = Math.addExact(Math.multiplyExact(best / 1_000_000L, slippagePpm),
+                (best % 1_000_000L) * slippagePpm / 1_000_000L);
+        return buy ? Math.min(originalBound, Math.addExact(best, distance))
+                : Math.max(originalBound, Math.subtractExact(best, distance));
     }
 
     private static OrderType orderType(CoreMatchingOrder command) {

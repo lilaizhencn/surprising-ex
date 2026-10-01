@@ -27,6 +27,38 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void linearQuotesCoverPositiveMakerFeeAndConfiguredNetEdge() {
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(200L).when(spec).makerFeeRatePpm();
+        var quoting = quoting();
+        quoting.setMinNetHalfSpreadPpm(100);
+        var plan = quotePlanner.plan(strategy(), quoting, risk(), spec,
+                orderBook(49_900, 50_100), mark(5_000_000), 0);
+        long bestBid = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY)
+                .mapToLong(q -> q.priceTicks()).max().orElseThrow();
+        long bestAsk = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL)
+                .mapToLong(q -> q.priceTicks()).min().orElseThrow();
+        assertThat(bestBid).isLessThanOrEqualTo(49_984);
+        assertThat(bestAsk).isGreaterThanOrEqualTo(50_016);
+        assertThat((bestAsk - bestBid) * 1_000_000L - (bestAsk + bestBid) * 200L).isPositive();
+    }
+
+    @Test
+    void entireRestingLadderCannotExceedInventoryAfterOneSidedFills() {
+        var strategy = strategy();
+        strategy.setOrderLevels(50);
+        strategy.setBaseQuantitySteps(1000);
+        for (long position : new long[]{0, 990, -990}) {
+            var plan = quotePlanner.plan(strategy, quoting(), risk(), instrument(),
+                    orderBook(49_990, 50_010), mark(5_000_000), position);
+            long bids = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY).mapToLong(q -> q.quantitySteps()).sum();
+            long asks = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL).mapToLong(q -> q.quantitySteps()).sum();
+            assertThat(position + bids).isLessThanOrEqualTo(1000);
+            assertThat(position - asks).isGreaterThanOrEqualTo(-1000);
+        }
+    }
+
+    @Test
     void followsAdjacentReferencePriceTicks() {
         var strategy = strategy();
         strategy.setOrderLevels(5);

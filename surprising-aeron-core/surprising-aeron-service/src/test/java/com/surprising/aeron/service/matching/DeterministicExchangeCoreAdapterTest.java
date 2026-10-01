@@ -32,6 +32,42 @@ import org.junit.jupiter.api.Test;
 
 class DeterministicExchangeCoreAdapterTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(CoreOrderSide.class)
+    void linearMarketOrderCannotSweepBeyondOneBasisPoint(CoreOrderSide side) {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            boolean buy = side == CoreOrderSide.BUY;
+            CoreOrderSide makerSide = buy ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+            for (int level = 0; level < 3; level++) {
+                adapter.place(11, new CoreMatchingOrder(101 + level, "21", makerSide,
+                        CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                        100_000 + (buy ? 1 : -1) * level * 10, 2));
+            }
+            var order = new CoreMatchingOrder(201, "21", side, CoreOrderType.MARKET,
+                    CoreTimeInForce.IOC, buy ? 110_000 : 90_000, 6, 100);
+            var result = adapter.placeWithEvidence(adapter.matcherShardId("21"), 4,
+                    new java.util.UUID(22, 4), 1000, 22, order);
+            var trades = result.matcherEvents().stream()
+                    .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE).toList();
+            assertThat(trades).extracting(MatcherResult.MatcherEvent::price)
+                    .containsExactly(100_000L, buy ? 100_010L : 99_990L);
+            assertThat(trades.stream().mapToLong(MatcherResult.MatcherEvent::size).sum()).isEqualTo(4);
+        }
+    }
+
+    @Test
+    void marketSlippageRoundingDoesNotAllowAnExtraTick() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            adapter.place(11, ask(101, 99));
+            adapter.place(11, ask(102, 100));
+            var result = adapter.placeAsync(22, new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
+                    CoreOrderType.MARKET, CoreTimeInForce.IOC, 110, 100, 100)).join();
+            assertThat(result.matcherEvents().stream()
+                    .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE))
+                    .extracting(MatcherResult.MatcherEvent::price).containsExactly(99L);
+        }
+    }
+
     @Test
     void nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation() {
         try (var direct = new DeterministicExchangeCoreAdapter();
