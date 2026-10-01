@@ -32,6 +32,29 @@ import org.junit.jupiter.api.Test;
 
 class DeterministicExchangeCoreAdapterTest {
 
+    @Test
+    void depthQueriesDoNotDiscardRestingOrdersBeyondVisibleLevels() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            for (int level = 0; level < 151; level++) {
+                assertThat(adapter.placeAsync(11, new CoreMatchingOrder(1000 + level, "21",
+                        CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                        100_000 + level, 1)).join().accepted()).isTrue();
+            }
+            assertThat(adapter.orderBookLevelsAsync("21", 50).join()).hasSize(50);
+            assertThat(adapter.orderBookLevelsAsync("21", 100).join()).hasSize(100);
+            var result = adapter.placeAsync(22, new CoreMatchingOrder(2000, "21",
+                    CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+                    100_150, 151)).join();
+            var trades = result.matcherEvents().stream()
+                    .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)
+                    .toList();
+            assertThat(trades).hasSize(151);
+            assertThat(trades.stream().mapToLong(MatcherResult.MatcherEvent::size).sum()).isEqualTo(151);
+            assertThat(trades.getLast().price()).isEqualTo(100_150);
+            assertThat(adapter.orderBookLevelsAsync("21", 100).join()).isEmpty();
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(CoreOrderSide.class)
     void linearMarketOrderCannotSweepBeyondOneBasisPoint(CoreOrderSide side) {
