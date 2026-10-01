@@ -912,11 +912,14 @@ public class MarketMakerService {
                                 .findFirst()
                                 .orElse(null);
                         OrderResponse response = item == null ? null : item.order();
-                        if (item == null || !item.success() || response == null
+                        if (item == null || item.success() && response == null) {
+                            throw new IllegalStateException("quote batch outcome is unknown; reconcile live orders before retry");
+                        }
+                        if (!item.success()
                                 || response.status() == OrderStatus.REJECTED) {
                             rejected++;
                             rejectionReason = firstReason(rejectionReason,
-                                    item == null ? "批量下单缺少结果" : firstReason(item.message(),
+                                    firstReason(item.message(),
                                             response == null ? null : response.rejectReason()));
                             continue;
                         }
@@ -931,10 +934,10 @@ public class MarketMakerService {
                         }
                     }
                 } catch (RuntimeException ex) {
-                    // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
-                    // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
-                    rejected += batchRequests.size();
-                    rejectionReason = firstReason(rejectionReason, ex.getMessage());
+                    // Core may have accepted the batch before the response was lost. Stop this
+                    // cycle before canceling more liquidity, then query actual orders next time.
+                    openOrderSnapshots.remove(orderSnapshotKey(strategy.getProductLine(), accountId, instrumentId));
+                    throw new IllegalStateException("quote replenishment outcome is unknown", ex);
                 }
             }
         }
@@ -1332,8 +1335,10 @@ public class MarketMakerService {
         }
         OrderQueryResponse response = orderRpcApi.openOrders(accountId, instrumentId,
                 properties.getQuoting().getMaxOpenOrdersPerAccountSymbol(), null);
-        List<OrderResponse> orders = response == null || response.orders() == null
-                ? List.of() : List.copyOf(response.orders());
+        if (response == null || response.orders() == null) {
+            throw new IllegalStateException("open order snapshot is unavailable");
+        }
+        List<OrderResponse> orders = List.copyOf(response.orders());
         openOrderSnapshots.put(key, new CachedOpenOrders(orders, now));
         return orders;
     }

@@ -514,6 +514,37 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void lostReplenishmentResponseStopsWithdrawalsAndForcesActualOrderQuery() {
+        var existing = staleTwentyLevelOrders();
+        Fixtures fixtures = new Fixtures(existing.subList(5, existing.size()));
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 40;
+        fixtures.orderRpc.loseNextQuoteResponse = true;
+        MarketMakerService service = fixtures.service();
+
+        var first = service.runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(first.strategies()).singleElement().satisfies(s ->
+                assertThat(s.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED));
+        assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+        service.runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.openOrdersCalls).isEqualTo(2);
+        assertThat(fixtures.orderRpc.openOrders).hasSize(40);
+        assertThat(fixtures.orderRpc.openOrders.stream().map(OrderResponse::clientOrderId).distinct()).hasSize(40);
+    }
+
+    @Test
+    void unavailableOrderSnapshotMustNotBeTreatedAsAnEmptyBook() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.orderRpc.nullOrderSnapshot = true;
+        var result = fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(result.strategies()).singleElement().satisfies(s ->
+                assertThat(s.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED));
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+        assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+    }
+
+    @Test
     void correctedTwentyByTwoLifecycleIsVisibleInAdminMetrics() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderLevels = 20;
@@ -953,6 +984,8 @@ class MarketMakerServiceTest {
         private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
         private final List<Long> failedCancelOrderIds = new ArrayList<>();
         private boolean batchSupported = true;
+        private boolean loseNextQuoteResponse;
+        private boolean nullOrderSnapshot;
         private boolean rejectMarketBatch;
         private boolean rejectQuoteBatch;
         private boolean omitMarketBatchDetails;
@@ -1001,6 +1034,10 @@ class MarketMakerServiceTest {
                 openOrders.add(placed);
                 results.add(new OrderBatchItemResponse(i, true, "completed",
                         omitMarketBatchDetails && placeRequest.orderType() == OrderType.MARKET ? null : placed));
+            }
+            if (loseNextQuoteResponse) {
+                loseNextQuoteResponse = false;
+                throw new IllegalStateException("response lost after Core accepted orders");
             }
             return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
         }
@@ -1122,6 +1159,7 @@ class MarketMakerServiceTest {
         public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
             productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
             openOrdersCalls++;
+            if (nullOrderSnapshot) return null;
             return new OrderQueryResponse(openOrders.size(), openOrders);
         }
     }

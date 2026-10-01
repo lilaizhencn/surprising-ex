@@ -35,13 +35,13 @@ class MarketMakerApplicationYamlTest {
                 .contains(false);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.quoting.order-reconciliation-interval"))
-                .contains("500ms");
+                .contains("${MM_ORDER_RECONCILIATION_INTERVAL:500ms}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.enabled"))
-                .contains("${MM_REFERENCE_MARKET_ENABLED:false}");
+                .contains("${MM_REFERENCE_MARKET_ENABLED:true}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.websocket-enabled"))
-                .contains("${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:false}");
+                .contains("${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:true}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.sources[0].parser"))
                 .contains("BINANCE_DEPTH");
@@ -51,6 +51,16 @@ class MarketMakerApplicationYamlTest {
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.strategies[0].enabled"))
                 .contains(true);
+    }
+
+    @Test
+    void linearLiquiditySettingsQueryActualOrdersEachCycle() throws IOException {
+        var properties = bind(Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1",
+                "MM_ORDER_LEVELS", "50", "MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL", "100",
+                "MM_ORDER_RECONCILIATION_INTERVAL", "0ms"));
+        assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(50);
+        assertThat(properties.getQuoting().getMaxOpenOrdersPerAccountSymbol()).isEqualTo(100);
+        assertThat(properties.getQuoting().getOrderReconciliationInterval()).isEqualTo(java.time.Duration.ZERO);
     }
 
     @ParameterizedTest
