@@ -266,7 +266,7 @@ public record TradingCoreState(
     }
 
     long fullBusinessStateHash() {
-        long hash = CoreStateHash.mix(CoreStateHash.start(), productLine.ordinal());
+        long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(productLine));
         hash = CoreStateHash.mix(hash, revision);
         for (CoreUserState user : users.values()) {
             hash = hashUser(hash, user);
@@ -305,19 +305,19 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, trigger.userId());
             hash = CoreStateHash.mix(hash, trigger.instrumentId());
             hash = CoreStateHash.mix(hash, trigger.side().wireCode());
-            hash = CoreStateHash.mix(hash, trigger.triggerType().ordinal());
-            hash = CoreStateHash.mix(hash, trigger.triggerCondition().ordinal());
+            hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(trigger.triggerType()));
+            hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(trigger.triggerCondition()));
             hash = CoreStateHash.mix(hash, trigger.triggerPriceTicks());
             hash = CoreStateHash.mix(hash, trigger.highestPriceTicks());
             hash = CoreStateHash.mix(hash, trigger.lowestPriceTicks());
-            hash = CoreStateHash.mix(hash, trigger.status().ordinal());
+            hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(trigger.status()));
             hash = CoreStateHash.mix(hash, trigger.placedOrderId());
             hash = CoreStateHash.mix(hash, trigger.triggerSequence());
             hash = CoreStateHash.mix(hash, trigger.triggeredPriceTicks());
             hash = CoreStateHash.mix(hash, trigger.updatedAtEpochMillis());
             hash = CoreStateHash.mix(hash, trigger.revision());
             if (trigger.priceSource() != com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK) {
-                hash = CoreStateHash.mix(hash, trigger.priceSource().ordinal());
+                hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(trigger.priceSource()));
             }
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
@@ -338,7 +338,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, risk.unrealizedPnlUnits());
             hash = CoreStateHash.mix(hash, risk.maintenanceMarginUnits());
             hash = CoreStateHash.mix(hash, risk.marginRatioPpm());
-            hash = CoreStateHash.mix(hash, risk.status().ordinal());
+            hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(risk.status()));
         }
         for (CoreLiquidationState liquidation : riskState.liquidations().values()) {
             if (liquidation.terminal()) continue;
@@ -354,7 +354,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.executionPriceTicks());
             hash = CoreStateHash.mix(hash, liquidation.liquidationFeeRatePpm());
             hash = CoreStateHash.mix(hash, liquidation.liquidationFeeUnits());
-            hash = CoreStateHash.mix(hash, liquidation.status().ordinal());
+            hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(liquidation.status()));
             hash = CoreStateHash.mix(hash, liquidation.nextCancelOrderId());
         }
         for (CoreRiskState.RiskScan scan : riskState.scans().values()) {
@@ -615,7 +615,7 @@ public record TradingCoreState(
     }
 
     static long hashUser(long initial, CoreUserState user) {
-        long hash = CoreStateHash.mix(initial, user.productLine().ordinal());
+        long hash = CoreStateHash.mix(initial, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(user.productLine()));
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
         hash = CoreStateHash.mix(hash, user.positionMode().wireCode());
@@ -651,7 +651,7 @@ public record TradingCoreState(
 
     static long hashOrder(long initial, CoreOrderState order) {
         long hash = CoreStateHash.mix(initial, order.orderId());
-        hash = CoreStateHash.mix(hash, order.productLine().ordinal());
+        hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(order.productLine()));
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, order.instrumentId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
@@ -677,7 +677,7 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.createdAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.updatedAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.clusterPosition());
-        hash = CoreStateHash.mix(hash, order.status().ordinal());
+        hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(order.status()));
         return CoreStateHash.mix(hash, order.revision());
     }
 

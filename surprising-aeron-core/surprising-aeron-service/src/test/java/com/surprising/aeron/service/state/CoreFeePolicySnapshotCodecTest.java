@@ -23,5 +23,6 @@ class CoreFeePolicySnapshotCodecTest {
 
         assertThat(second).containsExactly(first);
         assertThat(CoreFeePolicySnapshotCodec.decode(first)).isEqualTo(policies);
+        assertThat(CoreFeePolicySnapshotCodec.decode(first).keySet()).containsExactly(7L, 9L);
     }
 }

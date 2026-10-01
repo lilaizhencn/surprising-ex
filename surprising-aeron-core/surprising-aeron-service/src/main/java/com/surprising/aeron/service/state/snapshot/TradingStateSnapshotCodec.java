@@ -1,883 +1,835 @@
 package com.surprising.aeron.service.state.snapshot;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
+import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.*;
-
-import com.surprising.aeron.service.state.model.RiskLaneProgress;
-
-import com.surprising.aeron.service.state.model.AssetBalance;
-import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
-import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
-import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreMarkPriceState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CorePositionState;
-import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.model.CoreRiskStatus;
-import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.ProductLineWireCode;
-import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.protocol.CoreOrderType;
-import com.surprising.aeron.protocol.CorePositionMode;
-import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.aeron.service.state.model.*;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.model.CoreRiskState.RiskScan;
+import com.surprising.aeron.service.state.CoreTreasuryState.FundingProgress;
+import com.surprising.aeron.service.state.CoreTreasuryState.LifecycleProgress;
+import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.OptionType;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.UUID;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.*;
+import java.util.function.Function;
 
+/**
+ * 交易状态持久化格式。字段 ID 只增不复用；Java 名称、声明顺序和接口 DTO 不定义磁盘格式。
+ * v35/v36 由冻结的读取器恢复；v37 使用独立记录和编号字段，未知字段按长度跳过。
+ */
 public final class TradingStateSnapshotCodec {
+    private static final int VERSION = 37;
+    private static final int READER_REVISION = 1;
+    private TradingStateSnapshotCodec() { }
 
-    private static final int VERSION = 36;
-    private static final int MAX_TEXT_BYTES = 64;
-    private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
-
-    private TradingStateSnapshotCodec() {
-    }
-
-    public static byte[] encode(TradingCoreState state) {
-        Writer writer = new Writer();
-        writer.intValue(VERSION);
-        writer.intValue(ProductLineWireCode.encode(state.productLine()));
-        writer.longValue(state.revision());
-        writer.intValue(state.users().size());
-        for (CoreUserState user : state.users().values()) {
-            writer.longValue(user.userId());
-            writer.longValue(user.revision());
-            writer.intValue(user.positionMode().wireCode());
-            writer.intValue(user.balances().size());
-            user.balances().values().forEach(balance -> {
-                writer.text(balance.asset());
-                writer.longValue(balance.availableUnits());
-                writer.longValue(balance.lockedUnits());
-            });
-            writer.intValue(user.reservations().size());
-            user.reservations().values().forEach(reservation -> {
-                writer.longValue(reservation.orderId());
-                writer.text(reservation.instrumentId());
-                writer.intValue(reservation.kind().wireCode());
-                writer.text(reservation.asset());
-                writer.longValue(reservation.reservedUnits());
-                writer.longValue(reservation.releasedUnits());
-                writer.longValue(reservation.consumedUnits());
-                writer.longValue(reservation.orderQuantitySteps());
-            });
-            writer.intValue(user.positions().size());
-            user.positions().values().forEach(position -> {
-                writer.text(position.instrumentId());
-                writer.text(position.marginAsset());
-                writer.intValue(position.marginMode().wireCode());
-                writer.intValue(position.positionSide().wireCode());
-                writer.longValue(position.signedQuantitySteps());
-                writer.longValue(position.entryPriceTicks());
-                writer.longValue(position.entryValueTicks());
-                writer.longValue(position.realizedPnlUnits());
-                writer.longValue(position.positionMarginUnits());
-            });
-        }
-        writer.intValue(state.orders().size());
-        state.orders().values().forEach(order -> {
-            writer.longValue(order.orderId());
-            writer.longValue(order.userId());
-            writer.text(order.instrumentId());
-            writer.intValue(order.side().wireCode());
-            writer.longValue(order.priceTicks());
-            writer.longValue(order.matchingPriceTicks());
-            writer.longValue(order.quantitySteps());
-            writer.longValue(order.executedQuantitySteps());
-            writer.longValue(order.remainingQuantitySteps());
-            writer.byteValue(order.reduceOnly() ? 1 : 0);
-            writer.intValue(order.marginMode().wireCode());
-            writer.intValue(order.positionSide().wireCode());
-            writer.intValue(order.orderType().wireCode());
-            writer.intValue(order.timeInForce().wireCode());
-            writer.byteValue(order.postOnly() ? 1 : 0);
-            writer.optionalText(order.clientOrderId());
-            writer.longValue(order.commandId().getMostSignificantBits());
-            writer.longValue(order.commandId().getLeastSignificantBits());
-            writer.longValue(order.makerFeeRatePpm());
-            writer.longValue(order.takerFeeRatePpm());
-            writer.longValue(order.cumulativeFeeUnits());
-            writer.longValue(order.executedValueHigh());
-            writer.longValue(order.executedValueLow());
-            writer.longValue(order.createdAtEpochMillis());
-            writer.longValue(order.updatedAtEpochMillis());
-            writer.longValue(order.clusterPosition());
-            writer.intValue(order.status().ordinal());
-            writer.longValue(order.revision());
-        });
-        writer.intValue(state.instruments().size());
-        state.instruments().values().forEach(instrument -> {
-            writer.text(instrument.instrumentId());
-            writer.intValue(instrument.contractType().ordinal());
-            writer.text(instrument.baseAsset());
-            writer.text(instrument.quoteAsset());
-            writer.text(instrument.settleAsset());
-            writer.longValue(instrument.notionalMultiplierUnits());
-            writer.longValue(instrument.priceTickUnits());
-            writer.longValue(instrument.settleScaleUnits());
-            writer.longValue(instrument.initialMarginRatePpm());
-            writer.longValue(instrument.maintenanceMarginRatePpm());
-            writer.longValue(instrument.makerFeeRatePpm());
-            writer.longValue(instrument.takerFeeRatePpm());
-            writer.longValue(instrument.expiryEpochMillis());
-            writer.intValue(instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
-            writer.longValue(instrument.strikePriceTicks());
-            writer.longValue(instrument.maxLeveragePpm());
-            writer.longValue(instrument.maxPositionNotionalUnits());
-            writer.longValue(instrument.userOpenInterestLimitRatePpm());
-            writer.longValue(instrument.userOpenInterestLimitFloorUnits());
-            writer.longValue(instrument.maintenance().taskId());
-            writer.intValue(instrument.maintenance().mode().ordinal());
-            writer.longValue(instrument.maintenance().settlementPriceTicks());
-            writer.intValue(instrument.instrumentStatus().ordinal());
-            writer.byteValue(instrument.marketOrderEnabled() ? 1 : 0);
-            writer.byteValue(instrument.postOnlyEnabled() ? 1 : 0);
-            writer.byteValue(instrument.reduceOnlyEnabled() ? 1 : 0);
-            writer.intValue(instrument.supportedOrderTypeMask());
-            writer.intValue(instrument.supportedTimeInForceMask());
-            writer.intValue(instrument.riskLimitBrackets().size());
-            instrument.riskLimitBrackets().forEach(bracket -> {
-                writer.intValue(bracket.bracketNo());
-                writer.longValue(bracket.notionalFloorUnits());
-                writer.longValue(bracket.notionalCapUnits());
-                writer.longValue(bracket.maxLeveragePpm());
-                writer.longValue(bracket.initialMarginRatePpm());
-                writer.longValue(bracket.maintenanceMarginRatePpm());
-                writer.longValue(bracket.optionMarginFactorPpm());
-            });
-        });
-        writer.intValue(state.riskState().markPrices().size());
-        state.riskState().markPrices().values().forEach(mark -> {
-            writer.text(mark.instrumentId());
-            writer.longValue(mark.markPriceTicks());
-            writer.longValue(mark.indexPriceTicks());
-            writer.longValue(mark.forwardPriceTicks());
-            writer.longValue(mark.priceSequence());
-            writer.longValue(mark.generatedAtEpochMillis());
-            writer.longValue(mark.lastPriceTicks());
-        });
-        writer.intValue(state.riskState().snapshots().size());
-        state.riskState().snapshots().values().forEach(risk -> {
-            writer.longValue(risk.userId());
-            writer.text(risk.instrumentId());
-            writer.intValue(risk.positionSide().wireCode());
-            writer.longValue(risk.priceSequence());
-            writer.longValue(risk.equityUnits());
-            writer.longValue(risk.unrealizedPnlUnits());
-            writer.longValue(risk.maintenanceMarginUnits());
-            writer.longValue(risk.marginRatioPpm());
-            writer.intValue(risk.status().ordinal());
-        });
-        writer.intValue(state.riskState().liquidations().size());
-        state.riskState().liquidations().values().forEach(liquidation -> {
-            writer.longValue(liquidation.liquidationId());
-            writer.longValue(liquidation.userId());
-            writer.text(liquidation.instrumentId());
-            writer.intValue(liquidation.marginMode().wireCode());
-            writer.intValue(liquidation.positionSide().wireCode());
-            writer.longValue(liquidation.triggerPriceSequence());
-            writer.longValue(liquidation.signedQuantitySteps());
-            writer.longValue(liquidation.closeQuantitySteps());
-            writer.longValue(liquidation.deficitUnits());
-            writer.longValue(liquidation.executionPriceTicks());
-            writer.longValue(liquidation.liquidationFeeRatePpm());
-            writer.longValue(liquidation.liquidationFeeUnits());
-            writer.intValue(liquidation.status().ordinal());
-            writer.longValue(liquidation.nextCancelOrderId());
-        });
-        writer.intValue(state.riskState().scans().size());
-        state.riskState().scans().values().forEach(scan -> {
-            writer.text(scan.instrumentId());
-            writer.intValue(scan.accountLaneId());
-            writer.longValue(scan.priceSequence());
-            writer.longValue(scan.scanStartPriceSequence());
-            writer.longValue(scan.lastUserId());
-            writer.byteValue(scan.riskComplete() ? 1 : 0);
-            writer.longValue(scan.riskUserId());
-            writer.intValue(scan.riskPhase());
-            writer.text(scan.riskPositionCursor());
-            writer.longValue(scan.riskReservationCursor());
-            writer.longValue(scan.riskUnrealizedPnlUnits());
-            writer.longValue(scan.riskMaintenanceMarginUnits());
-            writer.longValue(scan.riskIsolatedMarginUnits());
-            writer.longValue(scan.riskIsolatedReservationUnits());
-            writer.byteValue(scan.triggerComplete() ? 1 : 0);
-            writer.intValue(scan.triggerPhase());
-            writer.longValue(scan.triggerPriceCursor());
-            writer.longValue(scan.triggerOrderCursor());
-            writer.longValue(scan.triggerUpperId());
-            writer.longValue(scan.triggerMarkPriceTicks());
-            writer.longValue(scan.triggerGeneratedAtEpochMillis());
-            writer.longValue(scan.triggerOcoOrderId());
-            writer.longValue(scan.triggerOcoCursor());
-            writer.longValue(scan.lastScheduledRevision());
-            writer.intValue(scan.laneProgress().size());
-            for (var lane : scan.laneProgress()) {
-                writer.longValue(lane.lastUserId());
-                writer.byteValue(lane.complete() ? 1 : 0);
-                writer.longValue(lane.userId());
-                writer.intValue(lane.phase());
-                writer.text(lane.positionCursor());
-                writer.longValue(lane.reservationCursor());
-                writer.longValue(lane.unrealizedPnlUnits());
-                writer.longValue(lane.maintenanceMarginUnits());
-                writer.longValue(lane.isolatedMarginUnits());
-                writer.longValue(lane.isolatedReservationUnits());
-                writer.longValue(lane.userRevision());
-                writer.longValue(lane.marketRevision());
-            }
-        });
-        writer.longValue(state.riskState().nextLiquidationId());
-        writer.longValue(state.riskState().marketRevision());
-        CoreRiskScanControlView scanControl = state.riskState().scanControl();
-        writer.longValue(scanControl.version());
-        writer.auditText(scanControl.ruleName());
-        writer.byteValue(scanControl.enabled() ? 1 : 0);
-        writer.longValue(scanControl.scanDelayMs());
-        writer.intValue(scanControl.scanBatchSize());
-        writer.auditText(scanControl.updatedBy());
-        writer.auditText(scanControl.reason());
-        writer.longValue(scanControl.updatedAtEpochMillis());
-        writeUnits(writer, state.treasuryState().feeBalances());
-        writeUnits(writer, state.treasuryState().insuranceBalances());
-        writeUnits(writer, state.treasuryState().insuranceDeficits());
-        writeUnits(writer, state.treasuryState().liquidationFeeBalances());
-        writeUnits(writer, state.treasuryState().fundingResidualBalances());
-        writeUnits(writer, state.treasuryState().roundingResidualBalances());
-        writeUnits(writer, state.treasuryState().clearingPnlBalances());
-        writeUnits(writer, state.treasuryState().fundingSettlements());
-        writeUnits(writer, state.treasuryState().lifecycleSettlements());
-        writer.intValue(state.treasuryState().fundingProgress().size());
-        state.treasuryState().fundingProgress().forEach((instrumentId, progress) -> {
-            writer.text(instrumentId);
-            writer.longValue(progress.settlementId());
-            writer.longValue(progress.fundingRatePpm());
-            writer.longValue(progress.markPriceTicks());
-            writer.longValue(progress.priceSequence());
-            writer.intValue(progress.accountLaneId());
-            writer.longValue(progress.nextCursorUserId());
-            writer.longValue(progress.commandId().getMostSignificantBits());
-            writer.longValue(progress.commandId().getLeastSignificantBits());
-        });
-        writer.intValue(state.treasuryState().lifecycleProgress().size());
-        state.treasuryState().lifecycleProgress().forEach((instrumentId, progress) -> {
-            writer.text(instrumentId);
-            writer.longValue(progress.settlementId());
-            writer.longValue(progress.settlementPriceTicks());
-            writer.longValue(progress.optionCashUnitsPerContract());
-            writer.byteValue(progress.ordersComplete() ? 1 : 0);
-            writer.intValue(progress.accountLaneId());
-            writer.longValue(progress.nextCursorOrderId());
-            writer.longValue(progress.nextCursorUserId());
-            writer.longValue(progress.commandId().getMostSignificantBits());
-            writer.longValue(progress.commandId().getLeastSignificantBits());
-            writer.longValue(progress.requiredInsuranceUnits());
-        });
-        writer.intValue(state.leverages().size());
-        state.leverages().forEach((key, leverage) -> {
-            writer.longValue(key.userId());
-            writer.text(key.instrumentId());
-            writer.intValue(key.marginMode().wireCode());
-            writer.longValue(leverage);
-        });
-        writer.intValue(state.algoOrders().size());
-        state.algoOrders().values().forEach(algo -> {
-            byte[] encoded = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(
-                    new com.surprising.aeron.protocol.CoreAlgoOrderView(algo.algoOrderId(), algo.userId(),
-                            algo.clientAlgoOrderId(), algo.instrumentId(), algo.algoTypeCode(), algo.side(), algo.priceTicks(),
-                            algo.quantitySteps(), algo.childQuantitySteps(), algo.intervalSeconds(), algo.durationSeconds(),
-                            algo.marginMode(), algo.positionSide(), algo.reduceOnly(), algo.postOnly(), algo.timeInForce(),
-                            algo.statusCode(), algo.currentOrderId(), algo.rejectReason(), algo.traceId(),
-                            algo.startAtEpochMillis(), algo.nextSliceAtEpochMillis(), algo.completedAtEpochMillis(),
-                            algo.createdAtEpochMillis(), algo.updatedAtEpochMillis(), algo.revision(), algo.childOrderIds(),
-                            0, 0, 0));
-            writer.intValue(encoded.length);
-            writer.bytes(encoded);
-        });
-        writer.intValue(state.cancelAllAfterTimers().size());
-        state.cancelAllAfterTimers().values().forEach(timer -> {
-            writer.longValue(timer.userId());
-            writer.text(timer.symbolScope());
-            writer.longValue(timer.countdownMillis());
-            writer.intValue(timer.status().wireCode());
-            writer.longValue(timer.triggerAtEpochMillis());
-            writer.longValue(timer.updatedAtEpochMillis());
-            writer.intValue(timer.canceledOrders());
-            writer.intValue(timer.canceledTriggerOrders());
-            writer.longValue(timer.revision());
-        });
-        writer.intValue(state.triggerOrders().size());
-        state.triggerOrders().values().forEach(trigger -> {
-            byte[] payload = com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger.view());
-            writer.intValue(payload.length);
-            writer.bytes(payload);
-        });
-        return writer.toByteArray();
+    public static byte[] encode(TradingCoreState value) {
+        byte[] fields = new SnapshotFields.Writer()
+                .number(1, SnapshotEnumCodes.encode(value.productLine()))
+                .number(2, value.revision())
+                .bytes(3, writeMap(value.users(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreUserState))
+                .bytes(4, writeMap(value.orders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreOrderState))
+                .bytes(5, writeMap(value.instruments(), key -> new SnapshotFields.Writer().text(1, key).encode(), TradingStateSnapshotCodec::writeCoreInstrument))
+                .bytes(6, writeCoreRiskState(value.riskState()))
+                .bytes(7, writeCoreTreasuryState(value.treasuryState()))
+                .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, item -> new SnapshotFields.Writer().number(1, item).encode()))
+                .bytes(9, writeMap(value.algoOrders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
+                .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
+                .list(11, value.triggerOrders().values(), item -> writeCoreTriggerOrderStateView(item.view()))
+                .number(12, READER_REVISION).encode();
+        return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
-        Reader reader = new Reader(encoded);
-        int version = reader.intValue();
-        if (version < 35 || version > VERSION) {
-            throw new ProtocolException("unsupported trading snapshot version: " + version);
-        }
-        ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
-        if (productLine != expectedProductLine) {
-            throw new ProtocolException("trading snapshot product line mismatch");
-        }
-        long revision = reader.nonNegativeLong("core revision");
-        int userCount = reader.count("users");
-        Map<Long, CoreUserState> users = new TreeMap<>();
-        for (int index = 0; index < userCount; index++) {
-            long userId = reader.positiveLong("userId");
-            long userRevision = reader.nonNegativeLong("user revision");
-            CorePositionMode positionMode = CorePositionMode.fromWireCode(reader.intValue());
-            Map<String, AssetBalance> balances = new TreeMap<>();
-            int balanceCount = reader.count("balances");
-            for (int balanceIndex = 0; balanceIndex < balanceCount; balanceIndex++) {
-                String asset = reader.text();
-                putUnique(balances, asset, new AssetBalance(asset,
-                        reader.nonNegativeLong("available units"), reader.nonNegativeLong("locked units")));
+        if (encoded == null || encoded.length < 4) throw new ProtocolException("truncated trading snapshot");
+        int version = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        if (version == 35 || version == 36) return TradingSnapshotV36Reader.decode(encoded, expectedProductLine);
+        if (version != VERSION) throw new ProtocolException("unsupported trading snapshot version: " + version);
+        try {
+            var r = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, 4, encoded.length));
+            int minimumReader = r.integer(12);
+            if (minimumReader < 1 || minimumReader > READER_REVISION)
+                throw new ProtocolException("trading snapshot requires reader version: " + minimumReader);
+            ProductLine product = SnapshotEnumCodes.readProductLine(r.integer(1));
+            if (product != expectedProductLine) throw new ProtocolException("trading snapshot product line mismatch");
+            Map<Long, CoreUserState> users = readMap(r.bytes(3), key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreUserState);
+            Map<Long, CoreOrderState> orders = readMap(r.bytes(4), key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreOrderState);
+            Map<String, CoreInstrument> instruments = readMap(r.bytes(5), key -> new SnapshotFields.Reader(key).text(1), TradingStateSnapshotCodec::readCoreInstrument);
+            Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new TreeMap<>();
+            for (var timer : r.list(10, TradingStateSnapshotCodec::readCoreCancelAllAfterState)) putUnique(timers, timer.key(), timer);
+            Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>();
+            for (var view : r.list(11, TradingStateSnapshotCodec::readCoreTriggerOrderStateView)) {
+                var instrument = instruments.get(view.instrumentId());
+                if (instrument == null) throw new ProtocolException("trigger instrument is missing");
+                putUnique(triggers, view.triggerOrderId(), CoreTriggerOrderState.from(view, instrument));
             }
-            Map<Long, OrderReservation> reservations = new TreeMap<>();
-            int reservationCount = reader.count("reservations");
-            for (int reservationIndex = 0; reservationIndex < reservationCount; reservationIndex++) {
-                long orderId = reader.positiveLong("reservation orderId");
-                OrderReservation reservation = new OrderReservation(orderId, reader.text(),
-                        ReservationKind.fromWireCode(reader.intValue()), reader.text(),
-                        reader.positiveLong("reserved units"), reader.nonNegativeLong("released units"),
-                        reader.nonNegativeLong("consumed units"), reader.positiveLong("order quantity"));
-                putUnique(reservations, orderId, reservation);
-            }
-            Map<String, CorePositionState> positions = new TreeMap<>();
-            int positionCount = reader.count("positions");
-            for (int positionIndex = 0; positionIndex < positionCount; positionIndex++) {
-                String instrumentId = reader.text();
-                String marginAsset = reader.text();
-                CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
-                CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-                CorePositionState position = new CorePositionState(instrumentId, marginAsset, marginMode, positionSide,
-                        reader.longValue(),
-                        reader.nonNegativeLong("entry price"), reader.nonNegativeLong("entry value"),
-                        reader.longValue(), reader.nonNegativeLong("position margin"));
-                putUnique(positions, instrumentId, position);
-            }
-            putUnique(users, userId, new CoreUserState(productLine, userId, userRevision,
-                    balances, reservations, positions, positionMode));
-        }
-        Map<Long, CoreOrderState> orders = new TreeMap<>();
-        int orderCount = reader.count("orders");
-        for (int index = 0; index < orderCount; index++) {
-            long orderId = reader.positiveLong("orderId");
-            long userId = reader.positiveLong("order userId");
-            String instrumentId = reader.text();
-            CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
-            long priceTicks = reader.nonNegativeLong("price ticks");
-            long matchingPriceTicks = reader.nonNegativeLong("matching price ticks");
-            long quantitySteps = reader.positiveLong("quantity steps");
-            long executedSteps = reader.nonNegativeLong("executed steps");
-            long remainingSteps = reader.nonNegativeLong("remaining steps");
-            boolean reduceOnly = reader.booleanValue();
-            CoreMarginMode orderMarginMode = CoreMarginMode.fromWireCode(reader.intValue());
-            CorePositionSide orderPositionSide = CorePositionSide.fromWireCode(reader.intValue());
-            CoreOrderType orderType = CoreOrderType.fromWireCode(reader.intValue());
-            CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(reader.intValue());
-            boolean postOnly = reader.booleanValue();
-            String clientOrderId = reader.optionalText();
-            UUID commandId = new UUID(reader.longValue(), reader.longValue());
-            long makerFeeRatePpm = reader.longValue();
-            long takerFeeRatePpm = reader.longValue();
-            long cumulativeFeeUnits = reader.longValue();
-            long valueHigh = reader.longValue();
-            long valueLow = reader.longValue();
-            long createdAt = reader.nonNegativeLong("order created time");
-            long updatedAt = reader.nonNegativeLong("order updated time");
-            long clusterPosition = reader.nonNegativeLong("order cluster position");
-            int statusCode = reader.intValue();
-            if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
-                throw new ProtocolException("invalid order status: " + statusCode);
-            }
-            CoreOrderState order = new CoreOrderState(orderId, productLine, userId, instrumentId,
-                    side,
-                    priceTicks, matchingPriceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
-                    orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
-                    clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                    cumulativeFeeUnits, valueHigh, valueLow, createdAt, updatedAt, clusterPosition,
-                    CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
-            putUnique(orders, orderId, order);
-        }
-        Map<String, CoreInstrument> instruments = new TreeMap<>();
-        int instrumentCount = reader.count("instruments");
-        for (int index = 0; index < instrumentCount; index++) {
-            String instrumentId = reader.text();
-            int contractType = reader.intValue();
-            if (contractType < 0 || contractType >= ContractType.values().length) {
-                throw new ProtocolException("invalid contract type: " + contractType);
-            }
-            ContractType decodedType = ContractType.values()[contractType];
-            String baseAsset = reader.text();
-            String quoteAsset = reader.text();
-            String settleAsset = reader.text();
-            long multiplier = reader.positiveLong("notional multiplier");
-            long priceTick = reader.positiveLong("price tick units");
-            long settleScale = reader.positiveLong("settle scale");
-            long initialMargin = reader.positiveLong("initial margin rate");
-            long maintenanceMargin = reader.positiveLong("maintenance margin rate");
-            long makerFee = reader.longValue();
-            long takerFee = reader.longValue();
-            long expiry = reader.nonNegativeLong("expiry time");
-            int optionTypeCode = reader.intValue();
-            if (optionTypeCode < -1 || optionTypeCode >= OptionType.values().length) {
-                throw new ProtocolException("invalid option type: " + optionTypeCode);
-            }
-            long strikePrice = reader.nonNegativeLong("strike price");
-            long maxLeverage = reader.positiveLong("max leverage");
-            long maxPosition = reader.positiveLong("max position notional");
-            long openInterestRate = reader.nonNegativeLong("open interest limit rate");
-            long openInterestFloor = reader.positiveLong("open interest limit floor");
-            long maintenanceTaskId = reader.nonNegativeLong("maintenance task");
-            int maintenanceMode = reader.intValue();
-            var maintenanceModes = com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.values();
-            if (maintenanceMode < 0 || maintenanceMode >= maintenanceModes.length) throw new ProtocolException("invalid maintenance mode");
-            var maintenance = new com.surprising.aeron.protocol.CoreInstrumentMaintenance(maintenanceTaskId,
-                    maintenanceModes[maintenanceMode], reader.nonNegativeLong("maintenance price"));
-            int instrumentStatus = reader.intValue();
-            if (instrumentStatus < 0 || instrumentStatus >= com.surprising.instrument.api.model.InstrumentStatus.values().length) {
-                throw new ProtocolException("invalid instrument status: " + instrumentStatus);
-            }
-            boolean marketOrderEnabled = reader.booleanValue();
-            boolean postOnlyEnabled = reader.booleanValue();
-            boolean reduceOnlyEnabled = reader.booleanValue();
-            int supportedOrderTypeMask = reader.intValue();
-            int supportedTimeInForceMask = reader.intValue();
-            int bracketCount = reader.count("risk limit brackets");
-            if (bracketCount == 0) throw new ProtocolException("risk limit brackets are empty");
-            java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
-            for (int bracketIndex = 0; bracketIndex < bracketCount; bracketIndex++) {
-                brackets.add(new CoreRiskLimitBracket(reader.intValue(),
-                        reader.nonNegativeLong("risk bracket floor"),
-                        reader.positiveLong("risk bracket cap"),
-                        reader.positiveLong("risk bracket max leverage"),
-                        reader.positiveLong("risk bracket initial margin"),
-                        reader.positiveLong("risk bracket maintenance margin"),
-                        reader.positiveLong("option margin factor")));
-            }
-            CoreInstrument instrument = new CoreInstrument(instrumentId,
-                    decodedType, baseAsset, quoteAsset, settleAsset, multiplier, priceTick, settleScale,
-                    initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
-                    optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
-                    strikePrice, maxLeverage, maxPosition, openInterestRate, openInterestFloor,
-                    java.util.List.copyOf(brackets), maintenance,
-                    com.surprising.instrument.api.model.InstrumentStatus.values()[instrumentStatus],
-                    marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
-                    supportedOrderTypeMask, supportedTimeInForceMask);
-            putUnique(instruments, instrumentId, instrument);
-        }
-        Map<String, CoreMarkPriceState> marks = new TreeMap<>();
-        int markCount = reader.count("mark prices");
-        for (int index = 0; index < markCount; index++) {
-            String instrumentId = reader.text();
-            CoreMarkPriceState mark = new CoreMarkPriceState(instrumentId,
-                    reader.positiveLong("mark price"),
-                    reader.nonNegativeLong("mark index price"), reader.nonNegativeLong("mark forward price"),
-                    reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"),
-                    version < 36 ? 0 : reader.nonNegativeLong("last price"));
-            putUnique(marks, instrumentId, mark);
-        }
-        Map<String, CoreRiskSnapshot> risks = new TreeMap<>();
-        int riskCount = reader.count("risk snapshots");
-        for (int index = 0; index < riskCount; index++) {
-            long userId = reader.positiveLong("risk userId");
-            String instrumentId = reader.text();
-            CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-            long priceSequence = reader.positiveLong("risk price sequence");
-            long equity = reader.longValue();
-            long unrealized = reader.longValue();
-            long maintenance = reader.nonNegativeLong("maintenance margin");
-            long ratio = reader.nonNegativeLong("margin ratio");
-            int status = reader.intValue();
-            if (status < 0 || status >= CoreRiskStatus.values().length) {
-                throw new ProtocolException("invalid risk status: " + status);
-            }
-            CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, instrumentId, positionSide,
-                    priceSequence, equity, unrealized, maintenance, ratio, CoreRiskStatus.values()[status]);
-            putUnique(risks, risk.key(), risk);
-        }
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>();
-        int liquidationCount = reader.count("liquidations");
-        for (int index = 0; index < liquidationCount; index++) {
-            long liquidationId = reader.positiveLong("liquidationId");
-            long userId = reader.positiveLong("liquidation userId");
-            String instrumentId = reader.text();
-            CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
-            CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-            long priceSequence = reader.positiveLong("liquidation price sequence");
-            long signedQuantity = reader.longValue();
-            long closeQuantity = reader.positiveLong("liquidation close quantity");
-            long deficitUnits = reader.nonNegativeLong("liquidation deficit");
-            long executionPriceTicks = reader.nonNegativeLong("liquidation execution price");
-            long liquidationFeeRatePpm = reader.nonNegativeLong("liquidation fee rate");
-            long liquidationFeeUnits = reader.nonNegativeLong("liquidation fee units");
-            int status = reader.intValue();
-            if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
-                throw new ProtocolException("invalid liquidation status: " + status);
-            }
-            CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, instrumentId,
-                    marginMode, positionSide, priceSequence, signedQuantity, closeQuantity,
-                    deficitUnits, executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits,
-                    CoreLiquidationState.Status.values()[status], reader.nonNegativeLong("liquidation cancel cursor"));
-            putUnique(liquidations, liquidationId, liquidation);
-        }
-        Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>();
-        int scanCount = reader.count("risk scans");
-        for (int index = 0; index < scanCount; index++) {
-            String scanSymbol = reader.text();
-            CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
-                    reader.intValue(),
-                    reader.nonNegativeLong("scan price sequence"),
-                    reader.nonNegativeLong("scan start price sequence"),
-                    reader.nonNegativeLong("scan userId"), reader.booleanValue(),
-                    reader.nonNegativeLong("scan active userId"), reader.intValue(), reader.text(),
-                    reader.nonNegativeLong("scan reservation cursor"), reader.longValue(),
-                    reader.nonNegativeLong("scan maintenance margin"),
-                    reader.nonNegativeLong("scan isolated margin"),
-                    reader.nonNegativeLong("scan isolated reservation"), reader.booleanValue(),
-                    reader.intValue(), reader.nonNegativeLong("trigger price cursor"),
-                    reader.nonNegativeLong("trigger order cursor"),
-                    reader.nonNegativeLong("trigger upper id"),
-                    reader.nonNegativeLong("trigger mark price"),
-                    reader.nonNegativeLong("trigger generated time"),
-                    reader.nonNegativeLong("trigger OCO order id"),
-                    reader.nonNegativeLong("trigger OCO cursor"), reader.nonNegativeLong("risk scheduling revision"), readRiskLanes(reader));
-            putUnique(scans, scanSymbol, scan);
-        }
-        long nextLiquidationId = reader.positiveLong("next liquidation id");
-        long marketRevision = reader.nonNegativeLong("market revision");
-        CoreRiskScanControlView scanControl = new CoreRiskScanControlView(
-                reader.positiveLong("risk scan control version"), reader.auditText(), reader.booleanValue(),
-                reader.nonNegativeLong("risk scan delay"), reader.intValue(), reader.auditText(), reader.auditText(),
-                reader.nonNegativeLong("risk scan control updated time"));
-        CoreRiskState riskState = new CoreRiskState(marks, risks, liquidations, scans,
-                nextLiquidationId, scanControl, marketRevision);
-        Map<String, Long> feeBalances = readUnits(reader, "fee balances");
-        Map<String, Long> insuranceBalances = readUnits(reader, "insurance balances");
-        Map<String, Long> insuranceDeficits = readUnits(reader, "insurance deficits");
-        Map<String, Long> liquidationFeeBalances = readUnits(reader, "liquidation fee balances");
-        Map<String, Long> fundingResidualBalances = readUnits(reader, "funding residual balances");
-        Map<String, Long> roundingResidualBalances = readUnits(reader, "rounding residual balances");
-        Map<String, Long> clearingPnlBalances = readUnits(reader, "clearing pnl balances");
-        Map<String, Long> fundingSettlements = readUnits(reader, "funding settlements");
-        Map<String, Long> lifecycleSettlements = readUnits(reader, "lifecycle settlements");
-        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
-        int fundingProgressCount = reader.count("funding progress");
-        for (int index = 0; index < fundingProgressCount; index++) {
-            String instrumentId = reader.text();
-            long settlementId = reader.positiveLong("funding progress settlement id");
-            long rate = reader.longValue();
-            long mark = reader.positiveLong("funding progress mark");
-            long priceSequence = reader.positiveLong("funding progress price sequence");
-            CoreTreasuryState.FundingProgress progress = new CoreTreasuryState.FundingProgress(
-                    settlementId, rate, reader.intValue(),
-                    reader.nonNegativeLong("funding progress cursor"),
-                    new UUID(reader.longValue(), reader.longValue()), mark, priceSequence);
-            putUnique(fundingProgress, instrumentId, progress);
-        }
-        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
-        int lifecycleProgressCount = reader.count("lifecycle progress");
-        for (int index = 0; index < lifecycleProgressCount; index++) {
-            String instrumentId = reader.text();
-            CoreTreasuryState.LifecycleProgress progress = new CoreTreasuryState.LifecycleProgress(
-                    reader.positiveLong("lifecycle progress settlement id"),
-                    reader.nonNegativeLong("lifecycle progress settlement price"),
-                    reader.nonNegativeLong("lifecycle progress option cash"),
-                    reader.booleanValue(), reader.intValue(),
-                    reader.nonNegativeLong("lifecycle progress order cursor"),
-                    reader.nonNegativeLong("lifecycle progress user cursor"),
-                    new UUID(reader.longValue(), reader.longValue()), reader.nonNegativeLong("required settlement insurance"));
-            putUnique(lifecycleProgress, instrumentId, progress);
-        }
-        CoreTreasuryState treasuryState = new CoreTreasuryState(feeBalances, insuranceBalances,
-                insuranceDeficits, liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances,
-                clearingPnlBalances, fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
-        Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
-        int leverageCount = reader.count("leverages");
-        for (int index = 0; index < leverageCount; index++) {
-            CoreLeverageKey key = new CoreLeverageKey(reader.positiveLong("leverage userId"), reader.text(),
-                    CoreMarginMode.fromWireCode(reader.intValue()));
-            putUnique(leverages, key, reader.positiveLong("leveragePpm"));
-        }
-        Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
-        int algoCount = reader.count("algo orders");
-        for (int index = 0; index < algoCount; index++) {
-            int length = reader.count("algo payload bytes");
-            CoreAlgoOrderState algo = CoreAlgoOrderState.from(
-                    com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(reader.bytes(length)));
-            putUnique(algoOrders, algo.algoOrderId(), algo);
-        }
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
-        int timerCount = reader.count("cancel-all-after timers");
-        for (int index = 0; index < timerCount; index++) {
-            long userId = reader.positiveLong("cancel-all-after userId");
-            String symbolScope = reader.text();
-            long countdownMillis = reader.nonNegativeLong("cancel-all-after countdown");
-            com.surprising.aeron.protocol.CoreCancelAllAfterStatus status =
-                    com.surprising.aeron.protocol.CoreCancelAllAfterStatus.fromWireCode(reader.intValue());
-            long triggerAt = reader.nonNegativeLong("cancel-all-after trigger time");
-            long updatedAt = reader.positiveLong("cancel-all-after updated time");
-            int canceledOrders = reader.intValue();
-            int canceledTriggerOrders = reader.intValue();
-            if (canceledOrders < 0 || canceledTriggerOrders < 0) {
-                throw new ProtocolException("negative cancel-all-after result count");
-            }
-            CoreCancelAllAfterState timer = new CoreCancelAllAfterState(userId, symbolScope, countdownMillis,
-                    status, triggerAt, updatedAt, canceledOrders, canceledTriggerOrders,
-                    reader.positiveLong("cancel-all-after revision"));
-            putUnique(cancelAllAfterTimers, timer.key(), timer);
-        }
-        Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
-        int triggerCount = reader.count("trigger orders");
-        for (int index = 0; index < triggerCount; index++) {
-            int length = reader.count("trigger payload bytes");
-            var view = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(reader.bytes(length));
-            CoreInstrument instrument = instruments.get(view.instrumentId());
-            if (instrument == null) throw new ProtocolException("trigger instrument is missing");
-            CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view, instrument);
-            putUnique(triggerOrders, trigger.triggerOrderId(), trigger);
-        }
-        reader.requireConsumed();
-        return new TradingCoreState(productLine, revision, users, orders, instruments, riskState,
-                treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
+            return new TradingCoreState(product, r.number(2), users, orders, instruments,
+                    readCoreRiskState(r.bytes(6)), readCoreTreasuryState(r.bytes(7)),
+                    readMap(r.bytes(8), TradingStateSnapshotCodec::readCoreLeverageKey, item -> new SnapshotFields.Reader(item).number(1)),
+                    readMap(r.bytes(9), key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreAlgoOrderState), timers, triggers);
+        } catch (ProtocolException invalid) { throw invalid; }
+        catch (RuntimeException invalid) { throw new ProtocolException("invalid trading snapshot: " + invalid.getMessage(), invalid); }
     }
 
-    private static void writeUnits(Writer writer, Map<String, Long> values) {
-        writer.intValue(values.size());
-        values.forEach((asset, units) -> {
-            writer.text(asset);
-            writer.longValue(units);
-        });
+    private static <K, V> byte[] writeMap(Map<K, V> values, Function<K, byte[]> key, Function<V, byte[]> value) {
+        return new SnapshotFields.Writer().list(1, values.entrySet(), entry -> new SnapshotFields.Writer()
+                .bytes(1, key.apply(entry.getKey())).bytes(2, value.apply(entry.getValue())).encode()).encode();
     }
-
-    private static Map<String, Long> readUnits(Reader reader, String name) {
-        Map<String, Long> values = new TreeMap<>();
-        int count = reader.count(name);
-        for (int index = 0; index < count; index++) {
-            putUnique(values, reader.text(), reader.longValue());
-        }
+    private static <K, V> Map<K, V> readMap(byte[] encoded, Function<byte[], K> key, Function<byte[], V> value) {
+        Map<K, V> values = new TreeMap<>();
+        for (var entry : new SnapshotFields.Reader(encoded).list(1, SnapshotFields.Reader::new))
+            putUnique(values, key.apply(entry.bytes(1)), value.apply(entry.bytes(2)));
         return values;
     }
-
     private static <K, V> void putUnique(Map<K, V> values, K key, V value) {
-        if (values.put(key, value) != null) {
-            throw new ProtocolException("duplicate trading snapshot key: " + key);
-        }
+        if (values.put(key, value) != null) throw new ProtocolException("duplicate trading snapshot key: " + key);
     }
 
-    private static final class Writer {
-        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
-
-        void byteValue(int value) {
-            output.write(value);
-        }
-
-        void intValue(int value) {
-            for (int shift = 0; shift < Integer.SIZE; shift += Byte.SIZE) {
-                output.write(value >>> shift);
-            }
-        }
-
-        void longValue(long value) {
-            for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-                output.write((int) (value >>> shift));
-            }
-        }
-
-        void text(String value) {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length == 0 || bytes.length > MAX_TEXT_BYTES) {
-                throw new IllegalArgumentException("invalid snapshot text length");
-            }
-            intValue(bytes.length);
-            output.writeBytes(bytes);
-        }
-
-        void optionalText(String value) {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > MAX_TEXT_BYTES) {
-                throw new IllegalArgumentException("invalid optional snapshot text length");
-            }
-            intValue(bytes.length);
-            output.writeBytes(bytes);
-        }
-
-        void auditText(String value) {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length == 0 || bytes.length > MAX_AUDIT_TEXT_BYTES) {
-                throw new IllegalArgumentException("invalid snapshot audit text length");
-            }
-            intValue(bytes.length);
-            output.writeBytes(bytes);
-        }
-
-        void bytes(byte[] value) {
-            if (value == null || value.length == 0 || value.length > 65_536) {
-                throw new IllegalArgumentException("invalid snapshot payload length");
-            }
-            output.writeBytes(value);
-        }
-
-        byte[] toByteArray() {
-            return output.toByteArray();
-        }
+    private static byte[] writeAssetBalance(AssetBalance value) {
+        return new SnapshotFields.Writer()
+                .text(1, value.asset()) // 1: asset
+                .number(2, value.availableUnits()) // 2: availableUnits
+                .number(3, value.lockedUnits()) // 3: lockedUnits
+                .encode();
+    }
+    private static AssetBalance readAssetBalance(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new AssetBalance(
+                r.text(1), // 1: asset
+                r.number(2), // 2: availableUnits
+                r.number(3)); // 3: lockedUnits
     }
 
-    private static java.util.List<RiskLaneProgress> readRiskLanes(Reader reader) {
-        int count = reader.count("risk Lanes");
-        if (count > Long.SIZE) throw new IllegalArgumentException("too many risk Lanes");
-        var lanes = new java.util.ArrayList<RiskLaneProgress>(count);
-        for (int i = 0; i < count; i++) lanes.add(new RiskLaneProgress(
-                reader.nonNegativeLong("Lane completed user"), reader.booleanValue(),
-                reader.nonNegativeLong("Lane active user"), reader.intValue(), reader.text(),
-                reader.nonNegativeLong("Lane reservation cursor"), reader.longValue(),
-                reader.nonNegativeLong("Lane maintenance margin"), reader.nonNegativeLong("Lane isolated margin"),
-                reader.nonNegativeLong("Lane isolated reservation"),
-                reader.nonNegativeLong("Lane account revision"), reader.nonNegativeLong("Lane market revision")));
-        return lanes;
+    private static byte[] writeOrderReservation(OrderReservation value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.orderId()) // 1: orderId
+                .text(2, value.instrumentId()) // 2: instrumentId
+                .number(3, SnapshotEnumCodes.encode(value.kind())) // 3: kind
+                .text(4, value.asset()) // 4: asset
+                .number(5, value.reservedUnits()) // 5: reservedUnits
+                .number(6, value.releasedUnits()) // 6: releasedUnits
+                .number(7, value.consumedUnits()) // 7: consumedUnits
+                .number(8, value.orderQuantitySteps()) // 8: orderQuantitySteps
+                .encode();
+    }
+    private static OrderReservation readOrderReservation(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new OrderReservation(
+                r.number(1), // 1: orderId
+                r.text(2), // 2: instrumentId
+                SnapshotEnumCodes.readReservationKind(r.integer(3)), // 3: kind
+                r.text(4), // 4: asset
+                r.number(5), // 5: reservedUnits
+                r.number(6), // 6: releasedUnits
+                r.number(7), // 7: consumedUnits
+                r.number(8)); // 8: orderQuantitySteps
     }
 
-    private static final class Reader {
-        private final byte[] input;
-        private int offset;
+    private static byte[] writeCorePositionState(CorePositionState value) {
+        return new SnapshotFields.Writer()
+                .text(1, value.instrumentId()) // 1: instrumentId
+                .text(2, value.marginAsset()) // 2: marginAsset
+                .number(3, SnapshotEnumCodes.encode(value.marginMode())) // 3: marginMode
+                .number(4, SnapshotEnumCodes.encode(value.positionSide())) // 4: positionSide
+                .number(5, value.signedQuantitySteps()) // 5: signedQuantitySteps
+                .number(6, value.entryPriceTicks()) // 6: entryPriceTicks
+                .number(7, value.entryValueTicks()) // 7: entryValueTicks
+                .number(8, value.realizedPnlUnits()) // 8: realizedPnlUnits
+                .number(9, value.positionMarginUnits()) // 9: positionMarginUnits
+                .encode();
+    }
+    private static CorePositionState readCorePositionState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CorePositionState(
+                r.text(1), // 1: instrumentId
+                r.text(2), // 2: marginAsset
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(3)), // 3: marginMode
+                SnapshotEnumCodes.readCorePositionSide(r.integer(4)), // 4: positionSide
+                r.number(5), // 5: signedQuantitySteps
+                r.number(6), // 6: entryPriceTicks
+                r.number(7), // 7: entryValueTicks
+                r.number(8), // 8: realizedPnlUnits
+                r.number(9)); // 9: positionMarginUnits
+    }
 
-        Reader(byte[] input) {
-            if (input == null) {
-                throw new ProtocolException("trading snapshot is required");
-            }
-            this.input = input;
-        }
+    private static byte[] writeCoreOrderState(CoreOrderState value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.orderId()) // 1: orderId
+                .number(2, SnapshotEnumCodes.encode(value.productLine())) // 2: productLine
+                .number(3, value.userId()) // 3: userId
+                .text(4, value.instrumentId()) // 4: instrumentId
+                .number(5, SnapshotEnumCodes.encode(value.side())) // 5: side
+                .number(6, value.priceTicks()) // 6: priceTicks
+                .number(7, value.matchingPriceTicks()) // 7: matchingPriceTicks
+                .number(8, value.quantitySteps()) // 8: quantitySteps
+                .number(9, value.executedQuantitySteps()) // 9: executedQuantitySteps
+                .number(10, value.remainingQuantitySteps()) // 10: remainingQuantitySteps
+                .bool(11, value.reduceOnly()) // 11: reduceOnly
+                .number(12, SnapshotEnumCodes.encode(value.marginMode())) // 12: marginMode
+                .number(13, SnapshotEnumCodes.encode(value.positionSide())) // 13: positionSide
+                .number(14, SnapshotEnumCodes.encode(value.orderType())) // 14: orderType
+                .number(15, SnapshotEnumCodes.encode(value.timeInForce())) // 15: timeInForce
+                .bool(16, value.postOnly()) // 16: postOnly
+                .text(17, value.clientOrderId()) // 17: clientOrderId
+                .uuid(18, value.commandId()) // 18: commandId
+                .number(19, value.makerFeeRatePpm()) // 19: makerFeeRatePpm
+                .number(20, value.takerFeeRatePpm()) // 20: takerFeeRatePpm
+                .number(21, value.cumulativeFeeUnits()) // 21: cumulativeFeeUnits
+                .number(22, value.executedValueHigh()) // 22: executedValueHigh
+                .number(23, value.executedValueLow()) // 23: executedValueLow
+                .number(24, value.createdAtEpochMillis()) // 24: createdAtEpochMillis
+                .number(25, value.updatedAtEpochMillis()) // 25: updatedAtEpochMillis
+                .number(26, value.clusterPosition()) // 26: clusterPosition
+                .number(27, SnapshotEnumCodes.encode(value.status())) // 27: status
+                .number(28, value.revision()) // 28: revision
+                .encode();
+    }
+    private static CoreOrderState readCoreOrderState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreOrderState(
+                r.number(1), // 1: orderId
+                SnapshotEnumCodes.readProductLine(r.integer(2)), // 2: productLine
+                r.number(3), // 3: userId
+                r.text(4), // 4: instrumentId
+                SnapshotEnumCodes.readCoreOrderSide(r.integer(5)), // 5: side
+                r.number(6), // 6: priceTicks
+                r.number(7), // 7: matchingPriceTicks
+                r.number(8), // 8: quantitySteps
+                r.number(9), // 9: executedQuantitySteps
+                r.number(10), // 10: remainingQuantitySteps
+                r.bool(11), // 11: reduceOnly
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(12)), // 12: marginMode
+                SnapshotEnumCodes.readCorePositionSide(r.integer(13)), // 13: positionSide
+                SnapshotEnumCodes.readCoreOrderType(r.integer(14)), // 14: orderType
+                SnapshotEnumCodes.readCoreTimeInForce(r.integer(15)), // 15: timeInForce
+                r.bool(16), // 16: postOnly
+                r.text(17), // 17: clientOrderId
+                r.uuid(18), // 18: commandId
+                r.number(19), // 19: makerFeeRatePpm
+                r.number(20), // 20: takerFeeRatePpm
+                r.number(21), // 21: cumulativeFeeUnits
+                r.number(22), // 22: executedValueHigh
+                r.number(23), // 23: executedValueLow
+                r.number(24), // 24: createdAtEpochMillis
+                r.number(25), // 25: updatedAtEpochMillis
+                r.number(26), // 26: clusterPosition
+                SnapshotEnumCodes.readCoreOrderStatus(r.integer(27)), // 27: status
+                r.number(28)); // 28: revision
+    }
 
-        int byteValue() {
-            require(Byte.BYTES);
-            return Byte.toUnsignedInt(input[offset++]);
-        }
+    private static byte[] writeCoreRiskSnapshot(CoreRiskSnapshot value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.userId()) // 1: userId
+                .text(2, value.instrumentId()) // 2: instrumentId
+                .number(3, SnapshotEnumCodes.encode(value.positionSide())) // 3: positionSide
+                .number(4, value.priceSequence()) // 4: priceSequence
+                .number(5, value.equityUnits()) // 5: equityUnits
+                .number(6, value.unrealizedPnlUnits()) // 6: unrealizedPnlUnits
+                .number(7, value.maintenanceMarginUnits()) // 7: maintenanceMarginUnits
+                .number(8, value.marginRatioPpm()) // 8: marginRatioPpm
+                .number(9, SnapshotEnumCodes.encode(value.status())) // 9: status
+                .encode();
+    }
+    private static CoreRiskSnapshot readCoreRiskSnapshot(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreRiskSnapshot(
+                r.number(1), // 1: userId
+                r.text(2), // 2: instrumentId
+                SnapshotEnumCodes.readCorePositionSide(r.integer(3)), // 3: positionSide
+                r.number(4), // 4: priceSequence
+                r.number(5), // 5: equityUnits
+                r.number(6), // 6: unrealizedPnlUnits
+                r.number(7), // 7: maintenanceMarginUnits
+                r.number(8), // 8: marginRatioPpm
+                SnapshotEnumCodes.readCoreRiskStatus(r.integer(9))); // 9: status
+    }
 
-        int intValue() {
-            require(Integer.BYTES);
-            int value = 0;
-            for (int shift = 0; shift < Integer.SIZE; shift += Byte.SIZE) {
-                value |= Byte.toUnsignedInt(input[offset++]) << shift;
-            }
-            return value;
-        }
+    private static byte[] writeCoreMarkPriceState(CoreMarkPriceState value) {
+        return new SnapshotFields.Writer()
+                .text(1, value.instrumentId()) // 1: instrumentId
+                .number(2, value.markPriceTicks()) // 2: markPriceTicks
+                .number(3, value.indexPriceTicks()) // 3: indexPriceTicks
+                .number(4, value.forwardPriceTicks()) // 4: forwardPriceTicks
+                .number(5, value.priceSequence()) // 5: priceSequence
+                .number(6, value.generatedAtEpochMillis()) // 6: generatedAtEpochMillis
+                .number(7, value.lastPriceTicks()) // 7: lastPriceTicks
+                .encode();
+    }
+    private static CoreMarkPriceState readCoreMarkPriceState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreMarkPriceState(
+                r.text(1), // 1: instrumentId
+                r.number(2), // 2: markPriceTicks
+                r.number(3), // 3: indexPriceTicks
+                r.number(4), // 4: forwardPriceTicks
+                r.number(5), // 5: priceSequence
+                r.number(6), // 6: generatedAtEpochMillis
+                r.numberOr(7, 0)); // 7: lastPriceTicks
+    }
 
-        long longValue() {
-            require(Long.BYTES);
-            long value = 0;
-            for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-                value |= (long) Byte.toUnsignedInt(input[offset++]) << shift;
-            }
-            return value;
-        }
+    private static byte[] writeCoreLiquidationState(CoreLiquidationState value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.liquidationId()) // 1: liquidationId
+                .number(2, value.userId()) // 2: userId
+                .text(3, value.instrumentId()) // 3: instrumentId
+                .number(4, SnapshotEnumCodes.encode(value.marginMode())) // 4: marginMode
+                .number(5, SnapshotEnumCodes.encode(value.positionSide())) // 5: positionSide
+                .number(6, value.triggerPriceSequence()) // 6: triggerPriceSequence
+                .number(7, value.signedQuantitySteps()) // 7: signedQuantitySteps
+                .number(8, value.closeQuantitySteps()) // 8: closeQuantitySteps
+                .number(9, value.deficitUnits()) // 9: deficitUnits
+                .number(10, value.executionPriceTicks()) // 10: executionPriceTicks
+                .number(11, value.liquidationFeeRatePpm()) // 11: liquidationFeeRatePpm
+                .number(12, value.liquidationFeeUnits()) // 12: liquidationFeeUnits
+                .number(13, SnapshotEnumCodes.encode(value.status())) // 13: status
+                .number(14, value.nextCancelOrderId()) // 14: nextCancelOrderId
+                .encode();
+    }
+    private static CoreLiquidationState readCoreLiquidationState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreLiquidationState(
+                r.number(1), // 1: liquidationId
+                r.number(2), // 2: userId
+                r.text(3), // 3: instrumentId
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(4)), // 4: marginMode
+                SnapshotEnumCodes.readCorePositionSide(r.integer(5)), // 5: positionSide
+                r.number(6), // 6: triggerPriceSequence
+                r.number(7), // 7: signedQuantitySteps
+                r.number(8), // 8: closeQuantitySteps
+                r.number(9), // 9: deficitUnits
+                r.number(10), // 10: executionPriceTicks
+                r.number(11), // 11: liquidationFeeRatePpm
+                r.number(12), // 12: liquidationFeeUnits
+                SnapshotEnumCodes.readCoreLiquidationStateStatus(r.integer(13)), // 13: status
+                r.number(14)); // 14: nextCancelOrderId
+    }
 
-        long nonNegativeLong(String field) {
-            long value = longValue();
-            if (value < 0) {
-                throw new ProtocolException(field + " must not be negative");
-            }
-            return value;
-        }
+    private static byte[] writeRiskLaneProgress(RiskLaneProgress value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.lastUserId()) // 1: lastUserId
+                .bool(2, value.complete()) // 2: complete
+                .number(3, value.userId()) // 3: userId
+                .number(4, value.phase()) // 4: phase
+                .text(5, value.positionCursor()) // 5: positionCursor
+                .number(6, value.reservationCursor()) // 6: reservationCursor
+                .number(7, value.unrealizedPnlUnits()) // 7: unrealizedPnlUnits
+                .number(8, value.maintenanceMarginUnits()) // 8: maintenanceMarginUnits
+                .number(9, value.isolatedMarginUnits()) // 9: isolatedMarginUnits
+                .number(10, value.isolatedReservationUnits()) // 10: isolatedReservationUnits
+                .number(11, value.userRevision()) // 11: userRevision
+                .number(12, value.marketRevision()) // 12: marketRevision
+                .encode();
+    }
+    private static RiskLaneProgress readRiskLaneProgress(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new RiskLaneProgress(
+                r.number(1), // 1: lastUserId
+                r.bool(2), // 2: complete
+                r.number(3), // 3: userId
+                r.integer(4), // 4: phase
+                r.text(5), // 5: positionCursor
+                r.number(6), // 6: reservationCursor
+                r.number(7), // 7: unrealizedPnlUnits
+                r.number(8), // 8: maintenanceMarginUnits
+                r.number(9), // 9: isolatedMarginUnits
+                r.number(10), // 10: isolatedReservationUnits
+                r.number(11), // 11: userRevision
+                r.number(12)); // 12: marketRevision
+    }
 
-        long positiveLong(String field) {
-            long value = longValue();
-            if (value <= 0) {
-                throw new ProtocolException(field + " must be positive");
-            }
-            return value;
-        }
+    private static byte[] writeCoreRiskScanControlView(CoreRiskScanControlView value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.version()) // 1: version
+                .text(2, value.ruleName()) // 2: ruleName
+                .bool(3, value.enabled()) // 3: enabled
+                .number(4, value.scanDelayMs()) // 4: scanDelayMs
+                .number(5, value.scanBatchSize()) // 5: scanBatchSize
+                .text(6, value.updatedBy()) // 6: updatedBy
+                .text(7, value.reason()) // 7: reason
+                .number(8, value.updatedAtEpochMillis()) // 8: updatedAtEpochMillis
+                .encode();
+    }
+    private static CoreRiskScanControlView readCoreRiskScanControlView(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreRiskScanControlView(
+                r.number(1), // 1: version
+                r.text(2), // 2: ruleName
+                r.bool(3), // 3: enabled
+                r.number(4), // 4: scanDelayMs
+                r.integer(5), // 5: scanBatchSize
+                r.text(6), // 6: updatedBy
+                r.text(7), // 7: reason
+                r.number(8)); // 8: updatedAtEpochMillis
+    }
 
-        int count(String field) {
-            int value = intValue();
-            if (value < 0 || value > input.length) {
-                throw new ProtocolException("invalid " + field + " count: " + value);
-            }
-            return value;
-        }
+    private static byte[] writeCoreRiskLimitBracket(CoreRiskLimitBracket value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.bracketNo()) // 1: bracketNo
+                .number(2, value.notionalFloorUnits()) // 2: notionalFloorUnits
+                .number(3, value.notionalCapUnits()) // 3: notionalCapUnits
+                .number(4, value.maxLeveragePpm()) // 4: maxLeveragePpm
+                .number(5, value.initialMarginRatePpm()) // 5: initialMarginRatePpm
+                .number(6, value.maintenanceMarginRatePpm()) // 6: maintenanceMarginRatePpm
+                .number(7, value.optionMarginFactorPpm()) // 7: optionMarginFactorPpm
+                .encode();
+    }
+    private static CoreRiskLimitBracket readCoreRiskLimitBracket(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreRiskLimitBracket(
+                r.integer(1), // 1: bracketNo
+                r.number(2), // 2: notionalFloorUnits
+                r.number(3), // 3: notionalCapUnits
+                r.number(4), // 4: maxLeveragePpm
+                r.number(5), // 5: initialMarginRatePpm
+                r.number(6), // 6: maintenanceMarginRatePpm
+                r.number(7)); // 7: optionMarginFactorPpm
+    }
 
-        String text() {
-            int length = count("text");
-            if (length == 0 || length > MAX_TEXT_BYTES) {
-                throw new ProtocolException("invalid snapshot text length: " + length);
-            }
-            require(length);
-            String value = new String(input, offset, length, StandardCharsets.UTF_8);
-            offset += length;
-            return value;
-        }
+    private static byte[] writeCoreInstrumentMaintenance(CoreInstrumentMaintenance value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.taskId()) // 1: taskId
+                .number(2, SnapshotEnumCodes.encode(value.mode())) // 2: mode
+                .number(3, value.settlementPriceTicks()) // 3: settlementPriceTicks
+                .encode();
+    }
+    private static CoreInstrumentMaintenance readCoreInstrumentMaintenance(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreInstrumentMaintenance(
+                r.number(1), // 1: taskId
+                SnapshotEnumCodes.readCoreInstrumentMaintenanceMode(r.integer(2)), // 2: mode
+                r.number(3)); // 3: settlementPriceTicks
+    }
 
-        String optionalText() {
-            int length = count("optional text");
-            if (length > MAX_TEXT_BYTES) {
-                throw new ProtocolException("invalid optional snapshot text length: " + length);
-            }
-            require(length);
-            String value = new String(input, offset, length, StandardCharsets.UTF_8);
-            offset += length;
-            return value;
-        }
+    private static byte[] writeCoreAlgoOrderState(CoreAlgoOrderState value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.algoOrderId()) // 1: algoOrderId
+                .number(2, value.userId()) // 2: userId
+                .text(3, value.clientAlgoOrderId()) // 3: clientAlgoOrderId
+                .text(4, value.instrumentId()) // 4: instrumentId
+                .number(5, value.algoTypeCode()) // 5: algoTypeCode
+                .number(6, SnapshotEnumCodes.encode(value.side())) // 6: side
+                .number(7, value.priceTicks()) // 7: priceTicks
+                .number(8, value.quantitySteps()) // 8: quantitySteps
+                .number(9, value.childQuantitySteps()) // 9: childQuantitySteps
+                .number(10, value.intervalSeconds()) // 10: intervalSeconds
+                .number(11, value.durationSeconds()) // 11: durationSeconds
+                .number(12, SnapshotEnumCodes.encode(value.marginMode())) // 12: marginMode
+                .number(13, SnapshotEnumCodes.encode(value.positionSide())) // 13: positionSide
+                .bool(14, value.reduceOnly()) // 14: reduceOnly
+                .bool(15, value.postOnly()) // 15: postOnly
+                .number(16, SnapshotEnumCodes.encode(value.timeInForce())) // 16: timeInForce
+                .number(17, value.statusCode()) // 17: statusCode
+                .number(18, value.currentOrderId()) // 18: currentOrderId
+                .text(19, value.rejectReason()) // 19: rejectReason
+                .text(20, value.traceId()) // 20: traceId
+                .number(21, value.startAtEpochMillis()) // 21: startAtEpochMillis
+                .number(22, value.nextSliceAtEpochMillis()) // 22: nextSliceAtEpochMillis
+                .number(23, value.completedAtEpochMillis()) // 23: completedAtEpochMillis
+                .number(24, value.createdAtEpochMillis()) // 24: createdAtEpochMillis
+                .number(25, value.updatedAtEpochMillis()) // 25: updatedAtEpochMillis
+                .number(26, value.revision()) // 26: revision
+                .list(27, value.childOrderIds(), item -> new SnapshotFields.Writer().number(1, item).encode()) // 27: childOrderIds
+                .encode();
+    }
+    private static CoreAlgoOrderState readCoreAlgoOrderState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreAlgoOrderState(
+                r.number(1), // 1: algoOrderId
+                r.number(2), // 2: userId
+                r.text(3), // 3: clientAlgoOrderId
+                r.text(4), // 4: instrumentId
+                r.integer(5), // 5: algoTypeCode
+                SnapshotEnumCodes.readCoreOrderSide(r.integer(6)), // 6: side
+                r.number(7), // 7: priceTicks
+                r.number(8), // 8: quantitySteps
+                r.number(9), // 9: childQuantitySteps
+                r.number(10), // 10: intervalSeconds
+                r.number(11), // 11: durationSeconds
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(12)), // 12: marginMode
+                SnapshotEnumCodes.readCorePositionSide(r.integer(13)), // 13: positionSide
+                r.bool(14), // 14: reduceOnly
+                r.bool(15), // 15: postOnly
+                SnapshotEnumCodes.readCoreTimeInForce(r.integer(16)), // 16: timeInForce
+                r.integer(17), // 17: statusCode
+                r.number(18), // 18: currentOrderId
+                r.text(19), // 19: rejectReason
+                r.text(20), // 20: traceId
+                r.number(21), // 21: startAtEpochMillis
+                r.number(22), // 22: nextSliceAtEpochMillis
+                r.number(23), // 23: completedAtEpochMillis
+                r.number(24), // 24: createdAtEpochMillis
+                r.number(25), // 25: updatedAtEpochMillis
+                r.number(26), // 26: revision
+                r.list(27, item -> new SnapshotFields.Reader(item).number(1))); // 27: childOrderIds
+    }
 
-        String auditText() {
-            int length = count("audit text");
-            if (length == 0 || length > MAX_AUDIT_TEXT_BYTES) {
-                throw new ProtocolException("invalid snapshot audit text length: " + length);
-            }
-            require(length);
-            String value = new String(input, offset, length, StandardCharsets.UTF_8);
-            offset += length;
-            return value;
-        }
+    private static byte[] writeCoreCancelAllAfterState(CoreCancelAllAfterState value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.userId()) // 1: userId
+                .text(2, value.symbolScope()) // 2: symbolScope
+                .number(3, value.countdownMillis()) // 3: countdownMillis
+                .number(4, SnapshotEnumCodes.encode(value.status())) // 4: status
+                .number(5, value.triggerAtEpochMillis()) // 5: triggerAtEpochMillis
+                .number(6, value.updatedAtEpochMillis()) // 6: updatedAtEpochMillis
+                .number(7, value.canceledOrders()) // 7: canceledOrders
+                .number(8, value.canceledTriggerOrders()) // 8: canceledTriggerOrders
+                .number(9, value.revision()) // 9: revision
+                .encode();
+    }
+    private static CoreCancelAllAfterState readCoreCancelAllAfterState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreCancelAllAfterState(
+                r.number(1), // 1: userId
+                r.text(2), // 2: symbolScope
+                r.number(3), // 3: countdownMillis
+                SnapshotEnumCodes.readCoreCancelAllAfterStatus(r.integer(4)), // 4: status
+                r.number(5), // 5: triggerAtEpochMillis
+                r.number(6), // 6: updatedAtEpochMillis
+                r.integer(7), // 7: canceledOrders
+                r.integer(8), // 8: canceledTriggerOrders
+                r.number(9)); // 9: revision
+    }
 
-        byte[] bytes(int length) {
-            if (length <= 0 || length > 65_536) {
-                throw new ProtocolException("invalid snapshot payload length: " + length);
-            }
-            require(length);
-            byte[] value = java.util.Arrays.copyOfRange(input, offset, offset + length);
-            offset += length;
-            return value;
-        }
+    private static byte[] writeCoreLeverageKey(CoreLeverageKey value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.userId()) // 1: userId
+                .text(2, value.instrumentId()) // 2: instrumentId
+                .number(3, SnapshotEnumCodes.encode(value.marginMode())) // 3: marginMode
+                .encode();
+    }
+    private static CoreLeverageKey readCoreLeverageKey(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreLeverageKey(
+                r.number(1), // 1: userId
+                r.text(2), // 2: instrumentId
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(3))); // 3: marginMode
+    }
 
-        boolean booleanValue() {
-            int value = byteValue();
-            if (value != 0 && value != 1) {
-                throw new ProtocolException("invalid boolean value: " + value);
-            }
-            return value == 1;
-        }
+    private static byte[] writeCoreTriggerOrderStateView(CoreTriggerOrderStateView value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.triggerOrderId()) // 1: triggerOrderId
+                .number(2, SnapshotEnumCodes.encode(value.productLine())) // 2: productLine
+                .number(3, value.userId()) // 3: userId
+                .text(4, value.clientTriggerOrderId()) // 4: clientTriggerOrderId
+                .text(5, value.ocoGroupId()) // 5: ocoGroupId
+                .text(6, value.instrumentId()) // 6: instrumentId
+                .number(7, SnapshotEnumCodes.encode(value.side())) // 7: side
+                .number(8, SnapshotEnumCodes.encode(value.triggerType())) // 8: triggerType
+                .number(9, SnapshotEnumCodes.encode(value.triggerCondition())) // 9: triggerCondition
+                .number(10, value.triggerPriceTicks()) // 10: triggerPriceTicks
+                .number(11, value.activationPriceTicks()) // 11: activationPriceTicks
+                .number(12, value.callbackRatePpm()) // 12: callbackRatePpm
+                .number(13, value.highestPriceTicks()) // 13: highestPriceTicks
+                .number(14, value.lowestPriceTicks()) // 14: lowestPriceTicks
+                .number(15, value.activatedAtEpochMillis()) // 15: activatedAtEpochMillis
+                .number(16, SnapshotEnumCodes.encode(value.orderType())) // 16: orderType
+                .number(17, SnapshotEnumCodes.encode(value.timeInForce())) // 17: timeInForce
+                .number(18, value.priceTicks()) // 18: priceTicks
+                .number(19, value.quantitySteps()) // 19: quantitySteps
+                .number(20, SnapshotEnumCodes.encode(value.marginMode())) // 20: marginMode
+                .number(21, SnapshotEnumCodes.encode(value.positionSide())) // 21: positionSide
+                .number(22, SnapshotEnumCodes.encode(value.status())) // 22: status
+                .number(23, value.placedOrderId()) // 23: placedOrderId
+                .number(24, value.triggerSequence()) // 24: triggerSequence
+                .number(25, value.triggeredPriceTicks()) // 25: triggeredPriceTicks
+                .text(26, value.rejectReason()) // 26: rejectReason
+                .text(27, value.traceId()) // 27: traceId
+                .number(28, value.expiresAtEpochMillis()) // 28: expiresAtEpochMillis
+                .number(29, value.triggeredAtEpochMillis()) // 29: triggeredAtEpochMillis
+                .number(30, value.createdAtEpochMillis()) // 30: createdAtEpochMillis
+                .number(31, value.updatedAtEpochMillis()) // 31: updatedAtEpochMillis
+                .number(32, value.revision()) // 32: revision
+                .number(33, value.makerFeeRatePpm()) // 33: makerFeeRatePpm
+                .number(34, value.takerFeeRatePpm()) // 34: takerFeeRatePpm
+                .number(35, SnapshotEnumCodes.encode(value.priceSource())) // 35: priceSource
+                .encode();
+    }
+    private static CoreTriggerOrderStateView readCoreTriggerOrderStateView(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreTriggerOrderStateView(
+                r.number(1), // 1: triggerOrderId
+                SnapshotEnumCodes.readProductLine(r.integer(2)), // 2: productLine
+                r.number(3), // 3: userId
+                r.text(4), // 4: clientTriggerOrderId
+                r.text(5), // 5: ocoGroupId
+                r.text(6), // 6: instrumentId
+                SnapshotEnumCodes.readCoreOrderSide(r.integer(7)), // 7: side
+                SnapshotEnumCodes.readCoreTriggerOrderType(r.integer(8)), // 8: triggerType
+                SnapshotEnumCodes.readCoreTriggerCondition(r.integer(9)), // 9: triggerCondition
+                r.number(10), // 10: triggerPriceTicks
+                r.number(11), // 11: activationPriceTicks
+                r.number(12), // 12: callbackRatePpm
+                r.number(13), // 13: highestPriceTicks
+                r.number(14), // 14: lowestPriceTicks
+                r.number(15), // 15: activatedAtEpochMillis
+                SnapshotEnumCodes.readCoreOrderType(r.integer(16)), // 16: orderType
+                SnapshotEnumCodes.readCoreTimeInForce(r.integer(17)), // 17: timeInForce
+                r.number(18), // 18: priceTicks
+                r.number(19), // 19: quantitySteps
+                SnapshotEnumCodes.readCoreMarginMode(r.integer(20)), // 20: marginMode
+                SnapshotEnumCodes.readCorePositionSide(r.integer(21)), // 21: positionSide
+                SnapshotEnumCodes.readCoreTriggerOrderStatus(r.integer(22)), // 22: status
+                r.number(23), // 23: placedOrderId
+                r.number(24), // 24: triggerSequence
+                r.number(25), // 25: triggeredPriceTicks
+                r.text(26), // 26: rejectReason
+                r.text(27), // 27: traceId
+                r.number(28), // 28: expiresAtEpochMillis
+                r.number(29), // 29: triggeredAtEpochMillis
+                r.number(30), // 30: createdAtEpochMillis
+                r.number(31), // 31: updatedAtEpochMillis
+                r.number(32), // 32: revision
+                r.number(33), // 33: makerFeeRatePpm
+                r.number(34), // 34: takerFeeRatePpm
+                SnapshotEnumCodes.readCoreTriggerPriceSource(r.integer(35))); // 35: priceSource
+    }
 
-        void requireConsumed() {
-            if (offset != input.length) {
-                throw new ProtocolException("trailing bytes in trading snapshot");
-            }
-        }
+    private static byte[] writeRiskScan(RiskScan value) {
+        return new SnapshotFields.Writer()
+                .text(1, value.instrumentId()) // 1: instrumentId
+                .number(2, value.accountLaneId()) // 2: accountLaneId
+                .number(3, value.priceSequence()) // 3: priceSequence
+                .number(4, value.scanStartPriceSequence()) // 4: scanStartPriceSequence
+                .number(5, value.lastUserId()) // 5: lastUserId
+                .bool(6, value.riskComplete()) // 6: riskComplete
+                .number(7, value.riskUserId()) // 7: riskUserId
+                .number(8, value.riskPhase()) // 8: riskPhase
+                .text(9, value.riskPositionCursor()) // 9: riskPositionCursor
+                .number(10, value.riskReservationCursor()) // 10: riskReservationCursor
+                .number(11, value.riskUnrealizedPnlUnits()) // 11: riskUnrealizedPnlUnits
+                .number(12, value.riskMaintenanceMarginUnits()) // 12: riskMaintenanceMarginUnits
+                .number(13, value.riskIsolatedMarginUnits()) // 13: riskIsolatedMarginUnits
+                .number(14, value.riskIsolatedReservationUnits()) // 14: riskIsolatedReservationUnits
+                .bool(15, value.triggerComplete()) // 15: triggerComplete
+                .number(16, value.triggerPhase()) // 16: triggerPhase
+                .number(17, value.triggerPriceCursor()) // 17: triggerPriceCursor
+                .number(18, value.triggerOrderCursor()) // 18: triggerOrderCursor
+                .number(19, value.triggerUpperId()) // 19: triggerUpperId
+                .number(20, value.triggerMarkPriceTicks()) // 20: triggerMarkPriceTicks
+                .number(21, value.triggerGeneratedAtEpochMillis()) // 21: triggerGeneratedAtEpochMillis
+                .number(22, value.triggerOcoOrderId()) // 22: triggerOcoOrderId
+                .number(23, value.triggerOcoCursor()) // 23: triggerOcoCursor
+                .number(24, value.lastScheduledRevision()) // 24: lastScheduledRevision
+                .list(25, value.laneProgress(), item -> writeRiskLaneProgress(item)) // 25: laneProgress
+                .encode();
+    }
+    private static RiskScan readRiskScan(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new RiskScan(
+                r.text(1), // 1: instrumentId
+                r.integer(2), // 2: accountLaneId
+                r.number(3), // 3: priceSequence
+                r.number(4), // 4: scanStartPriceSequence
+                r.number(5), // 5: lastUserId
+                r.bool(6), // 6: riskComplete
+                r.number(7), // 7: riskUserId
+                r.integer(8), // 8: riskPhase
+                r.text(9), // 9: riskPositionCursor
+                r.number(10), // 10: riskReservationCursor
+                r.number(11), // 11: riskUnrealizedPnlUnits
+                r.number(12), // 12: riskMaintenanceMarginUnits
+                r.number(13), // 13: riskIsolatedMarginUnits
+                r.number(14), // 14: riskIsolatedReservationUnits
+                r.bool(15), // 15: triggerComplete
+                r.integer(16), // 16: triggerPhase
+                r.number(17), // 17: triggerPriceCursor
+                r.number(18), // 18: triggerOrderCursor
+                r.number(19), // 19: triggerUpperId
+                r.number(20), // 20: triggerMarkPriceTicks
+                r.number(21), // 21: triggerGeneratedAtEpochMillis
+                r.number(22), // 22: triggerOcoOrderId
+                r.number(23), // 23: triggerOcoCursor
+                r.number(24), // 24: lastScheduledRevision
+                r.list(25, item -> readRiskLaneProgress(item))); // 25: laneProgress
+    }
 
-        private void require(int length) {
-            if (length < 0 || offset > input.length - length) {
-                throw new ProtocolException("truncated trading snapshot");
-            }
-        }
+    private static byte[] writeFundingProgress(FundingProgress value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.settlementId()) // 1: settlementId
+                .number(2, value.fundingRatePpm()) // 2: fundingRatePpm
+                .number(3, value.accountLaneId()) // 3: accountLaneId
+                .number(4, value.nextCursorUserId()) // 4: nextCursorUserId
+                .uuid(5, value.commandId()) // 5: commandId
+                .number(6, value.markPriceTicks()) // 6: markPriceTicks
+                .number(7, value.priceSequence()) // 7: priceSequence
+                .encode();
+    }
+    private static FundingProgress readFundingProgress(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new FundingProgress(
+                r.number(1), // 1: settlementId
+                r.number(2), // 2: fundingRatePpm
+                r.integer(3), // 3: accountLaneId
+                r.number(4), // 4: nextCursorUserId
+                r.uuid(5), // 5: commandId
+                r.number(6), // 6: markPriceTicks
+                r.number(7)); // 7: priceSequence
+    }
+
+    private static byte[] writeLifecycleProgress(LifecycleProgress value) {
+        return new SnapshotFields.Writer()
+                .number(1, value.settlementId()) // 1: settlementId
+                .number(2, value.settlementPriceTicks()) // 2: settlementPriceTicks
+                .number(3, value.optionCashUnitsPerContract()) // 3: optionCashUnitsPerContract
+                .bool(4, value.ordersComplete()) // 4: ordersComplete
+                .number(5, value.accountLaneId()) // 5: accountLaneId
+                .number(6, value.nextCursorOrderId()) // 6: nextCursorOrderId
+                .number(7, value.nextCursorUserId()) // 7: nextCursorUserId
+                .uuid(8, value.commandId()) // 8: commandId
+                .number(9, value.requiredInsuranceUnits()) // 9: requiredInsuranceUnits
+                .encode();
+    }
+    private static LifecycleProgress readLifecycleProgress(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new LifecycleProgress(
+                r.number(1), // 1: settlementId
+                r.number(2), // 2: settlementPriceTicks
+                r.number(3), // 3: optionCashUnitsPerContract
+                r.bool(4), // 4: ordersComplete
+                r.integer(5), // 5: accountLaneId
+                r.number(6), // 6: nextCursorOrderId
+                r.number(7), // 7: nextCursorUserId
+                r.uuid(8), // 8: commandId
+                r.number(9)); // 9: requiredInsuranceUnits
+    }
+
+    private static byte[] writeCoreUserState(CoreUserState value) {
+        return new SnapshotFields.Writer()
+                .number(1, SnapshotEnumCodes.encode(value.productLine())) // 1: productLine
+                .number(2, value.userId()) // 2: userId
+                .number(3, value.revision()) // 3: revision
+                .bytes(4, writeMap(value.balances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeAssetBalance(item))) // 4: balances
+                .bytes(5, writeMap(value.reservations(), key -> new SnapshotFields.Writer().number(1, key).encode(), item -> writeOrderReservation(item))) // 5: reservations
+                .bytes(6, writeMap(value.positions(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeCorePositionState(item))) // 6: positions
+                .number(7, SnapshotEnumCodes.encode(value.positionMode())) // 7: positionMode
+                .encode();
+    }
+    private static CoreUserState readCoreUserState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreUserState(
+                SnapshotEnumCodes.readProductLine(r.integer(1)), // 1: productLine
+                r.number(2), // 2: userId
+                r.number(3), // 3: revision
+                readMap(r.bytes(4), key -> new SnapshotFields.Reader(key).text(1), item -> readAssetBalance(item)), // 4: balances
+                readMap(r.bytes(5), key -> new SnapshotFields.Reader(key).number(1), item -> readOrderReservation(item)), // 5: reservations
+                readMap(r.bytes(6), key -> new SnapshotFields.Reader(key).text(1), item -> readCorePositionState(item)), // 6: positions
+                SnapshotEnumCodes.readCorePositionMode(r.integer(7))); // 7: positionMode
+    }
+
+    private static byte[] writeCoreInstrument(CoreInstrument value) {
+        return new SnapshotFields.Writer()
+                .text(1, value.instrumentId()) // 1: instrumentId
+                .number(2, SnapshotEnumCodes.encode(value.contractType())) // 2: contractType
+                .text(3, value.baseAsset()) // 3: baseAsset
+                .text(4, value.quoteAsset()) // 4: quoteAsset
+                .text(5, value.settleAsset()) // 5: settleAsset
+                .number(6, value.notionalMultiplierUnits()) // 6: notionalMultiplierUnits
+                .number(7, value.priceTickUnits()) // 7: priceTickUnits
+                .number(8, value.settleScaleUnits()) // 8: settleScaleUnits
+                .number(9, value.initialMarginRatePpm()) // 9: initialMarginRatePpm
+                .number(10, value.maintenanceMarginRatePpm()) // 10: maintenanceMarginRatePpm
+                .number(11, value.makerFeeRatePpm()) // 11: makerFeeRatePpm
+                .number(12, value.takerFeeRatePpm()) // 12: takerFeeRatePpm
+                .number(13, value.expiryEpochMillis()) // 13: expiryEpochMillis
+                .number(14, value.optionType() == null ? -1 : SnapshotEnumCodes.encode(value.optionType())) // 14: optionType
+                .number(15, value.strikePriceTicks()) // 15: strikePriceTicks
+                .number(16, value.maxLeveragePpm()) // 16: maxLeveragePpm
+                .number(17, value.maxPositionNotionalUnits()) // 17: maxPositionNotionalUnits
+                .number(18, value.userOpenInterestLimitRatePpm()) // 18: userOpenInterestLimitRatePpm
+                .number(19, value.userOpenInterestLimitFloorUnits()) // 19: userOpenInterestLimitFloorUnits
+                .list(20, value.riskLimitBrackets(), item -> writeCoreRiskLimitBracket(item)) // 20: riskLimitBrackets
+                .bytes(21, writeCoreInstrumentMaintenance(value.maintenance())) // 21: maintenance
+                .number(22, SnapshotEnumCodes.encode(value.instrumentStatus())) // 22: instrumentStatus
+                .bool(23, value.marketOrderEnabled()) // 23: marketOrderEnabled
+                .bool(24, value.postOnlyEnabled()) // 24: postOnlyEnabled
+                .bool(25, value.reduceOnlyEnabled()) // 25: reduceOnlyEnabled
+                .number(26, value.supportedOrderTypeMask()) // 26: supportedOrderTypeMask
+                .number(27, value.supportedTimeInForceMask()) // 27: supportedTimeInForceMask
+                .encode();
+    }
+    private static CoreInstrument readCoreInstrument(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreInstrument(
+                r.text(1), // 1: instrumentId
+                SnapshotEnumCodes.readContractType(r.integer(2)), // 2: contractType
+                r.text(3), // 3: baseAsset
+                r.text(4), // 4: quoteAsset
+                r.text(5), // 5: settleAsset
+                r.number(6), // 6: notionalMultiplierUnits
+                r.number(7), // 7: priceTickUnits
+                r.number(8), // 8: settleScaleUnits
+                r.number(9), // 9: initialMarginRatePpm
+                r.number(10), // 10: maintenanceMarginRatePpm
+                r.number(11), // 11: makerFeeRatePpm
+                r.number(12), // 12: takerFeeRatePpm
+                r.number(13), // 13: expiryEpochMillis
+                r.integer(14) == -1 ? null : SnapshotEnumCodes.readOptionType(r.integer(14)), // 14: optionType
+                r.number(15), // 15: strikePriceTicks
+                r.number(16), // 16: maxLeveragePpm
+                r.number(17), // 17: maxPositionNotionalUnits
+                r.number(18), // 18: userOpenInterestLimitRatePpm
+                r.number(19), // 19: userOpenInterestLimitFloorUnits
+                r.list(20, item -> readCoreRiskLimitBracket(item)), // 20: riskLimitBrackets
+                readCoreInstrumentMaintenance(r.bytes(21)), // 21: maintenance
+                SnapshotEnumCodes.readInstrumentStatus(r.integer(22)), // 22: instrumentStatus
+                r.bool(23), // 23: marketOrderEnabled
+                r.bool(24), // 24: postOnlyEnabled
+                r.bool(25), // 25: reduceOnlyEnabled
+                r.integer(26), // 26: supportedOrderTypeMask
+                r.integer(27)); // 27: supportedTimeInForceMask
+    }
+
+    private static byte[] writeCoreRiskState(CoreRiskState value) {
+        return new SnapshotFields.Writer()
+                .bytes(1, writeMap(value.markPrices(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeCoreMarkPriceState(item))) // 1: markPrices
+                .bytes(2, writeMap(value.snapshots(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeCoreRiskSnapshot(item))) // 2: snapshots
+                .bytes(3, writeMap(value.liquidations(), key -> new SnapshotFields.Writer().number(1, key).encode(), item -> writeCoreLiquidationState(item))) // 3: liquidations
+                .bytes(4, writeMap(value.scans(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeRiskScan(item))) // 4: scans
+                .number(5, value.nextLiquidationId()) // 5: nextLiquidationId
+                .bytes(6, writeCoreRiskScanControlView(value.scanControl())) // 6: scanControl
+                .number(7, value.marketRevision()) // 7: marketRevision
+                .encode();
+    }
+    private static CoreRiskState readCoreRiskState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreRiskState(
+                readMap(r.bytes(1), key -> new SnapshotFields.Reader(key).text(1), item -> readCoreMarkPriceState(item)), // 1: markPrices
+                readMap(r.bytes(2), key -> new SnapshotFields.Reader(key).text(1), item -> readCoreRiskSnapshot(item)), // 2: snapshots
+                readMap(r.bytes(3), key -> new SnapshotFields.Reader(key).number(1), item -> readCoreLiquidationState(item)), // 3: liquidations
+                readMap(r.bytes(4), key -> new SnapshotFields.Reader(key).text(1), item -> readRiskScan(item)), // 4: scans
+                r.number(5), // 5: nextLiquidationId
+                readCoreRiskScanControlView(r.bytes(6)), // 6: scanControl
+                r.number(7)); // 7: marketRevision
+    }
+
+    private static byte[] writeCoreTreasuryState(CoreTreasuryState value) {
+        return new SnapshotFields.Writer()
+                .bytes(1, writeMap(value.feeBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 1: feeBalances
+                .bytes(2, writeMap(value.insuranceBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 2: insuranceBalances
+                .bytes(3, writeMap(value.insuranceDeficits(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 3: insuranceDeficits
+                .bytes(4, writeMap(value.liquidationFeeBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 4: liquidationFeeBalances
+                .bytes(5, writeMap(value.fundingResidualBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 5: fundingResidualBalances
+                .bytes(6, writeMap(value.roundingResidualBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 6: roundingResidualBalances
+                .bytes(7, writeMap(value.clearingPnlBalances(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 7: clearingPnlBalances
+                .bytes(8, writeMap(value.fundingSettlements(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 8: fundingSettlements
+                .bytes(9, writeMap(value.lifecycleSettlements(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> new SnapshotFields.Writer().number(1, item).encode())) // 9: lifecycleSettlements
+                .bytes(10, writeMap(value.fundingProgress(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeFundingProgress(item))) // 10: fundingProgress
+                .bytes(11, writeMap(value.lifecycleProgress(), key -> new SnapshotFields.Writer().text(1, key).encode(), item -> writeLifecycleProgress(item))) // 11: lifecycleProgress
+                .encode();
+    }
+    private static CoreTreasuryState readCoreTreasuryState(byte[] encoded) {
+        var r = new SnapshotFields.Reader(encoded);
+        return new CoreTreasuryState(
+                readMap(r.bytes(1), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 1: feeBalances
+                readMap(r.bytes(2), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 2: insuranceBalances
+                readMap(r.bytes(3), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 3: insuranceDeficits
+                readMap(r.bytes(4), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 4: liquidationFeeBalances
+                readMap(r.bytes(5), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 5: fundingResidualBalances
+                readMap(r.bytes(6), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 6: roundingResidualBalances
+                readMap(r.bytes(7), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 7: clearingPnlBalances
+                readMap(r.bytes(8), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 8: fundingSettlements
+                readMap(r.bytes(9), key -> new SnapshotFields.Reader(key).text(1), item -> new SnapshotFields.Reader(item).number(1)), // 9: lifecycleSettlements
+                readMap(r.bytes(10), key -> new SnapshotFields.Reader(key).text(1), item -> readFundingProgress(item)), // 10: fundingProgress
+                readMap(r.bytes(11), key -> new SnapshotFields.Reader(key).text(1), item -> readLifecycleProgress(item))); // 11: lifecycleProgress
     }
 }

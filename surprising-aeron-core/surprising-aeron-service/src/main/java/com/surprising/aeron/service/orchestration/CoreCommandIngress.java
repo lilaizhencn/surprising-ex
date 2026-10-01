@@ -238,7 +238,9 @@ final class CoreCommandIngress {
     private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
         StoredResult terminalDuplicate = runtime.resultLedger.get(message.header().commandId());
         if (terminalDuplicate != null) {
-            return runtime.resultLedger.duplicateResponse(terminalDuplicate, fingerprint,
+            CommandFingerprint stored = terminalDuplicate.fingerprint();
+            return runtime.resultLedger.duplicateResponse(terminalDuplicate,
+                    stored.matchesCommittedCommand(message, fingerprint) ? stored : fingerprint,
                     runtime.appliedCommandCount);
         }
         CommandSlot pendingDuplicate = runtime.pendingMatching.findByCommandId(message.header().commandId());
@@ -257,7 +259,7 @@ final class CoreCommandIngress {
         if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
             CommandFingerprint retained = runtime.terminalRetention.fundsCommand(message.header().commandId());
             if (retained != null) {
-                if (!retained.equals(fingerprint)) {
+                if (!retained.matchesCommittedCommand(message, fingerprint)) {
                     return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,

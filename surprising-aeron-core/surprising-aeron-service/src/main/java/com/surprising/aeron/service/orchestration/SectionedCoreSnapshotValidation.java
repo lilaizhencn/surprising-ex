@@ -64,20 +64,45 @@ final class SectionedCoreSnapshotValidation {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers) {
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers,
+            boolean implicitTransferUsers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.topology().equals(matcherSnapshot.topology()), "topology");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
-        requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
-                        tradingState.businessStateHash(), feePolicies, pendingTransfers)
+        requireMatch(manifest.businessStateHash() == (implicitTransferUsers
+                ? implicitUserBusinessHash(tradingState.businessStateHash(), feePolicies, pendingTransfers)
+                : TradingCoreRuntime.canonicalBusinessStateHash(tradingState.businessStateHash(), feePolicies, pendingTransfers))
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
                 == com.surprising.aeron.service.state.FundsStateHash.compute(tradingState), "funds hash");
         requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
+    }
+
+    /** 冻结的划转 v1 哈希；校验旧数据后才允许补齐用户字段，不能跳过原始哈希校验。 */
+    private static long implicitUserBusinessHash(long base,
+            Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies,
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
+        base = TradingCoreRuntime.canonicalBusinessStateHash(base, policies, Map.of());
+        if (transfers.isEmpty()) return base;
+        long digest = TradingCoreRuntime.HASH_OFFSET_BASIS;
+        for (var transfer : new java.util.TreeMap<>(transfers).values()) {
+            var command = transfer.command();
+            digest = TradingCoreRuntime.mix(digest, transfer.userId());
+            digest = TradingCoreRuntime.mix(digest, command.transferId());
+            digest = TradingCoreRuntime.mix(digest, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(command.sourceProductLine()));
+            digest = TradingCoreRuntime.mix(digest, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(command.targetProductLine()));
+            digest = TradingCoreRuntime.mixText(digest, command.sourceAccountType());
+            digest = TradingCoreRuntime.mixText(digest, command.targetAccountType());
+            digest = TradingCoreRuntime.mixText(digest, command.asset());
+            digest = TradingCoreRuntime.mix(digest, command.amountUnits());
+            digest = TradingCoreRuntime.mixText(digest, command.referenceId());
+            digest = TradingCoreRuntime.mixText(digest, command.reason());
+        }
+        return TradingCoreRuntime.mix(base, digest);
     }
 
     static void validateAccountLanes(HeaderManifest manifest, List<AccountLaneSnapshot> lanes) {

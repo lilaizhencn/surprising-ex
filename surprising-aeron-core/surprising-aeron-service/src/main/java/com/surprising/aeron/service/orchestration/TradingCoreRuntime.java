@@ -1541,8 +1541,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
             digest = mix(digest, command.transferId());
             digest = mix(digest, command.sourceUserId());
             digest = mix(digest, command.targetUserId());
-            digest = mix(digest, command.sourceProductLine().ordinal());
-            digest = mix(digest, command.targetProductLine().ordinal());
+            digest = mix(digest, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(command.sourceProductLine()));
+            digest = mix(digest, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(command.targetProductLine()));
             digest = mixText(digest, command.sourceAccountType());
             digest = mixText(digest, command.targetAccountType());
             digest = mixText(digest, command.asset());

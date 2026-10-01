@@ -24,7 +24,7 @@ public final class FundsStateHash {
         });
 
         CoreTreasuryState treasury = state.treasuryState();
-        long hash = CoreStateHash.mix(CoreStateHash.start(), state.productLine().ordinal());
+        long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(state.productLine()));
         hash = mix(hash, "users", users);
         hash = mix(hash, "fee", aggregate(treasury.feeBalances()));
         hash = mix(hash, "insurance", aggregate(treasury.insuranceBalances()));

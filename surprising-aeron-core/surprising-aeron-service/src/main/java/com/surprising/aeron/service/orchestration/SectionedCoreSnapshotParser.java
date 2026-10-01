@@ -52,7 +52,8 @@ final class SectionedCoreSnapshotParser {
         }
         SectionedCoreSnapshotValidation.validateAccountLanes(manifest, accountLanes);
         SectionedCoreSnapshotValidation.validatePairing(
-                manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers);
+                manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers,
+                CoreTransferSnapshotCodec.usesImplicitUserHash(payloads[6]));
         CoreSnapshotImage.verifyMatcherState(matcherSnapshot, tradingState,
                 manifest.appliedCommandCount(), manifest.businessStateHash());
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
@@ -206,7 +207,7 @@ final class SectionedCoreSnapshotParser {
                 com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
-                        commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
+                        commandResults, sourceSequences, tradingState, retention, matcherForRestoredState(),
                         manifest.projectionSequence(), feePolicies, pendingTransfers);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
                 candidate.activate();
@@ -223,6 +224,17 @@ final class SectionedCoreSnapshotParser {
                 throw new com.surprising.aeron.protocol.ProtocolException(
                         "invalid restored snapshot state: " + exception.getMessage(), exception);
             }
+        }
+
+        private MatcherSnapshot matcherForRestoredState() {
+            long currentHash = TradingCoreRuntime.canonicalBusinessStateHash(
+                    tradingState.businessStateHash(), feePolicies, pendingTransfers);
+            if (currentHash == matcherSnapshot.coreBusinessStateHash()) return matcherSnapshot;
+            // parse 已核验旧格式哈希、资金、Lane 和原生撮合状态。只更新同一批事实的哈希元数据。
+            return new MatcherSnapshot(matcherSnapshot.productLine(), matcherSnapshot.topology(),
+                    matcherSnapshot.snapshotId(), matcherSnapshot.coreSequence(), matcherSnapshot.matcherSequence(),
+                    matcherSnapshot.matcherShardProgress(), currentHash, matcherSnapshot.engineStateHash(),
+                    matcherSnapshot.symbols(), matcherSnapshot.users(), matcherSnapshot.modules());
         }
 
         CoreSnapshotManifest manifest(ProductLine expectedProductLine) {

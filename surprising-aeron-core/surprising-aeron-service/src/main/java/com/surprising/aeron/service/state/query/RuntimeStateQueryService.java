@@ -112,7 +112,7 @@ public final class RuntimeStateQueryService {
     }
 
     private static long userStateHash(CoreUserStateView user) {
-        long hash = CoreStateHash.mix(CoreStateHash.start(), user.productLine().ordinal());
+        long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(user.productLine()));
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
         hash = CoreStateHash.mix(hash, user.positionMode().wireCode());
@@ -155,7 +155,7 @@ public final class RuntimeStateQueryService {
 
     private static long orderStateHash(OrderRuntime order, String instrumentId) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), order.orderId());
-        hash = CoreStateHash.mix(hash, order.productLine().ordinal());
+        hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(order.productLine()));
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, instrumentId);
         hash = CoreStateHash.mix(hash, order.side().wireCode());
@@ -181,7 +181,7 @@ public final class RuntimeStateQueryService {
         hash = CoreStateHash.mix(hash, order.createdAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.updatedAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.clusterPosition());
-        hash = CoreStateHash.mix(hash, order.status().ordinal());
+        hash = CoreStateHash.mix(hash, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(order.status()));
         return CoreStateHash.mix(hash, order.revision());
     }
 

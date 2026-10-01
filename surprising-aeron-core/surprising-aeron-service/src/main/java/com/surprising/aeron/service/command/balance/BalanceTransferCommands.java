@@ -37,7 +37,7 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
 
     public void executeTransferOut(CoreMessage message, long clusterTimestamp) {
         owner.setSingleChangedUser(message.header().userId());
-        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (owner.asynchronousCommands()) {
             var work = AccountTransferOut.prepare(owner.reusableTransferOut(), owner.runtimeState(),
                     owner.identities(), message.header().userId(), command);
@@ -54,7 +54,7 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
 
     public void executeTransferIn(CoreMessage message, long clusterTimestamp) {
         owner.setSingleChangedUser(message.header().userId());
-        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (message.header().userId() != command.targetUserId())
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
         if (owner.runtimeState().productLine() != command.targetProductLine())

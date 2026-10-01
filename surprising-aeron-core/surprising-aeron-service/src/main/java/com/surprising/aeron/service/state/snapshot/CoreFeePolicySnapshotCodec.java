@@ -19,15 +19,27 @@ public final class CoreFeePolicySnapshotCodec {
     }
 
     public static byte[] encode(Map<Long, CoreFeePolicyState> policies) {
-        int length = Integer.BYTES * 2;
-        for (CoreFeePolicyState policy : policies.values()) {
-            length = Math.addExact(length, Math.addExact(FIXED_LENGTH,
-                    policy.instrumentId().getBytes(StandardCharsets.UTF_8).length));
-        }
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(VERSION).putInt(policies.size());
-        new TreeMap<>(policies).values().forEach(policy -> write(buffer, policy));
-        return buffer.array();
+        byte[] fields = new SnapshotFields.Writer().list(1, new TreeMap<>(policies).values(), policy ->
+                new SnapshotFields.Writer().number(1, policy.policyId()).number(2, policy.policyRevision())
+                        .number(3, policy.userId()).text(4, policy.instrumentId())
+                        .number(5, policy.makerFeeRatePpm()).number(6, policy.takerFeeRatePpm())
+                        .number(7, policy.sourcePriority()).bool(8, policy.active())
+                        .number(9, policy.effectiveFromEpochMillis()).number(10, policy.expireAtEpochMillis()).encode()).encode();
+        return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(2).put(fields).array();
+    }
+
+    private static Map<Long, CoreFeePolicyState> decodeFields(byte[] payload) {
+        Map<Long, CoreFeePolicyState> policies = new TreeMap<>();
+        var root = new SnapshotFields.Reader(java.util.Arrays.copyOfRange(payload, 4, payload.length));
+        try {
+            for (var r : root.list(1, SnapshotFields.Reader::new)) {
+                var policy = new CoreFeePolicyState(r.number(1), r.number(2), r.number(3), r.text(4),
+                        r.number(5), r.number(6), r.integer(7), r.bool(8), r.number(9), r.number(10));
+                if (policies.size() >= 1_000_000 || policies.put(policy.policyId(), policy) != null)
+                    throw new ProtocolException("invalid/duplicate fee policy snapshot");
+            }
+            return java.util.Collections.unmodifiableMap(policies);
+        } catch (IllegalArgumentException invalid) { throw new ProtocolException("invalid fee policy snapshot", invalid); }
     }
 
     public static Map<Long, CoreFeePolicyState> decode(byte[] payload) {
@@ -35,7 +47,9 @@ public final class CoreFeePolicySnapshotCodec {
             throw new ProtocolException("truncated fee policy snapshot");
         }
         ByteBuffer buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
-        if (buffer.getInt() != VERSION) throw new ProtocolException("unsupported fee policy snapshot version");
+        int version = buffer.getInt();
+        if (version == 2) return decodeFields(payload);
+        if (version != VERSION) throw new ProtocolException("unsupported fee policy snapshot version");
         int count = buffer.getInt();
         if (count < 0 || count > 1_000_000) throw new ProtocolException("invalid fee policy snapshot count");
         Map<Long, CoreFeePolicyState> policies = new TreeMap<>();
@@ -63,16 +77,7 @@ public final class CoreFeePolicySnapshotCodec {
             }
         }
         if (buffer.hasRemaining()) throw new ProtocolException("fee policy snapshot has trailing bytes");
-        return Map.copyOf(policies);
-    }
-
-    private static void write(ByteBuffer buffer, CoreFeePolicyState policy) {
-        byte[] instrumentId = policy.instrumentId().getBytes(StandardCharsets.UTF_8);
-        buffer.putLong(policy.policyId()).putLong(policy.policyRevision()).putLong(policy.userId())
-                .putShort((short) instrumentId.length).put(instrumentId)
-                .putLong(policy.makerFeeRatePpm()).putLong(policy.takerFeeRatePpm())
-                .putInt(policy.sourcePriority()).put((byte) (policy.active() ? 1 : 0))
-                .putLong(policy.effectiveFromEpochMillis()).putLong(policy.expireAtEpochMillis());
+        return java.util.Collections.unmodifiableMap(policies);
     }
 
     private static boolean readBoolean(ByteBuffer buffer) {

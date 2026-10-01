@@ -63,7 +63,7 @@ public final class CorePendingTransferCodec {
             }
             byte[] command = new byte[commandLength];
             buffer.get(command);
-            transfers.add(new CorePendingTransferView(userId, TradingCommandCodec.decodeTransferFunds(command)));
+            transfers.add(new CorePendingTransferView(userId, TradingCommandCodec.decodeTransferFunds(command, userId)));
         }
         if (buffer.hasRemaining()) throw new ProtocolException("pending transfer response has trailing bytes");
         return List.copyOf(transfers);

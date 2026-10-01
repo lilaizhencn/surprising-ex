@@ -47,6 +47,39 @@ public final class CommandFingerprint {
         return new CommandFingerprint(digest.digest(), true);
     }
 
+    /**
+     * 保留原始指纹；只在重试比对时识别已发布划转 v1/v2 的等价编码。
+     * 不重写旧快照里的指纹，不允许把新增的其他收款人归并为本人划转。
+     */
+    public boolean matchesCommittedCommand(CoreMessage message, CommandFingerprint actual) {
+        if (equals(actual)) return true;
+        var type = message.header().messageType();
+        if (type != CoreMessageType.TRANSFER_OUT && type != CoreMessageType.TRANSFER_IN) return false;
+        byte[] payload = message.payloadUnsafe();
+        try {
+            var transfer = TradingCommandCodec.decodeTransferFunds(payload, message.header().userId());
+            if (transfer.sourceUserId() != message.header().userId()
+                    || transfer.targetUserId() != message.header().userId()) return false;
+            int version = java.nio.ByteBuffer.wrap(payload).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
+            byte[] alternate;
+            if (version == 1) {
+                alternate = new byte[payload.length + Long.BYTES * 2];
+                java.nio.ByteBuffer.wrap(alternate).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .putInt(2).putLong(transfer.transferId())
+                        .putLong(transfer.sourceUserId()).putLong(transfer.targetUserId());
+                System.arraycopy(payload, 12, alternate, 28, payload.length - 12);
+            } else {
+                alternate = new byte[payload.length - Long.BYTES * 2];
+                java.nio.ByteBuffer.wrap(alternate).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .putInt(1).putLong(transfer.transferId());
+                System.arraycopy(payload, 28, alternate, 12, payload.length - 28);
+            }
+            return equals(of(new CoreMessage(message.header(), alternate)));
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
+
     public static CommandFingerprint fromBytes(byte[] value) {
         if (value == null) {
             throw new ProtocolException("command fingerprint is required");

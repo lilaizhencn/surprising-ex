@@ -75,7 +75,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
 
     @Override
     public void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
-        tombstones.putIfAbsent(EntityType.ORDER.ordinal(), orderId, userId,
+        tombstones.putIfAbsent(EntityType.ORDER.code, orderId, userId,
                 normalizeClientId(clientOrderId), coreSequence);
     }
 
@@ -210,7 +210,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             LinkedHashMap<EntityKey, RetainedEntity> candidates = read(input, Integer.MAX_VALUE);
             var decodedTombstones = read(input, MAX_TOMBSTONES);
             TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
-            for (var value : decodedTombstones.values()) tombstones.put(value.key().type().ordinal(),
+            for (var value : decodedTombstones.values()) tombstones.put(value.key().type().code,
                     value.key().id(), value.userId(), value.clientId(), value.exportSequence());
             int fundsCommandCount = input.readInt();
             if (fundsCommandCount < 0 || (long) fundsCommandCount * (16 + CommandFingerprint.LENGTH) != input.available()) {
@@ -280,7 +280,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
     }
 
     private void retain(EntityType type, long id, long userId, String clientId, long exportSequence) {
-        if (tombstones.contains(type.ordinal(), id)) return;
+        if (tombstones.contains(type.code, id)) return;
         String normalized = normalizeClientId(clientId);
         candidateLookupKey.reset(type, id);
         RetainedEntity existing = candidates.get(candidateLookupKey);
@@ -360,16 +360,16 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             if (candidate == null || candidate.exportSequence() > acknowledgedSequence) {
                 throw new IllegalStateException("terminal entity was not eligible for pruning: " + key);
             }
-            tombstones.put(type.ordinal(), id, candidate.userId(), candidate.clientId(), candidate.exportSequence());
+            tombstones.put(type.code, id, candidate.userId(), candidate.clientId(), candidate.exportSequence());
         }
     }
 
     private boolean contains(EntityType type, long id, long userId, String clientId) {
         if (id <= 0) throw new IllegalArgumentException("invalid terminal entity key");
-        if (tombstones.contains(type.ordinal(), id)) return true;
+        if (tombstones.contains(type.code, id)) return true;
         String normalized = normalizeClientId(clientId);
         if (normalized.isEmpty()) return false;
-        return tombstones.containsClient(type.ordinal(), userId, normalized);
+        return tombstones.containsClient(type.code, userId, normalized);
     }
 
     private void forEachSorted(Iterable<Long> values, java.util.function.LongConsumer consumer) {
@@ -384,7 +384,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             throws IOException {
         output.writeInt(values.size());
         for (RetainedEntity value : values.values()) {
-            output.writeByte(value.key().type().ordinal());
+            output.writeByte(value.key().type().code);
             output.writeLong(value.key().id());
             output.writeLong(value.userId());
             output.writeLong(value.exportSequence());
@@ -401,8 +401,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         LinkedHashMap<EntityKey, RetainedEntity> values = new LinkedHashMap<>();
         for (int index = 0; index < count; index++) {
             int typeCode = input.readUnsignedByte();
-            if (typeCode >= EntityType.values().length) throw new IllegalArgumentException("invalid entity type");
-            EntityKey key = new EntityKey(EntityType.values()[typeCode], input.readLong());
+            EntityKey key = new EntityKey(EntityType.fromCode(typeCode), input.readLong());
             long userId = input.readLong();
             long exportSequence = input.readLong();
             int textLength = input.readInt();
@@ -430,7 +429,20 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         return normalized;
     }
 
-    private enum EntityType { ORDER, ALGO, TRIGGER, LIQUIDATION }
+    private enum EntityType {
+        ORDER(0), ALGO(1), TRIGGER(2), LIQUIDATION(3);
+        final int code;
+        EntityType(int code) { this.code = code; }
+        static EntityType fromCode(int code) {
+            return switch (code) {
+                case 0 -> ORDER;
+                case 1 -> ALGO;
+                case 2 -> TRIGGER;
+                case 3 -> LIQUIDATION;
+                default -> throw new IllegalArgumentException("invalid entity type");
+            };
+        }
+    }
 
     /** 导出候选的稳定实体键；不用于高频终态FIFO。 */
     private static final class EntityKey {

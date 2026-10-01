@@ -66,6 +66,25 @@ import org.junit.jupiter.api.Test;
 class RuntimeCommitRecoveryTest {
 
     @Test
+    void multiplePendingTransfersKeepCanonicalOrderAcrossRestart() {
+        try (var original = new TradingCoreRuntime(ProductLine.SPOT)) {
+            var transfers = new java.util.HashMap<Long, TransferRuntime>();
+            for (long id : new long[]{17, 1, 257, 9}) {
+                transfers.put(id, new TransferRuntime(1001, new TransferFundsCommand(id, ProductLine.SPOT,
+                        ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 25,
+                        "ordered-" + id, "recovery", 1001, 1001)));
+            }
+            original.restorePendingTransfers(transfers);
+            long hash = original.stateHash();
+            try (var recovered = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot())) {
+                assertThat(recovered.stateHash()).isEqualTo(hash);
+                assertThat(recovered.pendingTransfers().keySet()).containsExactly(1L, 9L, 17L, 257L);
+                assertThat(recovered.pendingTransfers()).isEqualTo(transfers);
+            }
+        }
+    }
+
+    @Test
     void restorePublishesAuxiliaryStateWithTheCanonicalCandidate() {
         CoreFeePolicyState feePolicy = new CoreFeePolicyState(
                 91, 3, 1001, "1", -25, 75, 2, true, 900, 2_000);

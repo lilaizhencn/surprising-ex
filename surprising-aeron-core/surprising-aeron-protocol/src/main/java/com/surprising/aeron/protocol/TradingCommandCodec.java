@@ -61,15 +61,24 @@ public final class TradingCommandCodec {
     }
 
     public static TransferFundsCommand decodeTransferFunds(byte[] payload) {
+        return decodeTransferFunds(payload, 0);
+    }
+
+    /** v1 的划转双方都是已提交命令头中的用户；不能从当前登录态补齐。 */
+    public static TransferFundsCommand decodeTransferFunds(byte[] payload, long committedUserId) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 3 + Integer.BYTES * 2);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES + Integer.BYTES * 2);
         int version = buffer.getInt();
-        if (version != TRANSFER_FUNDS_VERSION) {
+        if (version != 1 && version != TRANSFER_FUNDS_VERSION) {
             throw new ProtocolException("unsupported transfer funds version: " + version);
         }
         long transferId = buffer.getLong();
-        long sourceUserId = buffer.getLong();
-        long targetUserId = buffer.getLong();
+        if (version == 1 && committedUserId <= 0) {
+            throw new ProtocolException("transfer v1 requires the committed user id");
+        }
+        if (version == 2) requireRemaining(buffer, Long.BYTES * 2 + Integer.BYTES * 2);
+        long sourceUserId = version == 1 ? committedUserId : buffer.getLong();
+        long targetUserId = version == 1 ? committedUserId : buffer.getLong();
         var source = ProductLineWireCode.decode(buffer.getInt());
         var target = ProductLineWireCode.decode(buffer.getInt());
         String sourceAccount = readTransferText(buffer, 32, false);

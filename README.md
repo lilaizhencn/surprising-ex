@@ -17,6 +17,8 @@ Product line identity controls routing and keeps instruments, accounts, trading 
 
 ## Architecture
 
+Backend snapshot field evolution and historical command recovery: [恢复兼容设计](docs/core-snapshot-evolution.md).
+
 The single-node stack has six Java processes:
 
 | Process | Responsibility |
