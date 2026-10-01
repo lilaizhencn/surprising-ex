@@ -9,12 +9,20 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
 public final class ProductTransferCoordinator {
+
+    private static final Logger log = LoggerFactory.getLogger(ProductTransferCoordinator.class);
+    // Only the scan order lives here; pending money remains owned by each source Core.
+    private final AtomicInteger nextReconciliationLine = new AtomicInteger();
 
     private final ProductAccountClient accountClient;
 
@@ -41,14 +49,30 @@ public final class ProductTransferCoordinator {
 
     public int reconcile(int limit) {
         if (limit <= 0) throw new IllegalArgumentException("reconciliation limit must be positive");
+        ProductLine[] lines = ProductLine.values();
+        int start = nextReconciliationLine.getAndUpdate(value -> (value + 1) % lines.length);
         int processed = 0;
-        for (ProductLine productLine : ProductLine.values()) {
-            if (processed == limit) break;
-            for (ProductTransferOperationRequest operation
-                    : accountClient.pendingTransfers(productLine, limit - processed)) {
-                forward(operation, command(operation), Instant.now());
-                processed++;
+        for (int offset = 0; offset < lines.length && processed < limit; offset++) {
+            ProductLine productLine = lines[(start + offset) % lines.length];
+            // Reserve a share for later products even when this source has an unavailable target.
+            int allowance = Math.min(256, Math.max(1, (limit - processed) / (lines.length - offset)));
+            List<ProductTransferOperationRequest> pending;
+            try {
+                pending = accountClient.pendingTransfers(productLine, allowance);
+            } catch (RuntimeException exception) {
+                log.warn("Pending transfer scan failed productLine={}", productLine, exception);
+                continue;
+            }
+            for (ProductTransferOperationRequest operation : pending) {
                 if (processed == limit) break;
+                processed++;
+                try {
+                    forward(operation, command(operation), Instant.now());
+                } catch (RuntimeException exception) {
+                    // Unknown outcomes stay pending in Core. Never refund or invent a new identity.
+                    log.warn("Pending transfer retry failed productLine={} transferId={}",
+                            productLine, operation.transferId(), exception);
+                }
             }
         }
         return processed;

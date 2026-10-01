@@ -9,6 +9,24 @@ import org.junit.jupiter.api.Test;
 
 class TerminalStateRetentionTest {
     @Test
+    void fullFundsRetentionPreservesOldIdentitiesAcrossRecoveryAndRejectsNewOnes() {
+        var retention = new TerminalStateRetention();
+        var fingerprint = CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]);
+        for (int i = 0; i < TerminalStateRetention.MAX_FUNDS_COMMANDS; i++) {
+            retention.retainFundsCommand(new UUID(17, i), fingerprint);
+        }
+        var first = new UUID(17, 0);
+        var next = new UUID(17, TerminalStateRetention.MAX_FUNDS_COMMANDS);
+        for (var state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {
+            assertThat(state.hasFundsCommandCapacity(first)).isTrue();
+            assertThat(state.fundsCommand(first)).isEqualTo(fingerprint);
+            assertThat(state.hasFundsCommandCapacity(next)).isFalse();
+            assertThatThrownBy(() -> state.retainFundsCommand(next, fingerprint))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("retention is full");
+        }
+    }
+
+    @Test
     void reusingLookupKeysCannotMutateStoredKeysOrSnapshot() {
         var retention = new TerminalStateRetention();
         retention.accept(1, 7, "", 1);

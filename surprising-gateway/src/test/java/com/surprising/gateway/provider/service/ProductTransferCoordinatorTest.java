@@ -101,6 +101,51 @@ class ProductTransferCoordinatorTest {
         assertThat(first.transferId()).isNotEqualTo(second.transferId());
     }
 
+    @Test
+    void unavailableSourceDoesNotBlockOtherProducts() {
+        var client = new RecordingProductAccountClient();
+        client.unavailableSource = ProductLine.SPOT;
+        var operation = new ProductTransferOperationRequest(10, 42, ProductLine.LINEAR_PERPETUAL,
+                ProductLine.SPOT, com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
+                com.surprising.account.api.model.AccountType.SPOT, "USDT", 10, "r", "");
+        client.addPending(operation);
+        assertThat(new ProductTransferCoordinator(client).reconcile(12)).isEqualTo(1);
+        assertThat(client.calls()).extracting(TransferCall::phase).containsExactly("IN", "COMPLETE");
+    }
+
+    @Test
+    void smallBatchRotatesSourcesDespitePermanentlyPendingTransfers() {
+        var client = new RecordingProductAccountClient();
+        var coordinator = new ProductTransferCoordinator(client);
+        for (ProductLine line : ProductLine.values()) {
+            ProductLine target = line == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
+            client.addPending(new ProductTransferOperationRequest(line.ordinal() + 1, 42, line, target,
+                    com.surprising.account.api.model.AccountType.valueOf(line.accountTypeCode()),
+                    com.surprising.account.api.model.AccountType.valueOf(target.accountTypeCode()),
+                    "USDT", 10, "r", ""));
+        }
+        client.throwOnCredit = true;
+        for (int i = 0; i < ProductLine.values().length; i++) {
+            assertThat(coordinator.reconcile(1)).isEqualTo(1);
+        }
+        assertThat(client.calls()).extracting(call -> call.operation().sourceProductLine())
+                .containsExactly(ProductLine.values());
+        assertThat(client.calls()).extracting(TransferCall::phase).containsOnly("IN");
+    }
+
+    @Test
+    void failedCreditDoesNotAbortOtherTransfersInTheSameBatch() {
+        var client = new RecordingProductAccountClient();
+        var coordinator = new ProductTransferCoordinator(client);
+        for (int i = 1; i <= 2; i++) client.addPending(new ProductTransferOperationRequest(i, 42,
+                ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                com.surprising.account.api.model.AccountType.SPOT,
+                com.surprising.account.api.model.AccountType.USDT_PERPETUAL, "USDT", 10, "r" + i, ""));
+        client.throwOnCredit = true;
+        assertThat(coordinator.reconcile(12)).isEqualTo(2);
+        assertThat(client.calls()).extracting(call -> call.operation().transferId()).containsExactly(1L, 2L);
+    }
+
     private ProductTransferCommand command(String key, String source, String target, long amount) {
         return new ProductTransferCommand(42L, key, source, target, "USDT", amount, key, "test transfer");
     }
@@ -110,6 +155,8 @@ class ProductTransferCoordinatorTest {
         private final EnumMap<ProductLine, List<ProductTransferOperationRequest>> pending =
                 new EnumMap<>(ProductLine.class);
         private boolean rejectNextTransferIn;
+        private boolean throwOnCredit;
+        private ProductLine unavailableSource;
 
         @Override
         public ProductAccountAdjustment transferOut(String accountType, ProductTransferOperationRequest request) {
@@ -120,6 +167,7 @@ class ProductTransferCoordinatorTest {
         @Override
         public ProductAccountAdjustment transferIn(String accountType, ProductTransferOperationRequest request) {
             calls.add(new TransferCall("IN", accountType, request));
+            if (throwOnCredit) throw new IllegalStateException("target unavailable");
             if (rejectNextTransferIn) {
                 rejectNextTransferIn = false;
                 return ProductAccountAdjustment.rejected("rejected");
@@ -138,6 +186,8 @@ class ProductTransferCoordinatorTest {
 
         @Override
         public List<ProductTransferOperationRequest> pendingTransfers(ProductLine productLine, int limit) {
+            if (productLine == unavailableSource) throw new IllegalStateException("source unavailable");
+            assertThat(limit).isBetween(1, 256);
             return pending.getOrDefault(productLine, List.of()).stream().limit(limit).toList();
         }
 

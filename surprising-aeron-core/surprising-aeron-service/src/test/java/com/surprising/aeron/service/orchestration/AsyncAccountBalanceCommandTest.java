@@ -33,6 +33,21 @@ class AsyncAccountBalanceCommandTest {
                 var in = command(targetProduct, CoreMessageType.TRANSFER_IN, 1, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(target, in).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(CoreTestCompletion.applyAsynchronously(target, in).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                // Target applied the credit but its acknowledgement was lost, then both sides restarted.
+                try (var restoredTarget = TradingCoreRuntime.fromSnapshot(targetProduct, target.snapshot(101))) {
+                    assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, in).status())
+                            .isEqualTo(ResponseStatus.DUPLICATE);
+                    assertThat(recovered.tradingState().user(11).totalUnits("USDT")
+                            + restoredTarget.tradingState().user(11).totalUnits("USDT")).isEqualTo(100);
+                    var changedTransfer = new TransferFundsCommand(7001, product, targetProduct,
+                            product.accountTypeCode(), targetProduct.accountTypeCode(), "USDT", 31,
+                            "partition-transfer", "");
+                    var conflict = command(targetProduct, CoreMessageType.TRANSFER_IN, 1,
+                            TradingCommandCodec.encodeTransferFunds(changedTransfer));
+                    assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, conflict).resultCode())
+                            .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+                    assertThat(restoredTarget.tradingState().user(11).totalUnits("USDT")).isEqualTo(30);
+                }
                 assertThat(CoreTestCompletion.applyAsynchronously(recovered,
                         command(product, CoreMessageType.COMPLETE_TRANSFER, 4,
                                 TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(7001))))

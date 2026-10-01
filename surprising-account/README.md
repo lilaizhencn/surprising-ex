@@ -303,3 +303,41 @@ mvn -pl surprising-gateway -am test
 ```
 
 API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。
+
+## 跨产品线恢复核查（2026-10-01）
+
+在线划转由 gateway 的 `ProductTransferCoordinator` 发起：原账号 `TRANSFER_OUT` 扣款并登记
+Core pending transfer → 目标 Core `TRANSFER_IN` 幂等入账 → 原 Core `COMPLETE_TRANSFER` 清理 pending。
+任一步超时均可能已经执行，必须继续使用同一 transferId/阶段 commandId 向前恢复，不能凭超时退款。
+资金权威、pending 状态和资金命令幂等指纹随核心快照恢复，不能从历史数据库余额反推。
+
+本次修复补偿调度：逐产品线隔离查询异常、逐笔隔离重试异常；六条产品线轮换扫描起点并为后续
+产品线保留批次份额，单次内部查询最多 256 笔。一个源产品线不可用或前面产品线的目标持续故障，
+不再中断所有后续产品线。调度器只增加一个扫描起点整数，不保存资金状态；重启归零不改变资金结果。
+同一源产品线内部仍使用现有 pending 前缀查询，没有游标：大量永久失败记录占满该源查询份额时，
+后续记录仍可能等待，需要进一步定义游标/重试公平性及故障处理，不能将本次修复表述为无限吞吐保证。
+
+已核查的限制：
+
+- `TerminalStateRetention.MAX_FUNDS_COMMANDS = 131072`。资金命令指纹不随普通命令结果淘汰；
+  满容量后 `CoreCommandIngress` 返回 `FUNDS_IDEMPOTENCY_RETENTION_FULL`。旧命令仍可幂等查询/重试，
+  但新的资金操作可能停止，且 pending 划转可能无法完成。持续划转上线前必须解决容量及安全的长期
+  幂等生命周期；不得直接删除指纹或换 reference 重试，这会引入重复扣款/入账。
+- 当前 `ProductTransferWireRequest`/`ProductTransferOperationRequest` 仅有发起用户身份，
+  不含独立收款用户；已检查链路是同一用户跨产品线划转，不能作为“向其他用户转账”已实现的证据。
+- 恢复要求快照之后的已提交 Cluster Log/Archive 完整重放。若源或目标单独回滚到缺少已提交交易的旧状态，
+  当前前向补偿协议不能保证自动弥补丢失历史；尤其源 pending 已完成删除后，不能依赖它重新发现目标丢账。
+  不得在丢日志后直接开放入金、划转或交易。
+- 本地 `scripts/local-perpetual.sh` 显式关闭产品线划转，单条线演示不能验证六条线持续互转。
+
+JDK 27 验证覆盖 `ProductTransferCoordinatorTest` 的故障隔离、持续失败时小批次轮换，
+`CoreFundsIdempotencyTest` 的幂等结果淘汰/快照，`AsyncAccountBalanceCommandTest` 六产品线的
+源扣款快照恢复、目标已入账但回执丢失后的目标快照恢复、重复入账和 payload 冲突拒绝，以及
+`RuntimeCommitRecoveryTest` 的运行时恢复；新增资金幂等容量边界测试证明满容量时保留旧记录并拒绝新增。
+未完成真实多进程 kill/restart、网络分区、leader 切换、并发成交加跨线连续划转、历史丢失恢复或用户间转账验收。
+这些测试通过不等同于生产故障恢复和持续资金可用性已全部达标。
+
+本轮最终验证结果：相关 Java 测试共 113 项通过，其中 Core 36 项、gateway 15 项、maker 62 项；
+另有盘口计算 Python 测试 6 项通过，Shell 语法和 `git diff --check` 通过。测试使用当前工作区的
+HotSpot JDK 27；工作区原有 Core runtime/snapshot 修改未纳入本次提交。无新增运行集群、钱包或 JFR。
+本轮临时 Maven 文本日志在结果记录后删除，未删除已有运行目录或已有测试报告。
