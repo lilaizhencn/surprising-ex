@@ -868,9 +868,11 @@ public class MarketMakerService {
         List<CancelOrderRequest> cancelRequests = owned.stream()
                 .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now))
                 // Move quotes that would cross the new opposite side first, preserving post-only semantics.
-                .sorted(Comparator.comparingInt(order ->
+                .sorted(Comparator.<OrderResponse>comparingInt(order ->
                         order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
-                                || order.side() == OrderSide.BUY && order.priceTicks() >= lowestAsk ? 0 : 1))
+                                || order.side() == OrderSide.BUY && order.priceTicks() >= lowestAsk ? 0 : 1)
+                        // Retain the deep quote while replacing the small levels around it.
+                        .thenComparingLong(OrderResponse::remainingQuantitySteps))
                 .map(order -> new CancelOrderRequest(accountId, order.orderId()))
                 .toList();
         int replacementBatchSize = Math.max(1, Math.min(MAX_BATCH_PLACE_ORDERS, owned.size() / 10));

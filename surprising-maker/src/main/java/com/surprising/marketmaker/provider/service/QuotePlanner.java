@@ -154,7 +154,6 @@ public class QuotePlanner {
             long targetSteps = accountTarget / perStep + (accountTarget % perStep == 0 ? 0 : 1);
             targetSteps = inventoryAdjustedQuantity(strategy, risk, side, position, targetSteps);
             List<Integer> band = new ArrayList<>();
-            long currentSteps = 0;
             var distanceLimit = java.math.BigInteger.valueOf(best)
                     .multiply(java.math.BigInteger.valueOf(quoting.getLiquiditySlippagePpm()));
             for (int index = 0; index < sized.size(); index++) {
@@ -164,20 +163,21 @@ public class QuotePlanner {
                 if (java.math.BigInteger.valueOf(distance).multiply(java.math.BigInteger.valueOf(ONE_PPM))
                         .compareTo(distanceLimit) > 0) continue;
                 band.add(index);
-                currentSteps = Math.addExact(currentSteps, quote.quantitySteps());
             }
-            long missing = Math.max(0, Math.subtractExact(targetSteps, currentSteps));
-            for (int slot = 0; slot < band.size() && missing > 0; slot++) {
+            // A newly improved best price must carry the target itself: spreading the extra
+            // equally leaves only a fraction executable while the old ladder is being replaced.
+            band.sort((left, right) -> side == OrderSide.BUY
+                    ? Long.compare(sized.get(right).priceTicks(), sized.get(left).priceTicks())
+                    : Long.compare(sized.get(left).priceTicks(), sized.get(right).priceTicks()));
+            long remaining = targetSteps;
+            for (int slot = 0; slot < band.size() && remaining > 0; slot++) {
                 int index = band.get(slot);
                 DesiredQuote quote = sized.get(index);
-                long slotsLeft = band.size() - slot;
-                long extra = missing / slotsLeft + (missing % slotsLeft == 0 ? 0 : 1);
                 long maximum = Math.min(instrument.maxQuantitySteps(), instrument.maxNotionalUnits()
                         / Math.multiplyExact(quote.priceTicks(), instrument.notionalMultiplierUnits()));
-                extra = Math.min(extra, Math.max(0, maximum - quote.quantitySteps()));
-                sized.set(index, new DesiredQuote(side, quote.level(), quote.priceTicks(),
-                        Math.addExact(quote.quantitySteps(), extra)));
-                missing -= extra;
+                long quantity = Math.min(maximum, Math.max(quote.quantitySteps(), remaining));
+                sized.set(index, new DesiredQuote(side, quote.level(), quote.priceTicks(), quantity));
+                remaining = Math.max(0, Math.subtractExact(remaining, quantity));
             }
         }
         return sized;

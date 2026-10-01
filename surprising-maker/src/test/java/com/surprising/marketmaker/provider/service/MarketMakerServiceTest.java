@@ -472,6 +472,22 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void replacesSmallStaleQuotesBeforeWithdrawingTheDeepBestQuotes() {
+        var orders = new ArrayList<>(staleTwentyLevelOrders());
+        for (int index = 0; index < 2; index++) {
+            var old = orders.get(index);
+            orders.set(index, order(old.orderId(), old.userId(), old.clientOrderId(), old.side(),
+                    old.priceTicks(), 100, old.status()));
+        }
+        Fixtures fixtures = new Fixtures(orders);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .hasSize(40).endsWith(1000L, 2000L);
+    }
+
+    @Test
     void splitsCancellationAtTheOrderServiceBatchLimit() {
         Fixtures fixtures = new Fixtures(staleOrders(30));
         fixtures.orderLevels = 30;

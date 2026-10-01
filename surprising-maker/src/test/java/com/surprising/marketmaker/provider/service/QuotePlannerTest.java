@@ -36,6 +36,14 @@ class QuotePlannerTest {
         org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).maxPositionNotionalUnits();
         var plan = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100), mark(5_000_000), 0);
         assertBandCapacity(plan, 500_000_000L);
+        for (OrderSide side : OrderSide.values()) {
+            var best = plan.quotes().stream().filter(q -> q.side() == side)
+                    .min((a, b) -> side == OrderSide.BUY ? Long.compare(b.priceTicks(), a.priceTicks())
+                            : Long.compare(a.priceTicks(), b.priceTicks())).orElseThrow();
+            assertThat(best.priceTicks() * best.quantitySteps() * spec.notionalMultiplierUnits())
+                    .as("the first newly quoted level must carry the target before outer levels are replaced")
+                    .isGreaterThanOrEqualTo(500_000_000L);
+        }
         assertThat(plan.quotes().stream().filter(q -> q.level() == 49).mapToLong(q -> q.quantitySteps()))
                 .containsExactly(10L, 10L);
     }
