@@ -1903,7 +1903,7 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_overrides (
     CONSTRAINT market_maker_overrides_inventory_skew CHECK (
         max_inventory_skew_ppm IS NULL OR max_inventory_skew_ppm BETWEEN 0 AND 1000000
     ),
-    CONSTRAINT market_maker_overrides_order_levels CHECK (order_levels IS NULL OR order_levels BETWEEN 1 AND 20),
+    CONSTRAINT market_maker_overrides_order_levels CHECK (order_levels IS NULL OR order_levels BETWEEN 1 AND 50),
     CONSTRAINT market_maker_overrides_admin_present CHECK (length(updated_by_admin_user_id) > 0),
     CONSTRAINT market_maker_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500),
     CONSTRAINT market_maker_overrides_version_positive CHECK (version > 0)

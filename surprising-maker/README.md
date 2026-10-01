@@ -342,6 +342,9 @@ java --enable-native-access=ALL-UNNAMED \
 
 ### 内部做市按 1bp 目标补充数量（2026-10-01）
 
+已有数据库先执行 `deployment/migrations/20261001-maker-depth-levels.sql`，将策略覆盖表的档数约束
+从 1–20 同步为 1–50；新库 `init.sql` 已同步。否则通过后台保存 50 档会触发数据库约束失败。
+
 `QuotePlanner.sizeLinearLiquidityBand` 在生成价格后，按配置的名义金额目标和账号数计算每账号
 所需合约张数，仅补充最优价起 `liquiditySlippagePpm` 范围内的档位。数量向上取整，沿用库存偏斜；
 随后仍执行单笔数量/名义金额限制和整侧库存/OI 预算，最终由 Core 校验保证金及风险档位。
