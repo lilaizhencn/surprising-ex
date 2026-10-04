@@ -741,6 +741,16 @@ class MarketMakerServiceTest {
         assertThat(requests).extracting(PlaceOrderRequest::clientOrderId).doesNotHaveDuplicates();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0, 10, -10})
+    void liquidityFreshnessUsesTimeAfterTheBookQuery(long ageSeconds) {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.bookAgeSeconds = ageSeconds;
+        var metrics = fixtures.service().adminMetrics(100);
+        assertThat(metrics.rows()).singleElement().satisfies(row ->
+                assertThat(row.liquidity().fresh()).isEqualTo(ageSeconds == 0));
+    }
+
     @Test
     void liquidityMetricsAcceptNativeAscendingBids() {
         Fixtures fixtures = new Fixtures(List.of());
@@ -924,6 +934,7 @@ class MarketMakerServiceTest {
         private long liquidityTargetNotionalUnits;
         private long levelSpacingTicks = 10;
         private boolean ascendingDepth;
+        private Long bookAgeSeconds;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
@@ -954,7 +965,7 @@ class MarketMakerServiceTest {
             snapshotCache.replace(productLine,
                     List.of(new FakeInstrumentRpc(priceTickUnits).latest(Integer.parseInt(instrumentId), productLine)));
             return new MarketMakerService(properties, markPriceCache(),
-                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
+                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
                     new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
         }
@@ -1327,12 +1338,18 @@ class MarketMakerServiceTest {
         private final long bestBidTicks;
         private final long bestAskTicks;
         private final boolean ascendingDepth;
+        private final Long bookAgeSeconds;
 
         private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks) {
             this(bestBidTicks, bestAskTicks, false);
         }
 
         private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks, boolean ascendingDepth) {
+            this(bestBidTicks, bestAskTicks, ascendingDepth, null);
+        }
+
+        private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks, boolean ascendingDepth, Long bookAgeSeconds) {
+            this.bookAgeSeconds = bookAgeSeconds;
             this.ascendingDepth = ascendingDepth;
             this.bestBidTicks = bestBidTicks;
             this.bestAskTicks = bestAskTicks;
@@ -1340,7 +1357,8 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderBookSnapshotResponse orderBook(String instrumentId, int depth) {
-            Instant now = Instant.parse("2026-01-01T00:00:00Z");
+            Instant now = bookAgeSeconds == null ? Instant.parse("2026-01-01T00:00:00Z")
+                    : Instant.now().minusSeconds(bookAgeSeconds);
             return new OrderBookSnapshotResponse(instrumentId, 1L, depth,
                     ascendingDepth ? List.of(new OrderBookLevel(bestBidTicks - 1, 200L, 1L),
                             new OrderBookLevel(bestBidTicks, 100L, 1L))

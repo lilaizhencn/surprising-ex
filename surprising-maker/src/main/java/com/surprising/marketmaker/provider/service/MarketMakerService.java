@@ -484,7 +484,7 @@ public class MarketMakerService {
             }
             if (staleOwned > 0) {
                 rowAnomalies.add(anomaly("WARN", "STALE_QUOTES", strategyId, productLine, instrumentId, accountId,
-                        staleOwned, 0, "owned live quotes exceed stale age"));
+                        staleOwned, 0, "owned live quotes have no fresh reference book"));
             }
             if (offTargetOwned > 0) {
                 rowAnomalies.add(anomaly("WARN", "OFF_TARGET_QUOTES", strategyId, productLine, instrumentId, accountId,
@@ -494,7 +494,7 @@ public class MarketMakerService {
                 rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, productLine, instrumentId, accountId,
                         1, 0, "instrument is unavailable or not TRADING"));
             }
-            MarketMakerLiquidityMetric liquidity = linearLiquidity(instrument, orderBook, now);
+            MarketMakerLiquidityMetric liquidity = linearLiquidity(instrument, orderBook, Instant.now());
             if (liquidity != null && liquidity.targetNotionalUnits() > 0) {
                 if (!liquidity.fresh()) rowAnomalies.add(anomaly("CRITICAL", "LIQUIDITY_BOOK_STALE", strategyId,
                         productLine, instrumentId, accountId, 0, 1, "fresh two-sided depth is required for liquidity verification"));
