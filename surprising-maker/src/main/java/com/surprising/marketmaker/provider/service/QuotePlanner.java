@@ -130,14 +130,15 @@ public class QuotePlanner {
         }
         return new QuotePlan(anchor, signedPositionSteps,
                 applyQuoteBudget(strategy, risk, instrument, markPrice, signedPositionSteps,
-                        sizeLinearLiquidityBand(strategy, quoting, risk, instrument, signedPositionSteps, quotes)),
+                        sizeLinearLiquidityBand(strategy, quoting, risk, instrument, signedPositionSteps, quotes, referenceOrderBook)),
                 suppressedDuplicateQuotes);
     }
 
     /** Make the configured executable band deep enough before enforcing the existing inventory/Core limits. */
     private List<DesiredQuote> sizeLinearLiquidityBand(MarketMakerProperties.Strategy strategy,
             MarketMakerProperties.Quoting quoting, MarketMakerProperties.Risk risk,
-            InstrumentResponse instrument, long position, List<DesiredQuote> quotes) {
+            InstrumentResponse instrument, long position, List<DesiredQuote> quotes,
+            ReferenceOrderBookSnapshot reference) {
         long target = quoting.getLinearLiquidityTargetNotionalUnits();
         if (target == 0 || (instrument.contractType()
                 != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
@@ -169,14 +170,22 @@ public class QuotePlanner {
                     : Long.compare(sized.get(left).priceTicks(), sized.get(right).priceTicks()));
             // Spread funded depth across executable ticks. Outer slots carry up to twice
             // the weight of the best slot; never pour a capped slot's shortfall into best.
-            long weightSum = (long) band.size() * (3L * band.size() - 1) / 2;
+            // Reference depth changes redistribute the funded total, even at an unchanged mid.
+            // Bound each multiplier to 0.8..1.2 so one external wall cannot absorb our ladder.
+            long[] weights = new long[band.size()];
+            long weightSum = 0;
+            for (int slot = 0; slot < band.size(); slot++) {
+                weights[slot] = Math.multiplyExact(band.size() + slot,
+                        referenceDepthWeight(reference, side, sized.get(band.get(slot)).level()));
+                weightSum = Math.addExact(weightSum, weights[slot]);
+            }
             for (int slot = 0; slot < band.size(); slot++) {
                 int index = band.get(slot);
                 DesiredQuote quote = sized.get(index);
                 long maximum = Math.min(instrument.maxQuantitySteps(), instrument.maxNotionalUnits()
                         / Math.multiplyExact(quote.priceTicks(), instrument.notionalMultiplierUnits()));
                 var numerator = java.math.BigInteger.valueOf(targetSteps)
-                        .multiply(java.math.BigInteger.valueOf(band.size() + slot));
+                        .multiply(java.math.BigInteger.valueOf(weights[slot]));
                 var denominator = java.math.BigInteger.valueOf(weightSum);
                 long share = numerator.add(denominator).subtract(java.math.BigInteger.ONE)
                         .divide(denominator).longValueExact();
@@ -185,6 +194,21 @@ public class QuotePlanner {
             }
         }
         return sized;
+    }
+
+    private long referenceDepthWeight(ReferenceOrderBookSnapshot reference, OrderSide side, int level) {
+        if (reference == null || !reference.hasTwoSidedDepth()) return ONE_PPM;
+        var levels = side == OrderSide.BUY ? reference.bids() : reference.asks();
+        if (level >= levels.size()) return ONE_PPM;
+        var total = java.math.BigInteger.ZERO;
+        for (var entry : levels) {
+            total = total.add(java.math.BigInteger.valueOf(Math.max(0L, entry.quantitySteps())));
+        }
+        if (total.signum() == 0) return ONE_PPM;
+        var observed = java.math.BigInteger.valueOf(Math.max(0L, levels.get(level).quantitySteps()))
+                .multiply(java.math.BigInteger.valueOf(levels.size()));
+        return 800_000L + observed.multiply(java.math.BigInteger.valueOf(400_000L))
+                .divide(observed.add(total)).longValueExact();
     }
 
     /** PMM budget sizing: scale each side proportionally; keep external depth proportions and core limits. */

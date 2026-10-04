@@ -76,6 +76,46 @@ class QuotePlannerTest {
     }
 
     @Test
+    void fundedDepthRespondsToReferenceQuantitiesWithoutChangingPriceOrCapacity() {
+        var strategy = strategy(); strategy.setOrderLevels(50);
+        var quoting = quoting(); quoting.setLevelSpacingTicks(1);
+        quoting.setLinearLiquidityTargetNotionalUnits(500_000_000L);
+        var risk = risk(); risk.setMaxInventorySteps(20_000);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).userOpenInterestLimitFloorUnits();
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).maxPositionNotionalUnits();
+        var first = depthReference(100, Instant.EPOCH);
+        var changed = depthReference(10_000, Instant.EPOCH.plusSeconds(1));
+        var before = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100),
+                mark(5_000_000), 0, first);
+        var after = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100),
+                mark(5_000_000), 0, changed);
+        assertThat(after.quotes().stream().map(q -> q.priceTicks()).toList())
+                .isEqualTo(before.quotes().stream().map(q -> q.priceTicks()).toList());
+        assertThat(after.quotes().getFirst().quantitySteps()).isGreaterThan(before.quotes().getFirst().quantitySteps());
+        assertThat(after.quotes().getFirst().quantitySteps()).isLessThan(before.quotes().getFirst().quantitySteps() * 2);
+        assertThat(after.quotes().stream().filter(q -> q.side() == OrderSide.SELL).toList())
+                .isEqualTo(before.quotes().stream().filter(q -> q.side() == OrderSide.SELL).toList());
+        assertBandCapacity(before, 500_000_000L);
+        assertBandCapacity(after, 500_000_000L);
+        var heartbeat = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100),
+                mark(5_000_000), 0, depthReference(10_000, Instant.EPOCH.plusSeconds(2)));
+        assertThat(heartbeat.quotes()).isEqualTo(after.quotes());
+        var extreme = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100),
+                mark(5_000_000), 0, depthReference(Long.MAX_VALUE, Instant.EPOCH));
+        assertBandCapacity(extreme, 500_000_000L);
+        assertThat(extreme.quotes().getFirst().quantitySteps()).isLessThan(before.quotes().getFirst().quantitySteps() * 2);
+    }
+
+    private ReferenceOrderBookSnapshot depthReference(long firstQuantity, Instant time) {
+        return new ReferenceOrderBookSnapshot("test", "604",
+                List.of(new ReferenceOrderBookLevel(49999, firstQuantity),
+                        new ReferenceOrderBookLevel(49998, 100), new ReferenceOrderBookLevel(49997, 100)),
+                List.of(new ReferenceOrderBookLevel(50001, 100),
+                        new ReferenceOrderBookLevel(50002, 100), new ReferenceOrderBookLevel(50003, 100)), time);
+    }
+
+    @Test
     void depthTargetIsSharedAcrossConfiguredMakerAccounts() {
         var strategy = strategy(); strategy.setAccountIds(List.of(900001L, 900002L));
         var quoting = quoting(); quoting.setLinearLiquidityTargetNotionalUnits(50_000_000L);
