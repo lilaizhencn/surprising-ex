@@ -472,32 +472,36 @@ class MarketMakerServiceTest {
     }
 
     @Test
-    void liquidityBestQuotesUseAmendInsteadOfSeparateCancellation() {
+    void liquidityBandQuotesUseAmendInsteadOfSeparateCancellation() {
         Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
         fixtures.liquidityTargetNotionalUnits = 25_000_000;
+        fixtures.levelSpacingTicks = 1;
         fixtures.orderRpc.jsonRoundTripReceipts = true;
         fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.orderRpc.amendRequests).extracting(AmendOrderRequest::orderId)
-                .containsExactlyInAnyOrder(1000L, 2000L);
+                .contains(1000L, 2000L);
         assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
-                .hasSize(38).doesNotContain(1000L, 2000L);
+                .hasSizeLessThan(38).doesNotContain(1000L, 2000L);
         assertThat(fixtures.orderRpc.openOrders).hasSize(40);
     }
 
-    @Test
-    void uncertainAmendStopsWithdrawalsAndRequeriesTheActualBook() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void uncertainOrPartialAmendStopsWithdrawalsAndRequeriesTheActualBook(boolean lostResponse) {
         Fixtures fixtures = new Fixtures(staleTwentyLevelOrders());
         fixtures.orderLevels = 20;
         fixtures.maxOpenOrders = 60;
         fixtures.liquidityTargetNotionalUnits = 25_000_000;
-        fixtures.orderRpc.loseNextAmendResponse = true;
+        fixtures.levelSpacingTicks = 1;
+        fixtures.orderRpc.loseNextAmendResponse = lostResponse;
+        fixtures.orderRpc.failNextAmendBatch = !lostResponse;
         var service = fixtures.service();
         var first = service.runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(first.strategies()).singleElement().satisfies(s ->
                 assertThat(s.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED));
-        assertThat(fixtures.orderRpc.amendRequests).hasSize(1);
+        assertThat(fixtures.orderRpc.amendRequests).isNotEmpty();
         assertThat(fixtures.orderRpc.cancelRequests).hasSizeLessThanOrEqualTo(4);
         assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
                 .doesNotContain(1000L, 2000L);
@@ -907,6 +911,7 @@ class MarketMakerServiceTest {
         private boolean referenceMarketEnabled;
         private long quantityRefreshTolerancePpm;
         private long liquidityTargetNotionalUnits;
+        private long levelSpacingTicks = 10;
         private boolean ascendingDepth;
         private int tradeBatchSize = 1;
         private int orderLevels = 3;
@@ -969,7 +974,7 @@ class MarketMakerServiceTest {
             properties.getCoordination().setEnabled(false);
             properties.getQuoting().setOrderLevels(orderLevels);
             properties.getQuoting().setMinSpreadTicks(10L);
-            properties.getQuoting().setLevelSpacingTicks(10L);
+            properties.getQuoting().setLevelSpacingTicks(levelSpacingTicks);
             properties.getQuoting().setRefreshThresholdTicks(2L);
             properties.getQuoting().setQuantityRefreshTolerancePpm(quantityRefreshTolerancePpm);
             properties.getQuoting().setLinearLiquidityTargetNotionalUnits(liquidityTargetNotionalUnits);
@@ -1104,6 +1109,7 @@ class MarketMakerServiceTest {
         private int cancelBatchCalls;
         private final List<AmendOrderRequest> amendRequests = new ArrayList<>();
         private boolean loseNextAmendResponse;
+        private boolean failNextAmendBatch;
         private long bidPlacesAtFirstCancel = -1;
         private final List<Integer> liveCountsAfterCancel = new ArrayList<>();
 
@@ -1176,7 +1182,27 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderCommandReceipt amendBatch(BatchAmendOrdersRequest request) {
-            throw new UnsupportedOperationException();
+            var results = new ArrayList<com.surprising.trading.api.model.AmendOrderBatchItemResponse>();
+            boolean lose = loseNextAmendResponse;
+            loseNextAmendResponse = false;
+            boolean fail = failNextAmendBatch;
+            failNextAmendBatch = false;
+            for (int index = 0; index < request.orders().size(); index++) {
+                var item = request.orders().get(index);
+                if (fail && index == request.orders().size() - 1) {
+                    results.add(new com.surprising.trading.api.model.AmendOrderBatchItemResponse(
+                            index, false, "injected rejection", null));
+                    continue;
+                }
+                var original = openOrders.stream().filter(o -> o.orderId() == item.orderId()).findFirst().orElseThrow();
+                amend(item);
+                var replacement = openOrders.stream().filter(o -> item.newClientOrderId().equals(o.clientOrderId()))
+                        .findFirst().orElseThrow();
+                results.add(new com.surprising.trading.api.model.AmendOrderBatchItemResponse(index, true, "ok",
+                        new AmendOrderResponse(original, replacement, true, "amended")));
+            }
+            return terminal(lose ? null : new com.surprising.trading.api.model.AmendOrderBatchResponse(
+                    results.size(), results.size() - (fail ? 1 : 0), fail ? 1 : 0, results));
         }
 
         @Override

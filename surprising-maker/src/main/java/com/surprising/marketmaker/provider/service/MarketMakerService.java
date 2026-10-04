@@ -32,7 +32,8 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AmendOrderRequest;
-import com.surprising.trading.api.model.AmendOrderResponse;
+import com.surprising.trading.api.model.AmendOrderBatchResponse;
+import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
@@ -906,7 +907,7 @@ public class MarketMakerService {
             for (CancelOrderRequest request : batch) {
                 OrderResponse old = kept.stream().filter(order -> order.orderId() == request.orderId())
                         .findFirst().orElse(null);
-                DesiredQuote best = bestQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk);
+                DesiredQuote best = liquidityQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk);
                 if (best == null) cancellations.add(request);
                 else amendments.put(request.orderId(), best);
             }
@@ -922,14 +923,11 @@ public class MarketMakerService {
                 rejectionReason = "cancellation is uncertain; preserve the deep quotes";
                 break;
             }
-            for (var amendment : amendments.entrySet()) {
-                OrderResponse updated = amendQuote(strategy, accountId, instrumentId, amendment.getKey(),
-                        amendment.getValue(), cycleSequence);
-                kept.removeIf(order -> order.orderId() == amendment.getKey());
-                if (isLive(updated)) kept.add(updated);
-                canceled++;
-                submitted++;
-            }
+            List<OrderResponse> updated = amendQuotes(strategy, accountId, instrumentId, amendments, cycleSequence);
+            kept.removeIf(order -> amendments.containsKey(order.orderId()));
+            updated.stream().filter(this::isLive).forEach(kept::add);
+            canceled += amendments.size();
+            submitted += amendments.size();
             ReconcileResult replacement = placeMissingQuotes(strategy, accountId, instrumentId, plan,
                     kept, accountPrefix, cycleSequence);
             submitted += replacement.submitted();
@@ -941,36 +939,59 @@ public class MarketMakerService {
         return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
     }
 
-    private DesiredQuote bestQuoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
+    private DesiredQuote liquidityQuoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
             OrderResponse old, String prefix, long bid, long ask) {
         if (old == null || properties.getQuoting().getLinearLiquidityTargetNotionalUnits() == 0
                 || (strategy.getProductLine() != ProductLine.LINEAR_PERPETUAL
                 && strategy.getProductLine() != ProductLine.LINEAR_DELIVERY)) return null;
         return plan.quotes().stream().filter(quote -> quote.side() == old.side()
-                && quote.priceTicks() == (quote.side() == OrderSide.BUY ? bid : ask)
+                && java.math.BigInteger.valueOf(Math.abs(quote.priceTicks() - (quote.side() == OrderSide.BUY ? bid : ask)))
+                        .multiply(java.math.BigInteger.valueOf(1_000_000L)).compareTo(
+                                java.math.BigInteger.valueOf(quote.side() == OrderSide.BUY ? bid : ask)
+                                        .multiply(java.math.BigInteger.valueOf(properties.getQuoting().getLiquiditySlippagePpm()))) <= 0
                 && old.clientOrderId().startsWith(quotePrefix(prefix, quote.side(), quote.level())))
                 .findFirst().orElse(null);
     }
 
-    /** The existing Core amend command replaces a quote without a separate cancel/place window. */
-    private OrderResponse amendQuote(MarketMakerProperties.Strategy strategy, long accountId,
-            String instrumentId, long originalOrderId, DesiredQuote quote, long cycleSequence) {
-        var replacement = quoteRequest(strategy, accountId, instrumentId, quote, cycleSequence);
+    /** Batch transport with per-item confirmation; a batch is not an all-or-nothing transaction. */
+    private List<OrderResponse> amendQuotes(MarketMakerProperties.Strategy strategy, long accountId,
+            String instrumentId, Map<Long, DesiredQuote> amendments, long cycleSequence) {
+        if (amendments.isEmpty()) return List.of();
+        List<AmendOrderRequest> requests = amendments.entrySet().stream().map(entry -> {
+            var quote = quoteRequest(strategy, accountId, instrumentId, entry.getValue(), cycleSequence);
+            return new AmendOrderRequest(accountId, entry.getKey(), quote.clientOrderId(),
+                    quote.priceTicks(), quote.quantitySteps(), TimeInForce.GTX, true);
+        }).toList();
+        List<OrderResponse> updated = new ArrayList<>();
         try {
-            var receipt = orderRpcApi.amend(new AmendOrderRequest(accountId, originalOrderId,
-                    replacement.clientOrderId(), replacement.priceTicks(), replacement.quantitySteps(),
-                    TimeInForce.GTX, true));
-            var result = receiptResult(receipt, AmendOrderResponse.class);
-            if (result == null || result.replacementOrder() == null
-                    || result.replacementOrder().status() == OrderStatus.REJECTED)
-                throw new IllegalStateException("quote amendment did not confirm replacement: " + receiptMessage(receipt));
-            var updated = result.replacementOrder();
-            forgetOrder(strategy.getProductLine(), accountId, instrumentId, originalOrderId);
-            rememberOrder(strategy.getProductLine(), accountId, instrumentId, updated);
+            for (int start = 0; start < requests.size(); start += 20) {
+                var batch = requests.subList(start, Math.min(start + 20, requests.size()));
+                var receipt = orderRpcApi.amendBatch(new BatchAmendOrdersRequest(batch));
+                var result = receiptResult(receipt, AmendOrderBatchResponse.class);
+                if (result == null || result.failed() != 0 || result.completed() != batch.size()
+                        || result.results().size() != batch.size())
+                    throw new IllegalStateException("quote amendments not confirmed: " + receiptMessage(receipt));
+                boolean[] confirmed = new boolean[batch.size()];
+                for (var item : result.results()) {
+                    if (!item.success() || item.index() < 0 || item.index() >= batch.size()
+                            || confirmed[item.index()] || item.amend() == null
+                            || item.amend().replacementOrder() == null)
+                        throw new IllegalStateException("invalid quote amendment result");
+                    var replacement = item.amend().replacementOrder();
+                    var request = batch.get(item.index());
+                    if (replacement.status() == OrderStatus.REJECTED
+                            || !request.newClientOrderId().equals(replacement.clientOrderId()))
+                        throw new IllegalStateException("quote amendment identity or status mismatch");
+                    confirmed[item.index()] = true;
+                    forgetOrder(strategy.getProductLine(), accountId, instrumentId, request.orderId());
+                    rememberOrder(strategy.getProductLine(), accountId, instrumentId, replacement);
+                    updated.add(replacement);
+                }
+            }
             return updated;
         } catch (RuntimeException ex) {
             openOrderSnapshots.remove(orderSnapshotKey(strategy.getProductLine(), accountId, instrumentId));
-            throw new IllegalStateException("quote amendment outcome requires an actual order query", ex);
+            throw new IllegalStateException("quote amendment outcome requires an actual order query: " + ex.getMessage(), ex);
         }
     }
 

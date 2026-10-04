@@ -41,11 +41,38 @@ class QuotePlannerTest {
                     .min((a, b) -> side == OrderSide.BUY ? Long.compare(b.priceTicks(), a.priceTicks())
                             : Long.compare(a.priceTicks(), b.priceTicks())).orElseThrow();
             assertThat(best.priceTicks() * best.quantitySteps() * spec.notionalMultiplierUnits())
-                    .as("the first newly quoted level must carry the target before outer levels are replaced")
-                    .isGreaterThanOrEqualTo(500_000_000L);
+                    .as("best quote carries only a share of the funded band")
+                    .isLessThan(150_000_000L);
         }
         assertThat(plan.quotes().stream().filter(q -> q.level() == 49).mapToLong(q -> q.quantitySteps()))
                 .containsExactly(10L, 10L);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {1, 40, 100})
+    void distributionUsesOnlyExecutableTicksAndKeepsNearLevelsSmaller(long slippage) {
+        var strategy = strategy(); strategy.setOrderLevels(50);
+        var quoting = quoting(); quoting.setLevelSpacingTicks(1);
+        quoting.setLiquiditySlippagePpm(slippage);
+        quoting.setLinearLiquidityTargetNotionalUnits(500_000_000L);
+        var risk = risk(); risk.setMaxInventorySteps(20_000);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).userOpenInterestLimitFloorUnits();
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).maxPositionNotionalUnits();
+        var plan = quotePlanner.plan(strategy, quoting, risk, spec, orderBook(49900, 50100), mark(5_000_000), 0);
+        for (OrderSide side : OrderSide.values()) {
+            var sorted = plan.quotes().stream().filter(q -> q.side() == side)
+                    .sorted(java.util.Comparator.comparingInt(q -> q.level())).toList();
+            long best = sorted.getFirst().priceTicks();
+            var band = sorted.stream().filter(q -> Math.abs(q.priceTicks() - best) * 1_000_000 <= best * slippage).toList();
+            long total = band.stream().mapToLong(q -> q.quantitySteps()).sum();
+            assertThat(total * best).isGreaterThanOrEqualTo(500_000_000L);
+            for (int i = 1; i < band.size(); i++) {
+                assertThat(band.get(i).quantitySteps()).isGreaterThanOrEqualTo(band.get(i - 1).quantitySteps());
+                assertThat(band.get(i).quantitySteps()).isLessThanOrEqualTo(band.getFirst().quantitySteps() * 2);
+            }
+            if (band.size() > 1) assertThat(band.getFirst().quantitySteps()).isLessThan(total / 2);
+        }
     }
 
     @Test

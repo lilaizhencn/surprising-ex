@@ -164,20 +164,24 @@ public class QuotePlanner {
                         .compareTo(distanceLimit) > 0) continue;
                 band.add(index);
             }
-            // A newly improved best price must carry the target itself: spreading the extra
-            // equally leaves only a fraction executable while the old ladder is being replaced.
             band.sort((left, right) -> side == OrderSide.BUY
                     ? Long.compare(sized.get(right).priceTicks(), sized.get(left).priceTicks())
                     : Long.compare(sized.get(left).priceTicks(), sized.get(right).priceTicks()));
-            long remaining = targetSteps;
-            for (int slot = 0; slot < band.size() && remaining > 0; slot++) {
+            // Spread funded depth across executable ticks. Outer slots carry up to twice
+            // the weight of the best slot; never pour a capped slot's shortfall into best.
+            long weightSum = (long) band.size() * (3L * band.size() - 1) / 2;
+            for (int slot = 0; slot < band.size(); slot++) {
                 int index = band.get(slot);
                 DesiredQuote quote = sized.get(index);
                 long maximum = Math.min(instrument.maxQuantitySteps(), instrument.maxNotionalUnits()
                         / Math.multiplyExact(quote.priceTicks(), instrument.notionalMultiplierUnits()));
-                long quantity = Math.min(maximum, Math.max(quote.quantitySteps(), remaining));
+                var numerator = java.math.BigInteger.valueOf(targetSteps)
+                        .multiply(java.math.BigInteger.valueOf(band.size() + slot));
+                var denominator = java.math.BigInteger.valueOf(weightSum);
+                long share = numerator.add(denominator).subtract(java.math.BigInteger.ONE)
+                        .divide(denominator).longValueExact();
+                long quantity = Math.min(maximum, Math.max(instrument.minQuantitySteps(), share));
                 sized.set(index, new DesiredQuote(side, quote.level(), quote.priceTicks(), quantity));
-                remaining = Math.max(0, Math.subtractExact(remaining, quantity));
             }
         }
         return sized;
