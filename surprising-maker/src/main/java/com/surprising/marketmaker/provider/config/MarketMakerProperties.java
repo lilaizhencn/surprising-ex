@@ -146,6 +146,11 @@ public class MarketMakerProperties {
         private long makerFeeReservePpm;
         @Min(0) @Max(100_000)
         private long minNetHalfSpreadPpm;
+        /** Maximum pressure/inventory quote skew; zero disables. Tick rounding bounds apply. */
+        @Min(0) @Max(1000)
+        private long referencePressureSkewPpm;
+        @Min(0) @Max(1000)
+        private long inventoryPriceSkewPpm;
         /** Quote-asset units; zero disables the deployment-specific depth target. */
         @PositiveOrZero
         private long linearLiquidityTargetNotionalUnits;

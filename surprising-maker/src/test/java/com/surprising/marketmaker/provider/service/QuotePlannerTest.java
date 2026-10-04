@@ -116,6 +116,66 @@ class QuotePlannerTest {
     }
 
     @Test
+    void pressureChangesQuotesAtAnUnchangedMidWithoutCrossingCostFloor() {
+        var config = quoting(); config.setReferencePressureSkewPpm(100);
+        var normal = quotePlanner.plan(strategy(), config, risk(), instrument(),
+                orderBook(49900, 50100), mark(5_000_000), 0, depthReference(100, Instant.EPOCH));
+        var buyPressure = quotePlanner.plan(strategy(), config, risk(), instrument(),
+                orderBook(49900, 50100), mark(5_000_000), 0, depthReference(Long.MAX_VALUE, Instant.EPOCH));
+        assertThat(topPrice(buyPressure, OrderSide.SELL)).isGreaterThan(topPrice(normal, OrderSide.SELL));
+        assertThat(topPrice(buyPressure, OrderSide.SELL) - topPrice(normal, OrderSide.SELL)).isLessThanOrEqualTo(5);
+        assertThat(topPrice(buyPressure, OrderSide.BUY)).isEqualTo(topPrice(normal, OrderSide.BUY));
+        var balanced = depthReference(100, Instant.EPOCH);
+        var sellReference = new ReferenceOrderBookSnapshot("test", "604", balanced.bids(),
+                List.of(new ReferenceOrderBookLevel(50001, Long.MAX_VALUE),
+                        new ReferenceOrderBookLevel(50002, Long.MAX_VALUE)), Instant.EPOCH);
+        var sellPressure = quotePlanner.plan(strategy(), config, risk(), instrument(),
+                orderBook(49900, 50100), mark(5_000_000), 0, sellReference);
+        assertThat(topPrice(sellPressure, OrderSide.BUY)).isLessThan(topPrice(normal, OrderSide.BUY));
+        assertThat(topPrice(sellPressure, OrderSide.SELL)).isEqualTo(topPrice(normal, OrderSide.SELL));
+        var heartbeat = quotePlanner.plan(strategy(), config, risk(), instrument(),
+                orderBook(49900, 50100), mark(5_000_000), 0, depthReference(Long.MAX_VALUE, Instant.EPOCH.plusSeconds(1)));
+        assertThat(heartbeat.quotes()).isEqualTo(buyPressure.quotes());
+        var noReference = quotePlanner.plan(strategy(), config, risk(), instrument(),
+                orderBook(49900, 50100), mark(5_000_000), 0);
+        assertThat(topPrice(noReference, OrderSide.BUY)).isEqualTo(topPrice(normal, OrderSide.BUY));
+        assertThat(topPrice(noReference, OrderSide.SELL)).isEqualTo(topPrice(normal, OrderSide.SELL));
+    }
+
+    @Test
+    void inventoryTiltsPricesAgainstAccumulatingMoreExposure() {
+        var config = quoting(); config.setInventoryPriceSkewPpm(100);
+        var flat = quotePlanner.plan(strategy(), config, risk(), instrument(), orderBook(49900, 50100), mark(5_000_000), 0);
+        var longPosition = quotePlanner.plan(strategy(), config, risk(), instrument(), orderBook(49900, 50100), mark(5_000_000), 500);
+        var shortPosition = quotePlanner.plan(strategy(), config, risk(), instrument(), orderBook(49900, 50100), mark(5_000_000), -500);
+        assertThat(topPrice(longPosition, OrderSide.BUY)).isLessThan(topPrice(flat, OrderSide.BUY));
+        assertThat(topPrice(longPosition, OrderSide.SELL)).isEqualTo(topPrice(flat, OrderSide.SELL));
+        assertThat(topPrice(shortPosition, OrderSide.SELL)).isGreaterThan(topPrice(flat, OrderSide.SELL));
+        assertThat(topPrice(shortPosition, OrderSide.BUY)).isEqualTo(topPrice(flat, OrderSide.BUY));
+    }
+
+    @Test
+    void pressurePreservesFundedBandAndStaysInsidePriceBounds() {
+        var strategy = strategy(); strategy.setOrderLevels(50);
+        var config = quoting(); config.setLevelSpacingTicks(1);
+        config.setReferencePressureSkewPpm(1000); config.setMaxPriceDeviationPpm(1000);
+        config.setLinearLiquidityTargetNotionalUnits(500_000_000L);
+        var risk = risk(); risk.setMaxInventorySteps(20_000);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).userOpenInterestLimitFloorUnits();
+        org.mockito.Mockito.doReturn(2_000_000_000L).when(spec).maxPositionNotionalUnits();
+        var plan = quotePlanner.plan(strategy, config, risk, spec, orderBook(49900, 50100),
+                mark(5_000_000), 0, depthReference(10_000, Instant.EPOCH));
+        assertThat(plan.quotes()).allSatisfy(q -> assertThat(q.priceTicks()).isBetween(49950L, 50050L));
+        assertBandCapacity(plan, 500_000_000L);
+    }
+
+    private long topPrice(QuotePlan plan, OrderSide side) {
+        return plan.quotes().stream().filter(q -> q.side() == side).mapToLong(q -> q.priceTicks())
+                .reduce(side == OrderSide.BUY ? Math::max : Math::min).orElseThrow();
+    }
+
+    @Test
     void depthTargetIsSharedAcrossConfiguredMakerAccounts() {
         var strategy = strategy(); strategy.setAccountIds(List.of(900001L, 900002L));
         var quoting = quoting(); quoting.setLinearLiquidityTargetNotionalUnits(50_000_000L);

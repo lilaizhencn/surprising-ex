@@ -74,6 +74,13 @@ public class QuotePlanner {
         long maxDeviationTicks = Math.max(1L, multiplyDiv(anchor, quoting.getMaxPriceDeviationPpm(), ONE_PPM));
         if (linear && (Math.max(instrument.makerFeeRatePpm(), quoting.getMakerFeeReservePpm()) > 0
                 || quoting.getMinNetHalfSpreadPpm() > 0) && halfSpread > maxDeviationTicks) throw new IllegalStateException("quote price bound cannot cover required spread and maker fee");
+        long priceSkew = linear ? priceSkewTicks(strategy, quoting, risk, anchor, signedPositionSteps,
+                referenceOrderBook) : 0L;
+        long skewLimit = Math.max(0L, maxDeviationTicks - halfSpread);
+        priceSkew = Math.max(-skewLimit, Math.min(skewLimit, priceSkew));
+        // Tilt quotes away from adverse flow without crossing the reference-based fee/edge floor.
+        long bidHalfSpread = halfSpread + Math.max(0L, -priceSkew);
+        long askHalfSpread = halfSpread + Math.max(0L, priceSkew);
         long minPrice = Math.max(1L, anchor - maxDeviationTicks);
         long maxPrice = anchor + maxDeviationTicks;
         long bestBid = bestBid(orderBook);
@@ -93,8 +100,8 @@ public class QuotePlanner {
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
             boolean referenceBid = bidDistance > 0;
             boolean referenceAsk = askDistance > 0;
-            bidDistance = bidDistance > 0 ? Math.max(halfSpread, bidDistance) : halfSpread + spacing * level;
-            askDistance = askDistance > 0 ? Math.max(halfSpread, askDistance) : halfSpread + spacing * level;
+            bidDistance = bidDistance > 0 ? Math.max(bidHalfSpread, bidDistance) : bidHalfSpread + spacing * level;
+            askDistance = askDistance > 0 ? Math.max(askHalfSpread, askDistance) : askHalfSpread + spacing * level;
             if (level > 0) {
                 // Preserve the source's adjacent gap; configured spacing only extends missing depth.
                 bidDistance = Math.max(bidDistance, previousBidDistance
@@ -132,6 +139,44 @@ public class QuotePlanner {
                 applyQuoteBudget(strategy, risk, instrument, markPrice, signedPositionSteps,
                         sizeLinearLiquidityBand(strategy, quoting, risk, instrument, signedPositionSteps, quotes, referenceOrderBook)),
                 suppressedDuplicateQuotes);
+    }
+
+    private long priceSkewTicks(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting,
+            MarketMakerProperties.Risk risk, long anchor, long position, ReferenceOrderBookSnapshot reference) {
+        long pressure = 0L;
+        if (quoting.getReferencePressureSkewPpm() > 0 && reference != null && reference.hasTwoSidedDepth()) {
+            var bid = nearDepth(reference.bids());
+            var ask = nearDepth(reference.asks());
+            var total = bid.add(ask);
+            if (total.signum() > 0) {
+                pressure = boundedSkew(anchor, quoting.getReferencePressureSkewPpm(), bid.subtract(ask), total);
+            }
+        }
+        long maxInventory = maxInventory(strategy, risk);
+        long inventory = maxInventory <= 0 ? 0L : boundedSkew(anchor, quoting.getInventoryPriceSkewPpm(),
+                java.math.BigInteger.valueOf(Math.max(-maxInventory, Math.min(maxInventory, position))),
+                java.math.BigInteger.valueOf(maxInventory));
+        return Math.subtractExact(pressure, inventory);
+    }
+
+    private java.math.BigInteger nearDepth(List<ReferenceOrderBookLevel> levels) {
+        var total = java.math.BigInteger.ZERO;
+        for (int i = 0; i < Math.min(5, levels.size()); i++) {
+            total = total.add(java.math.BigInteger.valueOf(Math.max(0L, levels.get(i).quantitySteps())));
+        }
+        return total;
+    }
+
+    private long boundedSkew(long anchor, long ppm, java.math.BigInteger imbalance,
+            java.math.BigInteger total) {
+        if (ppm == 0) return 0L;
+        // Round the configured maximum up to an executable tick, then the signal to nearest tick.
+        var million = java.math.BigInteger.valueOf(ONE_PPM);
+        var maximum = java.math.BigInteger.valueOf(anchor).multiply(java.math.BigInteger.valueOf(ppm))
+                .add(million).subtract(java.math.BigInteger.ONE).divide(million);
+        long magnitude = maximum.multiply(imbalance.abs()).add(total.divide(java.math.BigInteger.TWO))
+                .divide(total).min(maximum).longValueExact();
+        return imbalance.signum() < 0 ? -magnitude : magnitude;
     }
 
     /** Make the configured executable band deep enough before enforcing the existing inventory/Core limits. */
