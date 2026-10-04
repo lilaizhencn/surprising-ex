@@ -420,7 +420,6 @@ public class MarketMakerService {
                     .filter(order -> ownsOrder(accountPrefix, order))
                     .filter(this::isLive)
                     .toList();
-            long staleOwned = ownedLive.stream().filter(order -> isStale(order, now)).count();
             InstrumentResponse instrument = currentInstrument(productLine, instrumentId);
             PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
@@ -433,12 +432,13 @@ public class MarketMakerService {
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, instrumentId),
                     referenceOrderBook);
+            long staleOwned = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
+                    ? ownedLive.size() : 0;
             int desiredQuotes = plan.quotes().size();
             long matchedDesired = plan.quotes().stream()
                     .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix))
                     .count();
             long offTargetOwned = ownedLive.stream()
-                    .filter(order -> !isStale(order, now))
                     .filter(order -> plan.quotes().stream().noneMatch(quote -> matchesQuote(order, quote, accountPrefix)))
                     .count();
             long missingDesired = Math.max(0, desiredQuotes - matchedDesired);
@@ -1111,7 +1111,7 @@ public class MarketMakerService {
                                  DesiredQuote quote,
                                  String accountPrefix,
                                  Instant now) {
-        return isLive(order) && !isStale(order, now) && matchesQuote(order, quote, accountPrefix);
+        return isLive(order) && matchesQuote(order, quote, accountPrefix);
     }
 
     private boolean hasLiveQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
@@ -1151,13 +1151,6 @@ public class MarketMakerService {
 
     private boolean isLive(OrderResponse order) {
         return order != null && LIVE_STATUSES.contains(order.status());
-    }
-
-    private boolean isStale(OrderResponse order, Instant now) {
-        Duration maxAge = properties.getQuoting().getStaleOrderMaxAge();
-        return maxAge != null
-                && order.createdAt() != null
-                && order.createdAt().plus(maxAge).isBefore(now);
     }
 
     private PlaceOrderRequest quoteRequest(MarketMakerProperties.Strategy strategy,

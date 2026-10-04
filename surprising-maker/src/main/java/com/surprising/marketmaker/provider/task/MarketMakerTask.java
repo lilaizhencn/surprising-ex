@@ -17,19 +17,22 @@ import org.springframework.stereotype.Component;
 public class MarketMakerTask {
     private final MarketMakerService service;
     private final MarketMakerProperties properties;
+    private final MakerQuoteWakeups wakeups;
     // 只持有本服务工作线程；报价和资金状态仍由原服务及交易核心拥有。
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final AtomicBoolean running = new AtomicBoolean();
 
-    public MarketMakerTask(MarketMakerService service, MarketMakerProperties properties) {
+    public MarketMakerTask(MarketMakerService service, MarketMakerProperties properties, MakerQuoteWakeups wakeups) {
         this.service = service;
         this.properties = properties;
+        this.wakeups = wakeups;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
         if (!running.compareAndSet(false, true)) return;
         for (MarketMakerProperties.Strategy strategy : properties.getStrategies()) {
+            wakeups.register(strategy);
             startWorker(strategy, false);
             if (properties.getTrade().isEnabled()) startWorker(strategy, true);
         }
@@ -40,15 +43,19 @@ public class MarketMakerTask {
             while (running.get() && !Thread.currentThread().isInterrupted()) {
                 boolean completed = false;
                 try {
+                    if (!taking) wakeups.await(strategy, properties.getEngine().getQuoteWatchdogInterval());
+                    if (!running.get()) break;
                     completed = taking
                             ? service.runScheduledTrades(strategy.getStrategyId(), strategy.getProductLine())
                             : service.runScheduledStrategy(strategy.getStrategyId(), strategy.getProductLine());
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
                 } catch (RuntimeException ex) {
                     log.warn("Market-maker worker failed strategyId={} taking={}", strategy.getStrategyId(), taking, ex);
                 }
-                // 本地模拟成交和报价按各自间隔推进，避免成功后无限循环挤占实时查询。
-                long delayMillis = (taking ? properties.getEngine().getTradeInterval()
-                        : properties.getEngine().getQuoteInterval()).toMillis();
+                // Quotes follow events; timeout only recovers stale feeds, leases and missed notifications.
+                long delayMillis = taking ? properties.getEngine().getTradeInterval().toMillis() : 0;
                 if (!completed) delayMillis = Math.max(100, delayMillis);
                 if (delayMillis > 0) {
                     try { Thread.sleep(delayMillis); }
@@ -62,5 +69,6 @@ public class MarketMakerTask {
     public void stop() {
         running.set(false);
         workers.shutdownNow();
+        wakeups.clear();
     }
 }

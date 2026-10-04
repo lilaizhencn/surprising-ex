@@ -39,16 +39,24 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final MarketMakerProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final com.surprising.marketmaker.provider.task.MakerQuoteWakeups wakeups;
     private final Map<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
     private final Map<String, LiveBook> liveBooks = new ConcurrentHashMap<>();
     private final Map<String, WebSocketState> webSockets = new ConcurrentHashMap<>();
 
-    public RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper,
+            com.surprising.marketmaker.provider.task.MakerQuoteWakeups wakeups) {
         this.properties = properties;
+        this.wakeups = wakeups;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(timeout())
                 .build();
+    }
+
+    RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, new com.surprising.marketmaker.provider.task.MakerQuoteWakeups(properties, objectMapper));
     }
 
     @Override
@@ -134,7 +142,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             ReferenceOrderBookSnapshot snapshot = liveBook.snapshot(source.getName(), normalizedSymbol, receivedAt,
                     Math.max(1, properties.getReferenceMarket().getDepthLevels()));
             if (snapshot != null && snapshot.hasTwoSidedDepth()) {
-                cache.put(cacheKey(source.getProductLine(), normalizedSymbol), new CachedSnapshot(snapshot, receivedAt, true));
+                var previous = cache.put(cacheKey(source.getProductLine(), normalizedSymbol),
+                        new CachedSnapshot(snapshot, receivedAt, true));
+                if (previous == null || !previous.snapshot().bids().equals(snapshot.bids())
+                        || !previous.snapshot().asks().equals(snapshot.asks()))
+                    wakeups.changed(source.getProductLine(), normalizedSymbol);
                 return snapshot;
             }
             return null;

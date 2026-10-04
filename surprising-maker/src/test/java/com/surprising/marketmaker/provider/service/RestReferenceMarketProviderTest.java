@@ -80,6 +80,24 @@ class RestReferenceMarketProviderTest {
     }
 
     @Test
+    void acceptedChangedStreamBookWakesQuotesButIdenticalHeartbeatDoesNot() {
+        var properties = new MarketMakerProperties();
+        var wakeups = org.mockito.Mockito.mock(com.surprising.marketmaker.provider.task.MakerQuoteWakeups.class);
+        var provider = new RestReferenceMarketProvider(properties, new ObjectMapper(), wakeups);
+        var source = source("BINANCE_DEPTH");
+        source.setProductLine(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+        source.setWebSocketParser("BINANCE_DEPTH_STREAM");
+        String payload = "{\"b\":[[\"60000.1\",\"0.015\"]],\"a\":[[\"60000.3\",\"0.017\"]]}";
+        provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), payload, Instant.now());
+        provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), payload, Instant.now());
+        org.mockito.Mockito.verify(wakeups, org.mockito.Mockito.times(1))
+                .changed(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
+        provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), payload.replace("60000.1", "60000.2"), Instant.now());
+        org.mockito.Mockito.verify(wakeups, org.mockito.Mockito.times(2))
+                .changed(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
+    }
+
+    @Test
     void parsesBinanceWebSocketDepthStreamIntoLiveBook() {
         RestReferenceMarketProvider provider = provider();
         MarketMakerProperties.ReferenceMarket.Source source = source("BINANCE_DEPTH");

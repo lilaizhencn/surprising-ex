@@ -363,6 +363,17 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void matchingQuoteIsNotWithdrawnJustBecauseItHasBeenRestingForDays() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
+        var bid = orderAt(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
+                49_995L, 10L, OrderStatus.ACCEPTED, Instant.EPOCH);
+        Fixtures fixtures = new Fixtures(List.of(bid));
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+        assertThat(fixtures.orderRpc.openOrders).anyMatch(o -> o.orderId() == 7L);
+    }
+
+    @Test
     void runOnceCancelsOffTargetOwnedQuotesBeforeReposting() {
         String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L);
         OrderResponse staleBid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
@@ -882,9 +893,9 @@ class MarketMakerServiceTest {
         List<OrderResponse> orders = new ArrayList<>();
         for (int level = 0; level < levels; level++) {
             orders.add(order(1_000L + level, 900001L, prefix + "b" + level + "-1", OrderSide.BUY,
-                    49_995L - 10L * level, 10L, OrderStatus.ACCEPTED));
+                    49_998L - 10L * level, 10L, OrderStatus.ACCEPTED));
             orders.add(order(2_000L + level, 900001L, prefix + "s" + level + "-1", OrderSide.SELL,
-                    50_005L + 10L * level, 10L, OrderStatus.ACCEPTED));
+                    50_002L + 10L * level, 10L, OrderStatus.ACCEPTED));
         }
         return List.copyOf(orders);
     }

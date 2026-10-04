@@ -44,9 +44,9 @@ public class MarketMakerProperties {
     /** 启动时校验所有启用的行情源和策略都显式声明同一产品线。 */
     @PostConstruct
     void validateProductLineConfiguration() {
-        if (engine.quoteInterval == null || engine.tradeInterval == null
-                || engine.quoteInterval.isNegative() || engine.tradeInterval.isNegative())
-            throw new IllegalArgumentException("maker worker intervals must be non-negative");
+        if (engine.quoteWatchdogInterval == null || engine.tradeInterval == null
+                || (engine.quoteWatchdogInterval.isNegative() || engine.quoteWatchdogInterval.toMillis() < 100) || engine.tradeInterval.isNegative())
+            throw new IllegalArgumentException("maker trade interval must be non-negative and quote watchdog at least 100ms");
         for (ReferenceMarket.Source source : referenceMarket.sources) {
             if (source.enabled) {
                 ProductLineConfiguration.require(source.productLine,
@@ -88,7 +88,7 @@ public class MarketMakerProperties {
     public static class Engine {
         private boolean enabled;
         private String nodeId;
-        private Duration quoteInterval = Duration.ZERO;
+        private Duration quoteWatchdogInterval = Duration.ofSeconds(1);
         private Duration tradeInterval = Duration.ZERO;
 
     }
@@ -155,7 +155,6 @@ public class MarketMakerProperties {
         @Min(2)
         @Max(1000)
         private int maxOpenOrdersPerAccountSymbol = 30;
-        private Duration staleOrderMaxAge = Duration.ofSeconds(30);
         @Min(1)
         @Max(100000)
         private long maxPriceDeviationPpm = 5000L;

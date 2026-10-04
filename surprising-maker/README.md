@@ -105,7 +105,6 @@ surprising:
       level-spacing-ticks: 10
       refresh-threshold-ticks: 2
       max-open-orders-per-account-symbol: 30
-      stale-order-max-age: 30s
       max-price-deviation-ppm: 5000
       order-reconciliation-interval: 500ms
       volatility-spread-multiplier-ppm: 500000
@@ -241,10 +240,15 @@ Core 的实际下单风控仍是最终校验。
 或把模拟订单当成自然用户订单。删除了不再需要的 lastTradeSides 状态。
 本地配置每侧 50 档，最多 100 个活跃订单。`QuotePlanner.levelQuantity` 在 `quantity-variation-ppm > 0` 时，将稳定分档数量与外部数量各混合一半；稳定种子由策略、买卖方向和档位构成，同一参考盘口不会每轮随机重挂。外延档位循环使用参考数量分布。默认 0 保持直接参考数量，其他部署未开启不改变行为。预算使用标记价与报价最高价的较大值，避免外侧报价超过名义额度。`MarketMakerService.reconcile` 先补成交缺档，再分批撤换；本地关闭 500ms 活跃订单缓存，每轮核对实际订单。
 参考盘口因小于一张的外部数量而只剩少量可用档位时，`QuotePlanner.orderLevels` 仍按策略配置生成目标档数：已有档位沿用参考价格间距，外侧按配置间距扩展并循环使用已观察到的分档数量；不能把 50 档目标静默缩到 5～10 档。
-`MarketMakerService.matchesQuote` 还按 `refresh-tolerance-ppm` 和 `quantity-refresh-tolerance-ppm` 判断已有报价是否需要撤补；后者默认 0 保持精确数量匹配，测试部署可配置有限偏差，并以 `stale-order-max-age` 强制定期更新。已成交后数量差超出阈值的订单仍会补齐，Core 下单风控保持最终权威。
+`MarketMakerService.matchesQuote` 还按 `refresh-tolerance-ppm` 和 `quantity-refresh-tolerance-ppm` 判断已有报价是否需要撤补；后者默认 0 保持精确数量匹配，测试部署可配置有限偏差，不再因为挂单年龄强制撤单重挂；新鲜度由参考行情的 `max-age` 判断。已成交后数量差超出阈值的订单仍会补齐，Core 下单风控保持最终权威。
 JDK 27 maker 61 项测试通过，新增固定随机种子的逐单变化、单侧流动性与部分成交库存边界验证。
 
-本地模拟负载采用报价轮后 100ms、吃单轮后 150ms、每批 2 单。`MarketMakerTask` 读取 `engine.quote-interval` / `trade-interval`，默认 0 保持已有部署行为；负间隔启动校验失败。失败/暂停仍至少退让 100ms，shutdown 会打断等待。私有快照、用户下单与盘口更新共享本地资源，因此不再用无限成功循环制造演示成交。
+`MarketMakerTask` 的报价由参考盘口、标记价格变更和已提交成交事件唤醒，同一策略最多一个待处理信号。
+执行期间的新事件在本轮结束后立即处理；不同产品线和策略隔离。`engine.quote-watchdog-interval`
+默认 1 秒，仅在无事件时检查行情过期、连接和租约恢复；不因检查本身撤换仍然匹配的订单。
+原 `engine.quote-interval` 不再控制报价。模拟吃单仍使用 `trade-interval`，异常退让至少 100ms。
+成交唤醒使用独立进程消费组、latest 起点和 read_committed，通知不承担持仓/资金状态恢复职责。
+行情回调只发信号，不在 WebSocket/Kafka 消费线程中调用交易 RPC。
 
 ## 线性合约百万级订单与 1bp 验收（2026-10-01）
 

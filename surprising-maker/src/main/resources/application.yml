@@ -58,6 +58,7 @@ surprising:
     engine:
       enabled: true
       node-id:
+      quote-watchdog-interval: 1s
     coordination:
       enabled: true
       lease-duration: 5s
@@ -66,15 +67,14 @@ surprising:
       order-levels: ${MM_ORDER_LEVELS:20}
       min-spread-ticks: 20
       level-spacing-ticks: 8
-      refresh-threshold-ticks: 1
-      refresh-tolerance-ppm: ${MM_REFRESH_TOLERANCE_PPM:1}
+      refresh-threshold-ticks: ${MM_REFRESH_THRESHOLD_TICKS:0}
+      refresh-tolerance-ppm: ${MM_REFRESH_TOLERANCE_PPM:0}
       half-spread-ppm: ${MM_HALF_SPREAD_PPM:1}
       maker-fee-reserve-ppm: ${MM_MAKER_FEE_RESERVE_PPM:0}
       min-net-half-spread-ppm: ${MM_MIN_NET_HALF_SPREAD_PPM:0}
       linear-liquidity-target-notional-units: ${MM_LINEAR_LIQUIDITY_TARGET_NOTIONAL_UNITS:0}
       liquidity-slippage-ppm: ${MM_LIQUIDITY_SLIPPAGE_PPM:100}
       max-open-orders-per-account-symbol: ${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:60}
-      stale-order-max-age: 2s
       max-price-deviation-ppm: 5000
       order-reconciliation-interval: ${MM_ORDER_RECONCILIATION_INTERVAL:500ms}
       volatility-spread-multiplier-ppm: 500000
