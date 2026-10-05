@@ -36,9 +36,6 @@ fi
 set -a
 source "$CONFIG"
 set +a
-# Twenty continuously quoted markets need enough bounded work to finish a user scan
-# before the next mark/order revision invalidates its partial calculation.
-export RISK_SCAN_BATCH_SIZE="${RISK_SCAN_BATCH_SIZE:-4096}"
 export JAVA_HOME="${JAVA_HOME:-$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^    java.home = /{print $2; exit}')}"
 export PATH="$JAVA_HOME/bin:$PATH"
 # Homebrew keeps PostgreSQL keg-only. Other installations can supply PATH.
@@ -49,12 +46,8 @@ export ARTIFACT_ROOT="$LOCAL_DIR/artifacts"
 export RUNTIME_ROOT="$LOCAL_DIR/runtime" RUN_ID=local-perpetual POSTGRES_MODE=native
 export CORE_AERON_BASE_DIR="$LOCAL_DIR/core-driver" APP_AERON_DIR="$LOCAL_DIR/app-driver"
 export GATEWAY_PRODUCT_TRANSFER_ENABLED=false
-export LOCAL_SIMULATED_TRADES_ENABLED="${LOCAL_SIMULATED_TRADES_ENABLED:-${MANAGE_POSTGRES:-false}}"
 [[ ! -f "$LOCAL_DIR/market-ids.env" ]] || source "$LOCAL_DIR/market-ids.env"
-export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS MM_INSTRUMENT_ID
-export MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-1000}"
-export MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-50}"
-export MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL="${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:-100}"
+export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS READINESS_INSTRUMENT_ID
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 backend() { "$ROOT/scripts/linear-perpetual-single-node.sh" "$@"; }
 label() { printf 'com.surprising.local-perpetual.%s' "$1"; }
@@ -135,9 +128,11 @@ case "$ACTION" in
       curl --fail --silent --max-time 5 "http://127.0.0.1:$port/actuator/health" >/dev/null || fail "unhealthy service on port $port"
     done
     # HTTP health alone does not prove the restarted Core has finished replay.
+    if [[ -n "${READINESS_INSTRUMENT_ID:-}" ]]; then
     curl --fail --silent --max-time 5 -H 'X-Product-Line: LINEAR_PERPETUAL' \
-      "http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?instrumentId=$MM_INSTRUMENT_ID&depth=1" \
+      "http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?instrumentId=$READINESS_INSTRUMENT_ID&depth=1" \
       >/dev/null || fail 'Core query unavailable: process may still be recovering; inspect core-node0.log'
+    fi
     for name in postgres redis kafka frontend checkpoints; do
       if alive "$name"; then echo "$name=RUNNING"; else echo "$name=STOPPED_OR_EXTERNAL"; fi
     done
@@ -206,8 +201,7 @@ else
   export LOGGING_CONFIG="file:$LOCAL_DIR/logback.xml"
   python3 "$ROOT/scripts/render-local-market-ids.py" "$LOCAL_DIR"
   source "$LOCAL_DIR/market-ids.env"
-  export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS MM_INSTRUMENT_ID
-  export SPRING_CONFIG_ADDITIONAL_LOCATION="file:$LOCAL_DIR/application-local.yml"
+  export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS READINESS_INSTRUMENT_ID
   if [[ "${MANAGE_REDIS:-false}" == true ]] && ! alive redis; then
     [[ "$VALKEY_HOST" == 127.0.0.1 ]] || fail 'managed Redis must bind localhost'
     free_port "$VALKEY_PORT"
@@ -256,40 +250,8 @@ KAFKA
     cp "$jar" "$ARTIFACT_ROOT/$relative"
   done < <(find "$ROOT" -path '*/target/*.jar' -not -path '*/target/*/*' -type f)
   backend up
-  PRODUCT_LINE=LINEAR_PERPETUAL AERON_HOSTNAMES=127.0.0.1 AERON_EGRESS_HOSTNAME=127.0.0.1 \
-    "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
-    --add-opens java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
-    -cp "$ARTIFACT_ROOT/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar" \
-    com.surprising.aeron.tools.instrument.ClusterInstrumentSeedMain --risk-scan-only \
-    > "$LOCAL_DIR/logs/risk-scan-configuration.log" 2>&1
 fi
-# Test funds are limited to this launcher-owned database and use idempotent references.
-if [[ "${MANAGE_POSTGRES:-false}" == true && ! -f "$LOCAL_DIR/maker-funded" ]]; then
-  for user_id in {900101..900120} 910001; do
-    curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
-      -d "{\"userId\":$user_id,\"asset\":\"USDT\",\"amountUnits\":10000000000000,\"referenceId\":\"local-maker-initial-$user_id\",\"reason\":\"LOCAL DEMO test funds\"}" \
-      http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/maker-$user_id-initial.json"
-  done
-  touch "$LOCAL_DIR/maker-funded"
-fi
-# One-time simulated taker fee budget; never replenish based on trading losses.
-if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" == true && ! -f "$LOCAL_DIR/taker-fee-budget-funded" ]]; then
-  curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
-    -d '{"userId":910001,"asset":"USDT","amountUnits":90000000000000,"referenceId":"local-taker-fee-budget-910001","reason":"LOCAL DEMO simulated taker fee budget"}' \
-    http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/taker-fee-budget.json"
-  touch "$LOCAL_DIR/taker-fee-budget-funded"
-fi
-# Fixed extra capital for a longer local demonstration; never replenish losses automatically.
-if [[ "${MANAGE_POSTGRES:-false}" == true && "$LOCAL_SIMULATED_TRADES_ENABLED" == true && ! -f "$LOCAL_DIR/extended-demo-budget-funded" ]]; then
-  for user_id in {900101..900120} 910001; do
-    amount_units=90000000000000
-    [[ "$user_id" == 910001 ]] && amount_units=900000000000000
-    curl --fail --silent --show-error --max-time 30 -H 'Content-Type: application/json' \
-      -d "{\"userId\":$user_id,\"asset\":\"USDT\",\"amountUnits\":$amount_units,\"referenceId\":\"local-extended-demo-budget-$user_id\",\"reason\":\"LOCAL DEMO extended quote and taker fee budget\"}" \
-      http://127.0.0.1:9094/api/v1/accounts/admin/balance-adjustments > "$LOCAL_DIR/extended-demo-budget-$user_id.json"
-  done
-  touch "$LOCAL_DIR/extended-demo-budget-funded"
-fi
+# Business settings and account funding are managed in the admin Web.
 # Completed snapshots bound recovery work after an unattended service restart.
 mkdir -p "$LOCAL_DIR/bin"
 cp "$ROOT/scripts/checkpoint-local-perpetual.py" "$LOCAL_DIR/bin/checkpoint-local-perpetual.py"
@@ -305,12 +267,7 @@ if ! alive frontend; then
   start frontend /bin/bash -c 'cd "$1"; exec "$2" "$1/node_modules/vite/bin/vite.js" preview --host 127.0.0.1 --port "$3" --strictPort' "$LOCAL_DIR" "$LOCAL_DIR/web" "$(command -v node)" "$FRONTEND_PORT"
 fi
 wait_port 127.0.0.1 "$FRONTEND_PORT"
-ready_deadline=$((SECONDS + 180))
-until python3 "$ROOT/scripts/check-local-perpetual.py" > "$LOCAL_DIR/market-readiness.json"; do
-  (( SECONDS < ready_deadline )) || fail "20-symbol market not ready; see $LOCAL_DIR/market-readiness.json (services retained for diagnosis)"
-  sleep 5
-done
-echo 'MARKETS=20/20 ready (three index sources, mark price, two-sided books)'
+echo 'SERVICES=ready; configure and enable maker strategies in the admin Web'
 echo "PAGE=http://127.0.0.1:$FRONTEND_PORT/trade/usd-perpetual"
 echo "CONFIG=$CONFIG"
 echo "LOGS=$RUNTIME_ROOT/$RUN_ID/logs"

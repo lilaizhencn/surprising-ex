@@ -44,7 +44,7 @@ public record RegisterInstrumentCommand(
                 || maxLeveragePpm < 1_000_000L || maxPositionNotionalUnits <= 0
                 || userOpenInterestLimitRatePpm < 0 || userOpenInterestLimitFloorUnits <= 0
                 || riskLimitBrackets == null || riskLimitBrackets.isEmpty()
-                || instrumentStatusCode < 0 || instrumentStatusCode > 4
+                || instrumentStatusCode < 0 || instrumentStatusCode > 5
                 || supportedOrderTypeMask <= 0 || (supportedOrderTypeMask & ~0b11) != 0
                 || supportedTimeInForceMask <= 0 || (supportedTimeInForceMask & ~0b1111) != 0) {
             throw new IllegalArgumentException("invalid instrument command");

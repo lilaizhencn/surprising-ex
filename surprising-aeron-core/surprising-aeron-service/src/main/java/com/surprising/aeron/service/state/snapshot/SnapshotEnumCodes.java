@@ -329,6 +329,7 @@ public final class SnapshotEnumCodes {
             case HALT -> 2;
             case SETTLING -> 3;
             case CLOSED -> 4;
+            case DRAFT -> 5;
         };
     }
     static InstrumentStatus readInstrumentStatus(int value) {
@@ -338,6 +339,7 @@ public final class SnapshotEnumCodes {
             case 2 -> InstrumentStatus.HALT;
             case 3 -> InstrumentStatus.SETTLING;
             case 4 -> InstrumentStatus.CLOSED;
+            case 5 -> InstrumentStatus.DRAFT;
             default -> throw new ProtocolException("unknown persisted InstrumentStatus code: " + value);
         };
     }

@@ -55,93 +55,12 @@ surprising:
     trading:
       base-url: http://localhost:9094
   market-maker:
-    engine:
-      enabled: true
-      node-id:
-      quote-watchdog-interval: 1s
-    coordination:
-      enabled: true
-      lease-duration: 5s
-    quoting:
-      order-book-depth: 50
-      order-levels: ${MM_ORDER_LEVELS:20}
-      min-spread-ticks: 20
-      level-spacing-ticks: 8
-      refresh-threshold-ticks: ${MM_REFRESH_THRESHOLD_TICKS:0}
-      refresh-tolerance-ppm: ${MM_REFRESH_TOLERANCE_PPM:0}
-      half-spread-ppm: ${MM_HALF_SPREAD_PPM:1}
-      maker-fee-reserve-ppm: ${MM_MAKER_FEE_RESERVE_PPM:0}
-      min-net-half-spread-ppm: ${MM_MIN_NET_HALF_SPREAD_PPM:0}
-      reference-pressure-skew-ppm: ${MM_REFERENCE_PRESSURE_SKEW_PPM:0}
-      inventory-price-skew-ppm: ${MM_INVENTORY_PRICE_SKEW_PPM:0}
-      linear-liquidity-target-notional-units: ${MM_LINEAR_LIQUIDITY_TARGET_NOTIONAL_UNITS:0}
-      liquidity-slippage-ppm: ${MM_LIQUIDITY_SLIPPAGE_PPM:100}
-      max-open-orders-per-account-symbol: ${MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL:60}
-      max-price-deviation-ppm: 5000
-      order-reconciliation-interval: ${MM_ORDER_RECONCILIATION_INTERVAL:500ms}
-      volatility-spread-multiplier-ppm: 500000
-      max-volatility-spread-ticks: 100
-    risk:
-      max-inventory-steps: 10000
-      max-inventory-skew-ppm: 800000
-    trade:
-      orders-per-batch: ${MM_TRADE_ORDERS_PER_BATCH:8}
-      enabled: false
-      account-ids: [900001, 900002, 910001]
-      min-quantity-steps: 1
-      max-quantity-steps: 1000
-      slippage-ticks: 20
-      max-sweep-levels: 5
-      inventory-threshold-steps: 5000
-    reference-market:
-      enabled: ${MM_REFERENCE_MARKET_ENABLED:true}
-      websocket-enabled: ${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:true}
-      refresh-interval: 500ms
-      max-age: 3s
-      request-timeout: 2s
-      reconnect-backoff: 5s
-      depth-levels: 20
-      quantity-scale-ppm: 1000000
-      min-quantity-steps: 1
-      max-quantity-steps: 1000
-      sources:
-        - name: BINANCE_USDM
-          enabled: true
-          product-line: ${PRODUCT_LINE}
-          instrument-id: ${MM_INSTRUMENT_ID:}
-          external-symbol: BTCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
-          parser: BINANCE_DEPTH
-          websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
-          websocket-parser: BINANCE_DEPTH_STREAM
-        - name: OKX_SWAP
-          enabled: true
-          quantity-scale-ppm: 10000
-          product-line: ${PRODUCT_LINE}
-          instrument-id: ${MM_INSTRUMENT_ID:}
-          external-symbol: BTC-USDT-SWAP
-          url: https://www.okx.com/api/v5/market/books?instId={externalSymbol}&sz=20
-          parser: OKX_BOOKS
-          websocket-url: wss://ws.okx.com:8443/ws/v5/public
-          websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
-          websocket-parser: OKX_BOOKS_WS
-        - name: BYBIT_LINEAR
-          enabled: true
-          product-line: ${PRODUCT_LINE}
-          instrument-id: ${MM_INSTRUMENT_ID:}
-          external-symbol: BTCUSDT
-          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={externalSymbol}&limit=50
-          parser: BYBIT_ORDERBOOK
-          websocket-url: wss://stream.bybit.com/v5/public/linear
-          websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
-          websocket-parser: BYBIT_ORDERBOOK_WS
-    strategies:
-      - strategy-id: btc-usdt-mm-a
-        product-line: ${PRODUCT_LINE}
+    infrastructure:
+      product-line: ${PRODUCT_LINE}
+      node-id: ${MM_NODE_ID:}
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        instrument-snapshot-group-id: surprising-market-maker-instrument-snapshot-v1
+      coordination:
         enabled: true
-        account-ids: ${MM_ACCOUNT_IDS:900001,900002}
-        instrument-ids:
-          - "${MM_INSTRUMENT_ID:}"
-        base-quantity-steps: ${MM_BASE_QUANTITY_STEPS:20}
-        order-levels: ${MM_ORDER_LEVELS:20}
-        margin-mode: CROSS
+        lease-duration: 5s

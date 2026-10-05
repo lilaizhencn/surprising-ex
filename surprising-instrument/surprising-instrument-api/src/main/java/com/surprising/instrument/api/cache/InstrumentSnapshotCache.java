@@ -77,7 +77,18 @@ public final class InstrumentSnapshotCache {
             current.merge(symbolKey, immutable, InstrumentSnapshotCache::newer);
             java.util.Set<ProductLine> initialized = new java.util.HashSet<>(previous.initializedProductLines());
             initialized.add(productLine);
-            State next = new State(Map.copyOf(current), previous.assetScales(), true,
+            Map<ProductLine, Map<String, Long>> scales = new HashMap<>(previous.assetScales());
+            Map<String, Long> productScales = new HashMap<>(scales.getOrDefault(productLine, Map.of()));
+            event.assetScales().forEach((asset, scale) -> {
+                if (asset == null || asset.isBlank() || scale == null || scale <= 0)
+                    throw new IllegalArgumentException("invalid instrument event asset scale");
+                String key = asset.trim().toUpperCase(java.util.Locale.ROOT);
+                Long existing = productScales.putIfAbsent(key, scale);
+                if (existing != null && !existing.equals(scale))
+                    throw new IllegalArgumentException("existing asset scale cannot change: " + key);
+            });
+            scales.put(productLine, Map.copyOf(productScales));
+            State next = new State(Map.copyOf(current), Map.copyOf(scales), true,
                     java.util.Set.copyOf(initialized));
             if (state.compareAndSet(previous, next)) return true;
         }

@@ -108,6 +108,18 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void disabledEngineDrainsOnlyItsOwnedOrdersWithoutPlacingNewQuotes() {
+        var orders = new ArrayList<>(staleOrders(2));
+        orders.add(order(9999L, 900001L, "manual-user-order", OrderSide.BUY, 49000L, 1L, OrderStatus.ACCEPTED));
+        var fixtures = new Fixtures(orders);
+        var service = fixtures.service(); // engine is initially disabled
+        assertThat(service.runScheduledStrategy("47", ProductLine.LINEAR_PERPETUAL)).isFalse();
+        assertThat(fixtures.orderRpc.cancelRequests).extracting(CancelOrderRequest::orderId)
+                .containsExactlyInAnyOrder(1000L, 1001L, 2000L, 2001L);
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+    }
+
+    @Test
     void simulatedOrdersVaryIndividuallyWithoutForcingAlternatingSides() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.tradeBatchSize = 8;
@@ -967,7 +979,7 @@ class MarketMakerServiceTest {
             return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
-                    new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
+                    new FakeOverrideStore(properties), runEventRepository, referenceSampleRepository, snapshotCache);
         }
 
         private LatestMarkPriceCache markPriceCache() {
@@ -988,6 +1000,7 @@ class MarketMakerServiceTest {
 
         private MarketMakerProperties properties() {
             MarketMakerProperties properties = new MarketMakerProperties();
+            properties.setProductLine(productLine);
             properties.getReferenceMarket().setEnabled(referenceMarketEnabled);
             properties.getTrade().setEnabled(tradeEnabled);
             properties.getTrade().setOrdersPerBatch(tradeBatchSize);
@@ -1016,6 +1029,23 @@ class MarketMakerServiceTest {
     }
 
     private static final class FakeOverrideStore implements MarketMakerStrategyOverrideStore {
+        private final MarketMakerProperties configured;
+        FakeOverrideStore(MarketMakerProperties configured) { this.configured = configured; }
+        @Override
+        public List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions() {
+            return configured.getStrategies().stream().map(s -> new com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition(
+                    s.getStrategyId(), s.getProductLine(), s.isEnabled(), s.getAccountIds(), s.getInstrumentIds(),
+                    s.getBaseQuantitySteps(), s.getMarginMode(), s.getSpreadTicks(), s.getLevelSpacingTicks(),
+                    s.getMaxInventorySteps() == null ? configured.getRisk().getMaxInventorySteps() : s.getMaxInventorySteps(),
+                    s.getMaxInventorySkewPpm() == null ? configured.getRisk().getMaxInventorySkewPpm() : s.getMaxInventorySkewPpm(),
+                    s.getOrderLevels() == null ? configured.getQuoting().getOrderLevels() : s.getOrderLevels(), s.getInitialAnchorPriceTicks(), 1L)).toList();
+        }
+        @Override
+        public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
+                com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition, String admin, String reason) {
+            throw new UnsupportedOperationException();
+        }
+
         private final Map<String, StrategyConfigOverride> overrides = new HashMap<>();
 
         @Override

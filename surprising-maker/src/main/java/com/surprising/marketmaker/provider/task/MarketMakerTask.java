@@ -21,6 +21,7 @@ public class MarketMakerTask {
     // 只持有本服务工作线程；报价和资金状态仍由原服务及交易核心拥有。
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final AtomicBoolean running = new AtomicBoolean();
+    private final java.util.Set<String> startedStrategies = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public MarketMakerTask(MarketMakerService service, MarketMakerProperties properties, MakerQuoteWakeups wakeups) {
         this.service = service;
@@ -31,10 +32,17 @@ public class MarketMakerTask {
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
         if (!running.compareAndSet(false, true)) return;
-        for (MarketMakerProperties.Strategy strategy : properties.getStrategies()) {
+        refreshStrategies();
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 1000)
+    public void refreshStrategies() {
+        if (!running.get()) return;
+        for (MarketMakerProperties.Strategy strategy : service.configuredStrategies()) {
+            if (!startedStrategies.add(strategy.getProductLine() + ":" + strategy.getStrategyId())) continue;
             wakeups.register(strategy);
             startWorker(strategy, false);
-            if (properties.getTrade().isEnabled()) startWorker(strategy, true);
+            startWorker(strategy, true);
         }
     }
 

@@ -156,6 +156,37 @@ class InstrumentServiceTest {
                 eq("LINEAR_PERPETUAL:1"), eq("UPSERTED"), any(Object.class), any(Instant.class));
     }
 
+    @Test
+    void rejectsStaleAdminEditBeforeWritingConfigurationOrOutbox() {
+        var storage = mock(InstrumentStorageService.class);
+        var outbox = mock(InstrumentOutboxService.class);
+        var current = linearPerpetual("BTC-USDT", 4L, 10_000_000L);
+        when(storage.latest(1, ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(current));
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        assertThatThrownBy(() -> service.edit(request(current, current.priceTickUnits()), "1", "change fee", 3L))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("409");
+        verify(storage).lockForUpdate(1, ProductLine.LINEAR_PERPETUAL);
+        org.mockito.Mockito.verifyNoInteractions(outbox);
+        verify(storage, org.mockito.Mockito.never()).save(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void acceptsMatchingAdminEditVersionUnderRowLock() {
+        var storage = mock(InstrumentStorageService.class);
+        var outbox = mock(InstrumentOutboxService.class);
+        var current = linearPerpetual("BTC-USDT", 4L, 10_000_000L);
+        var request = request(current, current.priceTickUnits());
+        when(storage.latest(1, ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(current));
+        when(storage.save(eq(current.symbol()), eq(request), eq("1"), eq("change fee"), any())).thenReturn(current);
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        assertThat(service.edit(request, "1", "change fee", 4L)).isEqualTo(current);
+        var order = org.mockito.Mockito.inOrder(storage);
+        order.verify(storage).lockForUpdate(1, ProductLine.LINEAR_PERPETUAL);
+        order.verify(storage).latest(1, ProductLine.LINEAR_PERPETUAL);
+        order.verify(storage).save(eq(current.symbol()), eq(request), eq("1"), eq("change fee"), any());
+    }
+
     private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {
         return new InstrumentService(mock(InstrumentStorageService.class), mock(InstrumentValidator.class),
                 properties, outboxService);

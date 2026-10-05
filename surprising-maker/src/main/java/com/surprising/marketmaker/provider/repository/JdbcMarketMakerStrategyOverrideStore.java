@@ -23,6 +23,60 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
     }
 
     @Override
+    public List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions() {
+        return jdbcTemplate.query("SELECT * FROM market_maker_strategies ORDER BY product_line, strategy_id", this::definition);
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
+            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition d, String adminUserId, String reason) {
+        if (adminUserId == null || adminUserId.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
+            throw new IllegalArgumentException("admin identity and reason (1-1000 characters) are required");
+        var rows = jdbcTemplate.query("""
+                INSERT INTO market_maker_strategies (product_line, strategy_id, enabled, account_ids, instrument_ids,
+                    base_quantity_steps, margin_mode, spread_ticks, level_spacing_ticks, max_inventory_steps,
+                    max_inventory_skew_ppm, order_levels, initial_anchor_price_ticks, version, updated_by, reason)
+                SELECT ?, ?, ?, ?::bigint[], ?::text[], ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ? WHERE ? = 0
+                ON CONFLICT (product_line, strategy_id) DO NOTHING RETURNING *
+                """, this::definition, d.productLine().name(), d.strategyId(), d.enabled(),
+                array(d.accountIds()), array(d.instrumentIds()), d.baseQuantitySteps(), d.marginMode().name(),
+                d.spreadTicks(), d.levelSpacingTicks(), d.maxInventorySteps(), d.maxInventorySkewPpm(),
+                d.orderLevels(), d.initialAnchorPriceTicks(), adminUserId, reason, d.version());
+        if (d.version() > 0) {
+            rows = jdbcTemplate.query("""
+                    UPDATE market_maker_strategies SET enabled=?, account_ids=?::bigint[], instrument_ids=?::text[],
+                        base_quantity_steps=?, margin_mode=?, spread_ticks=?, level_spacing_ticks=?, max_inventory_steps=?,
+                        max_inventory_skew_ppm=?, order_levels=?, initial_anchor_price_ticks=?, version=version+1,
+                        updated_by=?, reason=?, updated_at=now()
+                    WHERE product_line=? AND strategy_id=? AND version=? RETURNING *
+                    """, this::definition, d.enabled(), array(d.accountIds()), array(d.instrumentIds()),
+                    d.baseQuantitySteps(), d.marginMode().name(), d.spreadTicks(), d.levelSpacingTicks(),
+                    d.maxInventorySteps(), d.maxInventorySkewPpm(), d.orderLevels(), d.initialAnchorPriceTicks(),
+                    adminUserId, reason, d.productLine().name(), d.strategyId(), d.version());
+        }
+        if (rows.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, "做市配置已更新，请重新加载");
+        delete(d.productLine(), d.strategyId());
+        return rows.getFirst();
+    }
+
+    private String array(List<?> values) {
+        return "{" + values.stream().map(Object::toString).collect(java.util.stream.Collectors.joining(",")) + "}";
+    }
+
+    private com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition(ResultSet rs, int row) throws SQLException {
+        return new com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition(
+                rs.getString("strategy_id"), ProductLine.valueOf(rs.getString("product_line")), rs.getBoolean("enabled"),
+                java.util.Arrays.stream((Object[]) rs.getArray("account_ids").getArray()).map(v -> ((Number) v).longValue()).toList(),
+                java.util.Arrays.stream((Object[]) rs.getArray("instrument_ids").getArray()).map(Object::toString).toList(),
+                rs.getLong("base_quantity_steps"), MarginMode.valueOf(rs.getString("margin_mode")),
+                rs.getLong("spread_ticks"), rs.getLong("level_spacing_ticks"), rs.getLong("max_inventory_steps"),
+                rs.getLong("max_inventory_skew_ppm"), rs.getInt("order_levels"), rs.getLong("initial_anchor_price_ticks"),
+                rs.getLong("version"));
+    }
+
+    @Override
     public List<StrategyConfigOverride> findAll() {
         return jdbcTemplate.query("""
                 SELECT product_line, strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,

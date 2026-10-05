@@ -155,7 +155,7 @@ class InstrumentValidatorTest {
                 3_000L, -3_000L, 1_000_000_000_000L,
                 minValidSources, null, null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, null,
-                List.of(new RiskLimitBracket(1, 0L, 5_000_000_000_000L,
+                List.of(new RiskLimitBracket(1, 0L, 500_000_000_000_000L,
                         100_000_000L, 10_000L, 5_000L)),
                 sources);
     }
@@ -207,7 +207,7 @@ class InstrumentValidatorTest {
                 2, expiryTime, deliveryTime, underlyingInstrumentId, underlyingInstrumentId == null ? null : com.surprising.product.api.ProductLine.SPOT, strikePriceUnits, optionType,
                 optionType == null ? null : OptionExerciseStyle.EUROPEAN, settlementMethod,
                 InstrumentStatus.PRE_TRADING, null,
-                List.of(new RiskLimitBracket(1, 0L, 5_000_000_000_000L,
+                List.of(new RiskLimitBracket(1, 0L, 500_000_000_000_000L,
                         100_000_000L, 10_000L, 5_000L)),
                 List.of(source("A", true), source("B", true)));
     }

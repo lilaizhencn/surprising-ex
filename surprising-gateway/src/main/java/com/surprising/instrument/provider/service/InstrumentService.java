@@ -122,6 +122,40 @@ public class InstrumentService {
         return upsert(request,InstrumentEventType.UPSERTED,operator,reason);
     }
 
+    /** Admin edits hold the row lock until the new configuration and audit are committed. */
+    @Transactional
+    public InstrumentResponse edit(InstrumentUpsertRequest request, String operator, String reason, long expectedChangeId) {
+        requireAudit(operator, reason);
+        instrumentValidator.validate(request);
+        requireEditVersion(request.instrumentId(), request.contractType().productLine(), expectedChangeId);
+        return upsert(request, InstrumentEventType.UPSERTED, operator, reason);
+    }
+
+    @Transactional
+    public InstrumentResponse editStatus(int instrumentId, ProductLine line, InstrumentStatus status,
+                                         String operator, String reason, long expectedChangeId) {
+        requireAudit(operator, reason);
+        requireEditVersion(instrumentId, line, expectedChangeId);
+        return updateStatus(instrumentId, line, status, operator, reason);
+    }
+
+    private void requireAudit(String operator, String reason) {
+        if (operator == null || operator.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
+            throw new IllegalArgumentException("administrator and change reason (1-1000 characters) are required");
+    }
+
+    private void requireEditVersion(Integer instrumentId, ProductLine line, long expectedChangeId) {
+        if (instrumentId == null) {
+            if (expectedChangeId != 0) throw new IllegalArgumentException("new instrument requires expectedChangeId 0");
+            return;
+        }
+        storageService.lockForUpdate(instrumentId, line);
+        if (expectedChangeId <= 0 || latest(instrumentId, line).lastChangeId() != expectedChangeId)
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "合约配置已更新，请重新加载后检查修改；本次修改未保存");
+    }
+
     private InstrumentResponse upsert(InstrumentUpsertRequest request, InstrumentEventType eventType) {
         return upsert(request,eventType,"SYSTEM:INSTRUMENT",eventType.name());
     }
@@ -165,7 +199,8 @@ public class InstrumentService {
     private void publish(InstrumentResponse response, InstrumentEventType eventType) {
         Instant eventTime = Instant.now();
         InstrumentEvent event = new InstrumentEvent(response.instrumentId(), response.symbol(), response.lastChangeId(), response.status(),
-                eventType, eventTime, response, response.contractType().productLine(), response.lastChangeId());
+                eventType, eventTime, response, response.contractType().productLine(), response.lastChangeId(),
+                storageService.assetScales());
         outboxService.enqueue("INSTRUMENT", response.lastChangeId(),
                 ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
                 eventType.name(), event, eventTime);

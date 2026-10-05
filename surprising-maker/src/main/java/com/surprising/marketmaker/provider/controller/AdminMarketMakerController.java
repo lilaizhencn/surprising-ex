@@ -82,6 +82,27 @@ public class AdminMarketMakerController {
                 strategyId, instrumentId, accountId, eventType, limit, cursor, sort);
     }
 
+    @GetMapping("/strategy-definitions")
+    public java.util.List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions(
+            @RequestHeader("X-Admin-User-Id") String adminUserId,
+            @RequestParam("productLine") String line) {
+        requireAdmin(adminUserId);
+        return marketMakerService.strategyDefinitions(productLine(line, null));
+    }
+
+    @PostMapping("/strategy-definitions")
+    public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
+            @RequestHeader("X-Admin-User-Id") String adminUserId,
+            @RequestParam("reason") String reason,
+            @RequestBody com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition) {
+        requireAdmin(adminUserId);
+        try {
+            return marketMakerService.saveStrategyDefinition(definition, adminUserId, reason);
+        } catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
+        }
+    }
+
     @GetMapping("/strategies/{strategyId}/config")
     public MarketMakerStrategyConfigResponse strategyConfig(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,

@@ -28,8 +28,8 @@ public final class InstrumentSnapshotSupport {
             throw new IllegalStateException(serviceName + "合约快照产品线不匹配: " + productLine);
         }
         snapshotCache.replace(productLine, snapshot.instruments(), snapshot.assetScales());
-        if (!snapshotCache.ready(productLine)) {
-            throw new IllegalStateException(serviceName + "合约快照为空，拒绝启动: " + productLine);
+        if (!snapshotCache.initialized(productLine)) {
+            throw new IllegalStateException(serviceName + "合约快照未初始化，拒绝启动: " + productLine);
         }
     }
 
@@ -41,11 +41,22 @@ public final class InstrumentSnapshotSupport {
                              InstrumentEvent event,
                              ProductLine productLine,
                              String serviceName) {
-        if (!InstrumentEventKeys.matches(recordKey, event)
-                || event.productLine() != productLine
-                || !snapshotCache.apply(event)) {
-            throw new IllegalArgumentException(serviceName + "合约事件产品线、key 或快照不匹配");
-        }
+        if (event == null || event.snapshot() == null
+                || event.instrumentId() != event.snapshot().instrumentId()
+                || event.changeId() != event.snapshot().lastChangeId()
+                || event.status() != event.snapshot().status()
+                || event.symbol() == null || event.snapshot().symbol() == null
+                || !event.symbol().trim().equalsIgnoreCase(event.snapshot().symbol().trim())
+                || event.snapshot().contractType() == null
+                || event.snapshot().contractType().productLine() != productLine
+                || !InstrumentEventKeys.matches(recordKey, event) || event.productLine() != productLine)
+            throw new IllegalArgumentException(serviceName + "合约事件产品线或 key 不匹配");
+        // Kafka can redeliver an event already included in the startup snapshot.
+        // Do not block newer hot-listing events behind an older committed version.
+        var current = snapshotCache.current(productLine, event.instrumentId());
+        if (current.isPresent() && current.get().lastChangeId() >= event.changeId()) return;
+        if (!snapshotCache.apply(event))
+            throw new IllegalArgumentException(serviceName + "合约事件快照不匹配");
     }
 
     /**

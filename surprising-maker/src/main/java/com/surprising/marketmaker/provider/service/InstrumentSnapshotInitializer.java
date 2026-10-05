@@ -5,7 +5,6 @@ import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.product.api.ProductLine;
-import java.util.EnumSet;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 
@@ -24,16 +23,8 @@ public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotIni
 
     @Override
     protected Set<ProductLine> productLines() {
-        Set<ProductLine> productLines = EnumSet.noneOf(ProductLine.class);
-        properties.getStrategies().stream().filter(MarketMakerProperties.Strategy::isEnabled)
-                .map(MarketMakerProperties.Strategy::getProductLine).forEach(productLines::add);
-        properties.getReferenceMarket().getSources().stream()
-                .filter(MarketMakerProperties.ReferenceMarket.Source::isEnabled)
-                .map(MarketMakerProperties.ReferenceMarket.Source::getProductLine).forEach(productLines::add);
-        if (productLines.isEmpty()) {
-            return Set.of();
-        }
-        return Set.copyOf(productLines);
+        return Set.of(com.surprising.product.api.ProductLineConfiguration.require(
+                properties.getProductLine(), "market-maker instrument snapshot"));
     }
 
     @Override

@@ -17,7 +17,7 @@ class OkxInstrumentSeedContractTest {
 
         assertThat(sql).contains(MATRIX_MARKER);
         int matrixStart = sql.indexOf(MATRIX_MARKER);
-        String matrix = sql.substring(matrixStart, sql.indexOf("-- OKX catalog counts", matrixStart));
+        String matrix = sql.substring(matrixStart, sql.indexOf("-- Retained seed:", matrixStart));
         assertThat(matrix)
                 .contains("UPDATE instruments SET min_valid_index_sources = 3")
                 .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT'")

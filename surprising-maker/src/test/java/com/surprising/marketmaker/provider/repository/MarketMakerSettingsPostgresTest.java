@@ -1,0 +1,71 @@
+package com.surprising.marketmaker.provider.repository;
+
+import static org.assertj.core.api.Assertions.*;
+import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
+import com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition;
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.MarginMode;
+import java.util.List;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.json.JsonMapper;
+
+@EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
+class MarketMakerSettingsPostgresTest {
+    private JdbcTemplate jdbc;
+    @BeforeEach void prepare() {
+        var url = System.getenv("INSTRUMENT_TEST_JDBC_URL");
+        var user = System.getenv("INSTRUMENT_TEST_DB_USER");
+        var password = System.getenv("INSTRUMENT_TEST_DB_PASSWORD");
+        var admin = new JdbcTemplate(new DriverManagerDataSource(url, user, password));
+        admin.execute("DROP SCHEMA IF EXISTS maker_settings_it CASCADE");
+        admin.execute("CREATE SCHEMA maker_settings_it");
+        jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?")
+                + "currentSchema=maker_settings_it", user, password));
+        for (String table : List.of("market_maker_business_settings", "market_maker_strategies", "market_maker_strategy_overrides"))
+            jdbc.execute("CREATE TABLE " + table + " (LIKE public." + table + " INCLUDING ALL)");
+    }
+    @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA maker_settings_it CASCADE"); }
+
+    @Test void settingsSurviveRestartAndRejectStaleSaveWithoutChangingCurrentValues() {
+        var json = JsonMapper.builder().findAndAddModules().build();
+        var store = new MarketMakerBusinessSettingsStore(jdbc, json);
+        var line = ProductLine.LINEAR_PERPETUAL;
+        store.initializeDisabled(line);
+        var initial = store.load(line);
+        assertThat(initial.settings().engine().isEnabled()).isFalse();
+        initial.settings().quoting().setOrderLevels(9);
+        assertThat(store.save(line, initial.settings(), 1, "1", "test change").version()).isEqualTo(2);
+        var restarted = new MarketMakerBusinessSettingsStore(jdbc, json);
+        restarted.initializeDisabled(line);
+        assertThat(restarted.load(line).settings().quoting().getOrderLevels()).isEqualTo(9);
+        assertThatThrownBy(() -> restarted.save(line, MarketMakerBusinessSettings.initialDisabled(), 1, "2", "stale change"))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(restarted.load(line).version()).isEqualTo(2);
+        assertThat(restarted.load(line).settings().quoting().getOrderLevels()).isEqualTo(9);
+    }
+
+    @Test void strategyCreationAndEditingUseVersionAndProductLine() {
+        var store = new JdbcMarketMakerStrategyOverrideStore(jdbc);
+        var request = definition(ProductLine.LINEAR_PERPETUAL, 0, 10);
+        var saved = store.saveDefinition(request, "1", "create");
+        assertThat(saved.version()).isEqualTo(1);
+        assertThatThrownBy(() -> store.saveDefinition(request, "2", "duplicate"))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 12), "1", "edit").version()).isEqualTo(2);
+        assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 99), "2", "stale"))
+                .isInstanceOf(ResponseStatusException.class);
+        store.saveDefinition(definition(ProductLine.INVERSE_PERPETUAL, 0, 8), "1", "other line");
+        assertThat(store.definitions()).hasSize(2).anySatisfy(d -> {
+            assertThat(d.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+            assertThat(d.baseQuantitySteps()).isEqualTo(12);
+        });
+    }
+    private MarketMakerStrategyDefinition definition(ProductLine line, long version, long quantity) {
+        return new MarketMakerStrategyDefinition("test-maker", line, false, List.of(2L), List.of("604"),
+                quantity, MarginMode.CROSS, 10, 10, 1000, 100000, 3, 0, version);
+    }
+}

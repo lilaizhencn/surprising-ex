@@ -19,6 +19,7 @@ class MarketMakerTaskTest {
     void eventsCoalesceDuringWorkAndNextQuoteDoesNotWaitForWatchdog() throws Exception {
         var properties = properties();
         var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var wakeups = new MakerQuoteWakeups(properties, new ObjectMapper());
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -46,6 +47,7 @@ class MarketMakerTaskTest {
     void unrelatedProductsAndInstrumentsDoNotWakeQuoteWorker() throws Exception {
         var properties = properties();
         var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var wakeups = new MakerQuoteWakeups(properties, new ObjectMapper());
         var entered = new CountDownLatch(1);
         when(service.runScheduledStrategy(anyString(), any())).thenAnswer(call -> { entered.countDown(); return true; });
@@ -64,6 +66,7 @@ class MarketMakerTaskTest {
         var properties = properties();
         properties.getEngine().setQuoteWatchdogInterval(Duration.ofMillis(100));
         var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var checked = new CountDownLatch(2);
         when(service.runScheduledStrategy(anyString(), any())).thenAnswer(call -> { checked.countDown(); return true; });
         var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties, new ObjectMapper()));
@@ -77,6 +80,7 @@ class MarketMakerTaskTest {
         var fast = strategy("fast", "653");
         properties.setStrategies(List.of(properties.getStrategies().getFirst(), fast));
         var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var slowStarted = new CountDownLatch(1);
         var slowStopped = new CountDownLatch(1);
         var fastRan = new CountDownLatch(1);
@@ -101,6 +105,7 @@ class MarketMakerTaskTest {
         var properties = properties(); var mapper = new ObjectMapper();
         var wakeups = new MakerQuoteWakeups(properties, mapper);
         var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var first = new CountDownLatch(1); var second = new CountDownLatch(1); var calls = new AtomicInteger();
         when(service.runScheduledStrategy(anyString(), any())).thenAnswer(call -> {
             if (calls.incrementAndGet() == 1) first.countDown(); else second.countDown(); return true;
@@ -118,8 +123,28 @@ class MarketMakerTaskTest {
         } finally { task.stop(); }
     }
 
+    @Test
+    void newlySavedStrategyStartsWithoutRestartAndDoesNotDuplicateWorkers() throws Exception {
+        var properties = properties();
+        var configured = new java.util.concurrent.atomic.AtomicReference<List<MarketMakerProperties.Strategy>>(List.of());
+        var service = mock(MarketMakerService.class);
+        when(service.configuredStrategies()).thenAnswer(ignored -> configured.get());
+        var quoted = new CountDownLatch(1);
+        when(service.runScheduledStrategy("new", ProductLine.LINEAR_PERPETUAL)).thenAnswer(ignored -> { quoted.countDown(); return true; });
+        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties, new ObjectMapper()));
+        try {
+            task.start();
+            configured.set(List.of(strategy("new", "653")));
+            task.refreshStrategies();
+            task.refreshStrategies();
+            assertThat(quoted.await(2, TimeUnit.SECONDS)).isTrue();
+            verify(service, times(1)).runScheduledStrategy("new", ProductLine.LINEAR_PERPETUAL);
+        } finally { task.stop(); }
+    }
+
     private MarketMakerProperties properties() {
         var properties = new MarketMakerProperties();
+        properties.setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.setStrategies(List.of(strategy("maker", "604")));
         properties.getEngine().setQuoteWatchdogInterval(Duration.ofSeconds(30));
         return properties;

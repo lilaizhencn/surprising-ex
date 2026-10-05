@@ -47,6 +47,13 @@ public class InstrumentStorageService {
             instrumentRepository.lockForUpdate(instrumentId, line);
             before = latest(instrumentId, line).orElseThrow();
             requireUnchangedContractTerms(before, request);
+            if (request.status() == InstrumentStatus.DRAFT && before.status() != InstrumentStatus.DRAFT)
+                throw new IllegalArgumentException("listed instruments cannot return to draft; pause trading instead");
+            if (before.status() == InstrumentStatus.CLOSED && request.status() != InstrumentStatus.CLOSED)
+                throw new IllegalArgumentException("closed instruments cannot reopen");
+            if (before.status() == InstrumentStatus.SETTLING && request.status() != InstrumentStatus.SETTLING
+                    && request.status() != InstrumentStatus.CLOSED)
+                throw new IllegalArgumentException("settling instruments cannot return to trading");
         }
         for (int assetId : new java.util.TreeSet<>(java.util.List.of(request.baseAssetId(), request.quoteAssetId(),
                 request.settleAssetId(), request.contractValueAssetId()))) {

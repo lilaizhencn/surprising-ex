@@ -41,9 +41,10 @@ public final class InstrumentLocalRoutes {
             return instrumentRequests.assetScales();
         }
         if (r.matches(HttpMethod.POST, INSTRUMENT_CONTROLLER_UPSERT)) {
-            return instrumentRequests.upsert(r.body(InstrumentUpsertRequest.class, true, false),
+            return instrumentRequests.edit(r.body(InstrumentUpsertRequest.class, true, false),
                     r.header("X-Admin-User-Id", String.class, null, true),
-                    r.query("reason", String.class, "Admin configuration update", false));
+                    r.query("reason", String.class, null, true),
+                    r.query("expectedChangeId", long.class, null, true));
         }
         if (r.matches(HttpMethod.GET, INSTRUMENT_CONTROLLER_ADMINLIST)) {
             return instrumentRequests.adminList(r.query("type", InstrumentType.class, null, false),
@@ -83,12 +84,13 @@ public final class InstrumentLocalRoutes {
                     r.query("limit", int.class, "50", false));
         }
         if (r.matches(HttpMethod.POST, INSTRUMENT_CONTROLLER_UPDATESTATUS)) {
-            return instrumentRequests.updateStatus(r.path("instrumentId", int.class),
+            return instrumentRequests.editStatus(r.path("instrumentId", int.class),
                     r.query("status", InstrumentStatus.class, null, true),
                     r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false),
                     r.header("X-Admin-User-Id", String.class, null, true),
-                    r.query("reason", String.class, "Admin trading status update", false));
+                    r.query("reason", String.class, null, true),
+                    r.query("expectedChangeId", long.class, null, true));
         }
         if (r.matches(HttpMethod.GET, INSTRUMENT_CONTROLLER_ADMINLATEST)) {
             return instrumentRequests.adminLatest(r.path("instrumentId", int.class),

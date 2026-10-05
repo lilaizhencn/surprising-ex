@@ -22,8 +22,27 @@ import org.springframework.validation.annotation.Validated;
 
 @Getter
 @Validated
-@ConfigurationProperties(prefix = "surprising.market-maker")
 public class MarketMakerProperties {
+
+    private volatile MarketMakerBusinessSettings businessSettings;
+
+    public Engine getEngine() { return businessSettings == null ? engine : businessSettings.engine(); }
+    public Quoting getQuoting() { return businessSettings == null ? quoting : businessSettings.quoting(); }
+    public Risk getRisk() { return businessSettings == null ? risk : businessSettings.risk(); }
+    public Trade getTrade() { return businessSettings == null ? trade : businessSettings.trade(); }
+    public ReferenceMarket getReferenceMarket() { return businessSettings == null ? referenceMarket : businessSettings.referenceMarket(); }
+
+    public void install(MarketMakerBusinessSettings settings) {
+        if (settings == null || settings.engine() == null || settings.quoting() == null || settings.risk() == null
+                || settings.trade() == null || settings.referenceMarket() == null)
+            throw new IllegalArgumentException("complete maker business settings are required");
+        settings.engine().setNodeId(getEngine().getNodeId());
+        businessSettings = settings;
+    }
+
+    @Setter
+    @jakarta.validation.constraints.NotNull
+    private ProductLine productLine;
 
     @Setter
     @Valid
@@ -42,23 +61,20 @@ public class MarketMakerProperties {
     private Risk risk = new Risk();
 
     /** 启动时校验所有启用的行情源和策略都显式声明同一产品线。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
+    public void validateBusinessSettings() {
+        var engine = getEngine();
+        var referenceMarket = getReferenceMarket();
         if (engine.quoteWatchdogInterval == null || engine.tradeInterval == null
                 || (engine.quoteWatchdogInterval.isNegative() || engine.quoteWatchdogInterval.toMillis() < 100) || engine.tradeInterval.isNegative())
             throw new IllegalArgumentException("maker trade interval must be non-negative and quote watchdog at least 100ms");
         for (ReferenceMarket.Source source : referenceMarket.sources) {
             if (source.enabled) {
-                ProductLineConfiguration.require(source.productLine,
+                ProductLineConfiguration.requireSame(productLine, source.productLine,
                         "market-maker.source." + source.name);
             }
         }
-        for (Strategy strategy : strategies) {
-            if (strategy.enabled) {
-                ProductLineConfiguration.require(strategy.productLine,
-                        "market-maker.strategy." + strategy.strategyId);
-            }
-        }
+        if (!strategies.isEmpty())
+            throw new IllegalStateException("做市策略只允许通过后台维护，请移除 YAML/环境变量中的 strategies 配置");
     }
 
     @Setter
@@ -87,8 +103,11 @@ public class MarketMakerProperties {
     @Setter
     public static class Engine {
         private boolean enabled;
+        @com.fasterxml.jackson.annotation.JsonIgnore
         private String nodeId;
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration quoteWatchdogInterval = Duration.ofSeconds(1);
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration tradeInterval = Duration.ZERO;
 
     }
@@ -106,6 +125,7 @@ public class MarketMakerProperties {
     @Setter
     public static class Coordination {
         private boolean enabled = true;
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration leaseDuration = Duration.ofSeconds(5);
 
     }
@@ -163,6 +183,7 @@ public class MarketMakerProperties {
         @Min(1)
         @Max(100000)
         private long maxPriceDeviationPpm = 5000L;
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration orderReconciliationInterval = Duration.ofMillis(500);
         @Min(0)
         @Max(5_000_000)
@@ -235,12 +256,16 @@ public class MarketMakerProperties {
         @Setter
         private boolean webSocketEnabled = true;
         @Setter
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration refreshInterval = Duration.ofMillis(500);
         @Setter
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration maxAge = Duration.ofSeconds(3);
         @Setter
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration requestTimeout = Duration.ofSeconds(2);
         @Setter
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration reconnectBackoff = Duration.ofSeconds(5);
         @Setter
         @Min(1)
@@ -256,7 +281,7 @@ public class MarketMakerProperties {
         @Setter
         @Positive
         private long maxQuantitySteps = 1_000L;
-        @Size(max = 20)
+        @Size(max = 1000)
         @Valid
         private List<Source> sources = new ArrayList<>();
 

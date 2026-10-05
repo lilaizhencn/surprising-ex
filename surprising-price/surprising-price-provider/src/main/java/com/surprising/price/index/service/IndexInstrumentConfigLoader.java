@@ -32,9 +32,7 @@ public class IndexInstrumentConfigLoader {
             throw new IllegalStateException("指数价格合约 JVM 快照尚未就绪");
         }
         return snapshotCache.current(productLine).stream()
-                .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING)
-                .filter(instrument -> properties.getRequiredInstrumentIds().isEmpty()
-                        || properties.getRequiredInstrumentIds().contains(Integer.toString(instrument.instrumentId())))
+                .filter(instrument -> instrument.status().visible())
                 .map(this::toSymbol)
                 .filter(instrumentId -> !instrumentId.getSources().isEmpty())
                 .toList();

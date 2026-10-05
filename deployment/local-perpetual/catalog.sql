@@ -2,11 +2,11 @@
 -- Correct the imported catalog's 10^12 price units to each asset's actual scale.
 BEGIN;
 CREATE TEMP TABLE local_symbols(symbol TEXT PRIMARY KEY, instrument_id INTEGER) ON COMMIT DROP;
-INSERT INTO local_symbols(symbol) VALUES ('BTC-USDT'),('ETH-USDT'),('SOL-USDT'),('XRP-USDT'),('DOGE-USDT'),('ADA-USDT'),('BNB-USDT'),('AVAX-USDT'),('LINK-USDT'),('DOT-USDT'),('LTC-USDT'),('BCH-USDT'),('UNI-USDT'),('AAVE-USDT'),('NEAR-USDT'),('SUI-USDT'),('TRX-USDT'),('OP-USDT'),('ETC-USDT'),('FIL-USDT');
+INSERT INTO local_symbols(symbol) VALUES ('BTC-USDT'),('ETH-USDT'),('SOL-USDT');
 UPDATE local_symbols s SET instrument_id=i.instrument_id FROM instruments i WHERE i.product_line='LINEAR_PERPETUAL' AND i.symbol=s.symbol;
 DO $$ BEGIN
-IF (SELECT count(*) FROM instruments i JOIN local_symbols s USING(symbol) WHERE product_line='LINEAR_PERPETUAL') <> 20
-THEN RAISE EXCEPTION 'Local perpetual catalog must contain exactly 20 instruments'; END IF;
+IF (SELECT count(*) FROM instruments i JOIN local_symbols s USING(symbol) WHERE product_line='LINEAR_PERPETUAL') <> 3
+THEN RAISE EXCEPTION 'Local perpetual catalog must contain exactly 3 instruments'; END IF;
 END $$;
 UPDATE instruments SET status='PRE_TRADING' WHERE product_line='LINEAR_PERPETUAL' AND symbol NOT IN (SELECT symbol FROM local_symbols);
 UPDATE instrument_index_sources SET enabled=false WHERE product_line='LINEAR_PERPETUAL';

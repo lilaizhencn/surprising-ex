@@ -27,6 +27,7 @@ class CommittedOrderProjectionPostgresTest {
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE core_order_projection (LIKE public.core_order_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_projection_watermark (LIKE public.core_projection_watermark INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
     }
 
@@ -72,10 +73,8 @@ class CommittedOrderProjectionPostgresTest {
     }
 
     @Test void onlyUserFacingMakerOrdersPersistAcrossBatchesAndRestartForEveryProduct() {
-        var environment = new org.springframework.mock.env.MockEnvironment()
-                .withProperty("surprising.trade-export.market-maker-account-ids[0]", "900")
-                .withProperty("surprising.trade-export.market-maker-account-ids[1]", "901");
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source), environment);
+        for (var line : ProductLine.values())
+            jdbc.update("INSERT INTO market_maker_strategies VALUES (?, ARRAY[900,901]::bigint[])", line.name());
         for (var line : ProductLine.values()) {
             // Unfilled quotes and cancellations are omitted. Ordinary-user orders always remain.
             repository.persist(line, List.of(order(line, 10, 900, "OPEN", 0, 1),
@@ -97,7 +96,7 @@ class CommittedOrderProjectionPostgresTest {
             repository.persist(line, List.of(order(line, 40, 901, "FILLED", 2, 2),
                     execution(line, "maker-taker", 40, 901, false), execution(line, "maker-taker", 41, 7, true)), 5);
             // Restart, then another internal fill and cancellation must still update the stored order.
-            repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source), List.of(900L, 901L));
+            repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
             repository.persist(line, List.of(order(line, 30, 900, "CANCELED", 3, 4),
                     execution(line, "last", 30, 900, true), execution(line, "last", 33, 901, false)), 6);
             repository.persist(line, List.of(order(line, 30, 900, "OPEN", 2, 3)), 5);
@@ -111,7 +110,8 @@ class CommittedOrderProjectionPostgresTest {
     }
 
     @Test void incompleteCounterpartyEvidenceFailsBeforeWritingOrAdvancingWatermark() {
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source), List.of(900L));
+        jdbc.update("INSERT INTO market_maker_strategies VALUES (?, ARRAY[900]::bigint[])", ProductLine.LINEAR_PERPETUAL.name());
+        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
         var line = ProductLine.LINEAR_PERPETUAL;
         assertThatThrownBy(() -> repository.persist(line, List.of(order(line, 30, 900, "FILLED", 2, 1),
                 execution(line, "missing", 30, 900, true)), 1)).isInstanceOf(IllegalArgumentException.class);

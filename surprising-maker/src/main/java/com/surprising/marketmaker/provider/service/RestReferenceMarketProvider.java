@@ -40,6 +40,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final com.surprising.marketmaker.provider.task.MakerQuoteWakeups wakeups;
+    private final Object configurationLock = new Object();
+    private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
+    private volatile long configurationGeneration;
     private final Map<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
     private final Map<String, LiveBook> liveBooks = new ConcurrentHashMap<>();
     private final Map<String, WebSocketState> webSockets = new ConcurrentHashMap<>();
@@ -62,6 +65,19 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     @Override
     public ReferenceOrderBookSnapshot snapshot(String instrumentId, ProductLine productLine, InstrumentResponse instrument) {
         MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
+        long generation;
+        synchronized (configurationLock) {
+            if (loadedConfiguration != referenceMarket) {
+                for (var state : webSockets.values()) {
+                    state.retired = true;
+                    if (state.webSocket != null) state.webSocket.abort();
+                }
+                webSockets.clear(); liveBooks.clear(); cache.clear();
+                loadedConfiguration = referenceMarket;
+                configurationGeneration++;
+            }
+            generation = configurationGeneration;
+        }
         if (!referenceMarket.isEnabled() || instrument == null) {
             return null;
         }
@@ -69,12 +85,14 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         String normalizedSymbol = normalizeSymbol(instrumentId);
         String cacheKey = cacheKey(effectiveProductLine, normalizedSymbol);
         Instant now = Instant.now();
-        ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
-        CachedSnapshot cached = cache.get(cacheKey);
-        if (cached != null
-                && (cached.streaming() || cached.fetchedAt().plus(refreshInterval()).isAfter(now))
-                && fresh(cached.snapshot(), now)) {
-            return cached.snapshot();
+        CachedSnapshot cached;
+        synchronized (configurationLock) {
+            if (generation != configurationGeneration) return null;
+            ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
+            cached = cache.get(cacheKey);
+            if (cached != null
+                    && (cached.streaming() || cached.fetchedAt().plus(refreshInterval()).isAfter(now))
+                    && fresh(cached.snapshot(), now)) return cached.snapshot();
         }
 
         for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
@@ -84,8 +102,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             try {
                 ReferenceOrderBookSnapshot snapshot = fetch(source, normalizedSymbol, instrument);
                 if (snapshot != null && snapshot.hasTwoSidedDepth()) {
-                    cache.put(cacheKey, new CachedSnapshot(snapshot, Instant.now(), false));
-                    return snapshot;
+                    synchronized (configurationLock) {
+                        if (generation != configurationGeneration) return null;
+                        cache.put(cacheKey, new CachedSnapshot(snapshot, Instant.now(), false));
+                        return snapshot;
+                    }
                 }
             } catch (RuntimeException ex) {
                 log.debug("Reference market fetch failed source={} symbol={} error={}",
@@ -93,10 +114,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             }
         }
 
-        if (cached != null && fresh(cached.snapshot(), now)) {
-            return cached.snapshot();
+        synchronized (configurationLock) {
+            return generation == configurationGeneration && cached != null && fresh(cached.snapshot(), now)
+                    ? cached.snapshot() : null;
         }
-        return null;
     }
 
     ReferenceOrderBookSnapshot parsePayload(MarketMakerProperties.ReferenceMarket.Source source,
@@ -427,6 +448,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     private static final class WebSocketState {
         private volatile WebSocket webSocket;
+        private volatile boolean retired;
         private volatile boolean connecting;
         private volatile Instant lastAttempt = Instant.EPOCH;
     }
@@ -450,7 +472,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
         @Override
         public void onOpen(WebSocket webSocket) {
+            if (state.retired) { webSocket.abort(); return; }
             state.webSocket = webSocket;
+            if (state.retired) { webSocket.abort(); return; }
             state.connecting = false;
             String subscribeMessage = source.getWebSocketSubscribeMessage();
             if (hasText(subscribeMessage)) {
@@ -461,12 +485,15 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            if (state.retired) { webSocket.abort(); return CompletableFuture.completedFuture(null); }
             text.append(data);
             if (last) {
                 String payload = text.toString();
                 text.setLength(0);
                 try {
-                    parseWebSocketPayload(source, instrumentId, instrument, payload, Instant.now());
+                    synchronized (configurationLock) {
+                        if (!state.retired) parseWebSocketPayload(source, instrumentId, instrument, payload, Instant.now());
+                    }
                 } catch (IllegalArgumentException ex) {
                     log.debug("Reference market websocket message ignored source={} symbol={} error={}",
                             source.getName(), instrumentId, ex.getMessage());

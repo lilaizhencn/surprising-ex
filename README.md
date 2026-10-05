@@ -73,7 +73,7 @@ Run these steps on the target Linux host. The deployment uses existing PostgreSQ
    chmod 600 /etc/surprising/linear-perpetual.env
    ```
 
-   Set the PostgreSQL password and a unique `GATEWAY_JWT_SECRET`. Review the database and broker addresses, heap limits, and `MM_INSTRUMENT_ID` in the environment file. The launcher applies [`init.sql`](init.sql) **only when the `instruments` table is absent**. Populate the desired instrument catalog and any test users and funds through their normal application flows before relying on maker trading.
+   Set the PostgreSQL password and a unique `GATEWAY_JWT_SECRET`. Review the database and broker addresses, heap limits in the environment file. The launcher applies [`init.sql`](init.sql) **only when the `instruments` table is absent**. Populate the desired instrument catalog and any test users and funds through their normal application flows before relying on maker trading.
 
 3. Load the environment for a preflight check, then install and start the systemd unit:
 
@@ -98,3 +98,15 @@ Run these steps on the target Linux host. The deployment uses existing PostgreSQ
 4. For later releases, build the new checkout on the server, stop the unit, point `/opt/surprising-ex` at the new checkout, and start the unit. **Keep** the runtime directory and Aeron Archive across restarts so Core recovers from its snapshot and log. Do not rerun `init.sql` against an existing database. Use `systemctl stop surprising-linear-perpetual` to stop the stack.
 
 The unit and example configuration are in [`deployment/test-single-node`](deployment/test-single-node/). This deployment has one Aeron member and therefore no failover quorum.
+
+## 后台合约维护与热上线
+
+合约配置从 `InstrumentLocalRoutes` 进入 `InstrumentService.edit/editStatus`：校验管理员原因、期望变更版本及参数后，在数据库锁内保存并发布快照事件。并发旧版本返回 409，不能覆盖另一管理员的修改。创建后的价格单位、数量单位、结算资产和到期条款不能修改；停用后不能退回草稿或重新打开已关闭合约。
+
+后台合约页面集中编辑交易规则、费用、资金费、风险档位、指数来源、做市策略及做市公共设置。草稿不可见；PRE_TRADING 上线展示；TRADING 开启交易；HALT 保留行情并暂停交易。页面展示 Core 应用状态及版本，未应用成功不能视为已完成上线。新增资产 scale 随 `InstrumentEvent` 自动传递，空目录也可以接受后续合约事件；指数加载不再被启动时的 required-ID 列表限制。
+
+`market_maker_strategies` 保存完整策略，`market_maker_business_settings` 保存经校验的产品线公共参数。部署连接和节点身份由环境变量管理。后台保存使用版本校验，调度器每秒加载新增策略和设置；参考盘口变更关闭旧连接，停用策略持续撤销本策略挂单。订单报表每个提交批次读取后台策略账户，保持产品线隔离，停用策略不改变历史账户分类。
+
+新数据库 `init.sql` 仅保留 BTC(604)、ETH(653)、SOL(866)。现有环境升级使用 `deployment/migrations/20261005-admin-contract-settings.sql`，必须先迁移实际运行的做市参数再发布；该结构迁移不删除合约或历史数据。首次未配置的做市处于关闭状态。不得在现有交易数据库执行完整初始化 SQL。
+
+2026-10-05 本地验证：HotSpot JDK 27 下合约校验、版本冲突、快照、Core 同步、指数热加载、做市调度/撤单/参考盘口及 PostgreSQL 持久化测试共 109 项通过。独立 PostgreSQL 18 实例完整执行初始 SQL 和结构迁移，目录仅三条合约；做市设置重载、版本冲突、产品线隔离与订单投影共 7 项数据库测试真实执行。前序 Core 全量回归已通过；本轮测试不代表在线发布、在线合约删除或全量历史账务对账完成。新增记录类保存配置边界，基础设施属性类绑定部署参数，存储类负责数据库原子版本校验，未增加交易热路径抽象。

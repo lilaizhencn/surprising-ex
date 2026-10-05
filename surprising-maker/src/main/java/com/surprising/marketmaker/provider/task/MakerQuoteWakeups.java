@@ -27,6 +27,7 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
     private final MarketMakerProperties properties;
     private final ObjectMapper mapper;
     private final Map<String, Signal> signals = new ConcurrentHashMap<>();
+    private final Map<String, MarketMakerProperties.Strategy> registeredStrategies = new ConcurrentHashMap<>();
     private final String groupId = "surprising-maker-quote-wakeup-" + UUID.randomUUID();
 
     public MakerQuoteWakeups(MarketMakerProperties properties, ObjectMapper mapper) {
@@ -36,7 +37,7 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
 
     public void changed(ProductLine product, String instrumentId) {
         if (product == null || instrumentId == null) return;
-        for (var strategy : properties.getStrategies()) {
+        for (var strategy : registeredStrategies.values()) {
             if (strategy.getProductLine() == product && strategy.getInstrumentIds().contains(instrumentId)) {
                 var signal = signals.get(key(strategy));
                 if (signal != null) signal.wake();
@@ -45,6 +46,7 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
     }
 
     void register(MarketMakerProperties.Strategy strategy) {
+        registeredStrategies.put(key(strategy), strategy);
         signals.computeIfAbsent(key(strategy), ignored -> new Signal()).wake();
     }
 
@@ -53,7 +55,7 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
         if (signal.ready.tryAcquire(watchdog.toMillis(), TimeUnit.MILLISECONDS)) signal.pending.set(false);
     }
 
-    void clear() { signals.clear(); }
+    void clear() { signals.clear(); registeredStrategies.clear(); }
 
     @Override
     public void onMarkPriceUpdated(MarkPriceEvent previous, MarkPriceEvent current) {
@@ -86,8 +88,8 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
     }
     public String groupId() { return groupId; }
     private List<ProductLine> products() {
-        return properties.getStrategies().stream().map(MarketMakerProperties.Strategy::getProductLine)
-                .filter(java.util.Objects::nonNull).distinct().toList();
+        return java.util.List.of(com.surprising.product.api.ProductLineConfiguration.require(
+                properties.getProductLine(), "market-maker trade wakeups"));
     }
     private String key(MarketMakerProperties.Strategy s) { return s.getProductLine() + ":" + s.getStrategyId(); }
     private static final class Signal {

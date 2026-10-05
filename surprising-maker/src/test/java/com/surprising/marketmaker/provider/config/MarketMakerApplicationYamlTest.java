@@ -1,98 +1,23 @@
 package com.surprising.marketmaker.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import jakarta.validation.Validation;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.context.properties.bind.Bindable;
-import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.env.YamlPropertySourceLoader;
-import org.springframework.core.env.MapPropertySource;
-import org.springframework.core.env.PropertySource;
-import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ClassPathResource;
 
 class MarketMakerApplicationYamlTest {
-
     @Test
-    void defaultStrategyRunsWithDeepBookAndKnownInternalAccounts() throws IOException {
-        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
-        List<PropertySource<?>> sources = loader.load("application", new ClassPathResource("application.yml"));
-        MarketMakerProperties properties = bind(Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL"));
-
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.engine.enabled"))
-                .contains(true);
-        assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(20);
-        assertThat(properties.getStrategies().getFirst().getAccountIds()).hasSize(2);
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.trade.enabled"))
-                .contains(false);
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.quoting.order-reconciliation-interval"))
-                .contains("${MM_ORDER_RECONCILIATION_INTERVAL:500ms}");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.enabled"))
-                .contains("${MM_REFERENCE_MARKET_ENABLED:true}");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.websocket-enabled"))
-                .contains("${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:true}");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.sources[0].parser"))
-                .contains("BINANCE_DEPTH");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.sources[0].websocket-parser"))
-                .contains("BINANCE_DEPTH_STREAM");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.market-maker.strategies[0].enabled"))
-                .contains(true);
-    }
-
-    @Test
-    void linearLiquiditySettingsQueryActualOrdersEachCycle() throws IOException {
-        var properties = bind(Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1",
-                "MM_ORDER_LEVELS", "50", "MM_MAX_OPEN_ORDERS_PER_ACCOUNT_SYMBOL", "100",
-                "MM_ORDER_RECONCILIATION_INTERVAL", "0ms"));
-        assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(50);
-        assertThat(properties.getQuoting().getMaxOpenOrdersPerAccountSymbol()).isEqualTo(100);
-        assertThat(properties.getQuoting().getOrderReconciliationInterval()).isEqualTo(java.time.Duration.ZERO);
-    }
-
-    @ParameterizedTest
-    @MethodSource("makerMatrixOverrides")
-    void makerMatrixOverridesBindToEffectiveValues(Map<String, Object> overrides,
-                                                   int orderLevels,
-                                                   int accountCount) throws IOException {
-        MarketMakerProperties properties = bind(overrides);
-
-        assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(orderLevels);
-        assertThat(properties.getStrategies().getFirst().getAccountIds()).hasSize(accountCount);
-        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(properties)).isEmpty();
-    }
-
-    private static List<Object[]> makerMatrixOverrides() {
-        return List.of(
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1", "MM_ORDER_LEVELS", "5",
-                        "MM_ACCOUNT_IDS", "900001,900002"),
-                        5, 2},
-                new Object[]{Map.of("PRODUCT_LINE", "LINEAR_PERPETUAL", "MM_INSTRUMENT_ID", "1", "MM_ORDER_LEVELS", "50",
-                        "MM_ACCOUNT_IDS", "900001,900002,900003,900004,900005,900006,900007,900008"),
-                        50, 8});
-    }
-
-    private MarketMakerProperties bind(Map<String, Object> overrides) throws IOException {
-        StandardEnvironment environment = new StandardEnvironment();
-        environment.getPropertySources().addFirst(new MapPropertySource("matrix", overrides));
-        for (PropertySource<?> source : new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yml"))) {
-            environment.getPropertySources().addLast(source);
+    void yamlContainsInfrastructureOnlyAndCannotEnableBusinessStrategies() throws Exception {
+        var sources = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"));
+        for (var source : sources) {
+            assertThat(source.getProperty("surprising.market-maker.strategies[0].enabled")).isNull();
+            assertThat(source.getProperty("surprising.market-maker.quoting.order-levels")).isNull();
+            assertThat(source.getProperty("surprising.market-maker.reference-market.sources[0].url")).isNull();
+            assertThat(source.getProperty("surprising.market-maker.engine.enabled")).isNull();
         }
-        return Binder.get(environment).bind("surprising.market-maker", Bindable.of(MarketMakerProperties.class))
-                .orElseThrow(() -> new IllegalStateException("market maker properties are required"));
+        assertThat(sources).extracting(source -> source.getProperty("surprising.market-maker.infrastructure.product-line"))
+                .contains("${PRODUCT_LINE}");
+        assertThat(MarketMakerBusinessSettings.initialDisabled().engine().isEnabled()).isFalse();
+        assertThat(MarketMakerBusinessSettings.initialDisabled().referenceMarket().getSources()).isEmpty();
     }
 }

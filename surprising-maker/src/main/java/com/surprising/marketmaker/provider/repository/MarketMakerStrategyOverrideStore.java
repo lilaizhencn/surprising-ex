@@ -7,6 +7,12 @@ import java.util.Optional;
 
 public interface MarketMakerStrategyOverrideStore {
 
+    List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions();
+
+    com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
+            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition,
+            String adminUserId, String reason);
+
     List<StrategyConfigOverride> findAll();
 
     Optional<StrategyConfigOverride> find(ProductLine productLine, String strategyId);

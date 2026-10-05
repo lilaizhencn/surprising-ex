@@ -54,6 +54,38 @@ class InstrumentSnapshotSupportTest {
         assertTrue(cache.current(ProductLine.OPTION).isEmpty());
     }
 
+    @Test
+    void initializesAnEmptyCatalogForLaterHotListing() {
+        var rpc = (com.surprising.instrument.api.client.InstrumentRpcApi) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{com.surprising.instrument.api.client.InstrumentRpcApi.class},
+                (proxy, method, args) -> {
+                    if (!method.getName().equals("snapshot")) throw new UnsupportedOperationException();
+                    return new com.surprising.instrument.api.model.InstrumentSnapshotResponse(ProductLine.OPTION,
+                            0L, "", List.of(), java.util.Map.of());
+                });
+        var cache = new InstrumentSnapshotCache();
+        InstrumentSnapshotSupport.initialize(rpc, cache, ProductLine.OPTION, "test");
+        assertTrue(cache.initialized(ProductLine.OPTION));
+    }
+
+    @Test
+    void appliesAssetScalesWithNewContractAndIgnoresValidRedelivery() {
+        var cache = new InstrumentSnapshotCache();
+        cache.replace(ProductLine.OPTION, List.of(), java.util.Map.of("USDT", 100_000_000L));
+        var snapshot = instrument("BTC-USDT-260925");
+        var event = new InstrumentEvent(1, snapshot.symbol(), 1, snapshot.status(), InstrumentEventType.UPSERTED,
+                Instant.now(), snapshot, ProductLine.OPTION, 1, java.util.Map.of("BTC", 100_000_000L));
+        InstrumentSnapshotSupport.apply(cache, "OPTION:1", event, ProductLine.OPTION, "test");
+        assertEquals(100_000_000L, cache.scale(ProductLine.OPTION, "BTC").orElseThrow());
+        assertEquals(100_000_000L, cache.scale(ProductLine.OPTION, "USDT").orElseThrow());
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                InstrumentSnapshotSupport.apply(cache, "OPTION:1", event, ProductLine.OPTION, "test"));
+        var invalid = new InstrumentEvent(1, "WRONG", 1, snapshot.status(), InstrumentEventType.UPSERTED,
+                Instant.now(), snapshot, ProductLine.OPTION, 1);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                InstrumentSnapshotSupport.apply(cache, "OPTION:1", invalid, ProductLine.OPTION, "test"));
+    }
+
     private InstrumentResponse instrument(String symbol) {
         return new InstrumentResponse(
                 1, 3, 1, 1, 1, symbol,

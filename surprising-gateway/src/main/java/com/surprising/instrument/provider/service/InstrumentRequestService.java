@@ -38,7 +38,9 @@ public class InstrumentRequestService {
 
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
-            return instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
+            var result = instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
+            if (!result.status().visible()) throw new IllegalStateException("instrument is not listed");
+            return result;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -65,7 +67,9 @@ public class InstrumentRequestService {
     public Object list(InstrumentType type, InstrumentStatus status, String productLineHeader,
                        String productLineValue, boolean includeMarketSummary, boolean includeTrend) {
         try {
-            var instruments = instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
+            var all = instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
+            var visible = all.instruments().stream().filter(value -> value.status().visible()).toList();
+            var instruments = new InstrumentQueryResponse(visible.size(), visible);
             if (!includeMarketSummary) return instruments;
             var summaries = marketSummaries.summaries(
                     instruments.instruments().stream().map(InstrumentResponse::instrumentId).distinct().toList(),
@@ -117,6 +121,24 @@ public class InstrumentRequestService {
 
     public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(int instrumentId, ProductLine productLine, long beforeId, int limit) {
         return instrumentService.changes(instrumentId, productLine, beforeId, limit);
+    }
+
+    public InstrumentResponse edit(InstrumentUpsertRequest request, String operator, String reason, long expectedChangeId) {
+        try {
+            return instrumentService.edit(request, operator, reason, expectedChangeId);
+        } catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
+        }
+    }
+
+    public InstrumentResponse editStatus(int instrumentId, InstrumentStatus status, String header, String query,
+                                         String operator, String reason, long expectedChangeId) {
+        try {
+            return instrumentService.editStatus(instrumentId, requiredProductLine(query, header), status,
+                    operator, reason, expectedChangeId);
+        } catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
+        }
     }
 
     public InstrumentResponse upsert(InstrumentUpsertRequest request, String operator, String reason) {

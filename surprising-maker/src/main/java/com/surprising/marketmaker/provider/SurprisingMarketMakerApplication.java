@@ -24,7 +24,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         MarketDataRpcApi.class,
         OrderRpcApi.class
 })
-@EnableConfigurationProperties(MarketMakerProperties.class)
+@EnableConfigurationProperties(com.surprising.marketmaker.provider.config.MarketMakerInfrastructureProperties.class)
 @Slf4j
 public class SurprisingMarketMakerApplication {
 
@@ -37,13 +37,8 @@ public class SurprisingMarketMakerApplication {
 
     @PostConstruct
     void logEffectiveMarketMatrixConfiguration() {
-        int accountCount = properties.getStrategies().isEmpty()
-                ? 0
-                : properties.getStrategies().getFirst().getAccountIds().size();
-        log.info("Effective maker matrix configuration orderLevels={} accountCount={} referenceMarketEnabled={} marketTakingEnabled={}",
-                properties.getQuoting().getOrderLevels(),
-                accountCount,
-                properties.getReferenceMarket().isEnabled(), properties.getTrade().isEnabled());
+        log.info("Maker strategies are loaded from the administrator-managed database; productLine={}",
+                properties.getProductLine());
     }
 
     public static void main(String[] args) {

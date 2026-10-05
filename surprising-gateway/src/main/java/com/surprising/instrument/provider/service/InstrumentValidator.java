@@ -14,7 +14,29 @@ import org.springframework.stereotype.Component;
 public class InstrumentValidator {
 
     public void validate(InstrumentUpsertRequest request) {
+        if (request == null) throw new IllegalArgumentException("instrument configuration is required");
         requireSymbol(request.symbol());
+        if (request.instrumentId() != null) requirePositive("instrumentId", request.instrumentId());
+        requirePositive("baseAssetId", request.baseAssetId());
+        requirePositive("quoteAssetId", request.quoteAssetId());
+        requirePositive("settleAssetId", request.settleAssetId());
+        requirePositive("contractValueAssetId", request.contractValueAssetId());
+        if (request.baseAssetId() == request.quoteAssetId())
+            throw new IllegalArgumentException("base and quote assets must differ");
+        if (request.status() == null) throw new IllegalArgumentException("status is required");
+        requirePrecision("pricePrecision", request.pricePrecision());
+        requirePrecision("quantityPrecision", request.quantityPrecision());
+        requireChoices("supportedOrderTypes", request.supportedOrderTypes(), Set.of("LIMIT", "MARKET"));
+        requireChoices("supportedTimeInForce", request.supportedTimeInForce(), Set.of("GTC", "IOC", "FOK", "GTX"));
+        if (request.marketOrderEnabled() != request.supportedOrderTypes().contains("MARKET"))
+            throw new IllegalArgumentException("marketOrderEnabled must match supportedOrderTypes MARKET");
+        if (request.postOnlyEnabled() && !request.supportedOrderTypes().contains("LIMIT"))
+            throw new IllegalArgumentException("postOnlyEnabled requires LIMIT");
+        requireMarginRates("instrument", request.initialMarginRatePpm(), request.maintenanceMarginRatePpm());
+        if (request.maxLeveragePpm() < 1_000_000L)
+            throw new IllegalArgumentException("maxLeveragePpm must be at least 1000000 (1x)");
+        if (request.userOpenInterestLimitRatePpm() > 1_000_000L)
+            throw new IllegalArgumentException("userOpenInterestLimitRatePpm must not exceed 1000000");
         validateProductContractPair(request.instrumentType(), request.contractType());
         requirePositive("contractMultiplierPpm", request.contractMultiplierPpm());
         requirePositive("priceTickUnits", request.priceTickUnits());
@@ -110,6 +132,12 @@ public class InstrumentValidator {
     private void validateDerivativeRules(InstrumentUpsertRequest request) {
         validateBrackets(request.riskLimitBrackets());
         validateIndexSources(request.indexSources(), request.minValidIndexSources());
+        for (var bracket : request.riskLimitBrackets()) {
+            if (bracket.maxLeveragePpm() > request.maxLeveragePpm())
+                throw new IllegalArgumentException("risk bracket leverage exceeds instrument maximum");
+        }
+        if (request.riskLimitBrackets().getLast().notionalCapUnits() < request.maxPositionNotionalUnits())
+            throw new IllegalArgumentException("risk brackets must cover maxPositionNotionalUnits");
     }
 
     private void validateExpiringRules(InstrumentUpsertRequest request, String name) {
@@ -142,9 +170,13 @@ public class InstrumentValidator {
 
     private void validateFundingRules(InstrumentUpsertRequest request) {
         if (request.instrumentType() == InstrumentType.PERPETUAL) {
-            if (request.fundingIntervalHours() <= 0) {
-                throw new IllegalArgumentException("fundingIntervalHours must be positive");
+            if (request.fundingIntervalHours() <= 0 || request.fundingIntervalHours() > 24
+                    || 24 % request.fundingIntervalHours() != 0) {
+                throw new IllegalArgumentException("fundingIntervalHours must be one of 1, 2, 3, 4, 6, 8, 12, 24");
             }
+            requireFeeRate("interestRatePpm", request.interestRatePpm());
+            requireFeeRate("fundingRateCapPpm", request.fundingRateCapPpm());
+            requireFeeRate("fundingRateFloorPpm", request.fundingRateFloorPpm());
             if (request.fundingRateCapPpm() < request.fundingRateFloorPpm()) {
                 throw new IllegalArgumentException("fundingRateCap must be greater than or equal to fundingRateFloor");
             }
@@ -163,6 +195,10 @@ public class InstrumentValidator {
         long previousCap = 0L;
         int expected = 1;
         for (RiskLimitBracket bracket : brackets) {
+            if (bracket == null) throw new IllegalArgumentException("risk bracket must not be null");
+            requireMarginRates("risk bracket", bracket.initialMarginRatePpm(), bracket.maintenanceMarginRatePpm());
+            if (bracket.maxLeveragePpm() < 1_000_000L)
+                throw new IllegalArgumentException("risk bracket leverage must be at least 1x");
             if (bracket.bracketNo() != expected++) {
                 throw new IllegalArgumentException("risk brackets must start at 1 and be contiguous");
             }
@@ -194,22 +230,84 @@ public class InstrumentValidator {
         Set<String> names = new HashSet<>();
         int enabledCount = 0;
         for (IndexSourceConfig source : sources) {
+            if (source == null) throw new IllegalArgumentException("index source must not be null");
+            requireUrl("index source baseUrl", source.baseUrl(), Set.of("https", "http"));
+            if (source.path() == null || !source.path().startsWith("/") || source.path().startsWith("//"))
+                throw new IllegalArgumentException("index source path must start with a single slash");
+            if (source.sourceSymbol() == null || source.sourceSymbol().isBlank()
+                    || source.parser() == null || source.parser().isBlank())
+                throw new IllegalArgumentException("index source symbol and parser are required");
+            if (source.quoteCurrency() == null || source.quoteCurrency().isBlank()
+                    || source.targetQuoteCurrency() == null || source.targetQuoteCurrency().isBlank())
+                throw new IllegalArgumentException("index source quote currencies are required");
+            requireParser(source.parser());
+            if (!source.quoteCurrency().equalsIgnoreCase(source.targetQuoteCurrency())) {
+                requireUrl("conversionBaseUrl", source.conversionBaseUrl(), Set.of("https", "http"));
+                if (source.conversionPath() == null || !source.conversionPath().startsWith("/")
+                        || source.conversionPath().startsWith("//"))
+                    throw new IllegalArgumentException("conversionPath must start with a single slash");
+                requireParser(source.conversionParser());
+            }
+            if (source.websocketEnabled()) {
+                requireParser(source.websocketParser());
+                requireUrl("index source websocketUrl", source.websocketUrl(), Set.of("wss", "ws"));
+                if (source.websocketParser() == null || source.websocketParser().isBlank()
+                        || source.websocketSubscribeMessage() == null || source.websocketSubscribeMessage().isBlank())
+                    throw new IllegalArgumentException("WebSocket parser and subscription message are required");
+                try { new tools.jackson.databind.ObjectMapper().readTree(source.websocketSubscribeMessage()); }
+                catch (RuntimeException error) { throw new IllegalArgumentException("WebSocket subscription message must be valid JSON"); }
+            }
+            if (source.conversionMode() == null || !Set.of("DISCOUNT", "DISABLE").contains(source.conversionMode()))
+                throw new IllegalArgumentException("conversionMode must be DISCOUNT or DISABLE");
+            if (source.conversionOperation() == null || !Set.of("MULTIPLY", "DIVIDE").contains(source.conversionOperation()))
+                throw new IllegalArgumentException("conversionOperation must be MULTIPLY or DIVIDE");
             if (source.source() == null || source.source().isBlank()) {
                 throw new IllegalArgumentException("index source name is required");
             }
-            if (!names.add(source.source().trim().toUpperCase())) {
+            if (!names.add(source.source().trim().toUpperCase(java.util.Locale.ROOT))) {
                 throw new IllegalArgumentException("duplicate index source: " + source.source());
             }
             if (source.enabled()) {
                 enabledCount++;
             }
             requirePositive("index source weightPpm", source.weightPpm());
-            if (source.fallbackWeightMultiplierPpm() < 0) {
-                throw new IllegalArgumentException("index source fallbackWeightMultiplierPpm must be non-negative");
+            if (source.fallbackWeightMultiplierPpm() < 0 || source.fallbackWeightMultiplierPpm() > 1_000_000L) {
+                throw new IllegalArgumentException("index source fallbackWeightMultiplierPpm must be in [0,1000000]");
             }
         }
         if (enabledCount < minValidSources) {
             throw new IllegalArgumentException("enabled index sources must be >= minValidIndexSources");
+        }
+    }
+
+    private void requireParser(String parser) {
+        if (parser == null || !Set.of("BINANCE_BOOK_TICKER", "OKX_TICKER", "OKX_INDEX_TICKER",
+                "BYBIT_TICKER", "COINBASE_TICKER", "KRAKEN_TICKER").contains(parser))
+            throw new IllegalArgumentException("unsupported index source parser: " + parser);
+    }
+
+    private void requirePrecision(String name, int value) {
+        if (value < 0 || value > 18) throw new IllegalArgumentException(name + " must be in [0,18]");
+    }
+
+    private void requireChoices(String name, List<String> values, Set<String> allowed) {
+        if (values == null || values.isEmpty() || values.stream().anyMatch(v -> v == null || !allowed.contains(v))
+                || new HashSet<>(values).size() != values.size())
+            throw new IllegalArgumentException(name + " must contain unique supported values: " + allowed);
+    }
+
+    private void requireMarginRates(String name, long initial, long maintenance) {
+        if (initial <= 0 || initial > 1_000_000 || maintenance <= 0 || maintenance > initial)
+            throw new IllegalArgumentException(name + " requires 0 < maintenanceMarginRatePpm <= initialMarginRatePpm <= 1000000");
+    }
+
+    private void requireUrl(String name, String value, Set<String> schemes) {
+        try {
+            var uri = java.net.URI.create(value);
+            if (!schemes.contains(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
+                    || uri.getFragment() != null) throw new IllegalArgumentException();
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException(name + " must be an absolute URL using " + schemes);
         }
     }
 

@@ -824,7 +824,12 @@ class RuntimeCommitRecoveryTest {
             TradingOwnerTestSupport service, CoreMessage command) {
         List<byte[]> responses = new ArrayList<>();
         byte[] encoded = CoreMessageCodec.encode(command);
-        service.onSessionMessage(clusterClient(responses), command.header().submittedAtEpochMillis(),
+        // Source sequence numbers are independent; their synthetic submission clocks can go backwards.
+        // Aeron supplies a cluster clock, which must not precede committed order timestamps, including after restore.
+        long timestamp = Math.max(command.header().submittedAtEpochMillis(), service.state().tradingState().orders()
+                .values().stream().mapToLong(com.surprising.aeron.service.state.model.CoreOrderState::updatedAtEpochMillis)
+                .max().orElse(0L));
+        service.onSessionMessage(clusterClient(responses), timestamp,
                 new UnsafeBuffer(encoded), 0, encoded.length, aeronHeader());
         return new ClusterReplay(responses);
     }

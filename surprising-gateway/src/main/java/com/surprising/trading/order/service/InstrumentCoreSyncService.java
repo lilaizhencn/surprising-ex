@@ -23,7 +23,7 @@ public class InstrumentCoreSyncService {
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
     private record Attempt(RegisterInstrumentCommand configuration, UUID commandId, boolean outcomeUnknown, boolean applied,
                            long retryAfterNanos, String error) { }
-    public record SyncState(String productLine, String instrumentId, String state, String error) { }
+    public record SyncState(String productLine, String instrumentId, String state, String error, long appliedChangeId) { }
 
     public InstrumentCoreSyncService(@Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache cache,
             MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
@@ -86,13 +86,13 @@ public class InstrumentCoreSyncService {
         try {
             configuration=command(instrument);
         } catch (RuntimeException failure) {
-            return new SyncState(line.name(),Integer.toString(instrument.instrumentId()),"BLOCKED",error(failure));
+            return new SyncState(line.name(),Integer.toString(instrument.instrumentId()),"BLOCKED",error(failure),0);
         }
         boolean currentAttempt=attempt!=null && configuration.equals(attempt.configuration());
         boolean applied=currentAttempt && attempt.applied();
         return new SyncState(line.name(),Integer.toString(instrument.instrumentId()),
                 applied?"APPLIED":currentAttempt && attempt.error()!=null?"BLOCKED":"PENDING",
-                currentAttempt?attempt.error():null);
+                currentAttempt?attempt.error():null, applied?instrument.lastChangeId():0);
     }
 
     RegisterInstrumentCommand command(InstrumentResponse value) {

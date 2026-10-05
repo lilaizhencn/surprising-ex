@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only readiness check for the local 20-symbol U perpetual environment."""
+"""Read-only readiness check for the configured local U perpetual environment."""
 import concurrent.futures
 import json
 import os
@@ -11,7 +11,6 @@ import urllib.request
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:9094"
 RUNTIME = Path(os.environ.get("LOCAL_PERPETUAL_DIR", str(Path.home() / ".local/share/surprising-ex/perpetual-pmm-20")))
-INSTRUMENT_IDS = json.loads((RUNTIME / "market-ids.json").read_text())
 
 
 def get(path):
@@ -32,7 +31,7 @@ def check(item):
         index = get("/api/v1/gateway/price-index/latest?" + query)
         mark = get("/api/v1/gateway/price-mark/latest?" + query)
         book = get("/api/v1/gateway/trading-market/orderbook?depth=5&" + query)
-        assert index["validComponentCount"] == 3, "fewer than 3 valid index sources"
+        assert index["validComponentCount"] >= instrument["minValidIndexSources"], "insufficient valid index sources"
         assert mark["markPriceUnits"] > 0, "invalid mark ticks"
         assert book["bids"] and book["asks"], "empty order book"
         age = (datetime.now(timezone.utc) - datetime.fromisoformat(mark["eventTime"].replace("Z", "+00:00"))).total_seconds()
@@ -44,8 +43,10 @@ def check(item):
 
 
 if __name__ == "__main__":
+    catalog = get("/api/v1/gateway/instrument/list")
+    instrument_ids = {item["symbol"]: item["instrumentId"] for item in catalog["instruments"] if item["status"] == "TRADING"}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(check, INSTRUMENT_IDS.items()))
+        results = list(pool.map(check, instrument_ids.items()))
     print(json.dumps({"productLine": "LINEAR_PERPETUAL", "passed": sum(r["ok"] for r in results),
                       "total": len(results), "symbols": results}, indent=2))
     sys.exit(0 if all(r["ok"] for r in results) else 1)

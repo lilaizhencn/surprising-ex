@@ -34,25 +34,7 @@ public class CommittedOrderProjectionRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
 
-    private final Set<Long> marketMakerAccounts;
-
     public CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
-        this(jdbc, transactions, List.of());
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions,
-            org.springframework.core.env.Environment environment) {
-        this(jdbc, transactions, org.springframework.boot.context.properties.bind.Binder.get(environment)
-                .bind("surprising.trade-export.market-maker-account-ids",
-                        org.springframework.boot.context.properties.bind.Bindable.listOf(Long.class)).orElse(List.of()));
-    }
-
-    CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions,
-            List<Long> marketMakerAccounts) {
-        this.marketMakerAccounts = Set.copyOf(marketMakerAccounts);
-        if (this.marketMakerAccounts.stream().anyMatch(id -> id <= 0))
-            throw new IllegalArgumentException("market maker account IDs must be positive");
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
     }
@@ -60,6 +42,11 @@ public class CommittedOrderProjectionRepository {
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
     void persist(ProductLine product, List<RealtimeFrame> orders, long exportSequence) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
+        // Read each committed batch from the admin catalog. Disabled strategies still own
+        // their historical accounts; changing enablement must not reclassify old maker fills.
+        Set<Long> marketMakerAccounts = new HashSet<>(jdbc.queryForList(
+                "SELECT DISTINCT unnest(account_ids) FROM market_maker_strategies WHERE product_line=?",
+                Long.class, product.name()));
         // This bounded, per-commit SQL batch owns only the latest supplied version of each order.
         // PostgreSQL multi-row ON CONFLICT cannot update the same key twice in one statement.
         var latest = new LinkedHashMap<Long, OrderWrite>();
@@ -80,8 +67,8 @@ public class CommittedOrderProjectionRepository {
                     if (!other.instrumentId().equals(frame.instrumentId()) || left[25] == right[25]
                             || !Arrays.equals(left, 8, 24, right, 8, 24))
                         throw new IllegalArgumentException("execution sides disagree");
-                    if (!this.marketMakerAccounts.contains(frame.userId())
-                            || !this.marketMakerAccounts.contains(other.userId())) {
+                    if (!marketMakerAccounts.contains(frame.userId())
+                            || !marketMakerAccounts.contains(other.userId())) {
                         userTradedOrders.add(ByteBuffer.wrap(left).order(ByteOrder.LITTLE_ENDIAN).getLong());
                         userTradedOrders.add(ByteBuffer.wrap(right).order(ByteOrder.LITTLE_ENDIAN).getLong());
                     }

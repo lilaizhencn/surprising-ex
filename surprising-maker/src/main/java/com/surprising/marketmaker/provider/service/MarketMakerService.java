@@ -100,6 +100,7 @@ public class MarketMakerService {
     private final Map<String, CachedOpenOrders> openOrderSnapshots = new ConcurrentHashMap<>();
     private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
     private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
+    private volatile List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions = List.of();
     private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
     private final String nodeId;
     private final String orderNonce;
@@ -138,10 +139,11 @@ public class MarketMakerService {
 
     /** 一个策略的连续工作线程入口；false 表示暂停、未取得租约或本轮失败。 */
     public boolean runScheduledStrategy(String strategyId, ProductLine productLine) {
-        if (!properties.getEngine().isEnabled()) return false;
         String traceId = TraceContext.currentOrCreate();
         try {
-            return runStrategy(findStrategy(strategyId, productLine), null, traceId, false);
+            var strategy = findStrategy(strategyId, productLine);
+            if (!properties.getEngine().isEnabled()) strategy.setEnabled(false);
+            return runStrategy(strategy, null, traceId, false);
         } finally {
             TraceContext.clear();
         }
@@ -710,13 +712,6 @@ public class MarketMakerService {
 
     private boolean runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, String traceId, boolean tradeAfterQuote) {
         StrategyRuntimeState state = state(strategy);
-        if (!strategy.isEnabled() || state.paused()) {
-            state.addSkipped(1L);
-            recordRunEvent(strategy, null, null, state.cycleSequence(), "SKIPPED",
-                    0, 0, 0, !strategy.isEnabled() ? "STRATEGY_DISABLED" : "STRATEGY_PAUSED",
-                    null, traceId, Instant.now());
-            return false;
-        }
         boolean completed = false;
         long cycleSequence = state.nextCycleSequence();
         for (String configuredSymbol : strategy.getInstrumentIds()) {
@@ -756,6 +751,19 @@ public class MarketMakerService {
             }
             Instant now = Instant.now();
             try {
+                if (!strategy.isEnabled() || state.paused()) {
+                    for (long accountId : strategy.getAccountIds()) {
+                        String prefix = accountPrefix(strategy, instrumentId, accountId);
+                        var requests = openOrders(strategy.getProductLine(), accountId, instrumentId, now).stream()
+                                .filter(this::isLive).filter(order -> ownsOrder(prefix, order))
+                                .map(order -> new CancelOrderRequest(accountId, order.orderId())).toList();
+                        var result = cancelOrders(strategy.getProductLine(), accountId, instrumentId, requests);
+                        state.addCanceled(result.completed());
+                        recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "STRATEGY_DRAINING",
+                                0, result.completed(), result.failed().size(), "STRATEGY_DISABLED_OR_PAUSED", null, traceId, now);
+                    }
+                    return false;
+                }
                 InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
@@ -1587,13 +1595,47 @@ public class MarketMakerService {
         return Long.toUnsignedString(crc32.getValue(), 36);
     }
 
+    /** The database is authoritative. YAML strategy lists never participate in runtime selection. */
+    public List<MarketMakerProperties.Strategy> configuredStrategies() {
+        strategyOverrides();
+        return definitions.stream().filter(d -> d.productLine() == properties.getProductLine()).map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
+    }
+
+    public List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> strategyDefinitions(ProductLine line) {
+        if (line == null) throw new IllegalArgumentException("productLine is required");
+        return overrideStore.definitions().stream().filter(d -> d.productLine() == line).toList();
+    }
+
+    public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveStrategyDefinition(
+            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition,
+            String adminUserId, String reason) {
+        com.surprising.product.api.ProductLineConfiguration.requireSame(properties.getProductLine(), definition.productLine(), "market-maker strategy");
+        for (String id : definition.instrumentIds()) {
+            var instrument = instrumentSnapshotCache.current(definition.productLine(), Integer.parseInt(id))
+                    .orElseThrow(() -> new IllegalArgumentException("instrument is not initialized: " + id));
+            if (definition.enabled() && instrument.status() != com.surprising.instrument.api.model.InstrumentStatus.TRADING)
+                throw new IllegalArgumentException("enable contract trading before enabling its maker");
+            if (definition.baseQuantitySteps() < instrument.minQuantitySteps()
+                    || definition.baseQuantitySteps() > instrument.maxQuantitySteps())
+                throw new IllegalArgumentException("maker base quantity is outside the contract order limits");
+        }
+        var old = overrideStore.definitions().stream().filter(d -> d.productLine() == definition.productLine()
+                && d.strategyId().equals(definition.strategyId())).findFirst();
+        if (old.isPresent() && (!old.get().accountIds().equals(definition.accountIds())
+                || !old.get().instrumentIds().equals(definition.instrumentIds())))
+            throw new IllegalArgumentException("existing strategy account and instrument bindings cannot change; create a new strategy");
+        var saved = overrideStore.saveDefinition(definition, adminUserId, reason);
+        strategyOverridesLoadedAt = Instant.EPOCH;
+        return saved;
+    }
+
     private List<MarketMakerProperties.Strategy> strategiesSnapshot() {
         return strategiesSnapshot(null);
     }
 
     private List<MarketMakerProperties.Strategy> strategiesSnapshot(ProductLine productLine) {
         Map<String, StrategyConfigOverride> overrides = strategyOverrides();
-        return properties.getStrategies().stream()
+        return configuredStrategies().stream()
                 .filter(strategy -> productLine == null || strategy.getProductLine() == productLine)
                 .map(strategy -> applyOverride(strategy, overrides.get(strategyKey(strategy))))
                 .toList();
@@ -1609,10 +1651,12 @@ public class MarketMakerService {
                 return strategyOverrides;
             }
             try {
+                var nextDefinitions = List.copyOf(overrideStore.definitions());
                 Map<String, StrategyConfigOverride> next = new HashMap<>();
                 for (StrategyConfigOverride override : overrideStore.findAll()) {
                     next.put(strategyKey(override.productLine(), override.strategyId()), override);
                 }
+                definitions = nextDefinitions;
                 strategyOverrides = Map.copyOf(next);
             } catch (RuntimeException ex) {
                 log.warn("Failed to load market-maker strategy overrides: {}", ex.getMessage());
@@ -1697,7 +1741,7 @@ public class MarketMakerService {
 
     private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId, ProductLine productLine) {
         String normalized = normalizeRequired(strategyId, "strategyId");
-        return properties.getStrategies().stream()
+        return configuredStrategies().stream()
                 .filter(strategy -> productLine == null || strategy.getProductLine() == productLine)
                 .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
                 .findFirst()

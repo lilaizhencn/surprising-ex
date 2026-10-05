@@ -47,7 +47,7 @@ class IndexInstrumentConfigLoaderTest {
     }
 
     @Test
-    void requiredInstrumentIdsLimitIndexWorkToTheConfiguredHotSet() {
+    void readinessInstrumentIdsDoNotExcludeNewlyListedContracts() {
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.setRequiredInstrumentIds(List.of("1"));
         InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
@@ -56,7 +56,7 @@ class IndexInstrumentConfigLoaderTest {
         IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(properties, cache);
 
         assertThat(loader.load()).extracting(IndexPriceProperties.SymbolConfig::getInstrumentId)
-                .containsExactly("1");
+                .containsExactly("1", "2");
     }
 
     private IndexSourceConfig source() {
@@ -84,7 +84,7 @@ class IndexInstrumentConfigLoaderTest {
 
     private InstrumentResponse instrument(String instrumentId, long version, boolean withSource) {
         Instant now = Instant.parse("2026-07-31T00:00:00Z");
-        return new InstrumentResponse(1, 3, 1, 1, 3, instrumentId, version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
