@@ -154,6 +154,31 @@ class GatewayProxyServiceTest {
                         .isEqualTo(HttpStatus.UNAUTHORIZED));
     }
 
+    @ParameterizedTest
+    @CsvSource({"instrument-admin,/upsert", "instrument-admin,/604/status",
+            "market-maker,/business-settings", "market-maker,/strategy-definitions",
+            "market-maker,/strategies/local-btc-usdt-maker/pause", "insurance-admin,/runtime-config",
+            "risk,/admin/runtime-config", "funding,/admin/runtime-config",
+            "liquidation,/admin/runtime-config", "adl,/admin/runtime-config"})
+    void routineConfigurationNeedsAdminPermissionButNoSecondAdministrator(String service, String suffix) {
+        var properties = properties();
+        properties.getAdminRoutes().put(service, new GatewayProperties.BackendRoute(
+                "http://configuration:9080", "/api/v1/configuration", true));
+        var auth = adminAuthService();
+        var proxy = gateway(properties, new CapturingRestTemplate(), auth, null, new FakeApprovalRepository());
+        var request = new MockHttpServletRequest("POST", "/api/v1/admin/gateway/" + service + suffix);
+        request.addHeader("Authorization", "Bearer admin");
+        request.addHeader("X-Product-Line", "LINEAR_PERPETUAL");
+        assertThat(proxy.requiresHighRiskAdminApproval(service, HttpMethod.POST, request)).isFalse();
+        proxy.proxy(service, HttpMethod.POST, request, "{}".getBytes(StandardCharsets.UTF_8));
+        org.mockito.Mockito.verify(auth).requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway." + service + ".write");
+        doThrow(new IllegalStateException("permission denied")).when(auth)
+                .requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway." + service + ".write");
+        assertThatThrownBy(() -> proxy.proxy(service, HttpMethod.POST, request, "{}".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
     @Test
     void highRiskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();

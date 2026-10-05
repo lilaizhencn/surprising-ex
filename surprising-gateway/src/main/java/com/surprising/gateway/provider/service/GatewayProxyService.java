@@ -660,6 +660,20 @@ public class GatewayProxyService {
         }
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
         String path = request.getRequestURI() == null ? "" : request.getRequestURI().toLowerCase(Locale.ROOT);
+        // Routine business configuration is versioned and audited by its owning service.
+        // Financial adjustments and operational intervention still require dual approval.
+        String prefix = ADMIN_GATEWAY_PREFIX + "/" + normalizedService;
+        String suffix = path.startsWith(prefix + "/") ? path.substring(prefix.length()) : "";
+        if (HttpMethod.POST.equals(method) && switch (normalizedService) {
+            case "instrument-admin" -> suffix.equals("/upsert") || suffix.matches("/[0-9]+/status");
+            case "market-maker" -> suffix.equals("/business-settings") || suffix.equals("/strategy-definitions")
+                    || suffix.matches("/strategies/[a-z0-9_-]+/(config|pause|resume)");
+            case "insurance-admin" -> suffix.equals("/runtime-config");
+            case "risk", "liquidation", "funding", "adl" -> suffix.equals("/admin/runtime-config");
+            default -> false;
+        }) {
+            return false;
+        }
         if (List.of("account", "instrument-admin", "insurance-admin", "trading-fees", "trading-leverage",
                 "trading-orders", "market-maker", "risk-admin", "liquidation-admin", "wallet-admin").contains(normalizedService)) {
             return true;

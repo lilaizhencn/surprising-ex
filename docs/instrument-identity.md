@@ -39,3 +39,11 @@ Core 协议版本为 8。项目尚未上线，不实现旧名称状态的兼容�
 相关入口：`InstrumentIds`、`InstrumentRepository`、`InstrumentStorageService`、`InstrumentSnapshotCache`、`ClusterInstrumentSeedMain`、`AssetConfigurationService`。
 
 做市专用账户由该产品线的 `surprising.trade-export.market-maker-account-ids` 明确列出（包含模拟成交账户）。普通用户订单全部入历史查询表；纯做市互成交和未成交撤单不入表。做市订单只要曾与普通用户成交，完整累计状态就持续保存，包括后续内部成交、撤单和重启后的更新。过滤只位于历史持久化边界，不影响 Core 权威状态、资金流水、公开成交或 WebSocket。
+
+## 后台日常配置权限（2026-10-05）
+
+`GatewayProxyService` 对合约新增、编辑、状态变更、做市定义及参数、价格配置和生命周期运行参数校验管理员身份与对应 `admin.gateway.<service>.write` 权限，并记录操作审计；这些明确列举的 POST 配置接口不要求第二位管理员审批。合约和配置服务继续校验变更原因、预期版本及参数边界，版本冲突必须重新读取后提交。做市暂停、恢复保留既有状态流转及审计。
+
+账户余额调整、保险基金划拨、代客撤单、维护清算等资金或业务干预接口仍要求审批，不通过关闭全局审批开关来简化日常配置。未列入日常配置清单的接口沿用原审批规则。管理端 `src/api/admin.ts` 与网关保持同样的日常接口范围。
+
+`GatewayProxyServiceTest` 覆盖日常配置无需第二位管理员、缺少服务权限拒绝访问，以及资金、维护干预继续要求审批；本次 40 项测试通过。
