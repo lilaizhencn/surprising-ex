@@ -66,7 +66,8 @@ public final class RiskScanCoordinator {
         // the coordinator in phase 1/2 after its Lane work has been rolled back; re-arming here
         // is the recovery boundary for the next command and must not retain the abandoned page.
         budget = runtime.riskScanControl().enabled()
-                ? Math.min(maxWork, runtime.riskScanControl().scanBatchSize()) : 0;
+                ? Math.min(maxWork, adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount())) : 0;
         remaining = budget;
         initial = null;
         instrument = null;
@@ -75,6 +76,13 @@ public final class RiskScanCoordinator {
         laneMask = creationMask = nextLiquidationId = 0;
         nextLane = work = 0;
         phase = 0;
+    }
+
+    /** Configured batch is the minimum; pending instruments add bounded work deterministically. */
+    public static int adaptiveBudget(int minimum, int pendingInstruments) {
+        if (minimum < 1 || minimum > 4096 || pendingInstruments < 0)
+            throw new IllegalArgumentException("invalid adaptive risk scan budget");
+        return (int) Math.min(4096L, Math.max(minimum, pendingInstruments * 8L));
     }
 
     /** 一次轮询只推进已就绪阶段；队列未完成立即返回，不等待其他线程。 */

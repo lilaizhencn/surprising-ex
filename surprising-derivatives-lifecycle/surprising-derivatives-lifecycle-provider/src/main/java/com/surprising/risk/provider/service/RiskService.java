@@ -69,7 +69,8 @@ public class RiskService {
                 .filter(value -> value.marginMode().name().equals(MarginMode.CROSS.name())).toList();
         long unrealized = sum(cross, CoreRiskSnapshotView::unrealizedPnlUnits);
         long maintenance = sum(cross, CoreRiskSnapshotView::maintenanceMarginUnits);
-        long equity = Math.addExact(wallet, unrealized);
+        // Core values cross equity from the same current prices, including option premium value.
+        long equity = cross.isEmpty() ? wallet : cross.getFirst().equityUnits();
         long ratio = marginRatio(maintenance, equity);
         Instant now = Instant.now();
         return new RiskAccountSnapshotResponse(snapshotSequence(snapshots, user.revision()), userId,

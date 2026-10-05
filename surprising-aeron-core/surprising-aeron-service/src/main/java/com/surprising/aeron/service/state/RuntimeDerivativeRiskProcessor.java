@@ -115,7 +115,8 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalStateException("risk scan input is missing");
         }
         int completedWork = continueScan(runtime, instrument, sourceScan.priceSequence(),
-                Math.min(maxWork, runtime.riskScanControl().scanBatchSize()), null, indexedUserIds, identities);
+                Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount())), null, indexedUserIds, identities);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return completedWork;
     }
@@ -137,7 +138,8 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalStateException("risk scan input is missing");
         }
         int completedWork = continueScan(runtime, instrument, sourceScan.priceSequence(),
-                Math.min(maxWork, runtime.riskScanControl().scanBatchSize()), positionUsers, null, identities);
+                Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount())), positionUsers, null, identities);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return completedWork;
     }
@@ -150,7 +152,8 @@ public final class RuntimeDerivativeRiskProcessor {
         }
         runtime.assertOwner();
         if (!runtime.riskScanControl().enabled()) return 0;
-        int budget = Math.min(maxWork, runtime.riskScanControl().scanBatchSize());
+        int budget = Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount()));
         int remaining = budget;
         while (remaining > 0) {
             RiskScanRuntime selected = runtime.firstRiskIncompleteScan();

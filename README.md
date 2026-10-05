@@ -34,6 +34,16 @@ Gateway sends trading commands to the single-member Aeron Cluster. Core owns tra
 
 The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-aeron-core/) contains the cluster and client; [`surprising-gateway`](surprising-gateway/) contains the consolidated identity, instrument, trading, and account application; [`surprising-price`](surprising-price/), [`surprising-realtime`](surprising-realtime/), [`surprising-derivatives-lifecycle`](surprising-derivatives-lifecycle/), and [`surprising-maker`](surprising-maker/) contain the other four processes. Shared API modules define product-line and business contracts.
 
+## 风险查询口径
+
+`RuntimeRiskQueryService.snapshots` 在查询边界使用当前仓位、钱包和标记价，统一计算名义价值、未实现盈亏、维持保证金、权益、保证金率和风险状态；返回的价格序号对应本次估值价格。全仓按用户及结算资产汇总，扣除逐仓占用；逐仓仅使用本仓保证金，期权权益使用期权市值。
+
+后台有界风险扫描保存的 `RiskSnapshotRuntime` 用于风险扫描和清算流程，可能落后于当前价格，不能与新价格拼接为一份查询结果。查询不写入扫描快照，不生成强平任务，也不修改余额、持仓或扫描游标。新仓位在首次扫描前即可查询；缺少必要价格时报错，不返回旧估值伪装为最新值。
+
+2026-10-05 测试环境核验：430 个 U 本位合约下，扫描预算 64 时 BTC 仓位快照连续采样落后标记价 20–37 个序号。通过带版本校验的风险运行配置接口将 `scanBatchSize` 调整为 512（保持 25ms 配置间隔），随后 8 次采样滞后为 0–1 个序号。该临时预算作为 Core 运行配置持久化。风险续扫现在根据待处理合约数自动确定本轮预算：`min(4096, max(配置基线, 待处理合约数 × 8))`；积压减少后自动回落，保留 TP/SL 预算和原有 Lane 公平轮转。查询一致性不依赖扫描及时完成。
+
+验证记录：JDK 27 下已执行 Core 与生命周期模块回归，以及风险估值、风险预算和扫描公平性定向测试。`DerivativeRiskBoundaryBenchmark` 对 U 本位交割、币本位交割和期权执行 1×1s 预热、2×1s 测量、单 fork；分别为 57.614、55.991、67.309 轮/秒，三条路径接受数与终态数相等，未完成数为 0。该短测用于验证路径可完成及资金断言，不作为吞吐提升结论。线上完整历史成交与资金流水投影缺失，不能据此声称历史已实现盈亏已完整对账。
+
 ## Single-node deployment
 
 Run these steps on the target Linux host. The deployment uses existing PostgreSQL, Kafka, and Redis/Valkey services. Install **HotSpot JDK 27**, Maven, `psql`, and the build's normal dependencies first. Configure PostgreSQL, Kafka, and Valkey at the addresses in the environment file, or change those values to match the host.

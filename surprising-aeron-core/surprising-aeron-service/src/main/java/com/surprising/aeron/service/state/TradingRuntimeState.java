@@ -2628,6 +2628,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         return riskScans.get(symbolId);
     }
 
+    /** Bounded query over committed positions, including those not yet visited by the risk scan. */
+    public LongHashSet usersWithPublishedPositions(int maximumPositions) {
+        assertOwner();
+        if (publishedPositions.size() > maximumPositions)
+            throw new com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException();
+        LongHashSet users = new LongHashSet();
+        for (PositionRuntime position : publishedPositions.values())
+            if (position.signedQuantitySteps() != 0) users.add(position.userId());
+        return users;
+    }
+
     public int publishedPositionCount() {
         assertOwner();
         return publishedPositions.size();

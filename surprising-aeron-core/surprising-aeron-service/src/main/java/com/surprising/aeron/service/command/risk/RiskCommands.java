@@ -41,17 +41,18 @@ public final class RiskCommands {
         if (activeScan == null) return;
         String instrumentId = owner.identities().instrumentId(activeScan.symbolId());
         int pendingBefore = owner.pendingRiskScanCount();
+        int maxWork = RiskScanCoordinator.adaptiveBudget(command.maxUsers(), pendingBefore);
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState().revision();
         // Busy accounts can keep risk valuation incomplete across price updates. Reserve
         // bounded work for their TP/SL so closing orders do not wait for a whole risk pass.
-        int riskBudget = activeScan.triggerComplete() ? command.maxUsers() : command.maxUsers() / 2;
+        int riskBudget = activeScan.triggerComplete() ? maxWork : maxWork / 2;
         if (owner.asynchronousCommands()) {
             RiskScanCoordinator risk = null;
             if (!activeScan.riskComplete() && riskBudget > 0) {
                 risk = owner.reusableRiskScanCoordinator(riskBudget);
             }
-            owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, command.maxUsers(),
+            owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, maxWork,
                     pendingBefore, startedAt, beforeRevision);
             return;
         }
@@ -61,11 +62,11 @@ public final class RiskCommands {
                     owner.positionUserIndex(), owner.runtimeState(), owner.identities());
         }
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
-        int remainingWork = command.maxUsers() - completedRiskWork;
+        int remainingWork = maxWork - completedRiskWork;
         if (remainingWork > 0 && !owner.runtimeState().riskScan(activeScan.symbolId()).triggerComplete()) {
             owner.evaluatePendingTriggerScan(instrumentId, remainingWork);
         }
-        owner.logRiskScan("continuation", instrumentId, command.maxUsers(), pendingBefore, startedAt);
+        owner.logRiskScan("continuation", instrumentId, maxWork, pendingBefore, startedAt);
     }
 
     public void executeUpdateRiskScanControl(CoreMessage message, long clusterTimestamp) {
