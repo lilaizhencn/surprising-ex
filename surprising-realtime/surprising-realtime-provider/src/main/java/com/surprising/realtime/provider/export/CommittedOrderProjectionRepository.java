@@ -45,8 +45,12 @@ public class CommittedOrderProjectionRepository {
         // Read each committed batch from the admin catalog. Disabled strategies still own
         // their historical accounts; changing enablement must not reclassify old maker fills.
         Set<Long> marketMakerAccounts = new HashSet<>(jdbc.queryForList(
-                "SELECT DISTINCT unnest(account_ids) FROM market_maker_strategies WHERE product_line=?",
-                Long.class, product.name()));
+                """
+                SELECT unnest(account_ids) FROM market_maker_strategies WHERE product_line=?
+                UNION SELECT value::bigint FROM market_maker_business_settings,
+                    jsonb_array_elements_text(settings->'trade'->'accountIds')
+                    WHERE product_line=?
+                """, Long.class, product.name(), product.name()));
         // This bounded, per-commit SQL batch owns only the latest supplied version of each order.
         // PostgreSQL multi-row ON CONFLICT cannot update the same key twice in one statement.
         var latest = new LinkedHashMap<Long, OrderWrite>();

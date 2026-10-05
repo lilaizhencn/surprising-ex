@@ -28,6 +28,7 @@ class CommittedOrderProjectionPostgresTest {
         jdbc.execute("CREATE TABLE core_order_projection (LIKE public.core_order_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_projection_watermark (LIKE public.core_projection_watermark INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
+        jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
     }
 
@@ -73,8 +74,10 @@ class CommittedOrderProjectionPostgresTest {
     }
 
     @Test void onlyUserFacingMakerOrdersPersistAcrossBatchesAndRestartForEveryProduct() {
-        for (var line : ProductLine.values())
-            jdbc.update("INSERT INTO market_maker_strategies VALUES (?, ARRAY[900,901]::bigint[])", line.name());
+        for (var line : ProductLine.values()) {
+            jdbc.update("INSERT INTO market_maker_strategies VALUES (?, ARRAY[900]::bigint[])", line.name());
+            jdbc.update("INSERT INTO market_maker_business_settings VALUES (?, '{\"trade\":{\"accountIds\":[901]}}'::jsonb)", line.name());
+        }
         for (var line : ProductLine.values()) {
             // Unfilled quotes and cancellations are omitted. Ordinary-user orders always remain.
             repository.persist(line, List.of(order(line, 10, 900, "OPEN", 0, 1),
