@@ -103,9 +103,14 @@ public class InstrumentCoreSyncService {
     }
 
     private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale) {
-        var brackets=value.riskLimitBrackets().stream().map(b->new CoreRiskLimitBracket(b.bracketNo(),
-                b.notionalFloorUnits(),b.notionalCapUnits(),b.maxLeveragePpm(),b.initialMarginRatePpm(),
-                b.maintenanceMarginRatePpm(),b.optionMarginFactorPpm())).toList();
+        // Core's shared instrument protocol requires a bounded bracket even for spot
+        // orders. Derive it from the instrument; spot administrators never configure derivative tiers.
+        var brackets=value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+                ? java.util.List.of(new CoreRiskLimitBracket(1, 0, value.maxPositionNotionalUnits(),
+                        value.maxLeveragePpm(), value.initialMarginRatePpm(), value.maintenanceMarginRatePpm()))
+                : value.riskLimitBrackets().stream().map(b->new CoreRiskLimitBracket(b.bracketNo(),
+                        b.notionalFloorUnits(),b.notionalCapUnits(),b.maxLeveragePpm(),b.initialMarginRatePpm(),
+                        b.maintenanceMarginRatePpm(),b.optionMarginFactorPpm())).toList();
         long strike=value.strikePriceUnits()==null?0:value.strikePriceUnits()/value.priceTickUnits();
         if (value.strikePriceUnits()!=null && value.strikePriceUnits()%value.priceTickUnits()!=0)
             throw new IllegalArgumentException("strike price does not align with tick size");
@@ -133,7 +138,8 @@ public class InstrumentCoreSyncService {
                 value.optionType()==null?-1:value.optionType().ordinal(),strike,value.maxLeveragePpm(),value.maxPositionNotionalUnits(),
                 value.userOpenInterestLimitRatePpm(),value.userOpenInterestLimitFloorUnits(),brackets,
                 value.status().ordinal(),value.marketOrderEnabled(),value.postOnlyEnabled(),value.reduceOnlyEnabled(),
-                supportedOrderTypes,supportedTimeInForce);
+                supportedOrderTypes,supportedTimeInForce,
+                value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT ? value.quantityStepUnits() : 1L);
     }
 
     private static String error(RuntimeException failure) {

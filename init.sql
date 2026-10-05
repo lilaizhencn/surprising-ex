@@ -1391,7 +1391,7 @@ CREATE TABLE IF NOT EXISTS price_mark_ticks (
     best_bid_price              NUMERIC(38, 18),
     best_ask_price              NUMERIC(38, 18),
     funding_rate                NUMERIC(38, 18) NOT NULL,
-    next_funding_time           TIMESTAMPTZ NOT NULL,
+    next_funding_time           TIMESTAMPTZ,
     time_until_funding_seconds  BIGINT NOT NULL,
     basis_average               NUMERIC(38, 18),
     basis_window_seconds        BIGINT NOT NULL,
@@ -2924,7 +2924,7 @@ CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_trace_idx
 CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     approval_id          BIGSERIAL PRIMARY KEY,
     requester_user_id    BIGINT NOT NULL REFERENCES gateway_users(user_id),
-    requester_username   TEXT NOT NULL,
+    requester_username   TEXT,
     approver_user_id     BIGINT REFERENCES gateway_users(user_id),
     approver_username    TEXT,
     service              TEXT NOT NULL,
@@ -2946,6 +2946,8 @@ CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     CONSTRAINT gateway_admin_approval_service_check CHECK (service ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
     CONSTRAINT gateway_admin_approval_method_check CHECK (http_method ~ '^[A-Z]{3,16}$')
 );
+
+ALTER TABLE gateway_admin_approval_requests ALTER COLUMN requester_username DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_requester_time_idx
     ON gateway_admin_approval_requests (requester_user_id, requested_at DESC);
@@ -3664,3 +3666,25 @@ ALTER TABLE instruments ADD FOREIGN KEY (underlying_product_line, underlying_ins
 ALTER TABLE instrument_lifecycle_drain_acks ADD FOREIGN KEY(product_line,instrument_id,instrument_change_id) REFERENCES instrument_change_log(product_line,instrument_id,change_id);
 
 COMMIT;
+
+-- 生命周期业务设置仅由管理后台维护；不同产品线独立，更新使用版本比较。
+CREATE TABLE IF NOT EXISTS lifecycle_business_settings (
+    product_line VARCHAR(32) PRIMARY KEY CHECK (product_line IN ('LINEAR_PERPETUAL','INVERSE_PERPETUAL','LINEAR_DELIVERY','INVERSE_DELIVERY','OPTION')),
+    settings JSONB NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    updated_by VARCHAR(64) NOT NULL,
+    reason VARCHAR(1000) NOT NULL CHECK (length(trim(reason)) > 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 后台为价格业务配置唯一入口；连接、线程和保留策略属于部署参数。
+CREATE TABLE IF NOT EXISTS price_business_settings (
+    product_line VARCHAR(32) PRIMARY KEY CHECK (product_line IN ('SPOT','LINEAR_PERPETUAL','INVERSE_PERPETUAL','LINEAR_DELIVERY','INVERSE_DELIVERY','OPTION')),
+    settings JSONB NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    updated_by VARCHAR(64) NOT NULL,
+    reason VARCHAR(1000) NOT NULL CHECK (length(trim(reason)) > 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE price_mark_ticks ALTER COLUMN next_funding_time DROP NOT NULL;

@@ -1,82 +1,35 @@
 package com.surprising.adl.provider.service;
 
-import com.surprising.adl.provider.config.AdlProperties;
-import java.util.LinkedHashMap;
+import com.surprising.derivatives.lifecycle.LifecycleBusinessSettings;
+import com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsService;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
-/**
- * 统一执行 ADL 运行参数查询、校验和更新。
- */
 @Service
 public class AdlRuntimeConfigService {
-
-    private final AdlProperties properties;
-
-    public AdlRuntimeConfigService(AdlProperties properties) {
-        this.properties = properties;
-    }
-
+    private final LifecycleBusinessSettingsService settings;
+    public AdlRuntimeConfigService(LifecycleBusinessSettingsService settings) { this.settings = settings; }
     public Map<String, Object> current() {
-        Map<String, Object> scanner = new LinkedHashMap<>();
-        scanner.put("enabled", properties.getScanner().isEnabled());
-        scanner.put("scanDelayMs", properties.getScanner().getScanDelayMs());
-        scanner.put("minDeficitAgeMs", properties.getScanner().getMinDeficitAgeMs());
-        scanner.put("maxMarkAgeMs", properties.getScanner().getMaxMarkAgeMs());
-        scanner.put("batchSize", properties.getScanner().getBatchSize());
-        scanner.put("maxDeleveragesPerDeficit", properties.getScanner().getMaxDeleveragesPerDeficit());
-        scanner.put("candidateMultiplier", properties.getScanner().getCandidateMultiplier());
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("scope", "runtime");
-        response.put("scanner", scanner);
-        return response;
+        var saved = settings.current();
+        var value = saved.settings().adl();
+        return Map.of("scope", "DATABASE", "version", saved.version(), "updatedBy", saved.updatedBy(), "reason", saved.reason(),
+                "scanner", Map.of("enabled", value.enabled(), "scanDelayMs", value.scanDelayMs(), "batchSize", value.batchSize(),
+                        "maxDeleveragesPerDeficit", value.maxDeleveragesPerDeficit(), "candidateMultiplier", value.candidateMultiplier()));
     }
-
-    public Map<String, Object> update(Boolean scannerEnabled,
-                                      Long scanDelayMs,
-                                      Long minDeficitAgeMs,
-                                      Long maxMarkAgeMs,
-                                      Integer batchSize,
-                                      Integer maxDeleveragesPerDeficit,
-                                      Integer candidateMultiplier) {
-        if (scannerEnabled != null) {
-            properties.getScanner().setEnabled(scannerEnabled);
-        }
-        if (scanDelayMs != null) {
-            properties.getScanner().setScanDelayMs(nonNegative(scanDelayMs, "scanDelayMs"));
-        }
-        if (minDeficitAgeMs != null) {
-            properties.getScanner().setMinDeficitAgeMs(nonNegative(minDeficitAgeMs, "minDeficitAgeMs"));
-        }
-        if (maxMarkAgeMs != null) {
-            properties.getScanner().setMaxMarkAgeMs(nonNegative(maxMarkAgeMs, "maxMarkAgeMs"));
-        }
-        if (batchSize != null) {
-            properties.getScanner().setBatchSize(bounded(batchSize, 1, 10_000, "batchSize"));
-        }
-        if (maxDeleveragesPerDeficit != null) {
-            properties.getScanner().setMaxDeleveragesPerDeficit(
-                    bounded(maxDeleveragesPerDeficit, 1, 1_000, "maxDeleveragesPerDeficit"));
-        }
-        if (candidateMultiplier != null) {
-            properties.getScanner().setCandidateMultiplier(
-                    bounded(candidateMultiplier, 1, 1_000, "candidateMultiplier"));
-        }
+    public Map<String, Object> update(String admin, Long expectedVersion, Boolean enabled, Long scanDelayMs,
+            Long minDeficitAgeMs, Long maxMarkAgeMs, Integer batchSize, Integer maxDeleveragesPerDeficit,
+            Integer candidateMultiplier, String reason) {
+        if (minDeficitAgeMs != null || maxMarkAgeMs != null)
+            throw new IllegalArgumentException("ADL eligibility and mark freshness are owned by Core, not provider scanner settings");
+        synchronized (settings) {
+        var all = settings.current().settings();
+        var old = all.adl();
+        var next = new LifecycleBusinessSettings.Adl(value(enabled, old.enabled()), value(scanDelayMs, old.scanDelayMs()),
+                value(batchSize, old.batchSize()), value(maxDeleveragesPerDeficit, old.maxDeleveragesPerDeficit()),
+                value(candidateMultiplier, old.candidateMultiplier()));
+        settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), all.insurance(), next), expectedVersion, admin, reason);
         return current();
-    }
-
-    private long nonNegative(long value, String field) {
-        if (value < 0) {
-            throw new IllegalArgumentException(field + " must be non-negative");
         }
-        return value;
     }
-
-    private int bounded(int value, int min, int max, String field) {
-        if (value < min || value > max) {
-            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
-        }
-        return value;
-    }
+    private static <T> T value(T update, T previous) { return update == null ? previous : update; }
 }

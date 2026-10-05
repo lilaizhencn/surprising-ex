@@ -274,6 +274,10 @@ public final class RuntimeDerivativeFillCalculator {
         long premiumMarginFunding = instrument.contractType().isOption()
                 ? OptionFillCalculator.premiumMarginFunding(
                         instrument, premiumDelta, openSteps, marginIncrease, fillPriceTicks) : 0;
+        // Option sale proceeds pay the fee after supplying the seller margin. A better
+        // sell fill may charge more than the fee frozen at the order's lower price bound.
+        long premiumFeeFunding = instrument.contractType().isOption() && premiumDelta > 0
+                ? Math.min(feeDebit, Math.subtractExact(premiumDelta, premiumMarginFunding)) : 0;
         long proportionalBudget = proportional(state.reservedUnits(), fillQuantitySteps,
                 state.remaining);
         long fillReservationBudget = Math.min(state.reservedUnits(),
@@ -297,7 +301,7 @@ public final class RuntimeDerivativeFillCalculator {
                     Math.subtractExact(fillReservationBudget, Math.addExact(premiumDebit, feeDebit))));
         }
         long reservationDebit = Math.addExact(Math.subtractExact(marginIncrease, premiumMarginFunding),
-                Math.addExact(premiumDebit, feeDebit));
+                Math.addExact(premiumDebit, Math.subtractExact(feeDebit, premiumFeeFunding)));
         long reservationShortfall = Math.max(0,
                 Math.subtractExact(reservationDebit, state.reservedUnits()));
         if (reservationShortfall > 0 && closeSteps == 0) {
@@ -337,9 +341,10 @@ public final class RuntimeDerivativeFillCalculator {
         }
         if (premiumDelta < 0) nextLocked = Math.subtractExact(nextLocked, Math.negateExact(premiumDelta));
         else if (premiumDelta > 0) {
-            nextLocked = Math.addExact(nextLocked, premiumMarginFunding);
+            long retainedPremium = Math.addExact(premiumMarginFunding, premiumFeeFunding);
+            nextLocked = Math.addExact(nextLocked, retainedPremium);
             nextAvailable = Math.addExact(nextAvailable,
-                    Math.subtractExact(premiumDelta, premiumMarginFunding));
+                    Math.subtractExact(premiumDelta, retainedPremium));
         }
         if (feeDelta < 0) nextLocked = Math.subtractExact(nextLocked, Math.negateExact(feeDelta));
         else if (feeDelta > 0) nextAvailable = Math.addExact(nextAvailable, feeDelta);

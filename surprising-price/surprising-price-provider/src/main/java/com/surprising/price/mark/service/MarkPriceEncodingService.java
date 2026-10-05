@@ -59,7 +59,7 @@ public class MarkPriceEncodingService {
         long baseScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.baseAsset())
                 .orElseThrow(() -> notFound(Integer.toString(instrument.instrumentId()), instrument.changeId()));
         return new MarkPriceEncoding(instrument.changeId(), quoteScaleUnits, instrument.priceTickUnits(),
-                baseScaleUnits, instrument.quantityStepUnits());
+                baseScaleUnits, instrument.quantityStepUnits(), instrument.expiryTime());
     }
 
     private IllegalStateException notFound(String instrumentId) {

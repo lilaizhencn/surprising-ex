@@ -10,20 +10,18 @@ import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Getter
 @Validated
-@ConfigurationProperties(prefix = "surprising.price.mark")
 public class MarkPriceProperties {
 
     @Setter
     private Kafka kafka = new Kafka();
     @Setter
-    private Calculation calculation = new Calculation();
+    private volatile Calculation calculation = new Calculation();
     @Setter
-    private Coordination coordination = new Coordination();
+    private volatile Coordination coordination = new Coordination();
     @Setter
     private Audit audit = new Audit();
     private Aeron aeron = new Aeron();

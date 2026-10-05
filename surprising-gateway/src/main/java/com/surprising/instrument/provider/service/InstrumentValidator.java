@@ -94,6 +94,9 @@ public class InstrumentValidator {
         if (request.riskLimitBrackets() != null && !request.riskLimitBrackets().isEmpty()) {
             throw new IllegalArgumentException("spot instruments must not define risk limit brackets");
         }
+        if (request.indexSources() != null && !request.indexSources().isEmpty()) {
+            validateIndexSources(request.indexSources(), request.minValidIndexSources(), request.instrumentType() == InstrumentType.OPTION);
+        }
     }
 
     private void validatePerpetualRules(InstrumentUpsertRequest request) {
@@ -121,17 +124,25 @@ public class InstrumentValidator {
             throw new IllegalArgumentException("option underlying requires an explicit non-option product line");
         }
         requirePositive("strikePriceUnits", request.strikePriceUnits());
+        if (request.strikePriceUnits() % request.priceTickUnits() != 0)
+            throw new IllegalArgumentException("strikePriceUnits must align with priceTickUnits");
         if (request.optionType() == null) {
             throw new IllegalArgumentException("option instruments require optionType");
         }
         if (request.optionExerciseStyle() == null) {
             throw new IllegalArgumentException("option instruments require optionExerciseStyle");
         }
+        for (var source : request.indexSources()) {
+            if (!"OPTION_RISK_TICKER".equals(source.parser())
+                    || source.websocketEnabled() && !"OPTION_RISK_TICKER".equals(source.websocketParser())
+                    || !source.quoteCurrency().equalsIgnoreCase(source.targetQuoteCurrency()))
+                throw new IllegalArgumentException("option sources require OPTION_RISK_TICKER with premium, index and same-expiry forward in the contract quote currency");
+        }
     }
 
     private void validateDerivativeRules(InstrumentUpsertRequest request) {
         validateBrackets(request.riskLimitBrackets());
-        validateIndexSources(request.indexSources(), request.minValidIndexSources());
+        validateIndexSources(request.indexSources(), request.minValidIndexSources(), request.instrumentType() == InstrumentType.OPTION);
         for (var bracket : request.riskLimitBrackets()) {
             if (bracket.maxLeveragePpm() > request.maxLeveragePpm())
                 throw new IllegalArgumentException("risk bracket leverage exceeds instrument maximum");
@@ -223,7 +234,7 @@ public class InstrumentValidator {
         }
     }
 
-    private void validateIndexSources(List<IndexSourceConfig> sources, int minValidSources) {
+    private void validateIndexSources(List<IndexSourceConfig> sources, int minValidSources, boolean option) {
         if (sources == null || sources.isEmpty()) {
             throw new IllegalArgumentException("at least one index source is required");
         }
@@ -241,6 +252,8 @@ public class InstrumentValidator {
                     || source.targetQuoteCurrency() == null || source.targetQuoteCurrency().isBlank())
                 throw new IllegalArgumentException("index source quote currencies are required");
             requireParser(source.parser());
+            if (option != "OPTION_RISK_TICKER".equals(source.parser()))
+                throw new IllegalArgumentException("OPTION_RISK_TICKER is required exclusively for option sources");
             if (!source.quoteCurrency().equalsIgnoreCase(source.targetQuoteCurrency())) {
                 requireUrl("conversionBaseUrl", source.conversionBaseUrl(), Set.of("https", "http"));
                 if (source.conversionPath() == null || !source.conversionPath().startsWith("/")
@@ -282,7 +295,7 @@ public class InstrumentValidator {
 
     private void requireParser(String parser) {
         if (parser == null || !Set.of("BINANCE_BOOK_TICKER", "OKX_TICKER", "OKX_INDEX_TICKER",
-                "BYBIT_TICKER", "COINBASE_TICKER", "KRAKEN_TICKER").contains(parser))
+                "BYBIT_TICKER", "COINBASE_TICKER", "KRAKEN_TICKER", "OPTION_RISK_TICKER").contains(parser))
             throw new IllegalArgumentException("unsupported index source parser: " + parser);
     }
 

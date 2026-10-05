@@ -66,12 +66,8 @@ public class ExternalSpotWebSocketManager {
 
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
-        if (!properties.getWebSocket().isEnabled()) {
-            log.info("External spot WebSocket collector is disabled");
-            return;
-        }
         running = true;
-        Map<String, List<TrackedSource>> grouped = groupedSources();
+        Map<String, List<TrackedSource>> grouped = properties.getWebSocket().isEnabled() ? groupedSources() : Map.of();
         if (grouped.isEmpty()) {
             log.info("No external spot WebSocket sources configured");
         } else {
@@ -83,9 +79,7 @@ public class ExternalSpotWebSocketManager {
     }
 
     public void refreshConnections() {
-        if (running && properties.getWebSocket().isEnabled()) {
-            refreshConnections(groupedSources());
-        }
+        if (running) refreshConnections(properties.getWebSocket().isEnabled() ? groupedSources() : Map.of());
     }
 
     public List<WebSocketHealth> health() {
@@ -148,7 +142,7 @@ public class ExternalSpotWebSocketManager {
     }
 
     private void connect(WsSession session) {
-        if (!running || !session.connecting.compareAndSet(false, true)) {
+        if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session || !session.connecting.compareAndSet(false, true)) {
             return;
         }
         httpClient.newWebSocketBuilder()
@@ -160,6 +154,9 @@ public class ExternalSpotWebSocketManager {
                         scheduleReconnect(session, "connect failed: " + ex.getMessage());
                         return;
                     }
+                    if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session) {
+                        webSocket.abort(); return;
+                    }
                     session.webSocket.set(webSocket);
                     session.reconnectScheduled.set(false);
                     log.info("Connected external spot WebSocket url={} subscriptions={}", session.url, session.sources.size());
@@ -167,7 +164,7 @@ public class ExternalSpotWebSocketManager {
     }
 
     private void scheduleReconnect(WsSession session, String reason) {
-        if (!running || !session.reconnectScheduled.compareAndSet(false, true)) {
+        if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session || !session.reconnectScheduled.compareAndSet(false, true)) {
             return;
         }
         WebSocket webSocket = session.webSocket.getAndSet(null);
@@ -217,6 +214,7 @@ public class ExternalSpotWebSocketManager {
     }
 
     private void handlePayload(WsSession session, String payload) {
+        if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session) return;
         Instant receivedAt = Instant.now();
         boolean matched = false;
         for (TrackedSource trackedSource : session.sources()) {

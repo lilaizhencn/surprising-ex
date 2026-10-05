@@ -313,6 +313,21 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void spotInventoryLimitUsesQuantityStepsInsteadOfSmallestAssetUnits() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.productLine = ProductLine.SPOT;
+        fixtures.instrumentId = "48";
+        fixtures.quantityStepUnits = 10_000_000L;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("47", fixtures.instrumentId, ProductLine.SPOT));
+
+        // 1 billion asset units is 100 steps, below the configured 1,000-step limit.
+        assertThat(fixtures.orderRpc.placeRequests).anyMatch(order -> order.side() == OrderSide.BUY);
+        assertThat(fixtures.orderRpc.placeRequests).anyMatch(order -> order.side() == OrderSide.SELL);
+    }
+
+    @Test
     void runOnceSplitsQuoteBatchesAtTheOrderServiceLimit() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.orderRpc.batchSupported = true;
@@ -951,6 +966,7 @@ class MarketMakerServiceTest {
         private int orderLevels = 3;
         private int maxOpenOrders = 30;
         private long priceTickUnits = 100L;
+        private long quantityStepUnits = 1L;
         private long markPriceUnits = 5_000_000L;
         private long bestBidTicks = 49_990L;
         private long bestAskTicks = 50_010L;
@@ -975,7 +991,7 @@ class MarketMakerServiceTest {
             MarketMakerProperties properties = properties();
             InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
             snapshotCache.replace(productLine,
-                    List.of(new FakeInstrumentRpc(priceTickUnits).latest(Integer.parseInt(instrumentId), productLine)));
+                    List.of(new FakeInstrumentRpc(priceTickUnits, quantityStepUnits).latest(Integer.parseInt(instrumentId), productLine)));
             return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
@@ -1400,9 +1416,15 @@ class MarketMakerServiceTest {
 
     private static final class FakeInstrumentRpc implements InstrumentRpcApi {
         private final long priceTickUnits;
+        private final long quantityStepUnits;
 
         private FakeInstrumentRpc(long priceTickUnits) {
+            this(priceTickUnits, 1L);
+        }
+
+        private FakeInstrumentRpc(long priceTickUnits, long quantityStepUnits) {
             this.priceTickUnits = priceTickUnits;
+            this.quantityStepUnits = quantityStepUnits;
         }
 
         @Override
@@ -1417,7 +1439,7 @@ class MarketMakerServiceTest {
             ContractType contractType = ContractType.valueOf(effectiveProductLine.contractTypeCode());
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
             return new InstrumentResponse(instrumentId, 3, 1, 1, 3, "1", 1L, instrumentType, contractType,
-                    "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
+                    "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, quantityStepUnits, 1L, 1_000_000L,
                     1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
                     true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                     1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,

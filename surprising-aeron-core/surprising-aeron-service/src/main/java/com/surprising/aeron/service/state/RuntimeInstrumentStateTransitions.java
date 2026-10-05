@@ -52,6 +52,7 @@ public final class RuntimeInstrumentStateTransitions {
                 && before.settleAsset().equals(after.settleAsset())
                 && before.notionalMultiplierUnits() == after.notionalMultiplierUnits()
                 && before.priceTickUnits() == after.priceTickUnits()
+                && before.quantityStepUnits() == after.quantityStepUnits()
                 && before.settleScaleUnits() == after.settleScaleUnits()
                 && before.expiryEpochMillis() == after.expiryEpochMillis()
                 && before.optionType() == after.optionType()

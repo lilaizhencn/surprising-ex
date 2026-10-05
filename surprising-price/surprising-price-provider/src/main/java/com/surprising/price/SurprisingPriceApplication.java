@@ -10,7 +10,6 @@ import com.surprising.price.consumer.MarkPriceConsumerProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -26,7 +25,6 @@ import jakarta.annotation.PostConstruct;
 @EnableFeignClients(basePackages = "com.surprising")
 @EnableKafka
 @EnableScheduling
-@EnableConfigurationProperties({IndexPriceProperties.class, MarkPriceProperties.class})
 @Slf4j
 public class SurprisingPriceApplication {
 

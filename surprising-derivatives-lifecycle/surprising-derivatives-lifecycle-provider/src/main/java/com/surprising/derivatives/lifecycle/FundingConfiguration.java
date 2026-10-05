@@ -16,12 +16,18 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
         + "'${surprising.risk.product-line:LINEAR_PERPETUAL}' == 'INVERSE_PERPETUAL'")
 @ComponentScan(basePackages = "com.surprising.funding.provider",
         nameGenerator = FullyQualifiedAnnotationBeanNameGenerator.class)
-@EnableConfigurationProperties(FundingProperties.class)
 public class FundingConfiguration {
-    public FundingConfiguration(FundingProperties funding, RiskProperties risk) {
+    @Bean
+    public FundingProperties fundingProperties(org.springframework.core.env.Environment environment, RiskProperties risk) {
+        var funding = new FundingProperties();
+        funding.getKafka().setProductLine(risk.getProductLine());
+        org.springframework.boot.context.properties.bind.Binder.get(environment).bind("surprising.funding.kafka",
+                org.springframework.boot.context.properties.bind.Bindable.ofInstance(funding.getKafka()));
+        funding.getCoordination().setNodeId(environment.getProperty("FUNDING_NODE_ID"));
         if (funding.getKafka().getProductLine() != risk.getProductLine()) {
             throw new IllegalStateException("funding and lifecycle must use the same product line");
         }
+        return funding;
     }
 
     @Bean

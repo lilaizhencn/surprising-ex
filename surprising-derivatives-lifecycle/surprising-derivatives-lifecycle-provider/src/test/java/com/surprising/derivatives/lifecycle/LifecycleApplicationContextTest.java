@@ -39,7 +39,18 @@ class LifecycleApplicationContextTest {
                         () -> mock(DerivativesAeronClient.class))
                 .withBean(DerivativesInstrumentSnapshotInitializer.class.getName(), DerivativesInstrumentSnapshotInitializer.class,
                         () -> mock(DerivativesInstrumentSnapshotInitializer.class))
+                .withBean(DerivativesLifecycleMaintenanceTask.class.getName(), DerivativesLifecycleMaintenanceTask.class,
+                        () -> mock(DerivativesLifecycleMaintenanceTask.class))
+                .with(runner -> line.isFundingProduct() ? runner.withBean(com.surprising.funding.provider.task.FundingMaintenanceTask.class.getName(),
+                        com.surprising.funding.provider.task.FundingMaintenanceTask.class,
+                        () -> mock(com.surprising.funding.provider.task.FundingMaintenanceTask.class)) : runner)
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
+                .withBean(LifecycleBusinessSettingsService.class.getName(), LifecycleBusinessSettingsService.class, () -> {
+                    var settings = mock(LifecycleBusinessSettingsService.class);
+                    org.mockito.Mockito.when(settings.current()).thenReturn(new LifecycleBusinessSettingsService.Settings(
+                            1, LifecycleBusinessSettings.initial(), "SYSTEM", "composition fixture", java.time.Instant.now()));
+                    return settings;
+                })
                 .withBean(ObjectMapper.class, ObjectMapper::new)
                 .withBean("disableBackgroundIo", BeanPostProcessor.class, () -> new BeanPostProcessor() {
                     @Override public Object postProcessBeforeInitialization(Object bean, String name) {

@@ -3,16 +3,14 @@ package com.surprising.liquidation.provider.config;
 import lombok.Getter;
 
 import com.surprising.product.api.ProductLine;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Getter
-@ConfigurationProperties(prefix = "surprising.liquidation")
 public class LiquidationProperties {
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private Aeron aeron = new Aeron();
-    private Coordinator coordinator = new Coordinator();
-    private Execution execution = new Execution();
+    private volatile Coordinator coordinator = new Coordinator();
+    private volatile Execution execution = new Execution();
 
     public void setProductLine(ProductLine value) {
         productLine = value == null ? ProductLine.LINEAR_PERPETUAL : value;

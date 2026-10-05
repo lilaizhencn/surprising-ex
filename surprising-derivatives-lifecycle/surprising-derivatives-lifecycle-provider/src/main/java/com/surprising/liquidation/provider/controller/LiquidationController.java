@@ -7,6 +7,8 @@ import com.surprising.liquidation.provider.service.LiquidationService;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,5 +45,19 @@ public class LiquidationController {
     public Map<String, Object> runtimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId) {
         return runtimeConfigService.current();
     }
+
+    @PostMapping(LiquidationApiPaths.BASE_PATH + "/admin/runtime-config")
+    public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String admin,
+            @RequestBody RuntimeConfigUpdate request) {
+        try {
+            return runtimeConfigService.update(admin, request.expectedVersion(), request.executionEnabled(),
+                    request.liquidationFeeRatePpm(), request.delayMs(), request.workBatchSize(),
+                    request.maxPagesPerRun(), request.maxWorkBytes(), request.reason());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+    public record RuntimeConfigUpdate(Long expectedVersion, Boolean executionEnabled, Long liquidationFeeRatePpm,
+            Long delayMs, Integer workBatchSize, Integer maxPagesPerRun, Integer maxWorkBytes, String reason) {}
 
 }

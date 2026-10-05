@@ -34,18 +34,6 @@ surprising:
       cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
       concurrency: 1
       max-poll-records: 500
-    calculation:
-      publish-delay-ms: 1000
-      max-mark-age: 10s
-      max-rate-age: 5s
-    settlement:
-      settle-delay-ms: 1000
-      batch-size: 20
-      max-pages-per-run: ${FUNDING_MAX_PAGES_PER_RUN:8}
-    coordination:
-      enabled: true
-      node-id:
-      lease-duration: 15s
   risk:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:
@@ -53,20 +41,10 @@ surprising:
       egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
       response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
-    calculation:
-      max-mark-age: 10s
   liquidation:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
-    coordinator:
-      delay-ms: 25
-      work-batch-size: 256
-      max-pages-per-run: ${LIQUIDATION_MAX_PAGES_PER_RUN:8}
-      max-work-bytes: ${LIQUIDATION_MAX_WORK_BYTES:1048576}
-    execution:
-      enabled: true
-      liquidation-fee-rate-ppm: 3000
   insurance:
     aeron:
       hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
@@ -78,19 +56,6 @@ surprising:
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       concurrency: 2
       max-poll-records: 500
-    coverage:
-      scan-delay-ms: 1000
-      batch-size: 100
-  adl:
-    kafka:
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-    scanner:
-      scan-delay-ms: 1000
-      min-deficit-age-ms: 10000
-      max-mark-age-ms: 5000
-      batch-size: 50
-      max-deleverages-per-deficit: 20
-      candidate-multiplier: 5
   price:
     consumer:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}

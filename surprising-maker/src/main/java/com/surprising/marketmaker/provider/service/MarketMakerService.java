@@ -1540,7 +1540,11 @@ public class MarketMakerService {
             // 现货没有持仓对象，使用账户 JVM 快照中的基础资产权益作为库存约束。
             // AccountRpcApi 只访问账户服务本地快照，不会在报价周期内查询数据库。
             var balance = accountRpcApi.balance(accountId, instrument.baseAsset());
-            long inventory = balance == null ? 0L : Math.max(0L, balance.equityUnits());
+            if (instrument.quantityStepUnits() <= 0) {
+                throw new IllegalStateException("现货做市数量步长必须为正数");
+            }
+            long inventory = balance == null ? 0L
+                    : Math.max(0L, balance.equityUnits()) / instrument.quantityStepUnits();
             return new PositionResponse(accountId, instrumentId,
                     strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
         }

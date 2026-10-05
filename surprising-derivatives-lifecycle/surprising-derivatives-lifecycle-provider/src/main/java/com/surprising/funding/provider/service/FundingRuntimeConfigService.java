@@ -1,96 +1,42 @@
 package com.surprising.funding.provider.service;
 
-import com.surprising.funding.provider.config.FundingProperties;
-import java.util.LinkedHashMap;
+import com.surprising.derivatives.lifecycle.LifecycleBusinessSettings;
+import com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsService;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
-/**
- * 统一执行资金费运行参数查询、校验和更新。
- */
+/** 资金费设置的后台入口：校验完整候选值后按版本保存，不直接修改运行对象。 */
 @Service
 public class FundingRuntimeConfigService {
-
-    private final FundingProperties properties;
-
-    public FundingRuntimeConfigService(FundingProperties properties) {
-        this.properties = properties;
-    }
+    private final LifecycleBusinessSettingsService settings;
+    public FundingRuntimeConfigService(LifecycleBusinessSettingsService settings) { this.settings = settings; }
 
     public Map<String, Object> current() {
-        Map<String, Object> calculation = new LinkedHashMap<>();
-        calculation.put("enabled", properties.getCalculation().isEnabled());
-        calculation.put("publishDelayMs", properties.getCalculation().getPublishDelayMs());
-        calculation.put("maxMarkAge", properties.getCalculation().getMaxMarkAge().toString());
-
-        Map<String, Object> settlement = new LinkedHashMap<>();
-        settlement.put("enabled", properties.getSettlement().isEnabled());
-        settlement.put("settleDelayMs", properties.getSettlement().getSettleDelayMs());
-        settlement.put("batchSize", properties.getSettlement().getBatchSize());
-
-        Map<String, Object> coordination = new LinkedHashMap<>();
-        coordination.put("enabled", properties.getCoordination().isEnabled());
-        coordination.put("nodeId", properties.getCoordination().getNodeId());
-        coordination.put("leaseDuration", properties.getCoordination().getLeaseDuration().toString());
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("scope", "runtime");
-        response.put("calculation", calculation);
-        response.put("settlement", settlement);
-        response.put("coordination", coordination);
-        return response;
+        var saved = settings.current();
+        var value = saved.settings().funding();
+        return Map.of("scope", "DATABASE", "version", saved.version(), "updatedBy", saved.updatedBy(), "reason", saved.reason(),
+                "calculation", Map.of("enabled", value.calculationEnabled(), "publishDelayMs", value.publishDelayMs(), "maxMarkAgeMs", value.maxMarkAgeMs(), "maxRateAgeMs", value.maxRateAgeMs()),
+                "settlement", Map.of("enabled", value.settlementEnabled(), "settleDelayMs", value.settleDelayMs(), "batchSize", value.batchSize(), "maxPagesPerRun", value.maxPagesPerRun()),
+                "coordination", Map.of("enabled", value.coordinationEnabled(), "leaseDurationMs", value.leaseDurationMs()));
     }
 
-    public Map<String, Object> update(Boolean calculationEnabled,
-                                      Boolean settlementEnabled,
-                                      Boolean coordinationEnabled,
-                                      Long calculationPublishDelayMs,
-                                      Long settleDelayMs,
-                                      Integer settlementBatchSize,
-                                      Integer paymentPageSize,
-                                      Integer maxPagesPerRun,
-                                      Integer reconcileBatchSize) {
-        if (calculationEnabled != null) {
-            properties.getCalculation().setEnabled(calculationEnabled);
-        }
-        if (settlementEnabled != null) {
-            properties.getSettlement().setEnabled(settlementEnabled);
-        }
-        if (coordinationEnabled != null) {
-            properties.getCoordination().setEnabled(coordinationEnabled);
-        }
-        if (calculationPublishDelayMs != null) {
-            properties.getCalculation().setPublishDelayMs(
-                    nonNegative(calculationPublishDelayMs, "calculationPublishDelayMs"));
-        }
-        if (settleDelayMs != null) {
-            properties.getSettlement().setSettleDelayMs(positive(settleDelayMs, "settleDelayMs"));
-        }
-        if (settlementBatchSize != null) {
-            properties.getSettlement().setBatchSize(
-                    bounded(settlementBatchSize, 1, 10_000, "settlementBatchSize"));
-        }
+    public Map<String, Object> update(String admin, Long expectedVersion, Boolean calculationEnabled,
+            Boolean settlementEnabled, Boolean coordinationEnabled, Long publishDelayMs, Long settleDelayMs,
+            Integer batchSize, Integer paymentPageSize, Integer maxPagesPerRun, Integer reconcileBatchSize,
+            Long maxMarkAgeMs, Long maxRateAgeMs, Long leaseDurationMs, String reason) {
+        if (paymentPageSize != null || reconcileBatchSize != null)
+            throw new IllegalArgumentException("paymentPageSize and reconcileBatchSize are not runtime business controls");
+        synchronized (settings) {
+        var all = settings.current().settings();
+        var old = all.funding();
+        var next = new LifecycleBusinessSettings.Funding(value(calculationEnabled, old.calculationEnabled()),
+                value(settlementEnabled, old.settlementEnabled()), value(coordinationEnabled, old.coordinationEnabled()),
+                value(publishDelayMs, old.publishDelayMs()), value(maxMarkAgeMs, old.maxMarkAgeMs()), value(maxRateAgeMs, old.maxRateAgeMs()),
+                value(settleDelayMs, old.settleDelayMs()), value(batchSize, old.batchSize()),
+                value(maxPagesPerRun, old.maxPagesPerRun()), value(leaseDurationMs, old.leaseDurationMs()));
+        settings.save(new LifecycleBusinessSettings(next, all.liquidation(), all.insurance(), all.adl()), expectedVersion, admin, reason);
         return current();
-    }
-
-    private long nonNegative(long value, String field) {
-        if (value < 0) {
-            throw new IllegalArgumentException(field + " must be non-negative");
         }
-        return value;
     }
-
-    private int bounded(int value, int min, int max, String field) {
-        if (value < min || value > max) {
-            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
-        }
-        return value;
-    }
-
-    private long positive(long value, String field) {
-        if (value <= 0L) {
-            throw new IllegalArgumentException(field + " must be positive");
-        }
-        return value;
-    }
+    private static <T> T value(T update, T previous) { return update == null ? previous : update; }
 }

@@ -29,6 +29,12 @@ class FundingCompositionTest {
                 .withBean(RiskProperties.class, () -> risk)
                 .withBean(DerivativesAeronClient.class, () -> mock(DerivativesAeronClient.class))
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
+                .withBean(LifecycleBusinessSettingsService.class.getName(), LifecycleBusinessSettingsService.class, () -> {
+                    var settings = mock(LifecycleBusinessSettingsService.class);
+                    org.mockito.Mockito.when(settings.current()).thenReturn(new LifecycleBusinessSettingsService.Settings(
+                            1, LifecycleBusinessSettings.initial(), "SYSTEM", "composition fixture", java.time.Instant.now()));
+                    return settings;
+                })
                 .withBean(LatestMarkPriceCache.class, () -> mock(LatestMarkPriceCache.class))
                 .withBean("derivativesInstrumentSnapshotCache", InstrumentSnapshotCache.class, InstrumentSnapshotCache::new)
                 .withBean(ObjectMapper.class, ObjectMapper::new);

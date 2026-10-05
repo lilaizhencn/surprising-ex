@@ -28,7 +28,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @EnableScheduling
 @EnableFeignClients(clients = InstrumentRpcApi.class)
-@EnableConfigurationProperties({RiskProperties.class, LiquidationProperties.class, InsuranceProperties.class, AdlProperties.class})
+@EnableConfigurationProperties(RiskProperties.class)
 public class SurprisingDerivativesLifecycleApplication {
 
     public static void main(String[] args) {

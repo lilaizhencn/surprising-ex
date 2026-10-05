@@ -21,6 +21,15 @@ class InstrumentValidatorTest {
     private final InstrumentValidator validator = new InstrumentValidator();
 
     @Test
+    void rejectsSpotTickerForOptionRiskInputs() {
+        var json = new tools.jackson.databind.ObjectMapper();
+        var fields = (tools.jackson.databind.node.ObjectNode) json.valueToTree(optionRequest());
+        ((tools.jackson.databind.node.ObjectNode) fields.path("indexSources").get(0)).put("parser", "BINANCE_BOOK_TICKER");
+        assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("OPTION_RISK_TICKER");
+    }
+
+    @Test
     void rejectsTooFewEnabledIndexSources() {
         InstrumentUpsertRequest request = request(List.of(source("A", true), source("B", false)), 2);
 
@@ -35,6 +44,31 @@ class InstrumentValidatorTest {
 
         assertThatCode(() -> validator.validate(request))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void validatesOptionalSpotIndexSources() {
+        var json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
+        var fields = (tools.jackson.databind.node.ObjectNode) json.valueToTree(spotRequest());
+        fields.set("indexSources", json.valueToTree(List.of(source("A", true))));
+        assertThatCode(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
+                .doesNotThrowAnyException();
+        fields.put("minValidIndexSources", 2);
+        assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("enabled index sources");
+        fields.put("minValidIndexSources", 1);
+        ((tools.jackson.databind.node.ObjectNode) fields.get("indexSources").get(0)).put("baseUrl", "invalid");
+        assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("baseUrl");
+    }
+
+    @Test
+    void rejectsOptionStrikeNotAlignedWithPriceTickBeforePersisting() {
+        var json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
+        var fields = (tools.jackson.databind.node.ObjectNode) json.valueToTree(optionRequest());
+        fields.put("priceTickUnits", 100); fields.put("strikePriceUnits", 50_000_000_001L);
+        assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("strikePriceUnits must align");
     }
 
     @Test
@@ -209,17 +243,20 @@ class InstrumentValidatorTest {
                 InstrumentStatus.PRE_TRADING, null,
                 List.of(new RiskLimitBracket(1, 0L, 500_000_000_000_000L,
                         100_000_000L, 10_000L, 5_000L)),
-                List.of(source("A", true), source("B", true)));
+                List.of(source("A", true, contractType.isOption()), source("B", true, contractType.isOption())));
     }
 
     private Instant expiry() {
         return Instant.parse("2026-03-27T08:00:00Z");
     }
 
-    private IndexSourceConfig source(String name, boolean enabled) {
+    private IndexSourceConfig source(String name, boolean enabled) { return source(name, enabled, false); }
+
+    private IndexSourceConfig source(String name, boolean enabled, boolean option) {
+        String parser = option ? "OPTION_RISK_TICKER" : "BINANCE_BOOK_TICKER";
         return new IndexSourceConfig(name, enabled, "https://example.com", "/ticker", "BTCUSDT",
-                "BINANCE_BOOK_TICKER", "USDT", "USDT", null, null, null, "DISCOUNT",
-                "MULTIPLY", 500_000L, true, "wss://example.com", "{}", "BINANCE_BOOK_TICKER",
+                parser, "USDT", "USDT", null, null, null, "DISCOUNT",
+                "MULTIPLY", 500_000L, true, "wss://example.com", "{}", parser,
                 1_000_000L);
     }
 }

@@ -35,8 +35,6 @@ public class InstrumentSnapshotInitializer {
             throw new IllegalStateException("合约快照产品线不匹配: " + productLine);
         }
         snapshotCache.replace(productLine, snapshot.instruments(), snapshot.assetScales());
-        if (!snapshotCache.ready(productLine)) {
-            throw new IllegalStateException("合约快照为空，拒绝启动: " + productLine);
-        }
+        // 新产品线允许空目录启动；后续合约事件填充缓存，下单校验仍要求目标合约存在。
     }
 }

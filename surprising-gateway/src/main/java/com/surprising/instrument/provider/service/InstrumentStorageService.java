@@ -59,6 +59,12 @@ public class InstrumentStorageService {
                 request.settleAssetId(), request.contractValueAssetId()))) {
             var asset = assetScaleRepository.lock(assetId)
                     .orElseThrow(() -> new IllegalArgumentException("instrument asset not found: " + assetId));
+            if (assetId == request.quoteAssetId() && request.indexSources() != null) {
+                for (var source : request.indexSources()) {
+                    if (!asset.asset().equalsIgnoreCase(source.targetQuoteCurrency()))
+                        throw new IllegalArgumentException("index source target quote currency must match the instrument quote asset");
+                }
+            }
             if ((before == null || (before.status() != InstrumentStatus.TRADING && request.status() == InstrumentStatus.TRADING))
                     && (!asset.listed() || !asset.tradingEnabled())) {
                 throw new IllegalArgumentException("new instrument requires listed and trading-enabled assets");

@@ -215,7 +215,8 @@ public final class RuntimeSpotMatchProcessor {
         if (reservation == null || reservation.userId() != order.userId()) {
             throw new IllegalStateException("runtime spot reservation is missing");
         }
-        long quoteUnits = Math.multiplyExact(fillPriceTicks, fillQuantitySteps);
+        long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, fillPriceTicks, fillQuantitySteps);
+        long baseUnits = CoreContractMath.spotBaseUnits(instrument, fillQuantitySteps);
         long feeRate = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRate);
         int debitAssetId = order.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
@@ -236,10 +237,10 @@ public final class RuntimeSpotMatchProcessor {
             nextQuoteLocked = Math.subtractExact(nextQuoteLocked, quoteUnits);
             if (feeDelta < 0) nextQuoteLocked = Math.subtractExact(nextQuoteLocked, Math.negateExact(feeDelta));
             else if (feeDelta > 0) nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
-            nextBaseAvailable = Math.addExact(nextBaseAvailable, fillQuantitySteps);
+            nextBaseAvailable = Math.addExact(nextBaseAvailable, baseUnits);
         } else {
-            reservationDebit = fillQuantitySteps;
-            nextBaseLocked = Math.subtractExact(nextBaseLocked, fillQuantitySteps);
+            reservationDebit = baseUnits;
+            nextBaseLocked = Math.subtractExact(nextBaseLocked, baseUnits);
             nextQuoteAvailable = Math.addExact(nextQuoteAvailable, quoteUnits);
             nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
         }
@@ -403,7 +404,8 @@ public final class RuntimeSpotMatchProcessor {
                 if (price <= 0 || quantity <= 0 || quantity > remaining) {
                     throw new IllegalArgumentException("invalid runtime spot fill");
                 }
-                long quoteUnits = Math.multiplyExact(price, quantity);
+                long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, price, quantity);
+                long baseUnits = CoreContractMath.spotBaseUnits(instrument, quantity);
                 long feeRate = taker ? originalOrder.takerFeeRatePpm() : originalOrder.makerFeeRatePpm();
                 long feeDelta = CoreContractMath.feeDeltaUnits(instrument, price, quantity, feeRate);
                 int debitAssetId = originalOrder.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
@@ -416,10 +418,10 @@ public final class RuntimeSpotMatchProcessor {
                     quote.locked = Math.subtractExact(quote.locked, quoteUnits);
                     if (feeDelta < 0) quote.locked = Math.subtractExact(quote.locked, Math.negateExact(feeDelta));
                     else if (feeDelta > 0) quote.available = Math.addExact(quote.available, feeDelta);
-                    base.available = Math.addExact(base.available, quantity);
+                    base.available = Math.addExact(base.available, baseUnits);
                 } else {
-                    reservationDebit = quantity;
-                    base.locked = Math.subtractExact(base.locked, quantity);
+                    reservationDebit = baseUnits;
+                    base.locked = Math.subtractExact(base.locked, baseUnits);
                     quote.available = Math.addExact(quote.available, quoteUnits);
                     quote.available = Math.addExact(quote.available, feeDelta);
                 }

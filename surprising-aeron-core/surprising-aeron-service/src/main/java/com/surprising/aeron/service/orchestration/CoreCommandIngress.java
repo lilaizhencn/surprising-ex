@@ -58,10 +58,6 @@ final class CoreCommandIngress {
         if (message.header().productLine() != runtime.productLine) {
             return runtime.rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
-        if (message.header().kind() == WireMessageKind.COMMAND
-                && message.header().messageType() != CoreMessageType.REGISTER_INSTRUMENT) {
-            runtime.runtimeState.sealInstrumentRegistry();
-        }
         if (message.header().kind() == WireMessageKind.QUERY
                 && TradingCoreRuntime.accountLaneReadQuery(message.header().messageType())) {
             if (TradingCoreRuntime.singleUserLaneQuery(message.header().messageType())

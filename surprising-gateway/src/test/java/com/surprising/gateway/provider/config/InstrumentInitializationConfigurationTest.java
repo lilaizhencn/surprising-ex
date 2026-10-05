@@ -54,10 +54,16 @@ class InstrumentInitializationConfigurationTest {
     }
 
     @ParameterizedTest @EnumSource(ProductLine.class)
-    void stillRejectsEmptySnapshot(ProductLine line) {
+    void emptySnapshotStartsWithoutInventingTradableInstruments(ProductLine line) {
         var instruments = mock(InstrumentService.class);
         when(instruments.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(line, 0, "", List.of()));
-        context(line, instruments).run(ctx -> assertThat(ctx).hasFailed());
+        context(line, instruments).run(ctx -> {
+            assertThat(ctx).hasNotFailed();
+            var cache = ctx.getBean(InstrumentSnapshotCache.class);
+            assertThat(cache.initialized(line)).isTrue();
+            assertThat(cache.ready(line)).isFalse();
+            assertThat(cache.current(line)).isEmpty();
+        });
     }
 
     private ApplicationContextRunner context(ProductLine line, InstrumentService instruments) {

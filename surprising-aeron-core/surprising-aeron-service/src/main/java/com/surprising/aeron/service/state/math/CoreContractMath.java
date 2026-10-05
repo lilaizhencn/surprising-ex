@@ -155,7 +155,7 @@ public final class CoreContractMath {
             return 0;
         }
         long notional = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
-                ? Math.multiplyExact(priceTicks, quantitySteps)
+                ? spotQuoteUnits(instrument, priceTicks, quantitySteps)
                 : instrument.contractType().isOption()
                 ? OptionContractMath.optionPremiumUnits(instrument, priceTicks, quantitySteps)
                 : PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
@@ -172,11 +172,22 @@ public final class CoreContractMath {
 
     public static long notionalUnits(CoreInstrument instrument, long quantitySteps, long priceTicks) {
         if (quantitySteps <= 0) return 0;
+        if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
+            return spotQuoteUnits(instrument, priceTicks, quantitySteps);
+        }
         if (instrument.contractType().isOption()) {
             return OptionContractMath.optionPremiumUnits(instrument, priceTicks, quantitySteps);
         }
         return PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
+    }
+
+    public static long spotBaseUnits(CoreInstrument instrument, long quantitySteps) {
+        return Math.multiplyExact(quantitySteps, instrument.quantityStepUnits());
+    }
+
+    public static long spotQuoteUnits(CoreInstrument instrument, long priceTicks, long quantitySteps) {
+        return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps), instrument.notionalMultiplierUnits());
     }
 
     public static long riskNotionalUnits(CoreInstrument instrument, long quantitySteps, long referencePriceTicks) {

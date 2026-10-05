@@ -5,7 +5,12 @@ public record MarkPriceEncoding(
         long quoteScaleUnits,
         long priceTickUnits,
         long baseScaleUnits,
-        long quantityStepUnits) {
+        long quantityStepUnits,
+        java.time.Instant expiryTime) {
+    public MarkPriceEncoding(long instrumentChangeId, long quoteScaleUnits, long priceTickUnits,
+            long baseScaleUnits, long quantityStepUnits) {
+        this(instrumentChangeId, quoteScaleUnits, priceTickUnits, baseScaleUnits, quantityStepUnits, null);
+    }
 
     public MarkPriceEncoding {
         if (instrumentChangeId <= 0 || quoteScaleUnits <= 0 || priceTickUnits <= 0

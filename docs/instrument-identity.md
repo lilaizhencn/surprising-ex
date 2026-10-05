@@ -36,7 +36,7 @@ Core 协议版本为 8。项目尚未上线，不实现旧名称状态的兼容�
 
 币种与网络管理目前负责目录、配置校验和审计；本轮只启动交易相关六个服务，不启动 Wallet，也不代表已完成外部链上充提、手续费及确认数的联调。
 
-相关入口：`InstrumentIds`、`InstrumentRepository`、`InstrumentStorageService`、`InstrumentSnapshotCache`、`ClusterInstrumentSeedMain`、`AssetConfigurationService`。
+相关入口：`InstrumentIds`、`InstrumentRepository`、`InstrumentStorageService`、`InstrumentSnapshotCache`、`AssetConfigurationService`。
 
 做市专用账户由该产品线的 `surprising.trade-export.market-maker-account-ids` 明确列出（包含模拟成交账户）。普通用户订单全部入历史查询表；纯做市互成交和未成交撤单不入表。做市订单只要曾与普通用户成交，完整累计状态就持续保存，包括后续内部成交、撤单和重启后的更新。过滤只位于历史持久化边界，不影响 Core 权威状态、资金流水、公开成交或 WebSocket。
 
@@ -47,3 +47,5 @@ Core 协议版本为 8。项目尚未上线，不实现旧名称状态的兼容�
 账户余额调整、保险基金划拨、代客撤单、维护清算等资金或业务干预接口仍要求审批，不通过关闭全局审批开关来简化日常配置。未列入日常配置清单的接口沿用原审批规则。管理端 `src/api/admin.ts` 与网关保持同样的日常接口范围。
 
 `GatewayProxyServiceTest` 覆盖日常配置无需第二位管理员、缺少服务权限拒绝访问，以及资金、维护干预继续要求审批；本次 40 项测试通过。
+
+原独立 `ClusterInstrumentSeedMain` 手工初始化入口已移除。合约注册统一由网关从后台数据库目录通过 `InstrumentCoreSyncService` 自动完成，启动脚本不再维护第二套合约状态及风险预算环境变量入口。

@@ -60,4 +60,6 @@ COMMENT ON COLUMN market_maker_strategies.updated_by IS '最近修改管理员 I
 COMMENT ON COLUMN market_maker_strategies.reason IS '最近一次修改原因。';
 COMMENT ON COLUMN market_maker_strategies.updated_at IS '最近配置修改时间。';
 
+-- 邮箱/手机号账号可无用户名；审批身份以 requester_user_id 为准。
+ALTER TABLE gateway_admin_approval_requests ALTER COLUMN requester_username DROP NOT NULL;
 COMMIT;

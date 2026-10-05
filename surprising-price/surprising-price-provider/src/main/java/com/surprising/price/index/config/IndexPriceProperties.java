@@ -14,26 +14,24 @@ import java.util.List;
 import java.util.Locale;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Getter
 @Validated
-@ConfigurationProperties(prefix = "surprising.price.index")
 public class IndexPriceProperties {
 
     @Setter
     private Kafka kafka = new Kafka();
     @Setter
-    private Calculation calculation = new Calculation();
+    private volatile Calculation calculation = new Calculation();
     @Setter
     private Http http = new Http();
     @Setter
-    private WebSocket webSocket = new WebSocket();
+    private volatile WebSocket webSocket = new WebSocket();
     @Setter
-    private Fiat fiat = new Fiat();
+    private volatile Fiat fiat = new Fiat();
     @Setter
-    private Coordination coordination = new Coordination();
+    private volatile Coordination coordination = new Coordination();
     @Setter
     private Audit audit = new Audit();
     private List<String> requiredInstrumentIds = List.of();

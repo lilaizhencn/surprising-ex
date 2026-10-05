@@ -6,15 +6,13 @@ import lombok.Setter;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Getter
-@ConfigurationProperties(prefix = "surprising.insurance")
 public class InsuranceProperties {
 
     private Kafka kafka = new Kafka();
     @Setter
-    private Coverage coverage = new Coverage();
+    private volatile Coverage coverage = new Coverage();
     private Aeron aeron = new Aeron();
 
     public void setKafka(Kafka kafka) {

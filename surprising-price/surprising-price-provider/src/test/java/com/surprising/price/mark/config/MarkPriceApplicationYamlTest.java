@@ -33,10 +33,10 @@ class MarkPriceApplicationYamlTest {
 
     @ParameterizedTest
     @ValueSource(longs = {1000L, 500L, 250L, 100L})
-    void markMatrixOverrideBindsToEffectivePublishInterval(long publishIntervalMs) throws IOException {
+    void environmentCannotOverrideBusinessPublishInterval(long publishIntervalMs) throws IOException {
         MarkPriceProperties properties = bind(publishIntervalMs);
 
-        assertThat(properties.getCalculation().getPublishIntervalMs()).isEqualTo(publishIntervalMs);
+        assertThat(properties.getCalculation().getPublishIntervalMs()).isEqualTo(1000L);
         assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(properties)).isEmpty();
     }
 
@@ -55,7 +55,6 @@ class MarkPriceApplicationYamlTest {
     }
 
     private MarkPriceProperties bind(StandardEnvironment environment) {
-        return Binder.get(environment).bind("surprising.price.mark", Bindable.of(MarkPriceProperties.class))
-                .orElseThrow(() -> new IllegalStateException("mark price properties are required"));
+        return new com.surprising.price.settings.PriceInfrastructureConfiguration().markPriceProperties(environment);
     }
 }

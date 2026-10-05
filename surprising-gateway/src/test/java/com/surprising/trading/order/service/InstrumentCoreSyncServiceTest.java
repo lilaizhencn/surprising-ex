@@ -18,6 +18,28 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class InstrumentCoreSyncServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
+    void draftCanBeRegisteredAndRecoveredBeforeListing(ProductLine line) {
+        var cache = new InstrumentSnapshotCache();
+        var properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(line);
+        var gateway = mock(MaintenanceAeronGateway.class);
+        try (var runtime = new TradingCoreRuntime(line)) {
+            when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call ->
+                    new com.surprising.aeron.client.CoreCommandOutcome.Terminal(runtime.apply(new CoreMessage(
+                            CoreMessageHeader.command(call.getArgument(0), call.getArgument(1), line,
+                                    CommandSource.OPERATIONS, 993, 1, 0, 1_700_000_000_001L, 1), call.getArgument(3)))));
+            cache.replace(line, List.of(row(line, 1, InstrumentStatus.DRAFT)),
+                    java.util.Map.of("BTC", 100_000_000L, "USDT", 100_000_000L));
+            var service = new InstrumentCoreSyncService(cache, gateway, properties);
+            service.reconcile();
+            assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
+            assertThat(runtime.tradingState().instruments().get("1").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+            try (var restored = TradingCoreRuntime.fromSnapshot(line, runtime.snapshot(42))) {
+                assertThat(restored.tradingState().instruments().get("1").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+            }
+        }
+    }
+    @ParameterizedTest @EnumSource(ProductLine.class)
     void appliesStartupAndLaterConfigurationChangesThroughTheSameCoreCommand(ProductLine line) {
         var cache=new InstrumentSnapshotCache(); var properties=new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         var gateway=mock(MaintenanceAeronGateway.class); var sequence=new AtomicLong();
@@ -77,6 +99,17 @@ class InstrumentCoreSyncServiceTest {
                 var recovered=restored.tradingState().instruments().get("1");
                 assertThat(recovered.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
                 assertThat(recovered.marketOrderEnabled()).isFalse();
+                var newlyListed = row(line, 5, InstrumentStatus.DRAFT);
+                when(newlyListed.instrumentId()).thenReturn(2);
+                when(newlyListed.symbol()).thenReturn("2");
+                var registration = service.command(newlyListed);
+                long next = sequence.incrementAndGet();
+                var applied = restored.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
+                        java.util.UUID.randomUUID(), line, CommandSource.OPERATIONS, 993, next, 0,
+                        1_700_000_000_000L + next, next), TradingCommandCodec.encodeRegisterInstrument(registration)));
+                assertThat(applied.commandStatus()).as("new instrument after business activity and snapshot restore").isEqualTo(ResponseStatus.APPLIED);
+                assertThat(restored.tradingState().instruments()).containsKeys("1", "2");
+                assertThat(restored.tradingState().instruments().get("2").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
             }
 
             var restricted=row(line,4,InstrumentStatus.TRADING);
@@ -111,6 +144,7 @@ class InstrumentCoreSyncServiceTest {
         when(v.contractType()).thenReturn(type); when(v.baseAsset()).thenReturn("BTC"); when(v.quoteAsset()).thenReturn("USDT");
         when(v.settleAsset()).thenReturn(type.isInverse()?"BTC":"USDT"); when(v.notionalMultiplierUnits()).thenReturn(1L);
         when(v.priceTickUnits()).thenReturn(1L); when(v.initialMarginRatePpm()).thenReturn(100_000L);
+        when(v.quantityStepUnits()).thenReturn(1L);
         when(v.maintenanceMarginRatePpm()).thenReturn(50_000L); when(v.maxLeveragePpm()).thenReturn(10_000_000L);
         when(v.maxPositionNotionalUnits()).thenReturn(1_000_000L); when(v.userOpenInterestLimitFloorUnits()).thenReturn(1_000_000L);
         when(v.makerFeeRatePpm()).thenReturn(audit*1_000L);
@@ -118,7 +152,8 @@ class InstrumentCoreSyncServiceTest {
         when(v.reduceOnlyEnabled()).thenReturn(true);
         when(v.supportedOrderTypes()).thenReturn(List.of("LIMIT","MARKET"));
         when(v.supportedTimeInForce()).thenReturn(List.of("GTC","IOC","FOK","GTX"));
-        when(v.riskLimitBrackets()).thenReturn(List.of(new RiskLimitBracket(1,0,1_000_000,10_000_000,100_000,50_000,1_000_000)));
+        when(v.riskLimitBrackets()).thenReturn(line == ProductLine.SPOT ? List.of()
+                : List.of(new RiskLimitBracket(1,0,1_000_000,10_000_000,100_000,50_000,1_000_000)));
         if (type.isDelivery() || type.isOption()) when(v.expiryTime()).thenReturn(Instant.ofEpochMilli(2_000_000_000_000L));
         if (type.isOption()) { when(v.optionType()).thenReturn(OptionType.CALL); when(v.strikePriceUnits()).thenReturn(100L); }
         when(v.status()).thenReturn(status); return v;

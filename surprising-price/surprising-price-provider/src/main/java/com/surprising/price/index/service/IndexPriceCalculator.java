@@ -35,10 +35,16 @@ public class IndexPriceCalculator {
                 .sorted()
                 .toList());
 
+        boolean option = properties.getKafka().getProductLine() == com.surprising.product.api.ProductLine.OPTION;
+        BigDecimal premiumMedian = option ? median(freshnessChecked.stream().filter(SourceQuote::healthy)
+                .filter(q -> q.optionReference() != null).map(q -> q.optionReference().premiumPrice()).toList()) : null;
+        BigDecimal forwardMedian = option ? median(freshnessChecked.stream().filter(SourceQuote::healthy)
+                .filter(q -> q.optionReference() != null).map(q -> q.optionReference().sameExpiryForwardPrice()).toList()) : null;
         List<IndexComponentSnapshot> components = new ArrayList<>();
         BigDecimal totalValidWeight = BigDecimal.ZERO;
         for (SourceQuote quote : freshnessChecked) {
             SourceQuote checked = outlierAware(quote, median);
+            if (option) checked = optionOutlierAware(checked, premiumMedian, forwardMedian);
             if (checked.healthy()) {
                 totalValidWeight = totalValidWeight.add(checked.configuredWeight());
             }
@@ -71,7 +77,44 @@ public class IndexPriceCalculator {
 
         PriceStatus status = validCount == components.size() ? PriceStatus.HEALTHY : PriceStatus.DEGRADED;
         return new IndexPriceEvent(instrumentId, indexPrice.setScale(properties.getCalculation().getScale(), RoundingMode.HALF_UP),
-                sequence, status, weightedComponents.size(), validCount, configuredWeightTotal(quotes), now, weightedComponents);
+                sequence, status, weightedComponents.size(), validCount, configuredWeightTotal(quotes), now, weightedComponents,
+                optionReference(freshnessChecked, weightedComponents));
+    }
+
+    private com.surprising.price.api.model.OptionPriceReference optionReference(
+            List<SourceQuote> quotes, List<IndexComponentSnapshot> components) {
+        if (properties.getKafka().getProductLine() != com.surprising.product.api.ProductLine.OPTION) return null;
+        BigDecimal premium = BigDecimal.ZERO, forward = BigDecimal.ZERO;
+        Instant expiry = null;
+        for (int i = 0; i < components.size(); i++) {
+            var component = components.get(i);
+            if (component.status() != SourceStatus.HEALTHY) continue;
+            var reference = quotes.get(i).optionReference();
+            if (reference == null || expiry != null && !expiry.equals(reference.expiryTime()))
+                throw new IllegalArgumentException("all valid option sources must provide prices for the same expiry");
+            expiry = reference.expiryTime();
+            premium = premium.add(reference.premiumPrice().multiply(component.effectiveWeight()));
+            forward = forward.add(reference.sameExpiryForwardPrice().multiply(component.effectiveWeight()));
+        }
+        return new com.surprising.price.api.model.OptionPriceReference(premium, forward, expiry);
+    }
+
+    private SourceQuote optionOutlierAware(SourceQuote quote, BigDecimal premiumMedian, BigDecimal forwardMedian) {
+        if (!quote.healthy()) return quote;
+        var reference = quote.optionReference();
+        String reason = reference == null ? "option risk reference missing"
+                : outside(reference.premiumPrice(), premiumMedian) || outside(reference.sameExpiryForwardPrice(), forwardMedian)
+                    ? "option premium or forward deviates from source median" : null;
+        if (reason == null) return quote;
+        return new SourceQuote(quote.source(), quote.sourceSymbol(), quote.price(), quote.bidPrice(), quote.askPrice(),
+                quote.configuredWeight(), SourceStatus.OUTLIER, reason, quote.sourceTime(), quote.receivedAt(),
+                quote.latencyMillis(), quote.transport(), reference);
+    }
+
+    private boolean outside(BigDecimal price, BigDecimal median) {
+        return median == null || median.signum() <= 0 || price.subtract(median).abs()
+                .divide(median, properties.getCalculation().getScale(), RoundingMode.HALF_UP)
+                .compareTo(properties.getCalculation().getOutlierThreshold()) > 0;
     }
 
     private SourceQuote staleAware(SourceQuote quote, Instant now) {

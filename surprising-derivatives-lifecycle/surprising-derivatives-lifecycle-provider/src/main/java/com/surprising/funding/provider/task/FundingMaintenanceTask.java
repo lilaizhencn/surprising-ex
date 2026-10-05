@@ -11,17 +11,27 @@ import org.springframework.stereotype.Component;
 public class FundingMaintenanceTask {
 
     private final FundingService fundingService;
-    public FundingMaintenanceTask(FundingService fundingService) {
+    private final com.surprising.funding.provider.config.FundingProperties properties;
+    private long lastPublishNanos;
+    private long lastSettlementNanos;
+    public FundingMaintenanceTask(FundingService fundingService, com.surprising.funding.provider.config.FundingProperties properties) {
         this.fundingService = fundingService;
+        this.properties = properties;
     }
 
-    @Scheduled(scheduler = "fundingScheduler", fixedDelayString = "${surprising.funding.calculation.publish-delay-ms:1000}")
+    @Scheduled(scheduler = "fundingScheduler", fixedDelay = 25)
     public void publishRates() {
+        long now = System.nanoTime();
+        if (lastPublishNanos != 0 && now - lastPublishNanos < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(properties.getCalculation().getPublishDelayMs())) return;
+        lastPublishNanos = now;
         fundingService.publishRates();
     }
 
-    @Scheduled(scheduler = "fundingScheduler", fixedDelayString = "${surprising.funding.settlement.settle-delay-ms:1000}")
+    @Scheduled(scheduler = "fundingScheduler", fixedDelay = 25)
     public void settleDueRates() {
+        long now = System.nanoTime();
+        if (lastSettlementNanos != 0 && now - lastSettlementNanos < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(properties.getSettlement().getSettleDelayMs())) return;
+        lastSettlementNanos = now;
         fundingService.settleDueRates();
     }
 

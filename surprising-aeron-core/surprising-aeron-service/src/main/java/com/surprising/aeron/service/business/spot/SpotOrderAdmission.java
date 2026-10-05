@@ -10,6 +10,8 @@ import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
 import static com.surprising.aeron.service.business.OrderAdmissionMath.fragmentationSafeFeeDebit;
 import static com.surprising.aeron.service.state.math.CoreContractMath.feeDeltaUnits;
+import static com.surprising.aeron.service.state.math.CoreContractMath.spotBaseUnits;
+import static com.surprising.aeron.service.state.math.CoreContractMath.spotQuoteUnits;
 
 /** 现货订单准入需要冻结的资产数量计算。 */
 public final class SpotOrderAdmission {
@@ -19,8 +21,8 @@ public final class SpotOrderAdmission {
     public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                         ResolvedPlaceOrder order, long leverage,
                                         long pendingQuantitySteps) {
-        if (order.side() == CoreOrderSide.SELL) return order.quantitySteps();
-        long notional = Math.multiplyExact(order.reservationPriceTicks(), order.quantitySteps());
+        if (order.side() == CoreOrderSide.SELL) return spotBaseUnits(instrument, order.quantitySteps());
+        long notional = spotQuoteUnits(instrument, order.reservationPriceTicks(), order.quantitySteps());
         long feeDebit = fragmentationSafeFeeDebit(instrument, order);
         return Math.addExact(notional, feeDebit);
     }
@@ -36,8 +38,8 @@ public final class SpotOrderAdmission {
             CoreUserState user,
             ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {
-        if (command.side() == CoreOrderSide.SELL) return command.quantitySteps();
-        long notional = Math.multiplyExact(command.reservationPriceTicks(), command.quantitySteps());
+        if (command.side() == CoreOrderSide.SELL) return spotBaseUnits(instrument, command.quantitySteps());
+        long notional = spotQuoteUnits(instrument, command.reservationPriceTicks(), command.quantitySteps());
         long fee = feeDeltaUnits(instrument, command.reservationPriceTicks(),
                 command.quantitySteps(), command.takerFeeRatePpm());
         return Math.addExact(notional, Math.max(0, Math.negateExact(fee)));

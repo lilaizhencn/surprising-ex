@@ -122,6 +122,7 @@ public class FundingController {
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
             return runtimeConfigService.update(
+                    adminUserId, request.expectedVersion(),
                     request.calculationEnabled(),
                     request.settlementEnabled(),
                     request.coordinationEnabled(),
@@ -130,7 +131,7 @@ public class FundingController {
                     request.settlementBatchSize(),
                     request.paymentPageSize(),
                     request.maxPagesPerRun(),
-                    request.reconcileBatchSize());
+                    request.reconcileBatchSize(), request.maxMarkAgeMs(), request.maxRateAgeMs(), request.leaseDurationMs(), request.reason());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -145,7 +146,8 @@ public class FundingController {
             Integer settlementBatchSize,
             Integer paymentPageSize,
             Integer maxPagesPerRun,
-            Integer reconcileBatchSize) {
+            Integer reconcileBatchSize,
+            Long expectedVersion, Long maxMarkAgeMs, Long maxRateAgeMs, Long leaseDurationMs, String reason) {
     }
 
     private void requireAdmin(String adminUserId) {

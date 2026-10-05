@@ -98,13 +98,14 @@ public class AdlController {
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
             return runtimeConfigService.update(
+                    adminUserId, request.expectedVersion(),
                     request.scannerEnabled(),
                     request.scanDelayMs(),
                     request.minDeficitAgeMs(),
                     request.maxMarkAgeMs(),
                     request.batchSize(),
                     request.maxDeleveragesPerDeficit(),
-                    request.candidateMultiplier());
+                    request.candidateMultiplier(), request.reason());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -123,6 +124,6 @@ public class AdlController {
             Long maxMarkAgeMs,
             Integer batchSize,
             Integer maxDeleveragesPerDeficit,
-            Integer candidateMultiplier) {
+            Integer candidateMultiplier, Long expectedVersion, String reason) {
     }
 }

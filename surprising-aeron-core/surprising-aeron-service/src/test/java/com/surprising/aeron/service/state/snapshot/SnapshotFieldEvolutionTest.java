@@ -41,7 +41,7 @@ class SnapshotFieldEvolutionTest {
         byte[] encoded = TradingStateSnapshotCodec.encode(TradingCoreState.empty(ProductLine.SPOT));
         var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
         fields.removeIf(field -> id(field) == 12);
-        fields.add(new SnapshotFields.Writer().number(12, 2).encode());
+        fields.add(new SnapshotFields.Writer().number(12, 3).encode());
         assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(fields), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("requires reader version");
     }

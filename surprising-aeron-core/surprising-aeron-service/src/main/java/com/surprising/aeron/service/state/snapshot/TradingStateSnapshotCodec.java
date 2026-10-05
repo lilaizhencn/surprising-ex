@@ -20,7 +20,7 @@ import java.util.function.Function;
  */
 public final class TradingStateSnapshotCodec {
     private static final int VERSION = 37;
-    private static final int READER_REVISION = 1;
+    private static final int READER_REVISION = 2;
     private TradingStateSnapshotCodec() { }
 
     public static byte[] encode(TradingCoreState value) {
@@ -36,7 +36,7 @@ public final class TradingStateSnapshotCodec {
                 .bytes(9, writeMap(value.algoOrders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
                 .list(11, value.triggerOrders().values(), item -> writeCoreTriggerOrderStateView(item.view()))
-                .number(12, READER_REVISION).encode();
+                .number(12, value.instruments().values().stream().anyMatch(instrument -> instrument.quantityStepUnits() != 1) ? 2 : 1).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
@@ -745,6 +745,7 @@ public final class TradingStateSnapshotCodec {
                 .bool(25, value.reduceOnlyEnabled()) // 25: reduceOnlyEnabled
                 .number(26, value.supportedOrderTypeMask()) // 26: supportedOrderTypeMask
                 .number(27, value.supportedTimeInForceMask()) // 27: supportedTimeInForceMask
+                .number(28, value.quantityStepUnits()) // 28: base asset units per quantity step
                 .encode();
     }
     private static CoreInstrument readCoreInstrument(byte[] encoded) {
@@ -776,7 +777,8 @@ public final class TradingStateSnapshotCodec {
                 r.bool(24), // 24: postOnlyEnabled
                 r.bool(25), // 25: reduceOnlyEnabled
                 r.integer(26), // 26: supportedOrderTypeMask
-                r.integer(27)); // 27: supportedTimeInForceMask
+                r.integer(27), // 27: supportedTimeInForceMask
+                r.numberOr(28, 1L)); // Existing snapshots used unit quantities.
     }
 
     private static byte[] writeCoreRiskState(CoreRiskState value) {

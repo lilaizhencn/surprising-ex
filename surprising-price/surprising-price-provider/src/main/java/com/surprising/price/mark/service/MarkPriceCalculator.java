@@ -34,6 +34,8 @@ public class MarkPriceCalculator {
                                     BigDecimal basisAverage,
                                     MarkPriceEncoding encoding,
                                     Instant now) {
+        if (properties.getKafka().getProductLine() == com.surprising.product.api.ProductLine.OPTION)
+            return calculateOption(instrumentId, sequence, index, encoding, now);
         int scale = properties.getCalculation().getScale();
         BigDecimal indexPrice = index.indexPrice();
         BigDecimal fundingRate = funding == null ? BigDecimal.ZERO : funding.fundingRate();
@@ -77,6 +79,23 @@ public class MarkPriceCalculator {
                 book == null ? null : book.bestBidPrice(), book == null ? null : book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
                 basisAverage, properties.getCalculation().getBasisWindow().toSeconds(), clampLow, clampHigh,
                 sequence, status, now, now);
+    }
+
+    private MarkPriceEvent calculateOption(String instrumentId, long sequence, IndexPriceEvent index,
+                                           MarkPriceEncoding encoding, Instant now) {
+        var reference = index.optionReference();
+        if (reference == null || encoding.expiryTime() == null
+                || encoding.expiryTime().toEpochMilli() != reference.expiryTime().toEpochMilli() || !encoding.expiryTime().isAfter(now))
+            throw new IllegalArgumentException("option reference must match the configured contract expiry");
+        BigDecimal premium = reference.premiumPrice();
+        long units = premium.multiply(BigDecimal.valueOf(encoding.quoteScaleUnits()))
+                .setScale(0, RoundingMode.HALF_UP).longValueExact();
+        long ticks = Math.floorDiv(Math.addExact(units, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
+        if (ticks <= 0) throw new IllegalArgumentException("option premium is below its price tick");
+        return new MarkPriceEvent(properties.getKafka().getProductLine(), instrumentId, encoding.instrumentChangeId(),
+                units, ticks, premium, index.indexPrice(), reference.sameExpiryForwardPrice(), premium, null, null,
+                null, null, BigDecimal.ZERO, null, 0, BigDecimal.ZERO, 0, premium, premium,
+                sequence, index.status(), now, now);
     }
 
     public BigDecimal basis(IndexPriceEvent index, PerpBookTickerEvent book) {

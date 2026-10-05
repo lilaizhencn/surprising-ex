@@ -35,7 +35,7 @@ class ExternalSpotWebSocketManagerTest {
         var constructor = sessionType.getDeclaredConstructor(String.class, List.class); constructor.setAccessible(true);
         Object session = constructor.newInstance("ws://127.0.0.1:1", List.of(trackedSource));
         ((AtomicReference<WebSocket>) ReflectionTestUtils.getField(session, "webSocket")).set(socket);
-        ((Map<String, Object>) ReflectionTestUtils.getField(manager, "sessions")).put("test", session);
+        ((Map<String, Object>) ReflectionTestUtils.getField(manager, "sessions")).put("ws://127.0.0.1:1", session);
         ReflectionTestUtils.setField(manager, "running", true);
         try {
             Instant now = Instant.now();
@@ -45,6 +45,23 @@ class ExternalSpotWebSocketManagerTest {
             store.put("BTC-USDT-SWAP", source, quote(now.minusSeconds(100), now));
             manager.checkIdleSessions();
             verify(socket).abort();
+        } finally { manager.stop(); }
+    }
+
+    @Test
+    void initiallyDisabledCollectorCanBeEnabledWithoutRestart() {
+        var properties = new IndexPriceProperties(); properties.getWebSocket().setEnabled(false);
+        var config = mock(IndexInstrumentConfigService.class);
+        when(config.symbols()).thenReturn(List.of());
+        var manager = new ExternalSpotWebSocketManager(properties, config, mock(ExternalSpotPriceClient.class), new LatestSourceQuoteStore());
+        try {
+            manager.start();
+            verifyNoInteractions(config);
+            properties.getWebSocket().setEnabled(true); manager.refreshConnections();
+            verify(config).symbols();
+            properties.getWebSocket().setEnabled(false); manager.refreshConnections();
+            verifyNoMoreInteractions(config);
+            org.assertj.core.api.Assertions.assertThat(manager.health()).isEmpty();
         } finally { manager.stop(); }
     }
 

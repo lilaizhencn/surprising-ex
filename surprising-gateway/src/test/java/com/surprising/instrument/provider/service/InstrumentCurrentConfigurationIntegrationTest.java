@@ -29,8 +29,49 @@ class InstrumentCurrentConfigurationIntegrationTest {
         var audit = new InstrumentChangeLogRepository(jdbc);
         var storage = new InstrumentStorageService(repository, audit, new InstrumentRiskBracketRepository(jdbc),
                 new InstrumentIndexSourceRepository(jdbc), new AssetRepository(jdbc), json);
+        var template = storage.list(ProductLine.LINEAR_PERPETUAL, null, null).getFirst();
         for (var line : ProductLine.values()) {
-            var initial = storage.list(line, null, null).getFirst();
+            var creatingFields = (ObjectNode) json.valueToTree(template);
+            creatingFields.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
+            creatingFields.putNull("instrumentId");
+            creatingFields.put("symbol", "QA-" + line.name() + "-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT));
+            creatingFields.put("contractType", line == ProductLine.OPTION ? "VANILLA_OPTION" : line.name());
+            creatingFields.put("instrumentType", switch (line) {
+                case SPOT -> "SPOT";
+                case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> "PERPETUAL";
+                case LINEAR_DELIVERY, INVERSE_DELIVERY -> "DELIVERY";
+                case OPTION -> "OPTION";
+            });
+            if (line != ProductLine.LINEAR_PERPETUAL && line != ProductLine.INVERSE_PERPETUAL) {
+                for (var field : List.of("fundingIntervalHours", "interestRatePpm", "fundingRateCapPpm", "fundingRateFloorPpm"))
+                    creatingFields.put(field, 0);
+            }
+            if (line == ProductLine.SPOT) {
+                creatingFields.put("reduceOnlyEnabled", false);
+                creatingFields.putArray("riskLimitBrackets");
+                creatingFields.putArray("indexSources");
+            }
+            if (line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY)
+                creatingFields.put("settleAssetId", template.baseAssetId());
+            if (line == ProductLine.LINEAR_DELIVERY || line == ProductLine.INVERSE_DELIVERY || line == ProductLine.OPTION) {
+                creatingFields.put("expiryTime", Instant.now().plusSeconds(86400).toString());
+                creatingFields.put("deliveryTime", Instant.now().plusSeconds(86700).toString());
+                creatingFields.put("settlementMethod", "CASH");
+            }
+            if (line == ProductLine.OPTION) {
+                for (var item : creatingFields.path("indexSources")) {
+                    ((tools.jackson.databind.node.ObjectNode) item).put("parser", "OPTION_RISK_TICKER").put("websocketParser", "OPTION_RISK_TICKER");
+                }
+                creatingFields.put("underlyingInstrumentId", String.valueOf(template.instrumentId()));
+                creatingFields.put("underlyingProductLine", ProductLine.LINEAR_PERPETUAL.name());
+                creatingFields.put("strikePriceUnits", 5_000_000_000_000L);
+                creatingFields.put("optionType", "CALL");
+                creatingFields.put("optionExerciseStyle", "EUROPEAN");
+            }
+            var createRequest = json.treeToValue(creatingFields, InstrumentUpsertRequest.class);
+            new InstrumentValidator().validate(createRequest);
+            var initial = tx.execute(status -> storage.save(createRequest.symbol(), createRequest,
+                    "operator-42", "six-line test fixture", Instant.now()));
             ObjectNode fields = (ObjectNode) json.valueToTree(initial);
             fields.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
             tx.executeWithoutResult(status -> {

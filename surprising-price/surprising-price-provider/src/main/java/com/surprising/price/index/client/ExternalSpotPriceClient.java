@@ -147,6 +147,23 @@ public class ExternalSpotPriceClient {
         if (websocket) {
             validateWebSocketAncestry(source, parser, root);
         }
+        if ("OPTION_RISK_TICKER".equalsIgnoreCase(parser)) {
+            if (!source.getSourceSymbol().equals(root.path("symbol").asString())
+                    || !normalizedCurrency(source.getQuoteCurrency()).equals(normalizedCurrency(source.getTargetQuoteCurrency())))
+                throw new IllegalArgumentException("option quote symbol and quote currency must match configuration");
+            var reference = new com.surprising.price.api.model.OptionPriceReference(
+                    new BigDecimal(root.path("markPrice").asString()),
+                    new BigDecimal(root.path("sameExpiryForwardPrice").asString()),
+                    Instant.parse(root.path("expiryTime").asString()));
+            var index = new BigDecimal(root.path("indexPrice").asString());
+            var timestamp = Instant.ofEpochMilli(root.path("timestamp").asLong());
+            if (index.signum() <= 0 || timestamp.toEpochMilli() <= 0 || timestamp.isAfter(receivedAt)
+                    || !reference.expiryTime().isAfter(receivedAt))
+                throw new IllegalArgumentException("option quote requires positive index, non-future timestamp and unexpired expiry");
+            return new SourceQuote(source.getName(), source.getSourceSymbol(), index, null, null,
+                    source.getWeight(), SourceStatus.HEALTHY, null, timestamp, receivedAt, latencyMillis,
+                    websocket ? QuoteTransport.PUBLIC_WEBSOCKET : QuoteTransport.REST, reference);
+        }
         ParsedTicker ticker = parseTicker(parser, root);
         if (websocket && ticker.instrument() != null && !sameInstrument(ticker.instrument(), source.getSourceSymbol())) {
             throw new IgnoredPayloadException();

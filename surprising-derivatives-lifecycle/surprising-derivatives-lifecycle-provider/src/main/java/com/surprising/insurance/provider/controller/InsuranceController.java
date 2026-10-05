@@ -110,7 +110,7 @@ public class InsuranceController {
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
             return runtimeConfigService.update(
-                    request.coverageEnabled(), request.scanDelayMs(), request.batchSize());
+                    adminUserId, request.expectedVersion(), request.coverageEnabled(), request.scanDelayMs(), request.batchSize(), request.reason());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -119,7 +119,7 @@ public class InsuranceController {
     public record RuntimeConfigUpdate(
             Boolean coverageEnabled,
             Long scanDelayMs,
-            Integer batchSize) {
+            Integer batchSize, Long expectedVersion, String reason) {
     }
 
     private void requireAdmin(String adminUserId) {

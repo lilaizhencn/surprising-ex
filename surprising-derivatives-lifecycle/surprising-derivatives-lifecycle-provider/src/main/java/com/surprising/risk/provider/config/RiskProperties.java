@@ -12,13 +12,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class RiskProperties {
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-    private Calculation calculation = new Calculation();
     private Aeron aeron = new Aeron();
 
     public void setProductLine(ProductLine value) {
         productLine = value == null ? ProductLine.LINEAR_PERPETUAL : value;
     }
-    public void setCalculation(Calculation value) { calculation = value == null ? new Calculation() : value; }
     public void setAeron(Aeron value) { aeron = value == null ? new Aeron() : value; }
 
     @Getter
@@ -55,15 +53,4 @@ public class RiskProperties {
         }
     }
 
-    @Getter
-    public static class Calculation {
-        private Duration maxMarkAge = Duration.ofSeconds(10);
-
-        public void setMaxMarkAge(Duration value) {
-            if (value == null || value.isZero() || value.isNegative()) {
-                throw new IllegalArgumentException("maxMarkAge must be positive");
-            }
-            maxMarkAge = value;
-        }
-    }
 }

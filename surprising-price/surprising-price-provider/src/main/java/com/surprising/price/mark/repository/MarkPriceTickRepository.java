@@ -56,7 +56,7 @@ public class MarkPriceTickRepository {
                 statement.setBigDecimal(12, event.bestBidPrice());
                 statement.setBigDecimal(13, event.bestAskPrice());
                 statement.setBigDecimal(14, event.fundingRate());
-                statement.setTimestamp(15, Timestamp.from(event.nextFundingTime()));
+                statement.setTimestamp(15, event.nextFundingTime() == null ? null : Timestamp.from(event.nextFundingTime()));
                 statement.setLong(16, event.timeUntilFundingSeconds());
                 statement.setBigDecimal(17, event.basisAverage());
                 statement.setLong(18, event.basisWindowSeconds());
@@ -107,7 +107,7 @@ public class MarkPriceTickRepository {
                         rs.getBigDecimal("best_bid_price"),
                         rs.getBigDecimal("best_ask_price"),
                         rs.getBigDecimal("funding_rate"),
-                        rs.getTimestamp("next_funding_time").toInstant(),
+                        rs.getTimestamp("next_funding_time") == null ? null : rs.getTimestamp("next_funding_time").toInstant(),
                         rs.getLong("time_until_funding_seconds"),
                         rs.getBigDecimal("basis_average"),
                         rs.getLong("basis_window_seconds"),

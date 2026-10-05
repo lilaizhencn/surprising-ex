@@ -272,10 +272,14 @@ class TradingCommandCodecTest {
                 java.util.List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000,
                         100_000, 50_000, 1_000_000)),
                 3,
-                false, false, true, 0b01, 0b0011);
+                false, false, true, 0b01, 0b0011, 100_000L);
 
         assertThat(TradingCommandCodec.decodeRegisterInstrument(
                 TradingCommandCodec.encodeRegisterInstrument(command))).isEqualTo(command);
+        byte[] encoded = TradingCommandCodec.encodeRegisterInstrument(command);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(
+                java.util.Arrays.copyOf(encoded, encoded.length - Long.BYTES)))
+                .isInstanceOf(ProtocolException.class);
     }
 
     @Test

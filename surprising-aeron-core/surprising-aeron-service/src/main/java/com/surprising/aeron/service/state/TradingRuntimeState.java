@@ -185,10 +185,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
     /** 手续费、保险、清算等全局资金状态，按提交边界合并。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
-    /** 启动注册阶段创建的币对对象；同一 instrumentId 注册后不再替换。 */
+    /** 配置命令在控制栅栏内热注册；同一 instrumentId 的对象身份保持稳定。 */
     final Map<String, CoreInstrument> instruments = new HashMap<>();
-    /** 第一条非注册业务命令到达后冻结，恢复出的非空 registry 也直接冻结。 */
-    private boolean instrumentRegistrySealed;
     /** 用户自动撤单定时器状态。 */
     final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     /** 用户手续费策略状态，参与持久化与恢复。 */
@@ -2700,17 +2698,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         return instruments.get(OrderReservation.requireInstrumentId(instrumentId));
     }
 
-    public void sealInstrumentRegistry() {
-        assertOwner();
-        instrumentRegistrySealed = true;
-    }
-
     void registerInstrument(CoreInstrument instrument) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument registry");
-        if (instrumentRegistrySealed) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument registry is sealed");
-        }
         if (instrument == null || instruments.containsKey(instrument.instrumentId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is already registered");
         }
@@ -3092,7 +3082,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
         instruments.putAll(source.instruments());
-        instrumentRegistrySealed = !instruments.isEmpty();
         publishedAlgoOrders.clear();
         publishedTriggerOrders.clear();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {

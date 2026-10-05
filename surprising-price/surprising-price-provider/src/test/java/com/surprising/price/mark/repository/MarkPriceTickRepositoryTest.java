@@ -31,6 +31,23 @@ class MarkPriceTickRepositoryTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
+    void optionAuditDoesNotInventFundingTime() throws Exception {
+        var reference = event();
+        var option = new MarkPriceEvent(ProductLine.OPTION, reference.instrumentId(), 7L,
+                reference.markPriceUnits(), reference.markPriceTicks(), reference.markPrice(), reference.indexPrice(),
+                reference.indexPrice(), reference.price1(), null, null, null, null, BigDecimal.ZERO, null, 0,
+                BigDecimal.ZERO, 0, reference.clampLow(), reference.clampHigh(), 9902L,
+                PriceStatus.HEALTHY, reference.eventTime(), reference.publishedAt());
+        var audit = new MarkPricePublishedEvent(option, null, null, null, null, BigDecimal.ZERO, 0, option.eventTime());
+        new MarkPriceTickRepository(jdbcTemplate).saveBatch(List.of(new MarkPriceAuditRecord(audit, "{}")));
+        var setter = ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate).batchUpdate(any(String.class), setter.capture());
+        var statement = mock(PreparedStatement.class);
+        setter.getValue().setValues(statement, 0);
+        verify(statement).setTimestamp(15, null);
+    }
+
+    @Test
     void saveBatchPersistsFixedPointResultAndCompleteAuditJson() throws Exception {
         MarkPriceTickRepository repository = new MarkPriceTickRepository(jdbcTemplate);
         when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))

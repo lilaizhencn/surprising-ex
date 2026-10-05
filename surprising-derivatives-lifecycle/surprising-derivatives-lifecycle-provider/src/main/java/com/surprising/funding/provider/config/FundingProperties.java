@@ -9,23 +9,21 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.time.Duration;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Getter
 @Setter
 @Validated
-@ConfigurationProperties(prefix = "surprising.funding")
 public class FundingProperties {
 
     @Valid
     private Kafka kafka = new Kafka();
     @Valid
-    private Calculation calculation = new Calculation();
+    private volatile Calculation calculation = new Calculation();
     @Valid
-    private Settlement settlement = new Settlement();
+    private volatile Settlement settlement = new Settlement();
     @Valid
-    private Coordination coordination = new Coordination();
+    private volatile Coordination coordination = new Coordination();
 
     @Getter
     public static class Kafka {

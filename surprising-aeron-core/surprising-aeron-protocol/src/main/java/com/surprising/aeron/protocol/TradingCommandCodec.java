@@ -10,6 +10,7 @@ public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_VERSION = 4;
     private static final int INSTRUMENT_RISK_V3_MARKER = 0x49525633;
+    private static final int INSTRUMENT_UNITS_V4_MARKER = 0x49525634;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
     private static final int TRANSFER_FUNDS_VERSION = 2;
 
@@ -482,7 +483,7 @@ public final class TradingCommandCodec {
         byte[] settle = text(command.settleAsset());
         int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
         ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + instrumentId.length + base.length + quote.length + settle.length
-                        + Integer.BYTES * 7 + Long.BYTES * 13 + Byte.BYTES * 3 + bracketBytes)
+                        + Integer.BYTES * 7 + Long.BYTES * 14 + Byte.BYTES * 3 + bracketBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) instrumentId.length).put(instrumentId)
                 .putInt(command.contractTypeCode())
@@ -494,7 +495,7 @@ public final class TradingCommandCodec {
                 .putLong(command.maintenanceMarginRatePpm()).putLong(command.makerFeeRatePpm())
                 .putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())
                 .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks())
-                .putInt(INSTRUMENT_RISK_V3_MARKER)
+                .putInt(INSTRUMENT_UNITS_V4_MARKER)
                 .putLong(command.maxLeveragePpm()).putLong(command.maxPositionNotionalUnits())
                 .putLong(command.userOpenInterestLimitRatePpm())
                 .putLong(command.userOpenInterestLimitFloorUnits())
@@ -510,7 +511,8 @@ public final class TradingCommandCodec {
                 .put((byte) (command.postOnlyEnabled() ? 1 : 0))
                 .put((byte) (command.reduceOnlyEnabled() ? 1 : 0))
                 .putInt(command.supportedOrderTypeMask())
-                .putInt(command.supportedTimeInForceMask());
+                .putInt(command.supportedTimeInForceMask())
+                .putLong(command.quantityStepUnits());
         return buffer.array();
     }
 
@@ -534,7 +536,8 @@ public final class TradingCommandCodec {
         int optionType = buffer.getInt();
         long strike = buffer.getLong();
         requireRemaining(buffer, Integer.BYTES + Long.BYTES * 4 + Integer.BYTES);
-        if (buffer.getInt() != INSTRUMENT_RISK_V3_MARKER) {
+        int instrumentMarker = buffer.getInt();
+        if (instrumentMarker != INSTRUMENT_RISK_V3_MARKER && instrumentMarker != INSTRUMENT_UNITS_V4_MARKER) {
             throw new ProtocolException("invalid instrument risk policy marker");
         }
         long maxLeverage = buffer.getLong();
@@ -558,11 +561,16 @@ public final class TradingCommandCodec {
         boolean reduceOnlyEnabled = readBoolean(buffer);
         int supportedOrderTypeMask = buffer.getInt();
         int supportedTimeInForceMask = buffer.getInt();
+        long quantityStepUnits = 1L; // V3 journal records were defined in unit quantities.
+        if (instrumentMarker == INSTRUMENT_UNITS_V4_MARKER) {
+            requireRemaining(buffer, Long.BYTES);
+            quantityStepUnits = buffer.getLong();
+        }
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(instrumentId, contractTypeCode,
                 base, quote, settle, multiplier, priceTick, settleScale, initialMargin, maintenanceMargin,
                 makerFee, takerFee, expiry, optionType, strike, maxLeverage, maxPosition, openInterestRate,
                 openInterestFloor, brackets, statusCode, marketOrderEnabled, postOnlyEnabled,
-                reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask);
+                reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits);
         requireConsumed(buffer);
         return command;
     }
