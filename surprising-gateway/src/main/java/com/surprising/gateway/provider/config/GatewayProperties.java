@@ -349,7 +349,7 @@ public class GatewayProperties implements EnvironmentAware {
         @Setter
         private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
         @Setter
-        private Duration accessTokenTtl = Duration.ofMinutes(30);
+        private Duration accessTokenTtl = Duration.ofDays(7);
         @Setter
         private Duration refreshTokenTtl = Duration.ofDays(30);
 
