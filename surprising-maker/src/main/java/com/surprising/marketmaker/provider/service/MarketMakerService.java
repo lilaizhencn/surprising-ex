@@ -90,6 +90,7 @@ public class MarketMakerService {
     private final OrderRpcApi orderRpcApi;
     private final AccountRpcApi accountRpcApi;
     private final QuotePlanner quotePlanner;
+    private final com.surprising.marketmaker.provider.client.MakerTradingFeeClient tradingFeeClient;
     private final ReferenceMarketProvider referenceMarketProvider;
     private final MarketMakerLeaseCoordinator leaseCoordinator;
     private final MarketMakerStrategyOverrideStore overrideStore;
@@ -119,7 +120,9 @@ public class MarketMakerService {
                               MarketMakerStrategyOverrideStore overrideStore,
                               MarketMakerRunEventRepository runEventRepository,
                               MarketMakerReferenceSampleRepository referenceSampleRepository,
-                              InstrumentSnapshotCache instrumentSnapshotCache) {
+                              InstrumentSnapshotCache instrumentSnapshotCache,
+                              com.surprising.marketmaker.provider.client.MakerTradingFeeClient tradingFeeClient) {
+        this.tradingFeeClient = tradingFeeClient;
         this.properties = properties;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
         this.markPriceCache = markPriceCache;
@@ -192,6 +195,16 @@ public class MarketMakerService {
 
     public MarketMakerStrategyQueryResponse strategies() {
         return strategies(null);
+    }
+
+    private long effectiveMakerFee(long accountId, ProductLine productLine, InstrumentResponse instrument) {
+        var fee = tradingFeeClient.effective(accountId, String.valueOf(instrument.instrumentId()), instrument.changeId(), productLine);
+        if (fee == null || fee.userId() != accountId || fee.productLine() != productLine
+                || !String.valueOf(instrument.instrumentId()).equals(fee.instrumentId())
+                || fee.instrumentChangeId() != instrument.changeId()) {
+            throw new IllegalStateException("做市账户生效费率与合约版本不匹配，停止本轮报价");
+        }
+        return fee.makerFeeRatePpm();
     }
 
     private InstrumentResponse currentInstrument(ProductLine productLine, String instrumentId) {
@@ -433,7 +446,7 @@ public class MarketMakerService {
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, instrumentId),
-                    referenceOrderBook);
+                    referenceOrderBook, effectiveMakerFee(accountId, productLine, instrument));
             long staleOwned = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                     ? ownedLive.size() : 0;
             int desiredQuotes = plan.quotes().size();
@@ -828,7 +841,8 @@ public class MarketMakerService {
         QuotePlan plan = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                 ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                 : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                        otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
+                        otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook,
+                        effectiveMakerFee(accountId, strategy.getProductLine(), instrument));
         ReconcileResult result = reconcile(strategy, accountId, instrumentId, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());

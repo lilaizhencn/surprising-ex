@@ -995,7 +995,9 @@ class MarketMakerServiceTest {
             return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
-                    new FakeOverrideStore(properties), runEventRepository, referenceSampleRepository, snapshotCache);
+                    new FakeOverrideStore(properties), runEventRepository, referenceSampleRepository, snapshotCache,
+                    (user, symbol, version, line) -> new com.surprising.marketmaker.provider.client.MakerTradingFeeClient.EffectiveFee(
+                            user, line, symbol, version, snapshotCache.current(line, Integer.parseInt(symbol), version).orElseThrow().makerFeeRatePpm()));
         }
 
         private LatestMarkPriceCache markPriceCache() {

@@ -22,7 +22,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         AccountRpcApi.class,
         InstrumentRpcApi.class,
         MarketDataRpcApi.class,
-        OrderRpcApi.class
+        OrderRpcApi.class,
+        com.surprising.marketmaker.provider.client.MakerTradingFeeClient.class
 })
 @EnableConfigurationProperties(com.surprising.marketmaker.provider.config.MarketMakerInfrastructureProperties.class)
 @Slf4j

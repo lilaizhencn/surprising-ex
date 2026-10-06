@@ -51,15 +51,26 @@ public class QuotePlanner {
                           long signedPositionSteps,
                           long volatilityTicks,
                           ReferenceOrderBookSnapshot referenceOrderBook) {
+        return plan(strategy, quoting, risk, instrument, orderBook, markPrice, signedPositionSteps,
+                volatilityTicks, referenceOrderBook, instrument.makerFeeRatePpm());
+    }
+
+    public QuotePlan plan(MarketMakerProperties.Strategy strategy,
+                          MarketMakerProperties.Quoting quoting, MarketMakerProperties.Risk risk,
+                          InstrumentResponse instrument, OrderBookSnapshotResponse orderBook,
+                          MarkPriceResponse markPrice, long signedPositionSteps, long volatilityTicks,
+                          ReferenceOrderBookSnapshot referenceOrderBook, long effectiveMakerFeePpm) {
+        if (effectiveMakerFeePpm < -ONE_PPM || effectiveMakerFeePpm > ONE_PPM)
+            throw new IllegalArgumentException("invalid effective maker fee");
         long anchor = anchorPriceTicks(strategy, instrument, orderBook, markPrice, referenceOrderBook);
         int levels = orderLevels(strategy, quoting);
-        long halfSpread = Math.max(Math.max(1L, spreadTicks(strategy, quoting) / 2L),
+        long halfSpread = Math.max(spreadTicks(strategy, quoting) / 2L,
                 volatilitySpreadTicks(quoting, volatilityTicks));
         halfSpread = Math.max(halfSpread, multiplyDiv(anchor, quoting.getHalfSpreadPpm(), ONE_PPM));
         boolean linear = instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
                 || instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY;
         if (linear) {
-            long feePpm = Math.max(0L, Math.max(instrument.makerFeeRatePpm(), quoting.getMakerFeeReservePpm()));
+            long feePpm = Math.max(0L, Math.max(effectiveMakerFeePpm, quoting.getMakerFeeReservePpm()));
             if (feePpm >= ONE_PPM) throw new IllegalStateException("maker fee leaves no executable quote margin");
             long requiredEdgePpm = Math.addExact(feePpm, quoting.getMinNetHalfSpreadPpm());
             if (requiredEdgePpm > 0) {
@@ -72,7 +83,7 @@ public class QuotePlanner {
         }
         long spacing = levelSpacingTicks(strategy, quoting);
         long maxDeviationTicks = Math.max(1L, multiplyDiv(anchor, quoting.getMaxPriceDeviationPpm(), ONE_PPM));
-        if (linear && (Math.max(instrument.makerFeeRatePpm(), quoting.getMakerFeeReservePpm()) > 0
+        if (linear && (Math.max(effectiveMakerFeePpm, quoting.getMakerFeeReservePpm()) > 0
                 || quoting.getMinNetHalfSpreadPpm() > 0) && halfSpread > maxDeviationTicks) throw new IllegalStateException("quote price bound cannot cover required spread and maker fee");
         long priceSkew = linear ? priceSkewTicks(strategy, quoting, risk, anchor, signedPositionSteps,
                 referenceOrderBook) : 0L;
@@ -80,7 +91,7 @@ public class QuotePlanner {
         priceSkew = Math.max(-skewLimit, Math.min(skewLimit, priceSkew));
         // Tilt quotes away from adverse flow without crossing the reference-based fee/edge floor.
         long bidHalfSpread = halfSpread + Math.max(0L, -priceSkew);
-        long askHalfSpread = halfSpread + Math.max(0L, priceSkew);
+        long askHalfSpread = Math.max(halfSpread, (spreadTicks(strategy, quoting) + 1L) / 2L) + Math.max(0L, priceSkew);
         long minPrice = Math.max(1L, anchor - maxDeviationTicks);
         long maxPrice = anchor + maxDeviationTicks;
         long bestBid = bestBid(orderBook);
@@ -98,10 +109,10 @@ public class QuotePlanner {
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
-            boolean referenceBid = bidDistance > 0;
-            boolean referenceAsk = askDistance > 0;
-            bidDistance = bidDistance > 0 ? Math.max(bidHalfSpread, bidDistance) : bidHalfSpread + spacing * level;
-            askDistance = askDistance > 0 ? Math.max(askHalfSpread, askDistance) : askHalfSpread + spacing * level;
+            boolean referenceBid = referenceLevel(referenceOrderBook, OrderSide.BUY, level) != null;
+            boolean referenceAsk = referenceLevel(referenceOrderBook, OrderSide.SELL, level) != null;
+            bidDistance = referenceBid ? Math.max(bidHalfSpread, bidDistance) : bidHalfSpread + spacing * level;
+            askDistance = referenceAsk ? Math.max(askHalfSpread, askDistance) : askHalfSpread + spacing * level;
             if (level > 0) {
                 // Preserve the source's adjacent gap; configured spacing only extends missing depth.
                 bidDistance = Math.max(bidDistance, previousBidDistance
@@ -461,7 +472,7 @@ public class QuotePlanner {
         long distance = side == OrderSide.BUY
                 ? mid - referenceLevel.priceTicks()
                 : referenceLevel.priceTicks() - mid;
-        return Math.max(1L, distance);
+        return Math.max(0L, distance);
     }
 
     /** Keep a stable size profile between refreshes; external liquidity and inventory still shape it. */

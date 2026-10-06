@@ -27,6 +27,33 @@ class QuotePlannerTest {
     private final QuotePlanner quotePlanner = new QuotePlanner();
 
     @Test
+    void zeroFeeAccountCanQuoteOneTickWithContinuousDepthWhileDefaultFeesStayProtected() {
+        var strategy = strategy(); strategy.setOrderLevels(50);
+        var quoting = quoting(); quoting.setMinSpreadTicks(1); quoting.setLevelSpacingTicks(1);
+        quoting.setHalfSpreadPpm(0); quoting.setVolatilitySpreadMultiplierPpm(0);
+        var spec = org.mockito.Mockito.spy(instrument());
+        org.mockito.Mockito.doReturn(200L).when(spec).makerFeeRatePpm();
+        var reference = new ReferenceOrderBookSnapshot("test", "1",
+                List.of(new ReferenceOrderBookLevel(50000, 10)),
+                List.of(new ReferenceOrderBookLevel(50001, 10)), Instant.now());
+        var tight = quotePlanner.plan(strategy, quoting, risk(), spec, orderBook(49000, 51000),
+                mark(5_000_000), 0, 0, reference, 0);
+        var bids = tight.quotes().stream().filter(q -> q.side() == OrderSide.BUY).toList();
+        var asks = tight.quotes().stream().filter(q -> q.side() == OrderSide.SELL).toList();
+        assertThat(bids).hasSize(50); assertThat(asks).hasSize(50);
+        assertThat(asks.getFirst().priceTicks() - bids.getFirst().priceTicks()).isEqualTo(1);
+        for (int i = 1; i < 50; i++) {
+            assertThat(bids.get(i - 1).priceTicks() - bids.get(i).priceTicks()).isEqualTo(1);
+            assertThat(asks.get(i).priceTicks() - asks.get(i - 1).priceTicks()).isEqualTo(1);
+        }
+        var ordinary = quotePlanner.plan(strategy, quoting, risk(), spec, orderBook(49000, 51000),
+                mark(5_000_000), 0, 0, reference, 200);
+        long bid = ordinary.quotes().stream().filter(q -> q.side() == OrderSide.BUY).mapToLong(q -> q.priceTicks()).max().orElseThrow();
+        long ask = ordinary.quotes().stream().filter(q -> q.side() == OrderSide.SELL).mapToLong(q -> q.priceTicks()).min().orElseThrow();
+        assertThat(ask - bid).isGreaterThan(20);
+    }
+
+    @Test
     void fundedLinearPlanMeetsTargetInsideOneBasisPointWithoutInflatingOuterLevels() {
         var strategy = strategy(); strategy.setOrderLevels(50);
         var quoting = quoting(); quoting.setLevelSpacingTicks(1); quoting.setLinearLiquidityTargetNotionalUnits(500_000_000L);

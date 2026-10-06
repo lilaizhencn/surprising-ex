@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -26,9 +25,10 @@ public final class FeePolicyCoreImporter {
                 policy.makerFeeRatePpm(), policy.takerFeeRatePpm(), sourcePriority(policy.sourceType()),
                 policy.status() == FeeScheduleStatus.ACTIVE, policy.effectiveTime().toEpochMilli(),
                 policy.expireTime() == null ? 0 : policy.expireTime().toEpochMilli());
-        UUID commandId = UUID.nameUUIDFromBytes(("fee-policy:" + policy.productLine() + ':'
-                + policy.feeScheduleId() + ':' + revision + ':' + command.active())
-                .getBytes(StandardCharsets.UTF_8));
+        // Policy ID + revision provide durable idempotency in Core. A command identity
+        // must be new for each startup/import attempt: old command outcomes can expire
+        // from retention even though the fee policy itself remains authoritative.
+        UUID commandId = UUID.randomUUID();
         aeron.command(CoreMessageType.UPSERT_FEE_POLICY, commandId, policy.userId(),
                 TradingCommandCodec.encodeUpsertFeePolicy(command));
     }
