@@ -848,12 +848,22 @@ final class OrderedCommitCoordinator {
                     ExecuteLiquidationCommand single = new ExecuteLiquidationCommand(action.liquidationId(),
                             action.triggerPriceSequence(), action.executionPriceTicks(), batch.liquidationFeeRatePpm(),
                             action.cursorOrderId(), Math.min(remaining, ExecuteLiquidationCommand.DEFAULT_MAX_ORDERS));
+                    owner.resultBuilder.markUserChanged(liquidation.userId());
+                    boolean executable;
+                    try {
+                        executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
+                                .isExecutable(owner.runtimeState, owner.identities, single);
+                    } catch (CoreStateRejectedException rejection) {
+                        if (!"STALE_MARK_PRICE".equals(rejection.code())) throw rejection;
+                        // A queried liquidation action can expire before this batch reaches its commit fence.
+                        // Skip that action without touching orders or balances; fresh risk work will replace it.
+                        obsolete++;
+                        continue;
+                    }
                     var chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             action.cursorOrderId(), remaining);
                     for (CoreOrderState order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
-                    boolean executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
-                            .isExecutable(owner.runtimeState, owner.identities, single);
                     long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
                     var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
                     if (executable) {

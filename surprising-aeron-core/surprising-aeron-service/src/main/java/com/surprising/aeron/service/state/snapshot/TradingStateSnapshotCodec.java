@@ -20,7 +20,7 @@ import java.util.function.Function;
  */
 public final class TradingStateSnapshotCodec {
     private static final int VERSION = 37;
-    private static final int READER_REVISION = 2;
+    private static final int READER_REVISION = 3;
     private TradingStateSnapshotCodec() { }
 
     public static byte[] encode(TradingCoreState value) {
@@ -36,7 +36,7 @@ public final class TradingStateSnapshotCodec {
                 .bytes(9, writeMap(value.algoOrders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
                 .list(11, value.triggerOrders().values(), item -> writeCoreTriggerOrderStateView(item.view()))
-                .number(12, value.instruments().values().stream().anyMatch(instrument -> instrument.quantityStepUnits() != 1) ? 2 : 1).encode();
+                .number(12, value.instruments().values().stream().anyMatch(instrument -> !instrument.orderProtection().equals(com.surprising.aeron.protocol.CoreOrderProtection.initial())) ? 3 : value.instruments().values().stream().anyMatch(instrument -> instrument.quantityStepUnits() != 1) ? 2 : 1).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
@@ -746,6 +746,11 @@ public final class TradingStateSnapshotCodec {
                 .number(26, value.supportedOrderTypeMask()) // 26: supportedOrderTypeMask
                 .number(27, value.supportedTimeInForceMask()) // 27: supportedTimeInForceMask
                 .number(28, value.quantityStepUnits()) // 28: base asset units per quantity step
+                .number(29, value.orderProtection().marketMaxSlippagePpm())
+                .number(30, value.orderProtection().marketMaxMarkAgeMs())
+                .number(31, value.orderProtection().limitPriceProtectionEnabled() ? 1 : 0)
+                .number(32, value.orderProtection().limitPriceBandPpm())
+                .number(33, value.orderProtection().limitPriceMaxMarkAgeMs())
                 .encode();
     }
     private static CoreInstrument readCoreInstrument(byte[] encoded) {
@@ -778,7 +783,9 @@ public final class TradingStateSnapshotCodec {
                 r.bool(25), // 25: reduceOnlyEnabled
                 r.integer(26), // 26: supportedOrderTypeMask
                 r.integer(27), // 27: supportedTimeInForceMask
-                r.numberOr(28, 1L)); // Existing snapshots used unit quantities.
+                r.numberOr(28, 1L), // Existing snapshots used unit quantities.
+                new com.surprising.aeron.protocol.CoreOrderProtection(r.numberOr(29, 10_000), r.numberOr(30, 5_000),
+                        r.numberOr(31, 0) != 0, r.numberOr(32, 50_000), r.numberOr(33, 5_000)));
     }
 
     private static byte[] writeCoreRiskState(CoreRiskState value) {

@@ -167,6 +167,58 @@ class RiskBatchBudgetTest {
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void staleLiquidationActionDoesNotAbortBatchOrChangeFundsAfterRecovery(boolean asynchronous) {
+        ProductLine line = ProductLine.LINEAR_PERPETUAL;
+        try (var state = new TradingCoreRuntime(line)) {
+            applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
+                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                            100_000, 50_000, 0, 0, 0, -1, 0))));
+            applied(state, mark(line, "1", 1));
+            for (long user : new long[]{1, 2, 3}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
+            applied(state, command(line, CoreMessageType.PLACE_ORDER, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "1",
+                            CoreOrderSide.SELL, 100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "maker"))));
+            for (long user : new long[]{1, 3}) {
+                applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
+                                CoreOrderSide.BUY, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "taker-" + user))));
+                for (int n = 0; n < 2; n++) applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(200 + user * 10 + n, "1",
+                                CoreOrderSide.SELL, 110, 1, true, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cancel-" + user + "-" + n))));
+            }
+            applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
+                    new ApplyMarkPriceCommand("1", 1, 2, TIME))));
+            while (work(state, line).riskScanPending()) applied(state, command(line, CoreMessageType.CONTINUE_RISK_SCAN,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+            assertThat(work(state, line).actions()).hasSize(2);
+            var stale=ExecuteLiquidationBatchCommand.fromWork(work(state,line),0,0);
+            applied(state,command(line,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
+                    new ApplyMarkPriceCommand("1",2,3,TIME))));
+            long funds=liquidationFunds(state);
+            var users=state.tradingState().users();
+            var execute=command(line,CoreMessageType.EXECUTE_LIQUIDATION_BATCH,TradingCommandCodec.encodeExecuteLiquidationBatch(stale));
+            try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(601))) {
+                var result=executeLiquidation(state,execute,asynchronous);
+                assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                var summary=CoreLiquidationBatchResultCodec.decode(result.data());
+                assertThat(summary.obsoleteActions()).isEqualTo(2);
+                assertThat(summary.processedOrders()).isZero();
+                assertThat(summary.appliedActions()).isZero();
+                assertThat(apply(restored,execute).data()).isEqualTo(result.data());
+                assertThat(liquidationFunds(state)).isEqualTo(funds);
+                assertThat(state.tradingState().users()).isEqualTo(users);
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void liquidationBatchResumesAcrossAccountsAndSnapshotWithinCancellationBudget(boolean asynchronous) {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (var state = new TradingCoreRuntime(line)) {

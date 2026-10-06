@@ -10,16 +10,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import jakarta.annotation.PostConstruct;
 
 @Getter
-@ConfigurationProperties(prefix = "surprising.trading.order")
 public class TradingOrderProperties {
 
     @Setter
     private Kafka kafka = new Kafka();
     private EventPublish eventPublish = new EventPublish();
     @Setter
-    private Risk risk = new Risk();
+    private volatile Risk risk = new Risk();
     @Setter
-    private Algo algo = new Algo();
+    private volatile Algo algo = new Algo();
     private Aeron aeron = new Aeron();
 
     public void setEventPublish(EventPublish eventPublish) {
@@ -124,6 +123,10 @@ public class TradingOrderProperties {
         private boolean limitPriceProtectionEnabled;
         private long limitPriceBandPpm = 50_000L;
         private long limitPriceMaxMarkAgeMs = 5_000L;
+        public com.surprising.aeron.protocol.CoreOrderProtection protection() {
+            return new com.surprising.aeron.protocol.CoreOrderProtection(marketMaxSlippagePpm, marketMaxMarkAgeMs,
+                    limitPriceProtectionEnabled, limitPriceBandPpm, limitPriceMaxMarkAgeMs);
+        }
 
     }
 

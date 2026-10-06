@@ -145,7 +145,11 @@ public class AlgoOrderService {
         return new AlgoOrderQueryResponse(orders.size(), orders);
     }
 
-    public void scanDueAlgoOrders() {
+    private long lastScanNanos;
+    public synchronized void scanDueAlgoOrders() {
+        long scanNow = System.nanoTime();
+        if (scanNow - lastScanNanos < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(properties.getAlgo().getScanDelayMs())) return;
+        lastScanNanos = scanNow;
         if (!properties.getAlgo().isEnabled()) {
             return;
         }

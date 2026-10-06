@@ -665,7 +665,7 @@ public class GatewayProxyService {
         String prefix = ADMIN_GATEWAY_PREFIX + "/" + normalizedService;
         String suffix = path.startsWith(prefix + "/") ? path.substring(prefix.length()) : "";
         if (HttpMethod.POST.equals(method) && switch (normalizedService) {
-            case "instrument-admin" -> suffix.equals("/upsert") || suffix.matches("/[0-9]+/status");
+            case "instrument-admin" -> suffix.equals("/upsert") || suffix.equals("/order-settings") || suffix.matches("/[0-9]+/status");
             case "market-maker" -> suffix.equals("/business-settings") || suffix.equals("/strategy-definitions")
                     || suffix.matches("/strategies/[a-z0-9_-]+/(config|pause|resume)");
             case "insurance-admin" -> suffix.equals("/runtime-config");

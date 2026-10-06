@@ -26,6 +26,44 @@ import org.junit.jupiter.api.Test;
 class CoreOrderDecisionResolverTest {
 
     @Test
+    void configuredProtectionSurvivesCodecAndSnapshotAndControlsOrders() {
+        var policy = new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000);
+        var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                "BTC", "USDT", "USDT", 1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, -1, 0,
+                10_000_000, Long.MAX_VALUE, 0, 1,
+                List.of(new CoreRiskLimitBracket(1,0,Long.MAX_VALUE,10_000_000,100_000,50_000)),
+                1,true,true,true,3,15,1,policy);
+        var decoded = com.surprising.aeron.protocol.TradingCommandCodec.decodeRegisterInstrument(
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command));
+        assertThat(decoded).isEqualTo(command);
+        var instrument=CoreInstrument.from(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,decoded);
+        var identities=new RuntimeIdentityRegistry();
+        try(var runtime=runtime(instrument)) {
+            int symbol=identities.symbolId("1");
+            runtime.putMarkPrice(new MarkPriceRuntime(symbol,instrument,60_000,9,1_000));
+            var buy=new PlaceOrderCommand(91,"1",CoreOrderSide.BUY,0,2,false,CoreMarginMode.CROSS,
+                    CorePositionSide.NET,CoreOrderType.MARKET,CoreTimeInForce.IOC,false,"buy");
+            assertThat(CoreOrderDecisionResolver.resolve(runtime,identities,1001,buy,7_000).matchingPriceTicks()).isEqualTo(61_200);
+            assertThatThrownBy(()->CoreOrderDecisionResolver.resolve(runtime,identities,1001,buy,9_001)).isInstanceOf(CoreStateRejectedException.class);
+            var limit=new PlaceOrderCommand(92,"1",CoreOrderSide.BUY,62_000,2,false,CoreMarginMode.CROSS,
+                    CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"limit");
+            assertThatThrownBy(()->CoreOrderDecisionResolver.resolve(runtime,identities,1001,limit,1_500))
+                    .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("price band");
+        }
+        try(var core=new com.surprising.aeron.service.orchestration.TradingCoreRuntime(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL)) {
+            var message=new com.surprising.aeron.protocol.CoreMessage(com.surprising.aeron.protocol.CoreMessageHeader.command(
+                    com.surprising.aeron.protocol.CoreMessageType.REGISTER_INSTRUMENT,java.util.UUID.randomUUID(),
+                    com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,com.surprising.aeron.protocol.CommandSource.OPERATIONS,0,1,0,1,1),
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command));
+            assertThat(core.apply(message).commandStatus()).isEqualTo(com.surprising.aeron.protocol.ResponseStatus.APPLIED);
+            try(var restored=com.surprising.aeron.service.orchestration.TradingCoreRuntime.fromSnapshot(
+                    com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,core.snapshot(71))) {
+                assertThat(restored.tradingState().instruments().get("1").orderProtection()).isEqualTo(policy);
+            }
+        }
+    }
+
+    @Test
     void batchContextKeepsItsMarkAndUsesTheCanonicalInstrumentForEveryOrder() {
         var identities = new RuntimeIdentityRegistry();
         try (var runtime = runtime(linearInstrument())) {

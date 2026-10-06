@@ -20,6 +20,7 @@ public class InstrumentCoreSyncService {
     private final InstrumentSnapshotCache cache;
     private final MaintenanceAeronGateway gateway;
     private final ProductLine line;
+    private final TradingOrderProperties properties;
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
     private record Attempt(RegisterInstrumentCommand configuration, UUID commandId, boolean outcomeUnknown, boolean applied,
                            long retryAfterNanos, String error) { }
@@ -27,7 +28,7 @@ public class InstrumentCoreSyncService {
 
     public InstrumentCoreSyncService(@Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache cache,
             MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
-        this.cache=cache; this.gateway=gateway; this.line=properties.getKafka().getProductLine();
+        this.cache=cache; this.gateway=gateway; this.line=properties.getKafka().getProductLine(); this.properties=properties;
     }
 
     @Scheduled(fixedDelayString="${trading.order.instrument-sync-delay-ms:250}")
@@ -99,10 +100,10 @@ public class InstrumentCoreSyncService {
         long settleScale=value.contractType().isInverse()
                 ?cache.scale(line,value.settleAsset()).orElseThrow(
                         ()->new IllegalStateException("settlement asset scale is missing")):1L;
-        return command(value,settleScale);
+        return command(value,settleScale, properties.getRisk().protection());
     }
 
-    private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale) {
+    private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale, CoreOrderProtection protection) {
         // Core's shared instrument protocol requires a bounded bracket even for spot
         // orders. Derive it from the instrument; spot administrators never configure derivative tiers.
         var brackets=value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
@@ -139,7 +140,7 @@ public class InstrumentCoreSyncService {
                 value.userOpenInterestLimitRatePpm(),value.userOpenInterestLimitFloorUnits(),brackets,
                 value.status().ordinal(),value.marketOrderEnabled(),value.postOnlyEnabled(),value.reduceOnlyEnabled(),
                 supportedOrderTypes,supportedTimeInForce,
-                value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT ? value.quantityStepUnits() : 1L);
+                value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT ? value.quantityStepUnits() : 1L, protection);
     }
 
     private static String error(RuntimeException failure) {

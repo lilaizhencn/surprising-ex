@@ -18,7 +18,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.surprising.price.consumer"
 })
 @EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class,
-        com.surprising.trading.order.config.TradingOrderProperties.class,
         com.surprising.trading.trigger.config.TriggerProperties.class,
         com.surprising.account.provider.config.AccountProperties.class,
         com.surprising.instrument.provider.config.InstrumentProperties.class})

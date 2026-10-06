@@ -78,3 +78,5 @@
 合约记录的字段 28 保存 `quantityStepUnits`。现货余额以资产最小单位记账，订单数量仍以步数表示：卖出冻结及成交扣减使用 `quantitySteps × quantityStepUnits`，计价金额使用 `priceTicks × quantitySteps × notionalMultiplierUnits`。注册命令的 V4 payload 携带数量步长；既有 V3 注册记录和缺少字段 28 的历史快照明确使用原语义 1，不能根据新数据库配置重新解释历史余额。已存在合约的数量单位禁止原地修改。包含非 1 数量步长的快照要求最低读取修订号 2，旧读取器必须拒绝恢复，不能跳过该经济字段后继续处理交易；纯历史单位状态仍写最低修订号 1。
 
 Core 在普通交易发生后、快照恢复后仍接受新的合约注册，通过原 owner/control 边界串行应用，保持重复 ID 与不可变身份校验；不再以“第一笔业务命令之后封闭目录”阻止后台热上线。`CoreSpotAssetUnitsTest` 覆盖非单位步长、部分成交、双方手续费、平台资金守恒、撤单解冻及恢复；`InstrumentCoreSyncServiceTest` 覆盖六条产品线在业务命令和恢复后的新合约注册。
+
+订单价格保护规则保存于合约字段 29–33；非默认保护规则要求 reader revision 3。历史字段缺失时仅恢复当时既定的保护语义，新业务配置由后台数据库与合约同步负责。

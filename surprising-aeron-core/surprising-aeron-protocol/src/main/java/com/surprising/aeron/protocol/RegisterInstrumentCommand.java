@@ -30,9 +30,41 @@ public record RegisterInstrumentCommand(
         boolean reduceOnlyEnabled,
         int supportedOrderTypeMask,
         int supportedTimeInForceMask,
+        long quantityStepUnits, CoreOrderProtection orderProtection) {
+
+    public RegisterInstrumentCommand(
+        String instrumentId,
+        int contractTypeCode,
+        String baseAsset,
+        String quoteAsset,
+        String settleAsset,
+        long notionalMultiplierUnits,
+        long priceTickUnits,
+        long settleScaleUnits,
+        long initialMarginRatePpm,
+        long maintenanceMarginRatePpm,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long expiryEpochMillis,
+        int optionTypeCode,
+        long strikePriceTicks,
+        long maxLeveragePpm,
+        long maxPositionNotionalUnits,
+        long userOpenInterestLimitRatePpm,
+        long userOpenInterestLimitFloorUnits,
+        List<CoreRiskLimitBracket> riskLimitBrackets,
+        int instrumentStatusCode,
+        boolean marketOrderEnabled,
+        boolean postOnlyEnabled,
+        boolean reduceOnlyEnabled,
+        int supportedOrderTypeMask,
+        int supportedTimeInForceMask,
         long quantityStepUnits) {
+        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, instrumentStatusCode, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
+    }
 
     public RegisterInstrumentCommand {
+        java.util.Objects.requireNonNull(orderProtection, "orderProtection");
         com.surprising.product.api.InstrumentIds.parse(instrumentId);
         if (instrumentId == null || instrumentId.isBlank() || contractTypeCode < 0
                 || baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()

@@ -81,3 +81,4 @@
 /api/v1/trading/trigger-orders/open
 /api/v1/trading/trigger-orders/{triggerOrderId}
 /api/v1/instruments/default
+/api/v1/instruments/admin/order-settings
