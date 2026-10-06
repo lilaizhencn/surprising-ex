@@ -802,6 +802,10 @@ final class OrderedCommitCoordinator {
             com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand batch,
             MatchingResult matchingResult,
             CommandSlot laneContext) {
+        // Every action contributes to the immutable result's Lane mask, including actions
+        // skipped as obsolete or deferred by the cancellation budget. Complete those Lane
+        // acknowledgements even when their balances and orders do not change.
+        for (var action : batch.actions()) owner.resultBuilder.markUserChanged(action.userId());
         if (!matchingResult.accepted()) {
             int obsolete = batch.actions().stream()
                     .map(action -> owner.runtimeState.liquidation(action.liquidationId()))

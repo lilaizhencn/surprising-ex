@@ -1,0 +1,9 @@
+[Unit]
+Description=Save a verified Surprising linear perpetual snapshot
+After=surprising-linear-perpetual.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/surprising/linear-perpetual.env
+ExecStart=/opt/surprising-ex/scripts/linear-perpetual-snapshot.sh
+TimeoutStartSec=420

@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Surprising linear perpetual snapshot
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=30
+Unit=surprising-linear-perpetual-snapshot.service
+
+[Install]
+WantedBy=timers.target

@@ -175,13 +175,13 @@ class RiskBatchBudgetTest {
                             ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
-            for (long user : new long[]{1, 2, 3}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
+            for (long user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
             applied(state, command(line, CoreMessageType.PLACE_ORDER, 2,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "1",
                             CoreOrderSide.SELL, 100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "maker"))));
-            for (long user : new long[]{1, 3}) {
+            for (long user : new long[]{1, 7}) {
                 applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
                         TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
                                 CoreOrderSide.BUY, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
@@ -227,13 +227,13 @@ class RiskBatchBudgetTest {
                             ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
-            for (long user : new long[]{1, 2, 3}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
+            for (long user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
             applied(state, command(line, CoreMessageType.PLACE_ORDER, 2,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "1",
                             CoreOrderSide.SELL, 100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "maker"))));
-            for (long user : new long[]{1, 3}) {
+            for (long user : new long[]{1, 7}) {
                 applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
                         TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
                                 CoreOrderSide.BUY, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
@@ -271,6 +271,16 @@ class RiskBatchBudgetTest {
                     assertThat(CoreLiquidationBatchResultCodec.decode(actual.data()).processedOrders()).isEqualTo(1);
                 }
                 assertThat(pages).isEqualTo(4);
+                var obsolete = command(line, CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                        TradingCommandCodec.encodeExecuteLiquidationBatch(firstWork));
+                byte[] beforeObsolete = state.snapshot(602);
+                var obsoleteResult = executeLiquidation(state, obsolete, asynchronous);
+                assertThat(CoreLiquidationBatchResultCodec.decode(obsoleteResult.data()).obsoleteActions()).isEqualTo(2);
+                assertThat(apply(restored, obsolete).data()).isEqualTo(obsoleteResult.data());
+                try (var replay = new CommittedTradeReplay(line, beforeObsolete)) {
+                    replay.apply(CoreMessageCodec.encode(obsolete), TIME, obsolete.header().sourceSequence());
+                    assertThat(replay.businessHash()).isEqualTo(state.snapshotBusinessStateHash());
+                }
                 assertThat(state.tradingState().businessStateHash()).isEqualTo(restored.tradingState().businessStateHash());
                 assertThat(liquidationFunds(state)).isEqualTo(funds);
             }
