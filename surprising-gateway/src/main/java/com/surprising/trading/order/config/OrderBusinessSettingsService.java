@@ -14,7 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 数据库保存订单业务规则；Core 合约同步将同一规则写入撮合核心。 */
 @Service
 public class OrderBusinessSettingsService {
-    public record Snapshot(long version, OrderBusinessSettings settings, String updatedBy, String reason, Instant updatedAt) {}
+    public record Snapshot(long configurationVersion, OrderBusinessSettings settings, String updatedBy, String reason, Instant updatedAt) {}
     public record Update(OrderBusinessSettings settings, Long expectedVersion, String reason) {}
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
@@ -66,7 +66,7 @@ public class OrderBusinessSettingsService {
     @Scheduled(fixedDelay=1000) public synchronized void reload() {
         var value=jdbc.queryForObject("SELECT * FROM order_business_settings WHERE product_line=?",(rs,n)->decode(rs),line.name());
         if(value==null)throw new IllegalStateException("order settings missing");
-        if(current==null || value.version()>current.version())install(value);
+        if(current==null || value.configurationVersion()>current.configurationVersion())install(value);
     }
     private Snapshot decode(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new Snapshot(rs.getLong("version"),json.readValue(rs.getString("settings"),OrderBusinessSettings.class),rs.getString("updated_by"),rs.getString("reason"),rs.getTimestamp("updated_at").toInstant());

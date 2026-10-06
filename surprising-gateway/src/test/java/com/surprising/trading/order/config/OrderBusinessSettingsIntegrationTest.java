@@ -33,15 +33,15 @@ class OrderBusinessSettingsIntegrationTest {
         var before=first.current(line);
         var settings=new OrderBusinessSettings(new CoreOrderProtection(20000,8000,true,30000,4000),
                 new OrderBusinessSettings.Algo(false,50,100,2,100,10,300,5000));
-        first.save(line,new OrderBusinessSettingsService.Update(settings,before.version(),"configure orders"),"42");
+        first.save(line,new OrderBusinessSettingsService.Update(settings,before.configurationVersion(),"configure orders"),"42");
         second.reload();
         assertThat(second.current(line)).isEqualTo(first.current(line));
         assertThat(secondProps.getRisk().protection()).isEqualTo(settings.risk());
         assertThat(secondProps.getAlgo().getScanDelayMs()).isEqualTo(100);
         assertThat(secondProps.getAlgo().isEnabled()).isFalse();
-        assertThatThrownBy(()->second.save(line,new OrderBusinessSettingsService.Update(settings,before.version(),"stale"),"42"))
+        assertThatThrownBy(()->second.save(line,new OrderBusinessSettingsService.Update(settings,before.configurationVersion(),"stale"),"42"))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("409");
-        String valid=json.writeValueAsString(new OrderBusinessSettingsService.Update(settings,first.current(line).version(),"valid"));
+        String valid=json.writeValueAsString(new OrderBusinessSettingsService.Update(settings,first.current(line).configurationVersion(),"valid"));
         assertThat(first.parseUpdate(json.readTree(valid)).settings()).isEqualTo(settings);
         for(String bad:java.util.List.of(valid.replace("20000","2.5"),valid.replace("\"enabled\":false","\"enabled\":\"false\""),
                 valid.replace("\"marketMaxSlippagePpm\":20000,",""),valid.replace("\"risk\":{","\"risk\":{\"unknown\":1,")))
@@ -49,6 +49,6 @@ class OrderBusinessSettingsIntegrationTest {
         assertThatThrownBy(()->new CoreOrderProtection(1000000,5000,false,50000,5000)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(()->new OrderBusinessSettings.Algo(true,100,25,20,10,5,100,30000)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(()->first.current(line==ProductLine.SPOT?ProductLine.OPTION:ProductLine.SPOT)).isInstanceOf(IllegalArgumentException.class);
-        assertThat(first.current(line).version()).isEqualTo(before.version()+1);
+        assertThat(first.current(line).configurationVersion()).isEqualTo(before.configurationVersion()+1);
     }
 }
