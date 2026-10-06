@@ -33,6 +33,9 @@ class CandleQueryPostgresTest {
             var minutes = repository.findRange("2147483600", "1m", from, to, 1441);
             assertThat(minutes).hasSize(2).allSatisfy(row -> assertThat(row.instrumentId()).isEqualTo("2147483600"));
             assertThat(repository.findLatest("2147483600", "1m").orElseThrow().closePrice()).isEqualByComparingTo("102");
+            assertThat(repository.findBefore("2147483600", from)).isEmpty();
+            assertThat(repository.findBefore("2147483600", from.plusSeconds(60)).orElseThrow().closePrice()).isEqualByComparingTo("101");
+            assertThat(repository.findBefore("2147483600", to).orElseThrow().closePrice()).isEqualByComparingTo("102");
             var rollup = repository.findRange("2147483600", "15m", from, to, 120);
             assertThat(rollup).hasSize(1);
             assertThat(rollup.getFirst().baseVolume()).isEqualByComparingTo("5");

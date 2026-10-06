@@ -30,21 +30,29 @@ public class MarketSummaryRepository {
                 .addValue("since", Timestamp.from(now.minusSeconds(86_400)))
                 .addValue("until", Timestamp.from(now));
         var rows = jdbc.query("""
-                SELECT c.instrument_id, c.open_price, c.high_price, c.low_price,
-                       c.close_price, c.base_volume, c.quote_volume
-                  FROM candlestick_candles c
-                 WHERE c.instrument_id IN (:ids)
-                   AND c.period = '1m'
-                   AND c.status = 'CLOSED'
-                   AND c.open_time >= :since
-                   AND c.open_time < :until
-                   AND NOT EXISTS (
-                       SELECT 1 FROM instruments i
-                        WHERE i.instrument_id = c.instrument_id::integer
-                        GROUP BY i.instrument_id
-                       HAVING count(DISTINCT i.product_line) > 1
-                   )
-                 ORDER BY c.instrument_id, c.open_time
+                WITH eligible AS (
+                    SELECT i.instrument_id::text AS instrument_id
+                      FROM instruments i WHERE i.instrument_id::text IN (:ids)
+                     GROUP BY i.instrument_id HAVING count(DISTINCT i.product_line) = 1
+                ), samples AS (
+                    SELECT e.instrument_id, p.close_price AS open_price, p.close_price AS high_price,
+                           p.close_price AS low_price, p.close_price, 0::numeric AS base_volume,
+                           0::numeric AS quote_volume, :since::timestamptz AS sample_time, 0 AS sample_order
+                      FROM eligible e CROSS JOIN LATERAL (
+                          SELECT c.close_price FROM candlestick_candles c
+                           WHERE c.instrument_id = e.instrument_id AND c.period = '1m'
+                             AND c.status = 'CLOSED' AND c.close_time <= :since
+                           ORDER BY c.open_time DESC LIMIT 1
+                      ) p
+                    UNION ALL
+                    SELECT c.instrument_id, c.open_price, c.high_price, c.low_price,
+                           c.close_price, c.base_volume, c.quote_volume, c.open_time, 1
+                      FROM candlestick_candles c JOIN eligible e USING (instrument_id)
+                     WHERE c.period = '1m' AND c.status = 'CLOSED'
+                       AND c.open_time >= :since AND c.open_time < :until
+                )
+                SELECT instrument_id, open_price, high_price, low_price, close_price, base_volume, quote_volume
+                  FROM samples ORDER BY instrument_id, sample_time, sample_order
                 """, arguments, (rs, index) -> new Sample(
                 Integer.parseInt(rs.getString("instrument_id")),
                 rs.getBigDecimal("open_price"), rs.getBigDecimal("high_price"),
@@ -76,6 +84,8 @@ public class MarketSummaryRepository {
             int index = count == 1 ? 0 : i * (rows.size() - 1) / (count - 1);
             trend.add(rows.get(index).close());
         }
+        // With no executions in the window, both endpoints remain the last real close.
+        if (trend.size() == 1) trend.add(trend.getFirst());
         BigDecimal change = close.subtract(open).multiply(BigDecimal.valueOf(100))
                 .divide(open, 6, RoundingMode.HALF_UP);
         return new Summary(close, change, high, low, volume, quoteVolume, List.copyOf(trend));

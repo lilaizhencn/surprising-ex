@@ -75,19 +75,27 @@ public class CandleQueryService {
                 .sorted(Comparator.comparing(CandleResponse::openTime))
                 .limit(safeLimit)
                 .toList();
+        Instant firstOpen = candlePeriod.floor(startTime);
+        if (firstOpen.isBefore(startTime)) firstOpen = candlePeriod.closeTime(firstOpen);
+        CandleResponse previous = actualCandles.isEmpty() || actualCandles.getFirst().openTime().isAfter(firstOpen)
+                ? candleQueryRepository.findBefore(normalizedSymbol, firstOpen).orElse(null) : null;
         return new CandleQueryResponse(normalizedSymbol, candlePeriod.code(), safeLimit,
-                fillNoTradePeriods(actualCandles, candlePeriod, endTime.isBefore(now) ? endTime : now, safeLimit));
+                fillNoTradePeriods(actualCandles, previous, firstOpen, candlePeriod,
+                        endTime.isBefore(now) ? endTime : now, safeLimit));
     }
 
     /** 只在已有真实成交之后补齐无成交周期；价格沿用真实收盘价，成交量与笔数为零。 */
-    private List<CandleResponse> fillNoTradePeriods(List<CandleResponse> actual,
-                                                     CandlePeriod period, Instant through, int limit) {
-        if (actual.isEmpty()) return actual;
+    private List<CandleResponse> fillNoTradePeriods(List<CandleResponse> actual, CandleResponse previous,
+                                                     Instant start, CandlePeriod period, Instant through, int limit) {
+        if (actual.isEmpty() && previous == null) return actual;
         Map<Instant, CandleResponse> byOpenTime = new TreeMap<>();
         actual.forEach(candle -> byOpenTime.put(candle.openTime(), candle));
         List<CandleResponse> result = new ArrayList<>(limit);
-        CandleResponse previous = actual.getFirst();
-        for (Instant open = previous.openTime(); open.isBefore(through) && result.size() < limit;
+        if (previous == null) {
+            previous = actual.getFirst();
+            start = previous.openTime();
+        }
+        for (Instant open = start; open.isBefore(through) && result.size() < limit;
              open = period.closeTime(open)) {
             CandleResponse real = byOpenTime.get(open);
             if (real != null) {

@@ -29,4 +29,28 @@ class MarketSummaryRepositoryTest {
         assertThat(summary.trend().getFirst()).isEqualByComparingTo("100");
         assertThat(summary.trend().getLast()).isEqualByComparingTo("199");
     }
+
+    @Test
+    void quietDayKeepsRealCloseAndZeroVolume() {
+        var price = new BigDecimal("86256.8");
+        var summary = MarketSummaryRepository.summarize(java.util.List.of(
+                new MarketSummaryRepository.Sample(604, price, price, price, price, BigDecimal.ZERO, BigDecimal.ZERO)));
+        assertThat(summary.lastPrice()).isEqualByComparingTo(price);
+        assertThat(summary.change24h()).isZero();
+        assertThat(summary.volume24h()).isZero();
+        assertThat(summary.quoteVolume24h()).isZero();
+        assertThat(summary.trend()).containsExactly(price, price);
+    }
+
+    @Test
+    void firstTradeAfterQuietPeriodUsesOpeningCloseButOnlyNewTradeVolume() {
+        var prior = new BigDecimal("100");
+        var current = new BigDecimal("105");
+        var summary = MarketSummaryRepository.summarize(java.util.List.of(
+                new MarketSummaryRepository.Sample(604, prior, prior, prior, prior, BigDecimal.ZERO, BigDecimal.ZERO),
+                new MarketSummaryRepository.Sample(604, current, current, current, current, BigDecimal.TWO, new BigDecimal("210"))));
+        assertThat(summary.change24h()).isEqualByComparingTo("5");
+        assertThat(summary.volume24h()).isEqualByComparingTo("2");
+        assertThat(summary.quoteVolume24h()).isEqualByComparingTo("210");
+    }
 }

@@ -54,6 +54,18 @@ public class CandleQueryRepository {
                 java.sql.Timestamp.from(startTime), java.sql.Timestamp.from(endTime), limit);
     }
 
+    /** Last completed real minute before a query window; only its close seeds empty periods. */
+    public Optional<CandleResponse> findBefore(String instrumentId, Instant before) {
+        String sql = """
+                SELECT %s FROM candlestick_candles
+                 WHERE instrument_id = ? AND period = '1m' AND status = 'CLOSED'
+                   AND close_time <= ?
+                 ORDER BY open_time DESC LIMIT 1
+                """.formatted(SELECT_COLUMNS);
+        return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, instrumentId,
+                java.sql.Timestamp.from(before)).stream().findFirst();
+    }
+
     public Optional<CandleResponse> findLatest(String instrumentId, String period) {
         CandlePeriod candlePeriod = CandlePeriod.fromCode(period);
         if (candlePeriod != CandlePeriod.M1) {
