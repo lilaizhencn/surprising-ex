@@ -50,6 +50,15 @@ public class LoginVerificationSettingsController {
                 auth.authenticateBearer(bearer).userId(), method, request, Instant.now());
     }
 
+    @PostMapping("/{method}/resend")
+    public LoginVerificationService.ChallengeResponse resend(
+            @RequestHeader("Authorization") String bearer,
+            @PathVariable String method,
+            @Valid @RequestBody LoginVerificationService.ResendRequest request) {
+        return verification.resendBindingCode(
+                auth.authenticateBearer(bearer).userId(), method, request, Instant.now());
+    }
+
     @PostMapping("/{method}/confirm")
     public void confirm(
             @RequestHeader("Authorization") String bearer,

@@ -243,6 +243,32 @@ public class LoginVerificationService {
                 uri == null ? null : totp.qrCodeDataUrl(uri));
     }
 
+    /** Reissues a binding challenge without replacing the pending TOTP enrollment secret. */
+    @Transactional(noRollbackFor = VerificationFailure.class)
+    public ChallengeResponse resendBindingCode(
+            long userId, String method, ResendRequest request, Instant now) {
+        requireSettingMethod(method);
+        if (!"TOTP".equals(method)) throw new IllegalArgumentException("resend is only supported for TOTP enrollment");
+        var challenge = active(request.challengeToken(), method, now);
+        if (challenge.userId() != userId || !challenge.targetEnabled())
+            throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
+        List<Method> required = new ArrayList<>();
+        var credential = users.credential(userId).orElseThrow();
+        for (String requiredMethod : challenge.methods().split(",")) {
+            String destination = switch (requiredMethod) {
+                case "EMAIL" -> credential.email();
+                case "PHONE" -> credential.phone();
+                case "TOTP" -> null;
+                default -> throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
+            };
+            required.add(new Method(requiredMethod, mask(destination)));
+        }
+        if (required.stream().noneMatch(item -> item.type().equals("TOTP"))
+                || required.stream().noneMatch(item -> item.type().equals("EMAIL") || item.type().equals("PHONE")))
+            throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
+        return issue(userId, method, required, challenge.destination(), true, now);
+    }
+
     @Transactional(noRollbackFor = VerificationFailure.class)
     public void confirmBinding(
             long userId, String method, SettingConfirmation request, Instant now) {
@@ -447,6 +473,10 @@ public class LoginVerificationService {
                     String currentPassword,
             @jakarta.validation.Valid @jakarta.validation.constraints.NotNull
                     VerifyRequest codes) {}
+
+    public record ResendRequest(
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 64)
+                    String challengeToken) {}
 
     public record Method(String type, String destination) {}
 

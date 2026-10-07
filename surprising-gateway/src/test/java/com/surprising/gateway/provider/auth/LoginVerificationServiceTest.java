@@ -106,6 +106,42 @@ class LoginVerificationServiceTest {
         verifyNoInteractions(email, sms);
     }
 
+    @Test
+    void resendTotpEnrollmentCodeKeepsTheExistingPendingEnrollment() {
+        properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
+        var token = "a".repeat(43);
+        when(db.find(anyString()))
+                .thenReturn(Optional.of(new LoginVerificationRepository.Challenge(
+                        1, "TOTP", "old-hash", "fingerprint", "EMAIL,TOTP", "email-hash", null,
+                        null, now.plusSeconds(300), false, 0, true)));
+
+        var result = service.resendBindingCode(
+                1, "TOTP", new LoginVerificationService.ResendRequest(token), now.plusSeconds(60));
+
+        assertThat(result.simulated()).isTrue();
+        assertThat(result.methods()).extracting(LoginVerificationService.Method::type)
+                .containsExactly("EMAIL", "TOTP");
+        verify(db).issue(eq(1L), eq("TOTP"), anyString(), anyString(), eq("EMAIL,TOTP"),
+                anyString(), isNull(), isNull(), eq(true), eq(now.plusSeconds(60)));
+        verify(users, never()).upsertMfaSecret(anyLong(), anyString(), any());
+        verifyNoInteractions(email, sms);
+    }
+
+    @Test
+    void resendTotpEnrollmentCodeRejectsAnotherUsersChallenge() {
+        var token = "a".repeat(43);
+        when(db.find(anyString()))
+                .thenReturn(Optional.of(new LoginVerificationRepository.Challenge(
+                        2, "TOTP", "old-hash", "fingerprint", "EMAIL,TOTP", "email-hash", null,
+                        null, now.plusSeconds(300), false, 0, true)));
+
+        assertThatThrownBy(() -> service.resendBindingCode(
+                        1, "TOTP", new LoginVerificationService.ResendRequest(token), now))
+                .hasMessage("LOGIN_CHALLENGE_EXPIRED");
+        verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
+                nullable(String.class), nullable(String.class), nullable(String.class), anyBoolean(), any());
+    }
+
     void enableTotp(boolean enabled, Instant verified) {
         when(users.mfaCredential(1))
                 .thenReturn(
