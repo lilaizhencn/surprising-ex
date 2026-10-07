@@ -32,6 +32,7 @@ public class UserSecurityController {
 
     private final AuthService authService;
     private final UserSecurityService securityService;
+    private final LoginVerificationService loginVerification;
     private final SensitiveActionVerificationService verificationService;
     private final AuthPersistenceService persistence;
     private final GatewayUserAccessBlockRepository accessBlocks;
@@ -39,12 +40,14 @@ public class UserSecurityController {
 
     public UserSecurityController(AuthService authService,
                                   UserSecurityService securityService,
+                                  LoginVerificationService loginVerification,
                                   SensitiveActionVerificationService verificationService,
                                   AuthPersistenceService persistence,
                                   GatewayUserAccessBlockRepository accessBlocks,
                                   com.surprising.gateway.provider.config.GatewayProperties properties) {
         this.authService = authService;
         this.securityService = securityService;
+        this.loginVerification = loginVerification;
         this.verificationService = verificationService;
         this.persistence = persistence;
         this.accessBlocks = accessBlocks;
@@ -54,6 +57,42 @@ public class UserSecurityController {
     @GetMapping("/mfa")
     public UserSecurityService.UserMfaStatus mfaStatus(@RequestHeader("Authorization") String authorization) {
         return securityService.status(principal(authorization).userId());
+    }
+
+    @PostMapping("/mfa/enroll")
+    public LoginVerificationService.BindingResponse beginMfaEnrollment(
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody MfaChangeStartRequest request) {
+        return loginVerification.beginBinding(principal(authorization).userId(), "TOTP",
+                new LoginVerificationService.SettingRequest(request.currentPassword(), null, true), Instant.now());
+    }
+
+    @PostMapping("/mfa/confirm")
+    public UserSecurityService.UserMfaStatus confirmMfaEnrollment(
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody MfaChangeConfirmation request) {
+        long userId = principal(authorization).userId();
+        loginVerification.confirmBinding(userId, "TOTP", new LoginVerificationService.SettingConfirmation(
+                request.currentPassword(), request.codes()), Instant.now());
+        return securityService.status(userId);
+    }
+
+    @PostMapping("/mfa/disable")
+    public LoginVerificationService.BindingResponse beginMfaDisable(
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody MfaChangeStartRequest request) {
+        return loginVerification.beginBinding(principal(authorization).userId(), "TOTP",
+                new LoginVerificationService.SettingRequest(request.currentPassword(), null, false), Instant.now());
+    }
+
+    @PostMapping("/mfa/disable/confirm")
+    public UserSecurityService.UserMfaStatus confirmMfaDisable(
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody MfaChangeConfirmation request) {
+        long userId = principal(authorization).userId();
+        loginVerification.confirmBinding(userId, "TOTP", new LoginVerificationService.SettingConfirmation(
+                request.currentPassword(), request.codes()), Instant.now());
+        return securityService.status(userId);
     }
 
     @PostMapping("/password")
@@ -312,9 +351,20 @@ public class UserSecurityController {
 
     public record AccessChangeRequest(String emailCode, String totpCode) {}
     public record IpAccessChangeRequest(String ipAddress, String emailCode, String totpCode) {}
+    public record MfaChangeStartRequest(@jakarta.validation.constraints.NotBlank String currentPassword) {}
+    public record MfaChangeConfirmation(@jakarta.validation.constraints.NotBlank String currentPassword,
+                                        @Valid @jakarta.validation.constraints.NotNull
+                                        LoginVerificationService.VerifyRequest codes) {}
     public record DeviceStatus(long sessionId, String deviceId, String userAgent, String ipAddress,
                                Instant lastSeen, boolean active, boolean current, boolean blocked) {}
     public record IpStatus(String ipAddress, long loginCount, Instant lastSeen, boolean blocked) {}
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(LoginVerificationService.VerificationFailure.class)
+    public org.springframework.http.ResponseEntity<java.util.Map<String, String>> mfaFailure(
+            LoginVerificationService.VerificationFailure ex) {
+        return org.springframework.http.ResponseEntity.badRequest()
+                .body(java.util.Map.of("message", ex.getMessage()));
+    }
 
     private ResponseStatusException badRequest(IllegalArgumentException ex) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

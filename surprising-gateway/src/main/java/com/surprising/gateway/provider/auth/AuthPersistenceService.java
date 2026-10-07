@@ -81,6 +81,14 @@ public class AuthPersistenceService {
         return userRepository.find(userId).map(user -> toAuthenticatedUser(user, roles(userId)));
     }
 
+    public void recordSecurityChange(long userId, Instant now) {
+        userRepository.recordSecurityChange(userId, now.plus(java.time.Duration.ofHours(24)), now);
+    }
+
+    public Optional<Instant> withdrawalRestrictedUntil(long userId) {
+        return userRepository.withdrawalRestrictedUntil(userId);
+    }
+
     public List<String> roles(long userId) {
         List<Long> roleIds = userRoleRepository.findRoleIds(userId);
         return roleCodes(roleIds);

@@ -47,11 +47,12 @@ public class SensitiveActionVerificationService {
         }
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
         String destination = normalizeEmail(user.email());
-        String code = String.format("%06d", secureRandom.nextInt(1_000_000));
+        boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
+        String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
         Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
         var challenge = challengeRepository.create(userId, PURPOSE, "EMAIL", destination,
                 digest(code, normalizedScene, destination), expiresAt, requestIp, now);
-        sender.send(destination, "Verify your Surprising security action",
+        if (!simulated) sender.send(destination, "Verify your Surprising security action",
                 "Your security verification code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email.");
         return new IssuedChallenge(challenge.challengeId(), destination, expiresAt);
     }

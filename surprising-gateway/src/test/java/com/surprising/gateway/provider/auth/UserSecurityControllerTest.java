@@ -20,12 +20,13 @@ class UserSecurityControllerTest {
 
     private final AuthService authService = mock(AuthService.class);
     private final UserSecurityService securityService = mock(UserSecurityService.class);
+    private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
     private final SensitiveActionVerificationService verificationService =
             mock(SensitiveActionVerificationService.class);
     private final AuthPersistenceService persistence = mock(AuthPersistenceService.class);
     private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final UserSecurityController controller = new UserSecurityController(
-            authService, securityService, verificationService, persistence,
+            authService, securityService, loginVerification, verificationService, persistence,
             accessBlocks, new com.surprising.gateway.provider.config.GatewayProperties());
 
     @Test

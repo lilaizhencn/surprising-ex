@@ -69,6 +69,7 @@ public class GatewayUserMfaRepository {
         jdbcTemplate.update("""
                 UPDATE gateway_user_mfa
                    SET enabled = FALSE,
+                       verified_at = NULL,
                        updated_at = ?
                  WHERE user_id = ?
                 """, Timestamp.from(now), userId);

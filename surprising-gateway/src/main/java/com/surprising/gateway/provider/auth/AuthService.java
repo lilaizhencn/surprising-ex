@@ -583,6 +583,14 @@ public class AuthService {
         requireAccessAllowed(userId, null, ipAddress);
     }
 
+    public void recordSecurityChange(long userId, Instant now) {
+        repository.recordSecurityChange(userId, now);
+    }
+
+    public java.time.Instant withdrawalRestrictedUntil(long userId) {
+        return repository.withdrawalRestrictedUntil(userId).orElse(null);
+    }
+
     private String truncate(String value, int max) {
         if (value == null) {
             return null;

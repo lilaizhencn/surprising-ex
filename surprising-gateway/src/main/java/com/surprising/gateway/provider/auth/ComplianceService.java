@@ -362,6 +362,10 @@ public class ComplianceService {
     }
 
     public void requireWithdrawalEligibility(long userId) {
+        Instant restrictedUntil = authService.withdrawalRestrictedUntil(userId);
+        if (restrictedUntil != null && restrictedUntil.isAfter(Instant.now())) {
+            throw new WithdrawalSecurityHoldException(restrictedUntil);
+        }
         List<RiskTag> activeTags = riskTags(userId, "ACTIVE", 100);
         boolean blockedByRiskTag = activeTags.stream().anyMatch(tag ->
                 "HIGH".equalsIgnoreCase(tag.severity()) || "CRITICAL".equalsIgnoreCase(tag.severity()));
@@ -452,4 +456,12 @@ public class ComplianceService {
     public record KycDocumentContent(KycDocument document, byte[] content) {
     }
 
+    public static class WithdrawalSecurityHoldException extends IllegalStateException {
+        private final Instant restrictedUntil;
+        public WithdrawalSecurityHoldException(Instant restrictedUntil) {
+            super("withdrawals are temporarily restricted until " + restrictedUntil);
+            this.restrictedUntil = restrictedUntil;
+        }
+        public Instant restrictedUntil() { return restrictedUntil; }
+    }
 }

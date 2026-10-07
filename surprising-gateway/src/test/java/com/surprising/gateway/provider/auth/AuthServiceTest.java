@@ -201,7 +201,7 @@ class AuthServiceTest {
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         var challenge = new LoginVerificationService.ChallengeResponse(true,"challenge",now.plusSeconds(300),
-                List.of(new LoginVerificationService.Method("TOTP",null)));
+                List.of(new LoginVerificationService.Method("TOTP",null)), false);
         when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
         assertThat(service.login(new LoginRequest("admin","password"),new MockHttpServletRequest())).isSameAs(challenge);
         verifyNoInteractions(jwtTokenService);

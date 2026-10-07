@@ -2217,6 +2217,7 @@ CREATE TABLE IF NOT EXISTS gateway_users (
     phone               TEXT,
     password_hash       TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'NORMAL',
+    withdrawal_restricted_until TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_users_username_format CHECK (username ~ '^[a-z0-9_]{3,32}$'),
@@ -2230,6 +2231,7 @@ CREATE TABLE IF NOT EXISTS gateway_users (
 ALTER TABLE gateway_users ALTER COLUMN username DROP NOT NULL;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS withdrawal_restricted_until TIMESTAMPTZ;
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
     ON gateway_users (lower(username));
@@ -2256,7 +2258,7 @@ CREATE TABLE IF NOT EXISTS gateway_auth_challenges (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_auth_challenges_purpose_check CHECK (
-        purpose IN ('EMAIL_VERIFY', 'PASSWORD_RESET', 'LOGIN', 'SENSITIVE_ACTION')
+        purpose IN ('EMAIL_VERIFY', 'PASSWORD_RESET', 'LOGIN', 'SENSITIVE_ACTION', 'MFA_RECOVERY')
     ),
     CONSTRAINT gateway_auth_challenges_channel_check CHECK (channel IN ('EMAIL', 'PHONE')),
     CONSTRAINT gateway_auth_challenges_attempts_check CHECK (attempts BETWEEN 0 AND 5)
@@ -2265,6 +2267,22 @@ CREATE TABLE IF NOT EXISTS gateway_auth_challenges (
 CREATE INDEX IF NOT EXISTS gateway_auth_challenges_active_idx
     ON gateway_auth_challenges (user_id, purpose, destination, created_at DESC)
     WHERE consumed_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_mfa_recovery_requests (
+    request_id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    reason TEXT NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_by_user_id BIGINT REFERENCES gateway_users(user_id),
+    reviewed_at TIMESTAMPTZ,
+    decision_reason TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_mfa_recovery_pending_user_uidx
+    ON gateway_mfa_recovery_requests(user_id) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS gateway_mfa_recovery_queue_idx
+    ON gateway_mfa_recovery_requests(status, submitted_at);
 
 CREATE TABLE IF NOT EXISTS gateway_roles (
     role_id             BIGSERIAL PRIMARY KEY,

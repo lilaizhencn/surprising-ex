@@ -30,11 +30,12 @@ public class EmailVerificationService {
     @Transactional
     public IssuedChallenge issueEmailVerification(long userId, String email, String requestIp, Instant now) {
         String destination = normalizeEmail(email);
-        String code = String.format("%06d", secureRandom.nextInt(1_000_000));
+        boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
+        String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
         Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
         GatewayAuthChallengeRepository.Challenge challenge = repository.create(userId, PURPOSE, "EMAIL", destination,
                 digest(code, PURPOSE, destination), expiresAt, requestIp, now);
-        sender.send(destination, "Verify your Surprising account",
+        if (!simulated) sender.send(destination, "Verify your Surprising account",
                 "Your verification code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email.");
         return new IssuedChallenge(challenge.challengeId(), destination, expiresAt);
     }

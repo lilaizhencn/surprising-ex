@@ -165,6 +165,24 @@ public class GatewayUserRepository {
                 """, passwordHash, Timestamp.from(now), userId);
     }
 
+    public void recordSecurityChange(long userId, Instant restrictedUntil, Instant now) {
+        jdbcTemplate.update("""
+                UPDATE gateway_users
+                   SET withdrawal_restricted_until = GREATEST(
+                           COALESCE(withdrawal_restricted_until, ?), ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                """, Timestamp.from(restrictedUntil), Timestamp.from(restrictedUntil), Timestamp.from(now), userId);
+    }
+
+    public Optional<Instant> withdrawalRestrictedUntil(long userId) {
+        return jdbcTemplate.query("SELECT withdrawal_restricted_until FROM gateway_users WHERE user_id = ?",
+                (rs, rowNum) -> {
+                    Timestamp value = rs.getTimestamp("withdrawal_restricted_until");
+                    return value == null ? null : value.toInstant();
+                }, userId).stream().filter(java.util.Objects::nonNull).findFirst();
+    }
+
     private UserRecord toUserRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new UserRecord(
                 rs.getLong("user_id"),

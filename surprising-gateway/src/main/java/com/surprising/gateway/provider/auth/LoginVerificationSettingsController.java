@@ -28,6 +28,19 @@ public class LoginVerificationSettingsController {
         return verification.settings(auth.authenticateBearer(bearer).userId());
     }
 
+    @PostMapping("/{method}/verify-password")
+    public void verifyPassword(
+            @RequestHeader("Authorization") String bearer,
+            @PathVariable String method,
+            @Valid @RequestBody PasswordVerificationRequest request) {
+        verification.verifySettingPassword(
+                auth.authenticateBearer(bearer).userId(), method, request.currentPassword());
+    }
+
+    public record PasswordVerificationRequest(
+            @jakarta.validation.constraints.NotBlank
+            @jakarta.validation.constraints.Size(max = 128) String currentPassword) {}
+
     @PostMapping("/{method}/bind")
     public LoginVerificationService.BindingResponse begin(
             @RequestHeader("Authorization") String bearer,

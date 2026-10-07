@@ -36,5 +36,7 @@ class TotpServiceTest {
                 .contains("secret=" + secret)
                 .contains("digits=6")
                 .contains("period=30");
+        assertThat(service.qrCodeDataUrl(service.provisioningUri("admin", secret)))
+                .startsWith("data:image/png;base64,");
     }
 }

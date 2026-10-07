@@ -69,6 +69,43 @@ class LoginVerificationServiceTest {
                 .thenReturn(true);
     }
 
+    @Test
+    void passwordStepDoesNotSendCodesOrChangeSecurityState() {
+        service.verifySettingPassword(1, "EMAIL", "password");
+        verifyNoInteractions(db, email, sms);
+        verify(users, never()).upsertMfaSecret(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void passwordStepRejectsIncorrectPasswordBeforeIssuingAnyCode() {
+        assertThatThrownBy(() -> service.verifySettingPassword(1, "EMAIL", "wrong"))
+                .isInstanceOf(LoginVerificationService.VerificationFailure.class)
+                .hasMessage("LOGIN_PASSWORD_INVALID");
+        verifyNoInteractions(db, email, sms);
+    }
+
+    @Test
+    void passwordStepRejectsUnsupportedMethod() {
+        assertThatThrownBy(() -> service.verifySettingPassword(1, "UNKNOWN", "password"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(passwordHasher, db, email, sms);
+    }
+
+    @Test
+    void testSimulationUsesFixedCodeAndDoesNotRequireDeliveryProviders() {
+        properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
+
+        var response = service.beginBinding(1, "EMAIL",
+                new LoginVerificationService.SettingRequest("password", null, true), now);
+
+        assertThat(response.challenge().simulated()).isTrue();
+        assertThat(response.challenge().methods()).extracting(LoginVerificationService.Method::type)
+                .containsExactly("EMAIL", "PHONE");
+        verify(db).issue(eq(1L), eq("EMAIL"), anyString(), anyString(), eq("EMAIL,PHONE"),
+                anyString(), anyString(), eq("u@example.test"), eq(true), eq(now));
+        verifyNoInteractions(email, sms);
+    }
+
     void enableTotp(boolean enabled, Instant verified) {
         when(users.mfaCredential(1))
                 .thenReturn(

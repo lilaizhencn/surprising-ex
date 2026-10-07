@@ -40,11 +40,12 @@ public class PasswordResetService {
         Optional<GatewayUserRepository.UserCredential> credential = credential(normalized);
         if (credential.isPresent() && credential.get().email() != null) {
             String email = credential.get().email().toLowerCase(Locale.ROOT);
-            String code = String.format("%06d", secureRandom.nextInt(1_000_000));
+            boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
+            String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
             Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
             challenges.create(credential.get().userId(), PURPOSE, "EMAIL", email,
                     digest(code, PURPOSE, email), expiresAt, requestIp, now);
-            sender.send(email, "Reset your Surprising password",
+            if (!simulated) sender.send(email, "Reset your Surprising password",
                     "Your password reset code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email.");
         }
         return new ResetResult(true);

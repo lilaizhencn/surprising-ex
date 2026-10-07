@@ -60,6 +60,17 @@ public class GatewayAuthChallengeRepository {
                 Timestamp.from(now)).stream().findFirst();
     }
 
+    public Optional<Challenge> findActive(long challengeId, long userId, String purpose, Instant now) {
+        return jdbcTemplate.query("""
+                SELECT challenge_id, user_id, purpose, channel, destination, code_hash,
+                       expires_at, attempts, consumed_at
+                  FROM gateway_auth_challenges
+                 WHERE challenge_id = ? AND user_id = ? AND purpose = ?
+                   AND consumed_at IS NULL AND expires_at > ? AND attempts < 5
+                """, (rs, rowNum) -> toChallenge(rs), challengeId, userId, purpose, Timestamp.from(now))
+                .stream().findFirst();
+    }
+
     public boolean incrementAttempts(long challengeId, long userId, Instant now) {
         return jdbcTemplate.update("""
                 UPDATE gateway_auth_challenges

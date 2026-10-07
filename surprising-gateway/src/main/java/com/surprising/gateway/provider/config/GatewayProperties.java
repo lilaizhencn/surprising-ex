@@ -368,6 +368,8 @@ public class GatewayProperties implements EnvironmentAware {
         private String resendFrom = "";
         private String resendBaseUrl = "https://api.resend.com";
         private String verificationCodePepper = "local-dev-verification-pepper-change-me";
+        @Setter
+        private boolean simulatedVerificationCodesEnabled = false;
         private Duration verificationCodeTtl = Duration.ofMinutes(10);
         private String mfaSecretEncryptionKey = "";
         @Setter

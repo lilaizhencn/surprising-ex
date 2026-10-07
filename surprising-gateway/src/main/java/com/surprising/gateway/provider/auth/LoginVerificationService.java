@@ -169,6 +169,12 @@ public class LoginVerificationService {
         return List.copyOf(result);
     }
 
+    /** First UI step only; binding and confirmation independently check the password again. */
+    public void verifySettingPassword(long userId, String method, String currentPassword) {
+        requireSettingMethod(method);
+        requirePassword(userId, currentPassword);
+    }
+
     @Transactional(noRollbackFor = VerificationFailure.class)
     public BindingResponse beginBinding(
             long userId, String method, SettingRequest request, Instant now) {
@@ -217,21 +223,24 @@ public class LoginVerificationService {
         }
         // 绑定/开启时，注册联系方式与其他已绑定因素都要验证，与其登录开关无关。
         List<Method> required = new ArrayList<>();
-        for (Setting setting : settings(userId)) {
+        List<Setting> currentSettings = settings(userId);
+        for (Setting setting : currentSettings) {
             if (setting.type().equals(method)) required.add(new Method(method, mask(destination)));
-            else if (request.enabled() && setting.bound())
+            else if (request.enabled() && setting.bound() && !"TOTP".equals(method))
                 required.add(new Method(setting.type(), setting.destination()));
         }
-        ChallengeResponse challenge =
-                issue(userId, method, required, destination, request.enabled(), now);
-        return new BindingResponse(
-                challenge,
-                enrollmentSecret,
-                enrollmentSecret == null
-                        ? null
-                        : totp.provisioningUri(
-                                account.email() == null ? account.username() : account.email(),
-                                enrollmentSecret));
+        if ("TOTP".equals(method) && request.enabled()) {
+            String contactMethod = availableContactMethod(currentSettings, account.email(), account.phone());
+            if (required.stream().noneMatch(item -> item.type().equals(contactMethod))) {
+                required.add(new Method(contactMethod,
+                        mask("EMAIL".equals(contactMethod) ? account.email() : account.phone())));
+            }
+        }
+        ChallengeResponse challenge = issue(userId, method, required, destination, request.enabled(), now);
+        String uri = enrollmentSecret == null ? null
+                : totp.provisioningUri(account.email() == null ? account.username() : account.email(), enrollmentSecret);
+        return new BindingResponse(challenge, enrollmentSecret, uri,
+                uri == null ? null : totp.qrCodeDataUrl(uri));
     }
 
     @Transactional(noRollbackFor = VerificationFailure.class)
@@ -258,6 +267,17 @@ public class LoginVerificationService {
             challenges.saveFactor(
                     userId, method, challenge.destination(), challenge.targetEnabled(), now);
         challenges.consume(challenge.tokenHash());
+        users.recordSecurityChange(userId, now);
+    }
+
+    private String availableContactMethod(List<Setting> settings, String email, String phone) {
+        boolean emailBound = settings.stream().anyMatch(setting -> setting.type().equals("EMAIL") && setting.bound());
+        boolean phoneBound = settings.stream().anyMatch(setting -> setting.type().equals("PHONE") && setting.bound());
+        if (emailBound && email != null && email.trim().matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) return "EMAIL";
+        if (phoneBound && phone != null && phone.trim().matches("\\+[1-9][0-9]{6,14}")) return "PHONE";
+        if (email != null && email.trim().matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) return "EMAIL";
+        if (phone != null && phone.trim().matches("\\+[1-9][0-9]{6,14}")) return "PHONE";
+        throw new VerificationFailure("LOGIN_CONTACT_MISSING");
     }
 
     private void requireSettingMethod(String method) {
@@ -282,10 +302,13 @@ public class LoginVerificationService {
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes),
                 hash = digest(token);
-        String emailCode = methods.stream().anyMatch(m -> m.type().equals("EMAIL")) ? code() : null;
-        String phoneCode = methods.stream().anyMatch(m -> m.type().equals("PHONE")) ? code() : null;
-        SmsMessageSender sender = phoneCode == null ? null : sms.getIfAvailable();
-        if (phoneCode != null && sender == null)
+        boolean simulatedCodes = properties.getSecurity().isSimulatedVerificationCodesEnabled();
+        String emailCode = methods.stream().anyMatch(m -> m.type().equals("EMAIL"))
+                ? simulatedCodes ? "123456" : code() : null;
+        String phoneCode = methods.stream().anyMatch(m -> m.type().equals("PHONE"))
+                ? simulatedCodes ? "123456" : code() : null;
+        SmsMessageSender sender = phoneCode == null || simulatedCodes ? null : sms.getIfAvailable();
+        if (phoneCode != null && sender == null && !simulatedCodes)
             throw new VerificationFailure("LOGIN_SMS_UNAVAILABLE");
         if (!challenges.issue(
                 userId,
@@ -300,6 +323,7 @@ public class LoginVerificationService {
                 now)) throw new VerificationFailure("LOGIN_VERIFICATION_RATE_LIMITED");
         var user = users.credential(userId).orElseThrow();
         try {
+            if (simulatedCodes) return new ChallengeResponse(true, token, now.plusSeconds(300), methods, true);
             if (emailCode != null)
                 email.send(
                         "EMAIL".equals(purpose) ? destination : user.email(),
@@ -314,7 +338,7 @@ public class LoginVerificationService {
             challenges.consume(hash);
             throw new VerificationFailure("LOGIN_CODE_DELIVERY_FAILED");
         }
-        return new ChallengeResponse(true, token, now.plusSeconds(300), methods);
+        return new ChallengeResponse(true, token, now.plusSeconds(300), methods, false);
     }
 
     private LoginVerificationRepository.Challenge active(
@@ -408,7 +432,7 @@ public class LoginVerificationService {
     }
 
     public record BindingResponse(
-            ChallengeResponse challenge, String secret, String provisioningUri) {}
+            ChallengeResponse challenge, String secret, String provisioningUri, String qrCodeDataUrl) {}
 
     public record Setting(String type, boolean bound, boolean enabled, String destination) {}
 
@@ -430,7 +454,8 @@ public class LoginVerificationService {
             boolean requiresVerification,
             String challengeToken,
             Instant expiresAt,
-            List<Method> methods)
+            List<Method> methods,
+            boolean simulated)
             implements AuthModels.LoginResult {}
 
     public record VerifyRequest(

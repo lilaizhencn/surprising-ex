@@ -44,8 +44,10 @@ public class UserSecurityService {
 
     public UserMfaStatus status(long userId) {
         return persistence.mfaCredential(userId)
-                .map(credential -> new UserMfaStatus(credential.enabled(), credential.verifiedAt()))
-                .orElseGet(() -> new UserMfaStatus(false, null));
+                .map(credential -> new UserMfaStatus(credential.enabled(), credential.verifiedAt(),
+                        persistence.withdrawalRestrictedUntil(userId).orElse(null)))
+                .orElseGet(() -> new UserMfaStatus(false, null,
+                        persistence.withdrawalRestrictedUntil(userId).orElse(null)));
     }
 
     public List<Scene> scenes(long userId) {
@@ -129,7 +131,7 @@ public class UserSecurityService {
                 .map(Scene::label).findFirst().orElse(sceneCode);
     }
 
-    public record UserMfaStatus(boolean enabled, Instant verifiedAt) {
+    public record UserMfaStatus(boolean enabled, Instant verifiedAt, Instant withdrawalsRestrictedUntil) {
     }
 
     public record UserMfaEnrollment(boolean enabled, String secret, String provisioningUri) {

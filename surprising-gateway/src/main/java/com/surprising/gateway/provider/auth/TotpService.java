@@ -10,6 +10,11 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Locale;
+import java.io.ByteArrayOutputStream;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.qrcode.QRCodeWriter;
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
@@ -48,6 +53,20 @@ public class TotpService {
                 + "&issuer=" + urlEncode(issuer)
                 + "&algorithm=SHA1&digits=" + DIGITS
                 + "&period=" + PERIOD_SECONDS;
+    }
+
+    public String qrCodeDataUrl(String provisioningUri) {
+        try {
+            var hints = java.util.Map.of(EncodeHintType.CHARACTER_SET, "UTF-8",
+                    EncodeHintType.MARGIN, 1);
+            var matrix = new QRCodeWriter().encode(provisioningUri, BarcodeFormat.QR_CODE,
+                    256, 256, hints);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            MatrixToImageWriter.writeToStream(matrix, "PNG", output);
+            return "data:image/png;base64," + Base64.getEncoder().encodeToString(output.toByteArray());
+        } catch (Exception ex) {
+            throw new IllegalStateException("failed to render authenticator QR code", ex);
+        }
     }
 
     public boolean verify(String secret, String code, Instant now) {

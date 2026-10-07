@@ -46,6 +46,17 @@ class ComplianceServiceTest {
     }
 
     @Test
+    void blocksWithdrawalDuringSecurityHoldAndReturnsItsExpiry() {
+        Instant until = Instant.now().plusSeconds(3600);
+        when(authService.withdrawalRestrictedUntil(42L)).thenReturn(until);
+
+        assertThatThrownBy(() -> service.requireWithdrawalEligibility(42L))
+                .isInstanceOf(ComplianceService.WithdrawalSecurityHoldException.class)
+                .hasMessageContaining(until.toString());
+        verifyNoInteractions(riskTagRepository, amlCaseRepository);
+    }
+
+    @Test
     void blocksWithdrawalForOpenAmlCaseWhenRiskTagsAreClear() {
         when(riskTagRepository.find(42L, "ACTIVE", 100)).thenReturn(List.of());
         when(amlCaseRepository.find(42L, null, 200)).thenReturn(List.of(
