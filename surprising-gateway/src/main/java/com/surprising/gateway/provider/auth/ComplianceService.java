@@ -200,7 +200,7 @@ public class ComplianceService {
         java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
         boolean hasDocuments = request.documentIds() != null && !request.documentIds().isEmpty();
         if (hasDocuments) {
-            if (!List.of("ID_CARD", "PASSPORT").contains(request.documentType())) throw new IllegalArgumentException("select an identity card or passport");
+            if (!List.of("ID_CARD", "PASSPORT", "DRIVING_LICENSE", "RESIDENCE_PERMIT").contains(request.documentType())) throw new IllegalArgumentException("select a supported identity document");
             if (request.documentExpiresOn() == null || request.documentExpiresOn().isBefore(today)) {
                 throw new IllegalArgumentException("identity document must not be expired");
             }

@@ -18,7 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 public class KycDocumentService {
 
     private static final Set<String> DOCUMENT_TYPES = Set.of(
-            "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
+            "DRIVING_LICENSE", "DRIVING_LICENSE_FRONT", "DRIVING_LICENSE_BACK", "RESIDENCE_PERMIT", "RESIDENCE_PERMIT_FRONT", "RESIDENCE_PERMIT_BACK", "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
     private static final Set<String> CONTENT_TYPES = Set.of("application/pdf", "image/jpeg", "image/png");
 
     private final KycDocumentRepository repository;
@@ -136,6 +136,12 @@ public class KycDocumentService {
                     throw new IllegalArgumentException("KYC document does not match: missing " + required);
                 }
             }
+        } else if (Set.of("DRIVING_LICENSE", "RESIDENCE_PERMIT").contains(requestedType)) {
+            for (String side : List.of("_FRONT", "_BACK")) {
+                if (documents.stream().noneMatch(document -> (requestedType + side).equals(document.documentType()))) {
+                    throw new IllegalArgumentException("KYC document does not match: missing " + requestedType + side);
+                }
+            }
         } else if (documents.stream().noneMatch(document -> requestedType.equals(document.documentType()))) {
             throw new IllegalArgumentException("KYC document type does not match submitted verification");
         }
@@ -165,7 +171,7 @@ public class KycDocumentService {
         }
 
         boolean identity = documents.stream().anyMatch(document ->
-                Set.of("ID_CARD_FRONT", "PASSPORT").contains(document.documentType()));
+                Set.of("ID_CARD_FRONT", "PASSPORT", "DRIVING_LICENSE_FRONT", "RESIDENCE_PERMIT_FRONT").contains(document.documentType()));
         if (!identity) {
             throw new IllegalArgumentException("an identity document is required for KYC");
         }

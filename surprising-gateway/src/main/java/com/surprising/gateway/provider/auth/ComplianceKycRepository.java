@@ -173,7 +173,7 @@ public class ComplianceKycRepository {
                 throw new IllegalArgumentException("submittedDocuments may contain at most 10 items");
             }
             Set<String> allowedTypes = Set.of(
-                    "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
+                    "DRIVING_LICENSE", "DRIVING_LICENSE_FRONT", "DRIVING_LICENSE_BACK", "RESIDENCE_PERMIT", "RESIDENCE_PERMIT_FRONT", "RESIDENCE_PERMIT_BACK", "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
             for (JsonNode document : parsed) {
                 if (!document.isObject()) {
                     throw new IllegalArgumentException("each submitted document must be an object");

@@ -7,6 +7,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 class KycEvidenceReferenceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
+    void persistsAdditionalIdentityEvidence(String type) {
+        var repository = new ComplianceKycRepository(mock(JdbcTemplate.class), new ObjectMapper());
+        var request = new ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "BASIC", "SG", type, "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L));
+        assertThatCode(() -> repository.submit(42, request,
+            "[{\"type\":\"" + type + "_FRONT\",\"reference\":\"document:1\"},{\"type\":\"" + type + "_BACK\",\"reference\":\"document:2\"}]", Instant.now())).doesNotThrowAnyException();
+    }
     @Test void persistsSeparatedIdentityCardEvidenceWithDates() {
         var jdbc = mock(JdbcTemplate.class);
         var repository = new ComplianceKycRepository(jdbc, new ObjectMapper());

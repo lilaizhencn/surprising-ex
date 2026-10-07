@@ -138,6 +138,21 @@ class KycDocumentServiceTest {
         service.deleteDraft(7L, 10L);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
+    void cardDocumentsRequireBothSidesAndSeparateAddressEvidence(String type) {
+        KycDocumentRepository repository = mock();
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        List<Long> ids = List.of(10L, 11L);
+        when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(document(10L, type + "_FRONT"), document(11L, type + "_BACK")));
+        assertThat(service.requireSubmissionDocuments(7L, ids, type, "INDIVIDUAL", "BASIC", "NOT_REQUIRED")).hasSize(2);
+        assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, ids, type, "INDIVIDUAL", "STANDARD", "NOT_REQUIRED")).hasMessageContaining("address proof");
+        when(repository.findOwnedForSubmission(7L, List.of(10L))).thenReturn(List.of(document(10L, type + "_FRONT")));
+        assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, List.of(10L), type)).hasMessageContaining(type + "_BACK");
+        when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(document(10L, type + "_FRONT"), document(11L, "ADDRESS_PROOF")));
+        assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, ids, type)).hasMessageContaining(type + "_BACK");
+    }
+
     private KycDocument document(long id, String type) {
         return new KycDocument(id, 7L, type, type.toLowerCase() + ".pdf", "application/pdf",
                 8L, "a".repeat(64), "UPLOADED", Instant.now(), null);
