@@ -3,6 +3,9 @@ package com.surprising.gateway.provider.auth;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionResponse;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycSimulationRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycProviderInfo;
 import com.surprising.gateway.provider.service.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.service.KycDocumentStorageException;
 import com.surprising.gateway.provider.service.KycDocumentStorageUnavailableException;
@@ -45,8 +48,14 @@ public class UserComplianceController {
         }
     }
 
+    @GetMapping("/kyc/provider")
+    public KycProviderInfo kycProvider(@RequestHeader("Authorization") String authorization) {
+        try { return complianceService.userKycProviderInfo(authorization); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex); }
+    }
+
     @PostMapping("/kyc")
-    public KycProfile submitKyc(@RequestHeader("Authorization") String authorization,
+    public KycSubmissionResponse submitKyc(@RequestHeader("Authorization") String authorization,
                                 @Valid @RequestBody KycSubmissionRequest request) {
         try {
             return complianceService.submitUserKyc(authorization, request);
@@ -54,6 +63,34 @@ public class UserComplianceController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping("/kyc/simulation/complete")
+    public KycProfile completeKycSimulation(@RequestHeader("Authorization") String authorization,
+                                             @Valid @RequestBody KycSimulationRequest request) {
+        try { return complianceService.completeKycSimulation(authorization, request.decision().trim().toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }
+    }
+
+    @PostMapping("/kyc/session/refresh")
+    public KycProvider.KycProviderSession refreshKycSession(@RequestHeader("Authorization") String authorization) {
+        try { return complianceService.refreshUserKycSession(authorization); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }
+    }
+
+    @PostMapping(value = "/kyc/webhooks/{provider}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> providerWebhook(@PathVariable String provider,
+            @RequestHeader HttpHeaders headers, @RequestBody byte[] body) {
+        try {
+            complianceService.applyProviderCallback(provider, headers.toSingleValueMap(), body);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 

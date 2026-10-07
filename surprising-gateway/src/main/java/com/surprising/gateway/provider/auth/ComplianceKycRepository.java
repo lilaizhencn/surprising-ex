@@ -111,6 +111,38 @@ public class ComplianceKycRepository {
                 """, (rs, rowNum) -> toProfile(rs), userId).stream().findFirst().orElse(null);
     }
 
+    public boolean recordProviderEvent(String provider, String eventKey, Instant now) {
+        if (eventKey == null || eventKey.isBlank()) throw new IllegalArgumentException("provider event key is required");
+        return jdbcTemplate.update("""
+                INSERT INTO gateway_kyc_provider_events (provider, event_key, received_at)
+                VALUES (?, ?, ?) ON CONFLICT (provider, event_key) DO NOTHING
+                """, ComplianceValidation.provider(provider), eventKey, Timestamp.from(now)) == 1;
+    }
+
+    public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant now) {
+        String normalizedStatus = ComplianceValidation.kycStatus(status);
+        if (!Set.of("PENDING", "VERIFIED", "REJECTED").contains(normalizedStatus)) {
+            throw new IllegalArgumentException("provider KYC status is invalid");
+        }
+        return jdbcTemplate.queryForObject("""
+                UPDATE gateway_user_kyc_profiles
+                   SET status = ?, rejection_reason = ?,
+                       reviewed_by_user_id = NULL,
+                       reviewed_at = CASE WHEN ? = 'PENDING' THEN NULL::timestamptz ELSE ?::timestamptz END,
+                       face_verification_status = CASE WHEN ? = 'VERIFIED' AND face_verification_status = 'PENDING' THEN 'VERIFIED'
+                                                       WHEN ? = 'REJECTED' AND face_verification_status = 'PENDING' THEN 'FAILED'
+                                                       ELSE face_verification_status END,
+                       updated_at = ?
+                 WHERE user_id = ? AND provider = ?
+                RETURNING user_id, kyc_level, status, country, document_type, provider, provider_reference,
+                          reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
+                          applicant_type, submitted_documents::text, face_verification_status
+                """, (rs, rowNum) -> toProfile(rs), normalizedStatus,
+                "REJECTED".equals(normalizedStatus) ? ComplianceValidation.blankToNull(rejectionReason) : null,
+                normalizedStatus, Timestamp.from(now), normalizedStatus, normalizedStatus, Timestamp.from(now), userId,
+                ComplianceValidation.provider(provider));
+    }
+
     private KycProfile toProfile(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new KycProfile(
                 rs.getLong("user_id"),

@@ -75,6 +75,12 @@ class GatewayProductionSecurityConfigurationTest {
         documents.setAccessKey("s3-access-key");
         documents.setSecretKey("s3-secret-key");
 
+        properties.getKyc().getSumsub().setAppToken("sumsub-app-token");
+        properties.getKyc().getSumsub().setSecretKey("sumsub-secret-key-with-at-least-32-characters");
+        properties.getKyc().getSumsub().setWebhookSecret("sumsub-webhook-secret-with-at-least-32-chars");
+        properties.getKyc().getSumsub().setLevelName("basic-kyc-level");
+        properties.getKyc().setSimulationEnabled(false);
+
         assertThatCode(properties::validateProductionSecurityConfiguration)
                 .doesNotThrowAnyException();
     }
@@ -143,6 +149,10 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("RESEND_API_KEY", "re_test_api_key");
         testEnvironment.put("RESEND_FROM", "security@example.com");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_BASE_URL", "https://wallet.example.com");
+        testEnvironment.put("GATEWAY_KYC_SUMSUB_APP_TOKEN", "sumsub-app-token");
+        testEnvironment.put("GATEWAY_KYC_SUMSUB_SECRET_KEY", "sumsub-secret-key-with-at-least-32-characters");
+        testEnvironment.put("GATEWAY_KYC_SUMSUB_WEBHOOK_SECRET", "sumsub-webhook-secret-with-at-least-32-chars");
+        testEnvironment.put("GATEWAY_KYC_SUMSUB_LEVEL_NAME", "basic-kyc-level");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_KEY", "wallet-key");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");

@@ -8,6 +8,8 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionResponse;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycProviderInfo;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
@@ -15,6 +17,7 @@ import com.surprising.gateway.provider.service.KycDocumentService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +35,9 @@ public class ComplianceService {
     private final AdminApprovalService approvalService;
     private final KycDocumentService kycDocumentService;
     private final AdminAuditRepository adminAuditRepository;
+    private final AuthPersistenceService authPersistence;
+    private final EmailMessageSender emailMessageSender;
+    private final KycProviderRegistry kycProviders;
 
     public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
                              ComplianceKycRepository kycRepository,
@@ -40,7 +46,10 @@ public class ComplianceService {
                              AuthService authService,
                              AdminApprovalService approvalService,
                              KycDocumentService kycDocumentService,
-                             AdminAuditRepository adminAuditRepository) {
+                             AdminAuditRepository adminAuditRepository,
+                             AuthPersistenceService authPersistence,
+                             EmailMessageSender emailMessageSender,
+                             KycProviderRegistry kycProviders) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
         this.riskTagRepository = riskTagRepository;
@@ -49,6 +58,9 @@ public class ComplianceService {
         this.approvalService = approvalService;
         this.kycDocumentService = kycDocumentService;
         this.adminAuditRepository = adminAuditRepository;
+        this.authPersistence = authPersistence;
+        this.emailMessageSender = emailMessageSender;
+        this.kycProviders = kycProviders;
     }
 
     public AdminCursorPage.CursorPage<ComplianceUserSummary> adminUsersPage(
@@ -114,6 +126,21 @@ public class ComplianceService {
         return kycRepository.find(authService.authenticateBearer(authorization).userId());
     }
 
+    public KycProviderInfo userKycProviderInfo(String authorization) {
+        authService.authenticateBearer(authorization);
+        return new KycProviderInfo(kycProviders.selectedProvider(), kycProviders.simulationEnabled());
+    }
+
+    public KycProvider.KycProviderSession refreshUserKycSession(String authorization) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        KycProfile profile = kycRepository.find(userId);
+        if (profile == null || !"PENDING".equals(profile.status())
+                || profile.provider() == null || "SELF".equalsIgnoreCase(profile.provider())) {
+            throw new IllegalStateException("there is no active KYC provider session");
+        }
+        return kycProviders.refreshSession(profile.provider(), userId, profile.providerReference());
+    }
+
     public KycDocument uploadUserKycDocument(String authorization, String documentType,
                                              org.springframework.web.multipart.MultipartFile file) {
         long userId = authService.authenticateBearer(authorization).userId();
@@ -152,15 +179,74 @@ public class ComplianceService {
     }
 
     @Transactional
-    public KycProfile submitUserKyc(String authorization, KycSubmissionRequest request) {
+    public KycSubmissionResponse submitUserKyc(String authorization, KycSubmissionRequest request) {
         long userId = authService.authenticateBearer(authorization).userId();
-        List<KycDocument> documents = kycDocumentService.requireSubmissionDocuments(
-                userId, request.documentIds(), request.documentType(), request.applicantType(),
-                request.kycLevel(), request.faceVerificationStatus());
+        String provider = kycProviders.selectedProvider();
+        List<KycDocument> documents = "SELF".equals(provider) || (request.documentIds() != null && !request.documentIds().isEmpty())
+                ? kycDocumentService.requireSubmissionDocuments(userId, request.documentIds(), request.documentType(),
+                        request.applicantType(), request.kycLevel(), request.faceVerificationStatus()) : List.of();
+        KycProvider.KycProviderSession session = kycProviders.start(userId, request, documents);
+        ComplianceModels.KycSubmissionRequest providerRequest = new ComplianceModels.KycSubmissionRequest(
+                request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
+                session.provider(), session.providerReference(), request.submittedDocuments(),
+                "SELF".equals(session.provider()) ? request.faceVerificationStatus() : "PENDING", request.documentIds());
         String submittedDocuments = kycDocumentService.references(documents);
-        KycProfile profile = kycRepository.submit(userId, request, submittedDocuments, Instant.now());
-        kycDocumentService.markSubmitted(userId, request.documentIds());
-        return profile;
+        KycProfile profile = kycRepository.submit(userId, providerRequest, submittedDocuments, Instant.now());
+        if (request.documentIds() != null && !request.documentIds().isEmpty()) kycDocumentService.markSubmitted(userId, request.documentIds());
+        return new KycSubmissionResponse(profile, session);
+    }
+
+    @Transactional
+    public KycProfile applyProviderCallback(String provider, Map<String, String> headers, byte[] body) {
+        KycProvider.KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
+                .orElseThrow(() -> new IllegalArgumentException("KYC callback could not be verified"));
+        Long userId;
+        try { userId = Long.valueOf(result.externalUserId()); }
+        catch (RuntimeException ex) { throw new IllegalArgumentException("KYC callback user reference is invalid", ex); }
+        if (!kycRepository.recordProviderEvent(provider, result.eventKey(), Instant.now())) return kycRepository.find(userId);
+        KycProfile previous = kycRepository.find(userId);
+        if (previous == null || !provider.equalsIgnoreCase(previous.provider())
+                || (result.providerReference() != null && !result.providerReference().equals(previous.providerReference()))) {
+            throw new IllegalArgumentException("KYC callback does not match the current verification session");
+        }
+        KycProfile updated = kycRepository.applyProviderResult(userId, provider, result.status(),
+                result.rejectionReason(), Instant.now());
+        notifyKycTransition(previous, updated);
+        return updated;
+    }
+
+    @Transactional
+    public KycProfile completeKycSimulation(String authorization, String decision) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        if (!kycProviders.simulationEnabled()) throw new IllegalStateException("KYC simulation is disabled");
+        if (!List.of("APPROVED", "REJECTED", "MANUAL_REVIEW").contains(decision)) throw new IllegalArgumentException("decision must be APPROVED, REJECTED or MANUAL_REVIEW");
+        KycProfile previous = kycRepository.find(userId);
+        String selected = kycProviders.selectedProvider();
+        if (previous == null || !selected.equalsIgnoreCase(previous.provider()) || !"PENDING".equals(previous.status())) {
+            throw new IllegalStateException("there is no pending simulated KYC session");
+        }
+        if (!kycRepository.recordProviderEvent(selected,
+                "SIMULATION:" + userId + ":" + java.util.Objects.toString(previous.providerReference(), "manual")
+                        + ":" + previous.updatedAt().toEpochMilli(), Instant.now())) {
+            throw new IllegalStateException("the simulated KYC result was already submitted");
+        }
+        String status = switch (decision) { case "APPROVED" -> "VERIFIED"; case "REJECTED" -> "REJECTED"; default -> "PENDING"; };
+        String reason = "REJECTED".equals(status) ? "Simulated provider rejection" : null;
+        KycProfile updated = kycRepository.applyProviderResult(userId, selected, status, reason, Instant.now());
+        notifyKycTransition(previous, updated);
+        return updated;
+    }
+
+    private void notifyKycTransition(KycProfile previous, KycProfile updated) {
+        if (kycProviders.simulationEnabled()) return;
+        if (previous != null && "PENDING".equals(previous.status())
+                && List.of("VERIFIED", "REJECTED").contains(updated.status())) {
+            authPersistence.user(updated.userId()).map(AuthenticatedUser::email).filter(email -> email != null && !email.isBlank())
+                    .ifPresent(email -> { try { emailMessageSender.send(email, "Surprising identity verification update",
+                            "Your identity verification has been " + updated.status().toLowerCase(Locale.ROOT)
+                                    + (updated.rejectionReason() == null ? "." : ": " + updated.rejectionReason())); }
+                        catch (RuntimeException ignored) { } });
+        }
     }
 
     public RiskTag adminCreateRiskTag(String authorization,
@@ -222,7 +308,24 @@ public class ComplianceService {
     }
 
     public KycProfile upsertKyc(long userId, long adminUserId, KycUpdateRequest request, Instant now) {
-        return kycRepository.upsert(userId, adminUserId, request, now);
+        KycProfile previous = kycRepository.find(userId);
+        KycProfile updated = kycRepository.upsert(userId, adminUserId, request, now);
+        if (previous != null && "PENDING".equals(previous.status())
+                && List.of("VERIFIED", "REJECTED").contains(updated.status())) {
+            authPersistence.user(userId).map(AuthenticatedUser::email)
+                    .filter(email -> email != null && !email.isBlank())
+                    .ifPresent(email -> {
+                        try {
+                            emailMessageSender.send(email, "Surprising identity verification update",
+                                    "Your identity verification has been " + updated.status().toLowerCase(Locale.ROOT)
+                                            + (updated.rejectionReason() == null ? "."
+                                            : ". Reason: " + updated.rejectionReason()));
+                        } catch (RuntimeException ignored) {
+                            // KYC review state is durable even if the notification provider is unavailable.
+                        }
+                    });
+        }
+        return updated;
     }
 
     public KycProfile kyc(long userId) {
@@ -319,4 +422,5 @@ public class ComplianceService {
 
     public record KycDocumentContent(KycDocument document, byte[] content) {
     }
+
 }

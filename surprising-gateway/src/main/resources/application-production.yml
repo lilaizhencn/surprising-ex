@@ -36,6 +36,20 @@ surprising:
       region: ${GATEWAY_KYC_DOCUMENTS_REGION}
       access-key: ${GATEWAY_KYC_DOCUMENTS_ACCESS_KEY}
       secret-key: ${GATEWAY_KYC_DOCUMENTS_SECRET_KEY}
+    kyc:
+      provider: ${GATEWAY_KYC_PROVIDER:SUMSUB}
+      simulation-enabled: false
+      sumsub:
+        app-token: ${GATEWAY_KYC_SUMSUB_APP_TOKEN:}
+        secret-key: ${GATEWAY_KYC_SUMSUB_SECRET_KEY:}
+        webhook-secret: ${GATEWAY_KYC_SUMSUB_WEBHOOK_SECRET:}
+        level-name: ${GATEWAY_KYC_SUMSUB_LEVEL_NAME:}
+        base-url: ${GATEWAY_KYC_SUMSUB_BASE_URL:https://api.sumsub.com}
+      veriff:
+        api-key: ${GATEWAY_KYC_VERIFF_API_KEY:}
+        shared-secret: ${GATEWAY_KYC_VERIFF_SHARED_SECRET:}
+        base-url: ${GATEWAY_KYC_VERIFF_BASE_URL:https://stationapi.veriff.com}
+        callback-url: ${GATEWAY_KYC_VERIFF_CALLBACK_URL:}
     security:
       require-identity-for-private-routes: true
       admin-ip-allowlist: ${GATEWAY_ADMIN_IP_ALLOWLIST}

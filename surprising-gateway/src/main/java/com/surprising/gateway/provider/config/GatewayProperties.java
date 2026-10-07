@@ -38,6 +38,8 @@ public class GatewayProperties implements EnvironmentAware {
     @Getter
     private KycDocuments kycDocuments = new KycDocuments();
     @Getter
+    private Kyc kyc = new Kyc();
+    @Getter
     private BinanceApi binanceApi = new BinanceApi();
     @Getter
     @Setter
@@ -145,6 +147,28 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "kyc-documents.access-key", documents.getAccessKey());
         requireNonBlank(failures, "kyc-documents.secret-key", documents.getSecretKey());
 
+        Kyc configuredKyc = kyc == null ? new Kyc() : kyc;
+        if (configuredKyc.isSimulationEnabled()) {
+            failures.add("kyc.simulation-enabled must be false in production");
+        }
+        String provider = configuredKyc.getProvider();
+        if (!List.of("SUMSUB", "VERIFF", "SELF").contains(provider)) {
+            failures.add("kyc.provider must be SUMSUB, VERIFF, or SELF");
+        } else if ("SUMSUB".equals(provider)) {
+            requireNonBlank(failures, "kyc.sumsub.app-token", configuredKyc.getSumsub().getAppToken());
+            requireProductionSecret(failures, "kyc.sumsub.secret-key", configuredKyc.getSumsub().getSecretKey(), 32, null);
+            requireProductionSecret(failures, "kyc.sumsub.webhook-secret", configuredKyc.getSumsub().getWebhookSecret(), 32, null);
+            requireNonBlank(failures, "kyc.sumsub.level-name", configuredKyc.getSumsub().getLevelName());
+            requireHttpsUrl(failures, "kyc.sumsub.base-url", configuredKyc.getSumsub().getBaseUrl());
+        } else if ("VERIFF".equals(provider)) {
+            requireNonBlank(failures, "kyc.veriff.api-key", configuredKyc.getVeriff().getApiKey());
+            requireProductionSecret(failures, "kyc.veriff.shared-secret", configuredKyc.getVeriff().getSharedSecret(), 32, null);
+            requireHttpsUrl(failures, "kyc.veriff.base-url", configuredKyc.getVeriff().getBaseUrl());
+            if (configuredKyc.getVeriff().getCallbackUrl() != null && !configuredKyc.getVeriff().getCallbackUrl().isBlank()) {
+                requireHttpsUrl(failures, "kyc.veriff.callback-url", configuredKyc.getVeriff().getCallbackUrl());
+            }
+        }
+
         if (!failures.isEmpty()) {
             throw new IllegalStateException("production gateway security configuration is invalid: "
                     + String.join("; ", failures));
@@ -219,6 +243,8 @@ public class GatewayProperties implements EnvironmentAware {
     public void setKycDocuments(KycDocuments kycDocuments) {
         this.kycDocuments = kycDocuments == null ? new KycDocuments() : kycDocuments;
     }
+
+    public void setKyc(Kyc kyc) { this.kyc = kyc == null ? new Kyc() : kyc; }
 
     private static Map<?, ?> readJsonObject(String value) {
         if (value == null || value.isBlank() || value.trim().equals("{}")) {
@@ -617,6 +643,38 @@ public class GatewayProperties implements EnvironmentAware {
         public void setMaxFileSizeBytes(long maxFileSizeBytes) {
             this.maxFileSizeBytes = maxFileSizeBytes <= 0 ? 15L * 1024L * 1024L : maxFileSizeBytes;
         }
+    }
+
+    @Getter
+    public static class Kyc {
+        private String provider = "SUMSUB";
+        @Setter private boolean simulationEnabled = true;
+        private Sumsub sumsub = new Sumsub();
+        private Veriff veriff = new Veriff();
+        public void setProvider(String provider) {
+            this.provider = provider == null || provider.isBlank() ? "SUMSUB" : provider.trim().toUpperCase(java.util.Locale.ROOT);
+        }
+        public void setSumsub(Sumsub value) { sumsub = value == null ? new Sumsub() : value; }
+        public void setVeriff(Veriff value) { veriff = value == null ? new Veriff() : value; }
+    }
+
+    @Getter
+    public static class Sumsub {
+        @Setter private String appToken = "";
+        @Setter private String secretKey = "";
+        @Setter private String webhookSecret = "";
+        @Setter private String levelName = "basic-kyc-level";
+        private String baseUrl = "https://api.sumsub.com";
+        public void setBaseUrl(String value) { baseUrl = value == null || value.isBlank() ? "https://api.sumsub.com" : value.trim().replaceAll("/$", ""); }
+    }
+
+    @Getter
+    public static class Veriff {
+        @Setter private String apiKey = "";
+        @Setter private String sharedSecret = "";
+        private String baseUrl = "https://stationapi.veriff.com";
+        @Setter private String callbackUrl = "";
+        public void setBaseUrl(String value) { baseUrl = value == null || value.isBlank() ? "https://stationapi.veriff.com" : value.trim().replaceAll("/$", ""); }
     }
 
     @Getter
