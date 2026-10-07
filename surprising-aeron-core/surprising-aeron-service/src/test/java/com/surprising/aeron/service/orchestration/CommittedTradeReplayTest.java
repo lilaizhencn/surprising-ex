@@ -33,6 +33,23 @@ class CommittedTradeReplayTest {
             var resting = place(replay, line, 7, 201, CoreOrderSide.SELL);
             assertThat(resting).hasSize(1);
             assertThat(order(resting.getFirst()).status()).isEqualTo("OPEN");
+            place(replay, line, 7, 209, CoreOrderSide.SELL);
+            var batchCancel = send(replay, line, CoreMessageType.CANCEL_ORDER_BATCH, 7,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(999), new CancelOrderCommand(209)))));
+            assertThat(batchCancel.stream().filter(f -> f.kind() == RealtimeFrame.Kind.ORDER)
+                    .map(CommittedTradeReplayTest::order)).anySatisfy(o -> {
+                        assertThat(o.orderId()).isEqualTo(209);
+                        assertThat(o.status()).isEqualTo("CANCELED");
+                    });
+            var amended = send(replay, line, CoreMessageType.AMEND_ORDER_BATCH, 7,
+                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(201, 211, "repriced-211", 99L, null, null, null)))));
+            assertThat(amended.stream().filter(f -> f.kind() == RealtimeFrame.Kind.ORDER)
+                    .map(CommittedTradeReplayTest::order)).anySatisfy(o -> {
+                        assertThat(o.orderId()).isEqualTo(211);
+                        assertThat(o.priceTicks()).isEqualTo(99);
+                    });
             snapshot = replay.snapshot();
         }
         try (var restored = new CommittedTradeReplay(line, snapshot)) {
@@ -43,7 +60,7 @@ class CommittedTradeReplayTest {
                 assertThat(o.status()).isEqualTo("FILLED");
                 assertThat(o.executedQuantitySteps()).isEqualTo(2);
                 assertThat(o.remainingQuantitySteps()).isZero();
-                assertThat(o.getAveragePriceTicks()).isEqualTo("100");
+                assertThat(o.getAveragePriceTicks()).isEqualTo("99");
                 assertThat(o.instrumentId()).isEqualTo("604");
                 assertThat(o.productLine()).isEqualTo(line);
             });

@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-07",
+  "environment": "ex.tokdou.com test",
+  "recovery": "authoritative core snapshot; isolated candle consumer state; verified Archive replay",
+  "history": {
+    "verifiedIntervals": 15,
+    "from": "2026-10-06T13:06:00+00:00",
+    "toExclusive": "2026-10-07T01:22:00+00:00",
+    "trades": 11720,
+    "candles": 2022,
+    "instruments": {
+      "604": {
+        "trades": 3905,
+        "candles": 674,
+        "low": "85318.4",
+        "high": "86649.9",
+        "baseVolume": "150.00",
+        "quoteVolume": "12848526.518"
+      },
+      "653": {
+        "trades": 3909,
+        "candles": 674,
+        "low": "2682.69",
+        "high": "2722.86",
+        "baseVolume": "152.75",
+        "quoteVolume": "412138.0050"
+      },
+      "866": {
+        "trades": 3906,
+        "candles": 674,
+        "low": "120.05",
+        "high": "121.95",
+        "baseVolume": "149.79",
+        "quoteVolume": "18092.4297"
+      }
+    }
+  },
+  "publicApi": [
+    {
+      "instrument": "604",
+      "verifiedHistoricalMinutes": 674,
+      "periods": [
+        "1m",
+        "15m",
+        "1h",
+        "current 1h",
+        "current 1d"
+      ],
+      "status": "PASS"
+    },
+    {
+      "instrument": "653",
+      "verifiedHistoricalMinutes": 674,
+      "periods": [
+        "1m",
+        "15m",
+        "1h",
+        "current 1h",
+        "current 1d"
+      ],
+      "status": "PASS"
+    },
+    {
+      "instrument": "866",
+      "verifiedHistoricalMinutes": 674,
+      "periods": [
+        "1m",
+        "15m",
+        "1h",
+        "current 1h",
+        "current 1d"
+      ],
+      "status": "PASS"
+    }
+  ],
+  "liveExecutionsMatched": 6,
+  "financialSnapshotsIdenticalAccounts": 22,
+  "desktopAndMobileBrowser": "PASS",
+  "regressionTests": {
+    "run": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "scopeLimitations": [
+    "Five other product lines covered by replay regression tests, not live recovery",
+    "History before 2026-10-06T13:06:00Z was not rebuilt",
+    "Original historical cause of exporter checkpoint divergence remains unconfirmed"
+  ]
+}
