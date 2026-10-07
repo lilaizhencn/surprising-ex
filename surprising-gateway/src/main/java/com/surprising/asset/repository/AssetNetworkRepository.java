@@ -14,6 +14,10 @@ public class AssetNetworkRepository {
     private final JdbcTemplate jdbc;
     public AssetNetworkRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    public List<Network> enabled() {
+        return jdbc.query("SELECT * FROM asset_networks WHERE deposit_enabled OR withdrawal_enabled ORDER BY network_id", this::map);
+    }
+
     public List<Network> list(int assetId) {
         return jdbc.query("SELECT * FROM asset_networks WHERE asset_id=? ORDER BY network_id", this::map, assetId);
     }

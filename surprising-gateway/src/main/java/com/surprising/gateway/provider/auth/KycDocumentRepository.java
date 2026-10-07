@@ -113,6 +113,10 @@ public class KycDocumentRepository {
                 """.formatted(placeholders), args.toArray());
     }
 
+    public int deleteDraft(long userId, long documentId) {
+        return jdbcTemplate.update("UPDATE gateway_user_kyc_documents SET status='DELETED', deleted_at=now() WHERE user_id=? AND document_id=? AND status='UPLOADED'", userId, documentId);
+    }
+
     private List<Long> normalizedIds(List<Long> documentIds) {
         if (documentIds == null || documentIds.isEmpty()) {
             return List.of();

@@ -112,6 +112,32 @@ class KycDocumentServiceTest {
                 "BUSINESS", "ENHANCED", "PENDING")).hasSize(4);
     }
 
+    @Test
+    void identityCardRequiresFrontBackAndHoldingPhoto() {
+        KycDocumentRepository repository = mock();
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        List<Long> ids = List.of(10L, 11L, 12L, 13L);
+        List<KycDocument> complete = List.of(document(10L, "ID_CARD_FRONT"), document(11L, "ID_CARD_BACK"),
+                document(12L, "ID_CARD_SELFIE"), document(13L, "ADDRESS_PROOF"));
+        when(repository.findOwnedForSubmission(7L, ids)).thenReturn(complete);
+        assertThat(service.requireSubmissionDocuments(7L, ids, "ID_CARD", "INDIVIDUAL", "ENHANCED", "PENDING")).hasSize(4);
+        when(repository.findOwnedForSubmission(7L, List.of(10L, 11L))).thenReturn(complete.subList(0, 2));
+        assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, List.of(10L, 11L), "ID_CARD"))
+                .hasMessageContaining("ID_CARD_SELFIE");
+    }
+
+    @Test
+    void deletingDraftRequiresOwnershipAndUnsubmittedState() {
+        KycDocumentRepository repository = mock();
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        assertThatThrownBy(() -> service.deleteDraft(8L, 10L)).isInstanceOf(KycDocumentNotFoundException.class);
+        verify(repository, never()).deleteDraft(8L, 10L);
+        when(repository.findForUser(7L, 10L)).thenReturn(document(10L, "PASSPORT"));
+        assertThatThrownBy(() -> service.deleteDraft(7L, 10L)).hasMessageContaining("only unsubmitted");
+        when(repository.deleteDraft(7L, 10L)).thenReturn(1);
+        service.deleteDraft(7L, 10L);
+    }
+
     private KycDocument document(long id, String type) {
         return new KycDocument(id, 7L, type, type.toLowerCase() + ".pdf", "application/pdf",
                 8L, "a".repeat(64), "UPLOADED", Instant.now(), null);

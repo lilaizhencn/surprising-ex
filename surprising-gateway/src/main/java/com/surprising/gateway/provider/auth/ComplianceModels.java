@@ -70,7 +70,15 @@ public final class ComplianceModels {
             @Size(max = 240) String providerReference,
             @Size(max = 8000) String submittedDocuments,
             @Size(max = 40) String faceVerificationStatus,
-            @Size(max = 10) List<Long> documentIds) {
+            @Size(max = 10) List<Long> documentIds,
+            java.time.LocalDate documentExpiresOn,
+            java.time.LocalDate addressIssuedOn) {
+        public KycSubmissionRequest(String applicantType, String kycLevel, String country, String documentType,
+                String provider, String providerReference, String submittedDocuments, String faceVerificationStatus,
+                List<Long> documentIds) {
+            this(applicantType,kycLevel,country,documentType,provider,providerReference,submittedDocuments,
+                    faceVerificationStatus,documentIds,null,null);
+        }
     }
 
     public record KycSubmissionResponse(KycProfile profile, KycProvider.KycProviderSession verificationSession) {}

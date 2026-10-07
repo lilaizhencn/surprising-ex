@@ -37,6 +37,21 @@ public class UserComplianceController {
         this.complianceService = complianceService;
     }
 
+    @GetMapping("/countries")
+    public List<CountryRepository.Country> countries(@RequestHeader("Authorization") String authorization) {
+        try { return complianceService.countries(authorization); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/kyc/documents/{documentId}")
+    public ResponseEntity<Void> deleteDraft(@RequestHeader("Authorization") String authorization, @PathVariable long documentId) {
+        try { complianceService.deleteKycDraft(authorization, documentId); return ResponseEntity.noContent().build(); }
+        catch (KycDocumentNotFoundException ex) { throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
+    }
+
     @GetMapping("/kyc")
     public KycProfile kyc(@RequestHeader("Authorization") String authorization) {
         try {

@@ -18,7 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 public class KycDocumentService {
 
     private static final Set<String> DOCUMENT_TYPES = Set.of(
-            "ID_CARD", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
+            "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
     private static final Set<String> CONTENT_TYPES = Set.of("application/pdf", "image/jpeg", "image/png");
 
     private final KycDocumentRepository repository;
@@ -77,6 +77,13 @@ public class KycDocumentService {
         }
     }
 
+    public void deleteDraft(long userId, long documentId) {
+        requireForUser(userId, documentId);
+        if (repository.deleteDraft(userId, documentId) != 1) {
+            throw new IllegalStateException("only unsubmitted documents can be deleted");
+        }
+    }
+
     public List<KycDocument> findForUser(long userId) {
         return repository.findForUser(userId);
     }
@@ -123,7 +130,13 @@ public class KycDocumentService {
             throw new IllegalArgumentException("KYC document does not belong to the current user or is unavailable");
         }
         String requestedType = normalizeDocumentType(documentType);
-        if (documents.stream().noneMatch(document -> requestedType.equals(document.documentType()))) {
+        if ("ID_CARD".equals(requestedType)) {
+            for (String required : List.of("ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE")) {
+                if (documents.stream().noneMatch(document -> required.equals(document.documentType()))) {
+                    throw new IllegalArgumentException("KYC document does not match: missing " + required);
+                }
+            }
+        } else if (documents.stream().noneMatch(document -> requestedType.equals(document.documentType()))) {
             throw new IllegalArgumentException("KYC document type does not match submitted verification");
         }
         requireProfileDocuments(documents, applicantType, kycLevel, faceVerificationStatus);
@@ -152,7 +165,7 @@ public class KycDocumentService {
         }
 
         boolean identity = documents.stream().anyMatch(document ->
-                Set.of("ID_CARD", "PASSPORT").contains(document.documentType()));
+                Set.of("ID_CARD_FRONT", "PASSPORT").contains(document.documentType()));
         if (!identity) {
             throw new IllegalArgumentException("an identity document is required for KYC");
         }
@@ -168,7 +181,7 @@ public class KycDocumentService {
             throw new IllegalArgumentException("enhanced KYC requires face verification");
         }
         if ("PENDING".equals(normalizedFaceStatus)
-                && documents.stream().noneMatch(document -> "FACE_IMAGE".equals(document.documentType()))) {
+                && documents.stream().noneMatch(document -> Set.of("FACE_IMAGE", "ID_CARD_SELFIE").contains(document.documentType()))) {
             throw new IllegalArgumentException("a face image is required when face verification is enabled");
         }
     }
@@ -181,12 +194,18 @@ public class KycDocumentService {
     }
 
     public String references(List<KycDocument> documents) {
+        return references(documents, null, null);
+    }
+
+    public String references(List<KycDocument> documents, java.time.LocalDate expiresOn, java.time.LocalDate issuedOn) {
         try {
             return objectMapper.writeValueAsString(documents.stream()
                     .map(document -> Map.of(
                             "type", document.documentType(),
                             "reference", "document:" + document.documentId(),
-                            "sha256", document.sha256()))
+                            "sha256", document.sha256(),
+                            "documentExpiresOn", expiresOn == null ? "" : expiresOn.toString(),
+                            "addressIssuedOn", "ADDRESS_PROOF".equals(document.documentType()) && issuedOn != null ? issuedOn.toString() : ""))
                     .toList());
         } catch (JacksonException ex) {
             throw new IllegalStateException("KYC document references cannot be serialized", ex);

@@ -38,6 +38,7 @@ public class ComplianceService {
     private final AuthPersistenceService authPersistence;
     private final EmailMessageSender emailMessageSender;
     private final KycProviderRegistry kycProviders;
+    private final CountryRepository countries;
 
     public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
                              ComplianceKycRepository kycRepository,
@@ -49,7 +50,7 @@ public class ComplianceService {
                              AdminAuditRepository adminAuditRepository,
                              AuthPersistenceService authPersistence,
                              EmailMessageSender emailMessageSender,
-                             KycProviderRegistry kycProviders) {
+                             KycProviderRegistry kycProviders, CountryRepository countries) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
         this.riskTagRepository = riskTagRepository;
@@ -61,6 +62,7 @@ public class ComplianceService {
         this.authPersistence = authPersistence;
         this.emailMessageSender = emailMessageSender;
         this.kycProviders = kycProviders;
+        this.countries = countries;
     }
 
     public AdminCursorPage.CursorPage<ComplianceUserSummary> adminUsersPage(
@@ -122,6 +124,15 @@ public class ComplianceService {
         return upsertKyc(userId, principal.userId(), request, Instant.now());
     }
 
+    public List<CountryRepository.Country> countries(String authorization) {
+        authService.authenticateBearer(authorization);
+        return countries.enabled();
+    }
+
+    public void deleteKycDraft(String authorization, long documentId) {
+        kycDocumentService.deleteDraft(authService.authenticateBearer(authorization).userId(), documentId);
+    }
+
     public KycProfile userKyc(String authorization) {
         return kycRepository.find(authService.authenticateBearer(authorization).userId());
     }
@@ -181,16 +192,34 @@ public class ComplianceService {
     @Transactional
     public KycSubmissionResponse submitUserKyc(String authorization, KycSubmissionRequest request) {
         long userId = authService.authenticateBearer(authorization).userId();
-        String provider = kycProviders.selectedProvider();
-        List<KycDocument> documents = "SELF".equals(provider) || (request.documentIds() != null && !request.documentIds().isEmpty())
-                ? kycDocumentService.requireSubmissionDocuments(userId, request.documentIds(), request.documentType(),
-                        request.applicantType(), request.kycLevel(), request.faceVerificationStatus()) : List.of();
+        if (!countries.supported(request.country())) throw new IllegalArgumentException("select a supported country");
+        KycProfile current = kycRepository.find(userId);
+        if (current != null && ("VERIFIED".equals(current.status()) || "PENDING".equals(current.status()))) {
+            throw new IllegalStateException("verification is already pending or complete");
+        }
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        boolean hasDocuments = request.documentIds() != null && !request.documentIds().isEmpty();
+        if (hasDocuments) {
+            if (!List.of("ID_CARD", "PASSPORT").contains(request.documentType())) throw new IllegalArgumentException("select an identity card or passport");
+            if (request.documentExpiresOn() == null || request.documentExpiresOn().isBefore(today)) {
+                throw new IllegalArgumentException("identity document must not be expired");
+            }
+            if (List.of("STANDARD", "ENHANCED").contains(request.kycLevel())
+                    && (request.addressIssuedOn() == null || request.addressIssuedOn().isBefore(today.minusMonths(3))
+                    || request.addressIssuedOn().isAfter(today))) {
+                throw new IllegalArgumentException("address proof must be issued within the last three months");
+            }
+        }
+        if (!hasDocuments && "SELF".equals(kycProviders.selectedProvider())) throw new IllegalArgumentException("upload all required KYC documents");
+        // External SDK sessions collect and validate evidence in the provider flow.
+        List<KycDocument> documents = hasDocuments ? kycDocumentService.requireSubmissionDocuments(userId, request.documentIds(), request.documentType(),
+                request.applicantType(), request.kycLevel(), request.faceVerificationStatus()) : List.of();
         KycProvider.KycProviderSession session = kycProviders.start(userId, request, documents);
         ComplianceModels.KycSubmissionRequest providerRequest = new ComplianceModels.KycSubmissionRequest(
                 request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
                 session.provider(), session.providerReference(), request.submittedDocuments(),
                 "SELF".equals(session.provider()) ? request.faceVerificationStatus() : "PENDING", request.documentIds());
-        String submittedDocuments = kycDocumentService.references(documents);
+        String submittedDocuments = kycDocumentService.references(documents, request.documentExpiresOn(), request.addressIssuedOn());
         KycProfile profile = kycRepository.submit(userId, providerRequest, submittedDocuments, Instant.now());
         if (request.documentIds() != null && !request.documentIds().isEmpty()) kycDocumentService.markSubmitted(userId, request.documentIds());
         return new KycSubmissionResponse(profile, session);

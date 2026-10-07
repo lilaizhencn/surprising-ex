@@ -19,8 +19,10 @@ public class AssetConfigurationController {
     private final AssetConfigurationService service;
     private final AdminApprovalService approvals;
     private final ObjectMapper json;
+    private final com.surprising.gateway.provider.service.WalletFundingService funding;
 
-    public AssetConfigurationController(AuthService auth, AssetConfigurationService service, AdminApprovalService approvals, ObjectMapper json) {
+    public AssetConfigurationController(AuthService auth, AssetConfigurationService service, AdminApprovalService approvals, ObjectMapper json, com.surprising.gateway.provider.service.WalletFundingService funding) {
+        this.funding = funding;
         this.auth = auth;
         this.approvals = approvals;
         this.json = json;
@@ -50,7 +52,11 @@ public class AssetConfigurationController {
     public Network saveNetwork(@RequestHeader("Authorization") String authorization, @PathVariable int assetId,
                                @RequestBody byte[] body, HttpServletRequest request) {
         long operatorId = requireWrite(authorization, request, body);
-        return execute(() -> service.saveNetwork(assetId, json.readValue(body, NetworkRequest.class), operatorId));
+        return execute(() -> {
+            NetworkRequest config = json.readValue(body, NetworkRequest.class);
+            funding.validateNetwork(assetId, config);
+            return service.saveNetwork(assetId, config, operatorId);
+        });
     }
 
     private long requireWrite(String authorization, HttpServletRequest request, byte[] body) {

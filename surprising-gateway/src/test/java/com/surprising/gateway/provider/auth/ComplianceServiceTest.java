@@ -32,7 +32,7 @@ class ComplianceServiceTest {
     private final ComplianceService service = new ComplianceService(
             userProjectionRepository, kycRepository, riskTagRepository, amlCaseRepository,
             authService, approvalService, kycDocumentService, adminAuditRepository,
-            authPersistence, emailMessageSender, kycProviders);
+            authPersistence, emailMessageSender, kycProviders, mock(CountryRepository.class));
 
     @Test
     void blocksWithdrawalForHighOrCriticalActiveRiskTag() {
