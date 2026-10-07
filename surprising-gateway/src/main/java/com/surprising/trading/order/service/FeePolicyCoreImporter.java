@@ -1,6 +1,8 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.client.ResultUnknownException;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.trading.api.model.FeeScheduleResponse;
@@ -29,8 +31,16 @@ public final class FeePolicyCoreImporter {
         // must be new for each startup/import attempt: old command outcomes can expire
         // from retention even though the fee policy itself remains authoritative.
         UUID commandId = UUID.randomUUID();
-        aeron.command(CoreMessageType.UPSERT_FEE_POLICY, commandId, policy.userId(),
-                TradingCommandCodec.encodeUpsertFeePolicy(command));
+        try {
+            aeron.command(CoreMessageType.UPSERT_FEE_POLICY, commandId, policy.userId(),
+                    TradingCommandCodec.encodeUpsertFeePolicy(command));
+        } catch (ResultUnknownException unknown) {
+            // The command was admitted. Resolve its existing outcome; never resubmit it.
+            var result = aeron.commandResult(commandId);
+            if (result.status() != ResponseStatus.OK || result.commandStatus() != ResponseStatus.APPLIED) {
+                throw new IllegalStateException("fee policy import is not confirmed: " + result.resultCode(), unknown);
+            }
+        }
     }
 
     private static int sourcePriority(FeeScheduleSourceType sourceType) {
