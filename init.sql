@@ -2657,7 +2657,7 @@ CREATE TABLE IF NOT EXISTS gateway_user_kyc_documents (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMPTZ,
     CONSTRAINT gateway_user_kyc_documents_type_check CHECK (
-        document_type IN ('ID_CARD', 'ID_CARD_FRONT', 'ID_CARD_BACK', 'ID_CARD_SELFIE', 'PASSPORT', 'ADDRESS_PROOF', 'BUSINESS_LICENSE', 'FACE_IMAGE')
+        document_type IN ('ID_CARD', 'ID_CARD_FRONT', 'ID_CARD_BACK', 'ID_CARD_SELFIE', 'PASSPORT', 'ADDRESS_PROOF', 'BUSINESS_LICENSE', 'FACE_IMAGE', 'DRIVING_LICENSE', 'DRIVING_LICENSE_FRONT', 'DRIVING_LICENSE_BACK', 'RESIDENCE_PERMIT', 'RESIDENCE_PERMIT_FRONT', 'RESIDENCE_PERMIT_BACK')
     ),
     CONSTRAINT gateway_user_kyc_documents_content_type_check CHECK (
         content_type IN ('application/pdf', 'image/jpeg', 'image/png')
