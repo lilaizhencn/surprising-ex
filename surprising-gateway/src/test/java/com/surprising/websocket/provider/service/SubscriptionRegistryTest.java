@@ -200,6 +200,34 @@ class SubscriptionRegistryTest {
         verify(failed).close();
     }
 
+    @Test
+    void depthEncodesOncePerSharedBaselineButKeepsNewSubscriberSnapshotsSeparate() {
+        var mapper = org.mockito.Mockito.spy(new ObjectMapper());
+        var registry = new SubscriptionRegistry(mapper, new WebSocketProperties());
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT);
+        var first = connection("shared-first");
+        var second = connection("shared-second");
+        var joined = connection("shared-joined");
+        for (var client : java.util.List.of(first, second, joined)) registry.add(client);
+        registry.subscribe(first, topic); registry.subscribe(second, topic);
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(1, java.util.List.of()),
+                "v1", "book", Instant.now());
+        verify(mapper, org.mockito.Mockito.times(1)).writeValueAsString(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.clearInvocations(mapper);
+        registry.subscribe(joined, topic);
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(2, java.util.List.of()),
+                "v2", "book", Instant.now());
+        verify(mapper, org.mockito.Mockito.times(2)).writeValueAsString(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.clearInvocations(mapper);
+        registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(3, java.util.List.of()),
+                "v3", "book", Instant.now());
+        verify(mapper, org.mockito.Mockito.times(1)).writeValueAsString(org.mockito.ArgumentMatchers.any());
+        var messages = ArgumentCaptor.forClass(String.class);
+        verify(joined, org.mockito.Mockito.times(2)).send(messages.capture());
+        assertThat(messages.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(messages.getAllValues().get(1)).contains("\"previousSequence\":\"2\"");
+    }
+
     private ClientConnection connection(String id) {
         return connection(id, null);
     }

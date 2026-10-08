@@ -132,12 +132,19 @@ public class SubscriptionRegistry {
         fanoutBatches.increment();
         fanoutMessages.increment();
         var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
+        // Invocation-local: the same immutable baseline produces the same wire message.
+        // Identity keys avoid hashing/comparing all levels and never conflate distinct books.
+        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
         for (ClientConnection connection : connections) {
             var previous = baselines.get(connection.id());
             if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
-            var update = DepthUpdate.between(previous, book);
-            String message = objectMapper.writeValueAsString(WsServerMessage.event(topic,
-                    new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
+            String message = encodedByBaseline.get(previous);
+            if (message == null) {
+                var update = DepthUpdate.between(previous, book);
+                message = objectMapper.writeValueAsString(WsServerMessage.event(topic,
+                        new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
+                encodedByBaseline.put(previous, message);
+            }
             if (connection.send(message)) {
                 baselines.put(connection.id(), book);
             } else {
