@@ -28,6 +28,22 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 
 - HTTP 端口：`9094`
 - WebSocket 路径：`/ws/v1`
+
+`ClientConnection` 为每条连接保留一个串行发送虚拟线程和一个超时监视虚拟线程。
+发送队列为空时阻塞等待；监视线程在空闲时无限等待，发送开始或完成时才被唤醒，
+发送期间直接等待本次 deadline。发送状态和超时判定使用同一把短锁，socket 写入在锁外执行，
+避免旧发送的 deadline 关闭新发送。队列溢出或写入超时仍只关闭该慢连接，不阻塞其他连接的 fanout。
+
+2026-10-08 本地 HotSpot JDK 27 / Corretto 验证：200 条空闲连接、每次采样 2 秒，
+同一临时程序分别加载修改前后的 `ClientConnection`，使用进程 CPU 时间及 JFR ExecutionSample。
+CPU 时间从 2096ms 降至 9ms，采样窗口内 ExecutionSample 从 21 降至 0。
+这是空闲连接的局部对比，不代表整机或交易吞吐的改善幅度；本轮临时 JFR、程序和日志在结果入档后清理。
+回归覆盖空闲等待、发送完成、后续发送的新 deadline、阻塞发送超时、队列上限和慢连接隔离。
+
+同轮 Aeron 1.53.3 实测，应用内嵌 Driver 在 DEDICATED 下有 conductor、sender、receiver、
+network resolver 四个平台线程，SHARED 下合为一个。跨客户端、行情、生命周期、可靠成交导出、
+Gateway 和做市模块的回归按最新结果去重后共 383 项：379 通过，4 项因未配置 PostgreSQL 集成环境跳过。
+本次没有修改数据库逻辑，也未启动钱包服务、远端服务或六产品线在线压测；数据库集成及线上吞吐/P99 不在本轮验证范围内。
 - Gateway 前缀：`/api/v1/gateway/{service}`
 - 后台 Gateway 前缀：`/api/v1/admin/gateway/{service}`
 - 后台本地接口前缀：`/api/v1/admin/...`

@@ -29,6 +29,64 @@ import tools.jackson.databind.ObjectMapper;
 class ClientConnectionIsolationTest {
 
     @Test
+    void laterSendGetsItsOwnDeadline() throws Exception {
+        var session = new ControlledSession("second-send", 1, 1);
+        try (var connection = new ClientConnection(session, 1001L, 8, Duration.ofMillis(600))) {
+            assertThat(connection.send("completed")).isTrue();
+            assertThat(session.expectedMessages.await(2, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(400);
+            assertThat(connection.send("blocked")).isTrue();
+            assertThat(session.firstSendEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            // The first send's deadline passes, but the blocked second send has time left.
+            assertThat(session.closed.await(300, TimeUnit.MILLISECONDS)).isFalse();
+            assertThat(session.closed.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(session.closeStatus).isEqualTo(
+                    CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
+            assertThat(session.payloads()).containsExactly("completed");
+        }
+    }
+
+    @Test
+    void timesOutBlockedWriteWithoutClosingHealthyConnection() throws Exception {
+        var blocked = new ControlledSession("blocked-timeout", true, 0);
+        var healthy = new ControlledSession("healthy-timeout", false, 3);
+        try (var slowConnection = new ClientConnection(blocked, 1001L, 8, Duration.ofMillis(100));
+             var healthyConnection = new ClientConnection(healthy, 1002L, 8, Duration.ofMillis(100))) {
+            assertThat(slowConnection.send("blocked")).isTrue();
+            assertThat(blocked.firstSendEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(healthyConnection.sendBatch(List.of("one", "two", "three"))).isTrue();
+            assertThat(healthy.expectedMessages.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(blocked.closed.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(blocked.closeStatus).isEqualTo(
+                    CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
+            assertThat(slowConnection.send("after-timeout")).isFalse();
+            assertThat(healthy.open).isTrue();
+            assertThat(healthy.payloads()).containsExactly("one", "two", "three");
+        }
+    }
+
+    @Test
+    void idleConnectionAndCompletedSendDoNotExpire() throws Exception {
+        var session = new ControlledSession("idle", false, 2);
+        try (var connection = new ClientConnection(session, 1001L, 8, Duration.ofMillis(100))) {
+            assertThat(session.closed.await(250, TimeUnit.MILLISECONDS)).isFalse();
+            assertThat(connection.send("first")).isTrue();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (session.payloads().isEmpty() && System.nanoTime() < deadline) {
+                Thread.sleep(5);
+            }
+            assertThat(session.payloads()).containsExactly("first");
+            assertThat(session.closed.await(250, TimeUnit.MILLISECONDS)).isFalse();
+            assertThat(connection.send("second")).isTrue();
+            assertThat(session.expectedMessages.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(session.closed.await(250, TimeUnit.MILLISECONDS)).isFalse();
+            assertThat(session.payloads()).containsExactly("first", "second");
+        }
+        assertThat(session.closed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(session.closeStatus).isEqualTo(CloseStatus.NORMAL);
+    }
+
+    @Test
     void closesOnlyBlockedSessionAtQueueBound() throws Exception {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getSession().setOutboundQueueCapacity(2);
@@ -66,7 +124,7 @@ class ClientConnectionIsolationTest {
     private static final class ControlledSession implements WebSocketSession {
 
         private final String id;
-        private final boolean blockFirstSend;
+        private final int blockedSendIndex;
         private final CountDownLatch expectedMessages;
         private final CountDownLatch firstSendEntered = new CountDownLatch(1);
         private final CountDownLatch closed = new CountDownLatch(1);
@@ -77,10 +135,14 @@ class ClientConnectionIsolationTest {
         private int sendCount;
 
         private ControlledSession(String id, boolean blockFirstSend, int expectedMessageCount) {
+            this(id, blockFirstSend ? 0 : -1, expectedMessageCount);
+        }
+
+        private ControlledSession(String id, int blockedSendIndex, int expectedMessageCount) {
             this.id = id;
-            this.blockFirstSend = blockFirstSend;
+            this.blockedSendIndex = blockedSendIndex;
             this.expectedMessages = new CountDownLatch(expectedMessageCount);
-            if (!blockFirstSend) {
+            if (blockedSendIndex < 0) {
                 firstSendEntered.countDown();
             }
         }
@@ -154,7 +216,7 @@ class ClientConnectionIsolationTest {
 
         @Override
         public void sendMessage(WebSocketMessage<?> message) throws IOException {
-            if (blockFirstSend && sendCount++ == 0) {
+            if (sendCount++ == blockedSendIndex) {
                 firstSendEntered.countDown();
                 while (open) {
                     try {
