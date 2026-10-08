@@ -20,7 +20,7 @@
 
 - 一套数据库连接池，仍使用各业务原有表；原 funding 表须部署到此实例的数据源，不能遗漏原有迁移。
 - 一份 `derivativesInstrumentSnapshotCache`，资金费不再自行初始化或创建一份缓存。
-- risk、强平、ADL、funding 使用 `DerivativesAeronClient`，连接参数取 `surprising.risk.aeron` / `AERON_*`。保险业务的 `InsuranceAeronGateway` 仍有实际使用的独立客户端池，保留 `surprising.insurance.aeron`。
+- risk、强平、ADL、funding 和保险基金共用 `DerivativesAeronClient`，连接参数统一取 `surprising.risk.aeron` / `AERON_*`。`InsuranceAeronGateway` 不再创建和关闭独立客户端池，已删除 `surprising.insurance.aeron` 配置；共享池由生命周期服务统一关闭。启动时继续校验产品线一致，资金命令的 ID、顺序和未知结果处理保持原语义。
 - 一份标记价消费缓存，保留衍生品后台 5 秒的新鲜度要求。
 - `taskScheduler` 负责强平、保险、ADL，默认 6 线程；`fundingScheduler` 独立 2 线程负责费率发布和结算，避免资金费等待占用生命周期调度线程。共享客户端、数据库和 JVM 仍可能产生资源竞争。
 - `FundingConfiguration` 只对 U/币本位永续加载资金费组件；交割、期权不创建资金费任务、消费者或接口。资金费产品配置与生命周期产品不一致时启动失败。

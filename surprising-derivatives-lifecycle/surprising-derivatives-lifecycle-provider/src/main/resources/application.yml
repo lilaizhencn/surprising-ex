@@ -46,11 +46,6 @@ surprising:
     aeron:
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
   insurance:
-    aeron:
-      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
-      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
-      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     kafka:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}

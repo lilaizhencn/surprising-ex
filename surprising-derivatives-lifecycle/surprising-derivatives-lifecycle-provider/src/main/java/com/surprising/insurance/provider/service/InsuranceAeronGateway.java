@@ -1,6 +1,6 @@
 package com.surprising.insurance.provider.service;
 
-import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -10,22 +10,18 @@ import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.product.api.ProductLine;
-import jakarta.annotation.PreDestroy;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
-public class InsuranceAeronGateway implements AutoCloseable {
+public class InsuranceAeronGateway {
 
-    private final AeronClientPool clients;
+    private final DerivativesAeronClient clients;
     private final ProductLine productLine;
 
-    public InsuranceAeronGateway(InsuranceProperties properties) {
+    public InsuranceAeronGateway(InsuranceProperties properties, DerivativesAeronClient clients) {
         productLine = properties.getKafka().getProductLine();
-        InsuranceProperties.Aeron aeron = properties.getAeron();
-        this.clients = new AeronClientPool("insurance", properties.getKafka().getProductLine(),
-                aeron.getHostnames(), aeron.getEgressHostname(), aeron.getResponseTimeout(),
-                aeron.getClientConnections());
+        this.clients = clients;
     }
 
     public CoreLiquidationWorkView resolutionWork(CoreLiquidationWorkView.Purpose purpose,
@@ -59,9 +55,4 @@ public class InsuranceAeronGateway implements AutoCloseable {
         return response.data();
     }
 
-    @Override
-    @PreDestroy
-    public void close() {
-        clients.close();
-    }
 }
