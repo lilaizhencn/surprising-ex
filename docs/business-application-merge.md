@@ -51,7 +51,7 @@ maker 等独立进程通过 InternalController 使用 HTTP 契约，默认地址
 
 ## 多产品及托管资金
 
-当前统一业务应用由 `GATEWAY_PRODUCT_LINES` 显式选择一条或多条产品线。
+当前统一业务应用从数据库读取后台启用的产品线，自动初始化相应连接和任务。
 各产品拥有独立业务容器和 Aeron Core；身份、数据源与公共 WebSocket 共享。
 托管入账和扣款直接调用本进程的 SPOT 账户方法；跨产品划转也直接调用两个产品的账户方法，
 仍保留 Core pending transfer、幂等和结果未知恢复边界。不再配置独立 SPOT Gateway URL。
@@ -64,8 +64,7 @@ maker 等独立进程通过 InternalController 使用 HTTP 契约，默认地址
 ```bash
 mvn -pl surprising-gateway -am package -DskipTests
 # 先启动 PostgreSQL、Kafka、Redis 和独立 Aeron Core。
-# Gateway 配置 GATEWAY_PRODUCT_LINES；其他产品进程仍各自配置 PRODUCT_LINE。
-export GATEWAY_PRODUCT_LINES=LINEAR_PERPETUAL,SPOT
+# Gateway 在后台“产品与市场”启用接入；其他产品进程仍各自配置 PRODUCT_LINE。
 java --enable-native-access=ALL-UNNAMED \
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \

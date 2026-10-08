@@ -4,7 +4,7 @@
 `com.surprising.trading`，账户在 `com.surprising.account.provider`，合约在
 `com.surprising.instrument.provider`。四者共享一个启动入口、HTTP 端口及数据源；
 Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，再调用本地业务入口。
-`GATEWAY_PRODUCT_LINES` 可同时启用多条产品线，各自隔离连接、缓存、消费者和定时任务。
+后台“产品与市场”维护产品线接入，数据库热加载，各自隔离连接、缓存、消费者和定时任务。
 托管与划转直接调用对应产品账户方法，无需额外的 SPOT Gateway。
 详见 [多产品 Gateway 配置与验证](../docs/multi-product-gateway.md) 和
 [合并及部署说明](../docs/business-application-merge.md)。

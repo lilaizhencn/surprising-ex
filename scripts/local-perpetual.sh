@@ -45,7 +45,6 @@ fi
 export ARTIFACT_ROOT="$LOCAL_DIR/artifacts"
 export RUNTIME_ROOT="$LOCAL_DIR/runtime" RUN_ID=local-perpetual POSTGRES_MODE=native
 export CORE_AERON_BASE_DIR="$LOCAL_DIR/core-driver" APP_AERON_DIR="$LOCAL_DIR/app-driver"
-export GATEWAY_PRODUCT_TRANSFER_ENABLED=false
 [[ ! -f "$LOCAL_DIR/market-ids.env" ]] || source "$LOCAL_DIR/market-ids.env"
 export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS READINESS_INSTRUMENT_ID
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
@@ -222,7 +221,9 @@ controller.listener.names=CONTROLLER
 listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
 inter.broker.listener.name=PLAINTEXT
 log.dirs=$LOCAL_DIR/kafka
-num.partitions=32
+num.partitions=1
+offsets.topic.num.partitions=1
+transaction.state.log.num.partitions=1
 offsets.topic.replication.factor=1
 transaction.state.log.replication.factor=1
 transaction.state.log.min.isr=1

@@ -47,6 +47,7 @@ public final class LocalBusinessApi {
 
     @jakarta.annotation.PostConstruct
     public void validateConfiguration() {
+        if (accountProperties == null) return; // 公共币种/合约目录没有产品账户容器。
         if (productLine() == null || productLine() != tradingProperties.getKafka().getProductLine()) {
             throw new IllegalStateException("account and trading must use the same product line: account="
                     + productLine() + ", trading=" + tradingProperties.getKafka().getProductLine());
@@ -55,6 +56,13 @@ public final class LocalBusinessApi {
 
     public com.surprising.product.api.ProductLine productLine() {
         return accountProperties.getKafka().getProductLine();
+    }
+
+    public static LocalBusinessApi shared(com.surprising.instrument.provider.service.InstrumentRequestService instruments,
+                                         ObjectMapper mapper, Validator validator,
+                                         com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
+        return new LocalBusinessApi(null, null, new InstrumentLocalRoutes(instruments, null), mapper, validator,
+                websocket, null, null);
     }
 
     public void validateProductSelectors(jakarta.servlet.http.HttpServletRequest request, byte[] body) {

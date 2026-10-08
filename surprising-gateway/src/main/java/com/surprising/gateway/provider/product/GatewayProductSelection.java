@@ -9,14 +9,14 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 入口只解析一次产品归属；任何来源冲突都拒绝，不能用头覆盖正文或批量请求中的其他产品。 */
+/** 解析请求的产品归属；任何来源冲突都拒绝，不能用头覆盖正文或批量请求中的其他产品。 */
 @Component
 public final class GatewayProductSelection {
     private static final List<String> SELECTORS = List.of("productLine", "product-line", "product_line",
             "accountType", "account-type", "account_type", "contractType", "contract-type", "contract_type");
-    private final GatewayProductsProperties products;
+    private final GatewayProductServices products;
     private final ObjectMapper mapper;
-    public GatewayProductSelection(GatewayProductsProperties products, ObjectMapper mapper) {
+    public GatewayProductSelection(GatewayProductServices products, ObjectMapper mapper) {
         this.products = products;
         this.mapper = mapper;
     }
@@ -42,10 +42,10 @@ public final class GatewayProductSelection {
         if (selected.size() > 1) throw badRequest("conflicting product selectors");
         ProductLine product = selected.stream().findFirst().orElse(null);
         if (product == null && productRequired) {
-            if (products.getEnabled().size() != 1) throw badRequest("productLine is required for a multi-product Gateway");
-            product = products.getEnabled().getFirst();
+            if (products.enabled().size() != 1) throw badRequest("productLine is required for a multi-product Gateway");
+            product = products.enabled().getFirst();
         }
-        if (product != null) products.requireEnabled(product);
+        if (product != null && productRequired) products.requireEnabled(product);
         return product;
     }
     private void collect(Set<ProductLine> selected, JsonNode node) {

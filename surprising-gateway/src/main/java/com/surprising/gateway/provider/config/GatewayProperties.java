@@ -496,14 +496,9 @@ public class GatewayProperties implements EnvironmentAware {
 
     @Getter
     public static class ProductTransfer {
-        private boolean enabled = true;
         private Duration reconciliationDelay = Duration.ofSeconds(5);
         private int reconciliationBatchSize = 100;
         private java.math.BigDecimal verificationThresholdUsdt = new java.math.BigDecimal("10000");
-
-        public void setEnabled(boolean value) {
-            enabled = value;
-        }
 
         public void setReconciliationDelay(Duration value) {
             reconciliationDelay = value == null || value.isZero() || value.isNegative()

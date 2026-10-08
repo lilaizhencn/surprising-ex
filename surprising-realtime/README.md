@@ -372,3 +372,15 @@ Router 的控制及转发 Aeron 客户端也沿用默认 10 秒驱动超时（�
 实际绘制通过。回放回归测试覆盖六产品线的批量撤单（含不存在订单）、批量改单、快照恢复后的成交价格。
 这不表示其余五产品线做过本次线上恢复，也未对修复窗口之前的历史进行完整重建。
 测试环境原始备份保留在服务器 `/var/backups/surprising/20261007-candles`，包含敏感运行状态，禁止提交仓库。
+
+
+### 测试环境 Kafka 分区
+
+`CandlestickStreamConfiguration` 仍为每条产品独立创建成交输入和 K 线事件 Topic，但不再写死 32 个分区，
+新 Topic 遵循 Kafka Broker 的 `num.partitions`。服务重启不会自动扩容或重建已有 Topic。
+`scripts/local-perpetual.sh` 管理的新单节点测试 Kafka 使用 1 个业务分区；消费位点与事务状态内部 Topic
+也在首次创建时使用 1 个分区、1 个副本，减少测试环境资源开销。生产容量仍由 Kafka 部署管理。
+已有 Topic 的分区不能直接缩小：修改默认值只影响新建 Topic，不能删除或重建已有成交、K 线、
+Streams changelog 和内部 Topic 来节省分区，否则会破坏消费进度和恢复状态。
+`CandlestickStreamConfigurationTest` 使用真实嵌入式 Kafka，覆盖六产品新建 Topic 为 1 分区，
+已有 4 分区成交 Topic 在服务再次初始化后仍为 4，不被强制改成 32。

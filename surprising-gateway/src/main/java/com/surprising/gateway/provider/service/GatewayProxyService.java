@@ -53,6 +53,8 @@ public class GatewayProxyService {
     @Autowired
     private com.surprising.gateway.provider.product.GatewayProductServices products;
     @Autowired
+    private com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi;
+    @Autowired
     private com.surprising.gateway.provider.product.GatewayProductSelection productSelection;
 
     private final GatewayProperties properties;
@@ -229,11 +231,11 @@ public class GatewayProxyService {
                                             GatewayProperties.BackendRoute route) {
         if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
             HttpHeaders trustedHeaders = headers(request, identity, route);
-            ProductLine product = productSelection.resolve(request, body, !isSharedLocalService(service));
+            ProductLine product = productSelection.resolve(request, body, !isSharedLocalService(service, request));
             if (product != null) trustedHeaders.set("X-Product-Line", product.name());
             else trustedHeaders.remove("X-Product-Line");
-            ProductLine owner = product == null ? products.enabled().getFirst() : product;
-            return products.local(owner).invoke(service, target, method, trustedHeaders, body,
+            var local = isSharedLocalService(service, request) ? sharedBusinessApi : products.local(product);
+            return local.invoke(service, target, method, trustedHeaders, body,
                     properties.getHttpClient().getReadTimeout());
         }
         try {
@@ -345,16 +347,17 @@ public class GatewayProxyService {
         return route;
     }
 
-    private boolean isSharedLocalService(String service) {
-        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin").contains(service.toLowerCase(Locale.ROOT));
+    private boolean isSharedLocalService(String service, HttpServletRequest request) {
+        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin").contains(service.toLowerCase(Locale.ROOT))
+                && !request.getRequestURI().endsWith("/order-settings");
     }
 
     private GatewayProperties.BackendRoute resolveRoute(String service, boolean admin,
                                                          HttpServletRequest request, byte[] body) {
         GatewayProperties.BackendRoute configured = route(service, admin);
         if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
-            ProductLine requested = productSelection.resolve(request, body, !isSharedLocalService(service));
-            if (requested != null) products.local(requested).validateProductSelectors(request, body);
+            ProductLine requested = productSelection.resolve(request, body, !isSharedLocalService(service, request));
+            if (requested != null && !isSharedLocalService(service, request)) products.local(requested).validateProductSelectors(request, body);
             return configured;
         }
         return resolveProductRoute(configured, request, body);

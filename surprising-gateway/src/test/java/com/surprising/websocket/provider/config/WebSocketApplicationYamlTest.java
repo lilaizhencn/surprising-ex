@@ -27,6 +27,6 @@ class WebSocketApplicationYamlTest {
                 .containsOnlyNulls();
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.gateway.products.enabled"))
-                .contains("${GATEWAY_PRODUCT_LINES:}");
+                .containsOnlyNulls();
     }
 }

@@ -546,10 +546,11 @@ class GatewayProxyServiceTest {
         when(products.enabled()).thenReturn(java.util.List.of(ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
         org.springframework.test.util.ReflectionTestUtils.setField(gateway, "products", products);
-        var config = new com.surprising.gateway.provider.product.GatewayProductsProperties();
-        config.setEnabled(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
+        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "sharedBusinessApi", local);
+        var selectorProducts = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        when(selectorProducts.enabled()).thenReturn(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
                 ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));
-        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "productSelection", new com.surprising.gateway.provider.product.GatewayProductSelection(config, mapper));
+        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "productSelection", new com.surprising.gateway.provider.product.GatewayProductSelection(selectorProducts, mapper));
         return gateway;
     }
 

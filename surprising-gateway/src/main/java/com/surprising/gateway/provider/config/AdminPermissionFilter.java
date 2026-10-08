@@ -57,6 +57,9 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         }
         boolean read = HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method);
         String path = uri.substring("/api/v1/admin".length()).toLowerCase(Locale.ROOT);
+        if (path.startsWith("/product-lines")) {
+            return "admin.gateway.instrument-admin." + (read ? "read" : "write");
+        }
         if (path.startsWith("/users") || path.startsWith("/sessions")) {
             return "admin.users." + (read ? "read" : "write");
         }

@@ -1,7 +1,7 @@
 # 单 Gateway 接入多产品线
 
-一个 `surprising-gateway` JVM 同时接入启动时选择的产品，例如
-`GATEWAY_PRODUCT_LINES=LINEAR_PERPETUAL,SPOT`。六条产品线都支持：`SPOT`、
+一个 `surprising-gateway` JVM 从数据库读取后台启用的产品线，并动态初始化对应连接。
+六条产品线都支持：`SPOT`、
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION`。
 HTTP 和 WebSocket 统一使用 `9094` / `/ws/v1`，无需额外的 `9194` SPOT Gateway。
 每条产品仍使用独立 Aeron Core；这里只合并接入进程，不合并撮合、账户或结算状态。
@@ -35,16 +35,24 @@ Kafka 模式为每个产品创建独立 fanout 监听；Aeron realtime 模式沿
 这些是部署拓扑参数；合约、费率、风险和做市业务配置仍由后台管理并保存到数据库。
 
 ```bash
-export GATEWAY_PRODUCT_LINES=LINEAR_PERPETUAL,SPOT
 export AERON_CLUSTER_HOSTNAMES=127.0.0.1
 export AERON_EGRESS_HOSTNAME=127.0.0.1
-export GATEWAY_PRODUCT_TRANSFER_ENABLED=true
 # 按部署环境配置 SPRING_DATASOURCE_*、Kafka、Redis、认证密钥及托管钱包连接。
 scripts/start-gateway.sh
 ```
 
-`GATEWAY_PRODUCT_LINES` 必填且不能重复；不再用 Gateway 的 `PRODUCT_LINE` 选择业务产品。
-Core、maker、price、realtime 和生命周期等独立产品进程仍使用各自的 `PRODUCT_LINE`。
+启动前初始化数据库；已有数据库执行 `deployment/migrations/20261008-gateway-product-lines.sql`。
+新库六产品默认均未启用，此时 Gateway 的认证、后台和公共币种/合约目录仍可访问。
+在后台“产品与市场 → 产品线接入”填写原因、启用产品。Gateway 每 5 秒读取数据库，
+在独立调度线程初始化产品账户、订单、Kafka 订阅和定时任务；Core 查询成功、Kafka 自动启动的监听器取得分区后才发布到请求路由。
+初始化失败关闭该次上下文，显示错误并自动重试，已接入产品继续服务。
+数据库设置与本机状态分别显示；“已接入”不代表行情就绪或合约已开启交易。
+
+`GATEWAY_PRODUCT_LINES` 和 `GATEWAY_PRODUCT_TRANSFER_ENABLED` 已删除。
+划转对账自动扫描已接入产品的待处理记录，无需人工启用。
+产品线接入由 `gateway_product_lines` 保存，更新带版本校验；管理员权限、修改原因和事务审计均必需。
+接入后保留资金查询和对账连接，不提供会直接拆掉连接的关闭按钮；停止交易使用合约交易开关。
+Core、maker、price、realtime 和生命周期等独立产品进程仍使用各自的 `PRODUCT_LINE`，用于部署隔离。
 Core 响应超时限定为 1 毫秒到 1 分钟，连接数限定为 1 到 64。
 默认每条 Core 使用公共 `AERON_CLUSTER_HOSTNAMES`（一个或三个主机）、`AERON_EGRESS_HOSTNAME`、
 `AERON_RESPONSE_TIMEOUT`、`AERON_CLIENT_CONNECTIONS`。异机部署可分别覆盖：
@@ -83,13 +91,13 @@ CORE_ONLY=true PRODUCT_LINE=SPOT RUN_ID=spot-core AERON_CLUSTER_HOSTNAMES=127.0.
 
 此模式不启动 Gateway、price、realtime、maker 或生命周期，不初始化数据库；各产品使用独立进程锁。
 需要现货行情和交易时再运行该产品的行情服务；仅充值、提现和划转时 SPOT Core 即可。
-Gateway 启用的产品集合属于启动拓扑；新增集合成员需重新启动 Gateway。
+后台启用新的产品线会动态接入，无需重启 Gateway；Core 进程需预先部署。
 已启用产品中的合约新增、编辑、上市与开启交易继续使用现有后台热更新，不重启进程。
 
 ## 测试服务器迁移顺序
 
 1. 保留现有各产品 Core 的数据目录、cluster id 和 RUN_ID，不执行 `fresh`，不删除 Archive 或快照。
-2. 主 Gateway 启用 `LINEAR_PERPETUAL,SPOT`，迁入原 SPOT Gateway 的托管钱包、认证、安全和合规部署参数；
+2. 初始化产品线接入表，启动主 Gateway，在后台启用永续与现货接入；迁入原 SPOT Gateway 的托管钱包、认证、安全和合规部署参数；
    数据库和密钥继续使用原值。移除 `GATEWAY_SPOT_ACCOUNT_BASE_URL`。
 3. 补齐现货和永续的外部服务路由。保留 SPOT realtime `9195`，它负责行情/K 线，并非多余 Gateway。
 4. 若使用 Aeron realtime，两产品 router 通过共享 Redis 发现同一个 Gateway 节点与其接收地址；
@@ -197,3 +205,40 @@ Core 查询探针仍通过，未启动 HTTP 服务或初始化数据库。六产
 Core-only 探针进程已退出。已删除本轮临时 Archive、Aeron 目录、Kafka 数据、数据库、
 独立构建树和 preflight 测试目录；共享 PostgreSQL 5432 保持运行，既有数据及其他工作区修改保留。
 临时日志中的结果已汇总到本节，清理后不再作为可打开的交付文件。
+
+
+## 2026-10-08 后台接入配置验证
+
+本次进一步删除 Gateway 产品列表和划转启用环境变量，后台“产品市场 → 产品线接入”成为接入设置入口。
+`AdminProductLinesController` 负责管理员鉴权与 HTTP 参数检查，`GatewayProductSettings` 负责数据库版本和事务审计，
+`GatewayProductServices` 负责本机连接、消费者及失败上下文的生命周期；数据库设置与运行状态各有唯一所有者。
+未启用任何产品时，认证、后台、共享币种精度和合约目录仍可访问。接入调度使用独立线程，避免阻塞资金对账。
+
+待提交源码从 Git 暂存区独立导出，未混入已有 KYC、托管钱包、公告和 Core 修改。
+HotSpot Corretto 27 下 Gateway 模块测试 820 项：0 失败、0 错误、9 项环境门控跳过。
+其中后台分阶段真实 HTTP 测试另行执行两项通过：空配置启动、普通用户拒绝访问、严格参数校验、版本冲突、
+事务审计、五产品热接入、期权 Core 缺失时隔离失败、Core 启动后自动重试，以及 Gateway 重启后读取持久配置。
+同一 WebSocket 在启用产品前建立，启用后无需重连即可订阅新增产品；六产品配置和既有余额在重启后保持。
+最终增加 Kafka 分区分配就绪检查后，使用最终 JAR 再次执行六产品真实交易和持久配置验证。
+
+六产品真实 HTTP 交易覆盖模拟做市用户挂单、成交、撤单、持仓、主动平仓、划转和资金守恒；
+每条产品的用户、做市与 Treasury 资金差额均为 0，冻结和保证金最终释放。
+本轮 WebSocket 公共/私有消息通过隔离 Kafka 输入验证（私有消息按真实成交回执构造），
+完整 Core→RealtimeRouter→WebSocket 链路沿用上节已验证结果，未将本轮 Kafka 输入声称为 Core 实时输出。
+本次未修改撮合、风险、资金费、交割、行权算法；相关状态机验证见上节。
+其他门控包括原固定端口或负载测试，由新的六产品 HTTP 流程覆盖本次接入行为；三节点选主、容量压测、
+外部行情和真实链上资金操作未包含在本次本地验证中，未部署测试服务器后端。
+
+管理端独立导出后 lint、build 通过。Chromium 使用真实管理员登录和接口，验证桌面表格、窄屏卡片、
+必填原因、启用确认、保存状态与自动接入；页面无脚本错误。
+
+
+最终补充验证：订单后台设置六产品 PostgreSQL 用例 6 项通过。Realtime/K 线原有 59 项用例通过，
+新增分区用例首次执行暴露测试夹具未等待 Kafka 元数据传播，改为等待实际元数据后，配置测试 3 项重新通过。
+覆盖六产品新 Topic 为 1 分区、已有 4 分区 Topic 保持不变；未修改消费者 key、产品 Topic 名、消费组和恢复位置。
+本轮隔离 Kafka 实际检查为 55 个业务 Topic 各 1 分区、`__consumer_offsets` 50 分区；现有内部 Topic 未重建。
+本地托管 Kafka 的新建业务及内部 Topic 默认改为 1 分区；已有测试服务器分区数本轮未连接核查或修改。
+
+清理状态：本轮 Gateway、六 Core、管理端预览、Kafka、Redis、独立 PostgreSQL 均已停止。
+本轮独立构建树、数据库、Kafka 数据、Archive、Aeron 目录及临时日志清理；结果以本节记录为准。
+共享 PostgreSQL 5432 保持运行，工作区原有修改和历史运行目录保持原样。

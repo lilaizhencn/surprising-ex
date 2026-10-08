@@ -3,7 +3,6 @@ set -euo pipefail
 
 # 单一公共 Gateway；产品线 Core、数据库、Kafka、Redis 必须事先可用。
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-: "${GATEWAY_PRODUCT_LINES:?set GATEWAY_PRODUCT_LINES, for example LINEAR_PERPETUAL,SPOT}"
 JAVA_BIN="${JAVA_HOME:?HotSpot JDK 27 JAVA_HOME is required}/bin/java"
 version="$("$JAVA_BIN" -version 2>&1)"
 if [[ ! "$version" =~ version[[:space:]]\"27[.\"] ]] || [[ "$version" == *OpenJ9* ]] \

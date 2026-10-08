@@ -47,7 +47,6 @@ management:
 surprising:
   gateway:
     products:
-      enabled: ${GATEWAY_PRODUCT_LINES:}
       cores:
         SPOT:
           hostnames: ${GATEWAY_CORE_SPOT_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}

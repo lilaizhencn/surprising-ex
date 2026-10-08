@@ -55,7 +55,7 @@ Core 只按 `exchange-core.version` 解析 Maven 依赖，不再在 `surprising-
 
 必须把数据库密码和 `GATEWAY_JWT_SECRET` 改成服务器实际值。测试环境也不要继续使用默认 JWT secret。
 
-本测试 unit 默认设置 `GATEWAY_PRODUCT_TRANSFER_ENABLED=false`，因为当前只启用永续 Core；这只关闭跨产品转账后台对账。需要充值、提现和划转时，增加 SPOT Core，并让同一个 Gateway 设置 `GATEWAY_PRODUCT_LINES=LINEAR_PERPETUAL,SPOT`，不再部署 9194 Gateway，也不配置远程账户路由。完整拓扑、迁移顺序与验证见 [单 Gateway 接入多产品线](../../docs/multi-product-gateway.md)。
+需要充值、提现和划转时，增加 SPOT Core，并在后台“产品与市场”启用现货接入。Gateway 从数据库热加载产品线；不再配置 GATEWAY_PRODUCT_LINES 或划转对账开关，也不部署 9194 Gateway。已有环境先执行 `deployment/migrations/20261008-gateway-product-lines.sql`。完整拓扑与验证见 [单 Gateway 接入多产品线](../../docs/multi-product-gateway.md)。
 
 测试服务器的堆上限通过 `JVM_CORE_XMX=8g`、`JVM_GATEWAY_XMX=4g`、`JVM_PROVIDER_XMX=2g` 分别设置 Core、Gateway 和 price/realtime/derivatives-lifecycle/maker；统一初始堆为 `JVM_XMS=512m`。未配置分组上限时沿用 `JVM_XMX`。这些是 Java 堆上限，Aeron、Kafka、线程栈及映射内存仍需计入服务器总内存。调整后应重启 unit，并检查每个进程的 `-Xmx`、服务就绪和可用内存。
 

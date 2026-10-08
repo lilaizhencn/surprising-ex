@@ -31,7 +31,7 @@ class ClientWebSocketHandlerTest {
     }
 
     private static ClientWebSocketHandler handler(WebSocketProperties properties) {
-        return new ClientWebSocketHandler(null, null, properties, null, new com.surprising.gateway.provider.product.GatewayProductsProperties());
+        return new ClientWebSocketHandler(null, null, properties, null, org.mockito.Mockito.mock(com.surprising.gateway.provider.product.GatewayProductServices.class));
     }
 
     private static WebSocketProperties properties() {

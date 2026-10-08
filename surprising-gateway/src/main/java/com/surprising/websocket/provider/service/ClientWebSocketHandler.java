@@ -22,13 +22,13 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
     private final WebSocketJwtAuthenticator jwtAuthenticator;
-    private final com.surprising.gateway.provider.product.GatewayProductsProperties products;
+    private final com.surprising.gateway.provider.product.GatewayProductServices products;
 
     public ClientWebSocketHandler(ObjectMapper objectMapper,
                                   SubscriptionRegistry registry,
                                   WebSocketProperties properties,
                                   WebSocketJwtAuthenticator jwtAuthenticator,
-                                  com.surprising.gateway.provider.product.GatewayProductsProperties products) {
+                                  com.surprising.gateway.provider.product.GatewayProductServices products) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.properties = properties;

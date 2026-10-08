@@ -59,13 +59,14 @@ public class CandlestickStreamConfiguration {
 
     @Bean
     public NewTopic candleEventsTopic(CandlestickProperties properties) {
-        return TopicBuilder.name(properties.getKafka().getCandleTopic()).partitions(32).build();
+        // 分区由 Kafka 部署决定，启动服务不得把已有 Topic 强制扩成 32 个分区。
+        return TopicBuilder.name(properties.getKafka().getCandleTopic()).build();
     }
 
     // Streams must not depend on the first trade arriving to create its input topic.
     @Bean
     public NewTopic candleTradeSourceTopic(CandlestickProperties properties) {
-        return TopicBuilder.name(properties.getKafka().getTradeTopic()).partitions(32).build();
+        return TopicBuilder.name(properties.getKafka().getTradeTopic()).build();
     }
 
     @Bean

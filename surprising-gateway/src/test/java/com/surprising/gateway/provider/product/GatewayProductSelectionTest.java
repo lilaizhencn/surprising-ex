@@ -12,9 +12,16 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 class GatewayProductSelectionTest {
-    private final GatewayProductsProperties products = new GatewayProductsProperties();
+    private final GatewayProductServices products = org.mockito.Mockito.mock(GatewayProductServices.class);
+    private List<ProductLine> enabled = List.of(ProductLine.values());
     private final GatewayProductSelection selection = new GatewayProductSelection(products, new ObjectMapper());
-    GatewayProductSelectionTest() { products.setEnabled(List.of(ProductLine.values())); }
+    GatewayProductSelectionTest() {
+        org.mockito.Mockito.when(products.enabled()).thenAnswer(i -> enabled);
+        org.mockito.Mockito.doAnswer(i -> {
+            if (!enabled.contains(i.getArgument(0))) throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,"not enabled");
+            return null;
+        }).when(products).requireEnabled(org.mockito.ArgumentMatchers.any());
+    }
     private MockHttpServletRequest request() { return new MockHttpServletRequest("POST","/api/v1/gateway/trading"); }
     private byte[] body(String body) { return body.getBytes(StandardCharsets.UTF_8); }
     @ParameterizedTest @EnumSource(ProductLine.class)
@@ -26,7 +33,7 @@ class GatewayProductSelectionTest {
     @Test void refusesMissingSelectorForMultipleProducts() {
         assertThatThrownBy(() -> selection.resolve(request(),null,true)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("productLine is required");
         assertThat(selection.resolve(request(),null,false)).isNull();
-        products.setEnabled(List.of(ProductLine.SPOT));
+        enabled = List.of(ProductLine.SPOT);
         assertThat(selection.resolve(request(),null,true)).isEqualTo(ProductLine.SPOT);
     }
     @Test void rejectsConflictingHeadersQueriesAndBatchBodies() {
@@ -38,7 +45,7 @@ class GatewayProductSelectionTest {
         assertThatThrownBy(() -> selection.resolve(request,null,true)).hasMessageContaining("conflicting");
     }
     @Test void rejectsDisabledUnknownAndNonStringProducts() {
-        products.setEnabled(List.of(ProductLine.SPOT));
+        enabled = List.of(ProductLine.SPOT);
         var request=request(); request.addParameter("productLine","OPTION");
         assertThatThrownBy(() -> selection.resolve(request,null,true)).hasMessageContaining("not enabled");
         for(String body:List.of("{\"productLine\":\"made-up\"}","{\"productLine\":[]}","invalid"))
@@ -48,27 +55,26 @@ class GatewayProductSelectionTest {
         var request=new MockHttpServletRequest("POST","/fapi/v1/order");request.addHeader("X-Product-Line","SPOT");
         assertThatThrownBy(() -> selection.resolve(request,null,true)).hasMessageContaining("conflicting");
     }
-    @Test void fundingSelectsSpotAndStartupRequiresConnectionsForAllEnabledProducts() {
-        var request=request();request.addParameter("accountType","FUNDING");
+    @Test void fundingSelectsSpotAndOnlyCoreAddressesRemainInDeploymentConfiguration() {
+        var request=request(); request.addParameter("accountType","FUNDING");
         assertThat(selection.resolve(request,null,true)).isEqualTo(ProductLine.SPOT);
-        assertThatThrownBy(products::validate).hasMessageContaining("missing Gateway Core connection");
-        for(var product:products.getEnabled()) products.getCores().put(product,new GatewayProductsProperties.Core());
-        assertThatCode(products::validate).doesNotThrowAnyException();
-        products.setEnabled(List.of(ProductLine.SPOT,ProductLine.SPOT));
-        assertThatThrownBy(products::validate).hasMessageContaining("distinct");
+        var config = new GatewayProductsProperties();
+        assertThatThrownBy(() -> config.validate(ProductLine.SPOT)).hasMessageContaining("missing Gateway Core connection");
+        config.getCores().put(ProductLine.SPOT, new GatewayProductsProperties.Core());
+        assertThatCode(() -> config.validate(ProductLine.SPOT)).doesNotThrowAnyException();
     }
     @Test void rejectsTimeoutsThatLoseMillisecondPrecisionOrExceedTheRequestBudget() {
-        products.setEnabled(List.of(ProductLine.SPOT));
+        var config = new GatewayProductsProperties();
         var core = new GatewayProductsProperties.Core();
-        products.getCores().put(ProductLine.SPOT, core);
+        config.getCores().put(ProductLine.SPOT, core);
         for (var timeout : List.of(java.time.Duration.ZERO, java.time.Duration.ofNanos(1),
                 java.time.Duration.ofSeconds(61))) {
             core.setResponseTimeout(timeout);
-            assertThatThrownBy(products::validate).hasMessageContaining("invalid Gateway Core");
+            assertThatThrownBy(() -> config.validate(ProductLine.SPOT)).hasMessageContaining("invalid Gateway Core");
         }
         for (var timeout : List.of(java.time.Duration.ofMillis(1), java.time.Duration.ofMinutes(1))) {
             core.setResponseTimeout(timeout);
-            assertThatCode(products::validate).doesNotThrowAnyException();
+            assertThatCode(() -> config.validate(ProductLine.SPOT)).doesNotThrowAnyException();
         }
     }
 }
