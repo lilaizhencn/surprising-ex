@@ -34,6 +34,18 @@ class CommittedOrderProjectionPostgresTest {
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
 
+    @Test void emptyOrderBatchesAdvanceOnlyWatermarkWithoutDependingOnMakerCatalog() {
+        // An empty order batch must not query either catalog table.
+        jdbc.execute("DROP TABLE market_maker_strategies, market_maker_business_settings");
+        for (var product : ProductLine.values()) {
+            repository.persist(product, List.of(), 10);
+            repository.persist(product, List.of(), 9);
+            assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line=?",
+                    Long.class, product.name())).isEqualTo(10);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+    }
+
     @Test void idempotentRestartAndOldRevisionsCannotReplaceTerminalOrdersAcrossSixLines() {
         for (var line : ProductLine.values()) {
             repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), 10);

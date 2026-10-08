@@ -42,6 +42,11 @@ public class CommittedOrderProjectionRepository {
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
     void persist(ProductLine product, List<RealtimeFrame> orders, long exportSequence) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
+        if (orders.isEmpty()) {
+            // Commands without order changes must still advance the visibility watermark.
+            transaction.executeWithoutResult(status -> advanceWatermark(product, exportSequence));
+            return;
+        }
         // Read each committed batch from the admin catalog. Disabled strategies still own
         // their historical accounts; changing enablement must not reclassify old maker fills.
         Set<Long> marketMakerAccounts = new HashSet<>(jdbc.queryForList(
@@ -125,13 +130,17 @@ public class CommittedOrderProjectionRepository {
                 statement.setLong(11, exportSequence);
                 statement.setBytes(12, write.raw());
             });
-            jdbc.update("""
-                    INSERT INTO core_projection_watermark(product_line,last_export_sequence)
-                    VALUES (?,?) ON CONFLICT (product_line) DO UPDATE SET
-                      last_export_sequence=EXCLUDED.last_export_sequence,updated_at=now()
-                    WHERE core_projection_watermark.last_export_sequence < EXCLUDED.last_export_sequence
-                    """, product.name(), exportSequence);
+            advanceWatermark(product, exportSequence);
         });
     }
+    private void advanceWatermark(ProductLine product, long exportSequence) {
+        jdbc.update("""
+                INSERT INTO core_projection_watermark(product_line,last_export_sequence)
+                VALUES (?,?) ON CONFLICT (product_line) DO UPDATE SET
+                  last_export_sequence=EXCLUDED.last_export_sequence,updated_at=now()
+                WHERE core_projection_watermark.last_export_sequence < EXCLUDED.last_export_sequence
+                """, product.name(), exportSequence);
+    }
+
     private record OrderWrite(CoreOrderStateView order, byte[] raw) {}
 }

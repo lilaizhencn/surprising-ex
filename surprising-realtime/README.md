@@ -429,3 +429,28 @@ Streams changelog 和内部 Topic 来节省分区，否则会破坏消费进度�
 HotSpot JDK 27 定向执行客户端、价格、生命周期、realtime、gateway WebSocket 和 maker 及其直接依赖测试；按测试类最新结果去重，共 509 项，503 通过、6 跳过、0 失败。跳过项为 price/lifecycle 的 PostgreSQL 配置集成各 1 项、gateway 本地真实交易环境 2 项、maker PostgreSQL 配置集成 2 项。真实 Archive/Kafka 导出集成已执行，未部署本轮代码、未运行服务器端全链路交易或长稳测试。
 
 JFR 限制单文件最大 32MiB，已将采样条件和结果记录在各模块 README；分析完成后清理本轮临时程序、录制、日志和对应测试报告，保留此前已有数据与构建产物。
+
+
+## 后续成本点实施（2026-10-08）
+
+上一节的四项后续清单已实现：空订单批不查做市目录、导出小批有限合并、Lua 每批加载后按摘要执行、实时接收免整帧复制，以及盘口按共享基线复用编码。后两项说明分别位于 [协议模块](../surprising-aeron-core/surprising-aeron-protocol/README.md)、[gateway](../surprising-gateway/README.md)；Lua 方案和缓存失效边界见 [realtime-api](surprising-realtime-api/README.md)。
+
+### 订单投影与可靠成交合批
+
+`CommittedOrderProjectionRepository.persist` 收到空订单批时只在事务中推进查询水位，不查询做市账户目录、不创建订单/成交临时索引或调用空 batchUpdate。非空批仍读取当前服务端目录，保留普通用户历史、做市涉及用户成交的持久化凭据、最高 revision 和六产品隔离，不做长期账户分类缓存。
+
+`CommittedTradeExporter.ExportBatch` 接管原来分散在回调和循环中的两个列表及命令计数，由单一导出线程持有，不新增线程或通用执行框架。累计完整命令，达到原来的 256 命令或 4096 帧阈值就刷新；小批可跨 commit position 的推进合并，目标等待最多 5ms，空闲 park 和 commit counter 暂时不可用时的等待都受该期限约束。单个完整命令仍可超过帧阈值后立即刷新，不能为了容量把一个命令拆开。外部 I/O、回放或线程调度可能超过目标期限，5ms 不是端到端延迟保证。
+
+刷新顺序为订单与可见性水位同事务 → Kafka 确认 → 清空批次。两者成功后才记录已刷新序号；没有新订单、成交且水位相同的重复刷新不再访问 SQL/Kafka。所有 checkpoint 路径和正常退出强制刷新剩余批次；失败向上传递，不推进 checkpoint、不跳过未知结果。查询水位可多等待一个短合批窗口，但不能比数据库中已提交的订单状态超前。
+
+组件验证使用隔离 PostgreSQL、Hikari 单连接池、真实水位事务，比较逐命令刷新与当前合批，两边均使用优化后的空订单 SQL 路径；输入为 10,000 个空订单命令，期限时钟按每条 100µs 的虚拟间隔推进，最后都核对水位 10999。记录 JFR 与调用线程 ThreadMXBean：事务调用 10,000 → 197，分配量 42.422MB → 1.032MB，CPU 919.280ms → 100.312ms，组件总耗时 2744.451ms → 144.686ms。Kafka 为替身，虚拟间隔不是实时时序，因此不把此结果换算为实际撮合吞吐、用户延迟或整体服务 CPU 收益。
+
+### 验证范围
+
+HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 325 项，全部通过、无跳过。包括共享 codec/wire、真实 Driver 普通及分片传输、真实 Redis 缓存清空与版本屏障、真实 PostgreSQL 的六产品水位/幂等/事务回滚/做市保留规则、真实 Archive/Kafka 的提交边界与崩溃重复身份、路由恢复、盘口基线/背压、查询水位等待，以及六产品撮合、实时输出和快照恢复。
+
+主要执行范围：`surprising-realtime-provider,surprising-gateway,surprising-price-provider,surprising-derivatives-lifecycle-provider,surprising-maker -am`，选择本轮实时、投影、导出、快照与撮合相关测试；另执行 `*CodecTest,*Wire*Test,ProjectionWatermarkWaiterTest,ProjectedOrderQueryRepositoryTest`。真实 Archive/Kafka 导出另录制最多 32MiB 的 JFR并完成同样断言；该集成样本的导出执行采样不足，不据此断言热点占比。未启动 wallet，未部署或重启测试服务器，未执行真实 HTTP 用户交易全链路、Redis Cluster 故障、三节点切主或长稳容量验收。
+
+本轮使用独立临时 PostgreSQL、自动销毁的 Redis/Archive/Kafka 测试实例；分析入档后停止进程并清理本轮原始 JFR、临时程序、数据库目录、日志和对应测试报告，保留既有工作区数据和构建产物。
+
+清理完成：本轮独立 PostgreSQL 已停止，原始录制、临时程序/数据库/日志及 122 份对应测试报告已删除；没有遗留本轮 profile 进程，既有 Aeron 数据目录保持原样。

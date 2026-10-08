@@ -98,9 +98,7 @@ final class CommittedTradeExporter {
                     var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
-                var trades = new ArrayList<RealtimeFrame>();
-                var orderChanges = new ArrayList<RealtimeFrame>();
-                int[] messages = {0};
+                var batch = new ExportBatch(product, orders, sink);
                 long[] delivered = {checkpoint.logPosition()};
                 boolean[] partialMessage = {false};
                 var messageHeader = new MessageHeaderDecoder();
@@ -115,26 +113,12 @@ final class CommittedTradeExporter {
                         if (bodyLength <= 0) throw new IllegalArgumentException("empty archived Core command");
                         byte[] bytes = new byte[bodyLength];
                         buffer.getBytes(bodyOffset, bytes);
-                        for (var change : replay.apply(bytes, sessionHeader.timestamp(), header.position())) {
-                            if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
-                            else orderChanges.add(change);
-                        }
-                        messages[0]++;
-                        if (messages[0] >= 256 || trades.size() + orderChanges.size() >= 4096) {
-                            orders.persist(product, orderChanges, replay.exportSequence());
-                            sink.publish(trades);
-                            orderChanges.clear();
-                            trades.clear();
-                            messages[0] = 0;
-                        }
+                        batch.add(replay.apply(bytes, sessionHeader.timestamp(), header.position()),
+                                replay.exportSequence(), System.nanoTime());
                     }
                     delivered[0] = header.position();
                     if (System.nanoTime() >= nextCheckpoint[0]) {
-                        orders.persist(product, orderChanges, replay.exportSequence());
-                        sink.publish(trades);
-                        orderChanges.clear();
-                        trades.clear();
-                        messages[0] = 0;
+                        batch.flush(replay.exportSequence());
                         try {
                             new TradeExportCheckpoint(product, delivered[0], sink.tradeSequence(), replay.snapshot())
                                     .write(checkpointPath);
@@ -147,11 +131,12 @@ final class CommittedTradeExporter {
                 exportLoop: while (running.get()
                         && !Thread.currentThread().isInterrupted()
                         && cursor < stopAfter) {
+                    batch.flushIfDue(replay.exportSequence(), System.nanoTime());
                     int counter = ClusterCounters.find(aeron.countersReader(),
                             AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID, clusterId);
                     if (counter < 0) {
                         connected.accept(false);
-                        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(100));
+                        LockSupport.parkNanos(batch.waitNanos(System.nanoTime(), TimeUnit.MILLISECONDS.toNanos(100)));
                         continue;
                     }
                     connected.accept(true);
@@ -162,11 +147,12 @@ final class CommittedTradeExporter {
                     long position = archiveReplay.position(cursor);
                     if (committed <= position) {
                         if (System.nanoTime() >= nextCheckpoint[0]) {
+                            batch.flush(replay.exportSequence());
                             new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                                     .write(checkpointPath);
                             nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                         }
-                        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+                        LockSupport.parkNanos(batch.waitNanos(System.nanoTime(), TimeUnit.MILLISECONDS.toNanos(10)));
                         continue;
                     }
                     recordingLog.reload();
@@ -228,13 +214,10 @@ final class CommittedTradeExporter {
                     if (running.get() && !Thread.currentThread().isInterrupted()
                             && image.position() != safeEnd)
                         throw new IllegalStateException("incomplete committed archive replay");
-                    orders.persist(product, orderChanges, replay.exportSequence());
-                    sink.publish(trades);
-                    orderChanges.clear();
-                    trades.clear();
-                    messages[0] = 0;
+                    batch.flushIfDue(replay.exportSequence(), System.nanoTime());
                     cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
                     if (System.nanoTime() >= nextCheckpoint[0]) {
+                        batch.flush(replay.exportSequence());
                         new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                                 .write(checkpointPath);
                         log.info("trade-export product={} committedPosition={} exportedPosition={} trades={}",
@@ -242,9 +225,59 @@ final class CommittedTradeExporter {
                         nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                     }
                 }
+                batch.flush(replay.exportSequence());
                 new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                         .write(checkpointPath);
             }
+        }
+    }
+
+    /** Export-worker-owned batch: bounded by commands/frames and a 5ms delivery deadline. */
+    static final class ExportBatch {
+        private static final long MAX_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
+        private final ProductLine product;
+        private final CommittedOrderProjectionRepository orders;
+        private final ReliableTradeKafkaSink sink;
+        private final ArrayList<RealtimeFrame> trades = new ArrayList<>();
+        private final ArrayList<RealtimeFrame> orderChanges = new ArrayList<>();
+        private int messages;
+        private long startedAt, flushedSequence = -1;
+
+        ExportBatch(ProductLine product, CommittedOrderProjectionRepository orders, ReliableTradeKafkaSink sink) {
+            this.product = product;
+            this.orders = orders;
+            this.sink = sink;
+        }
+
+        void add(List<RealtimeFrame> changes, long sequence, long now) {
+            if (messages++ == 0) startedAt = now;
+            for (var change : changes) {
+                if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
+                else orderChanges.add(change);
+            }
+            if (messages >= 256 || trades.size() + orderChanges.size() >= 4096
+                    || now - startedAt >= MAX_DELAY_NANOS) flush(sequence);
+        }
+
+        void flushIfDue(long sequence, long now) {
+            if (messages > 0 && now - startedAt >= MAX_DELAY_NANOS) flush(sequence);
+        }
+
+        long waitNanos(long now, long maxWaitNanos) {
+            return messages == 0 ? maxWaitNanos
+                    : Math.max(1, Math.min(maxWaitNanos, MAX_DELAY_NANOS - (now - startedAt)));
+        }
+
+        void flush(long sequence) {
+            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty()) {
+                orders.persist(product, orderChanges, sequence);
+                sink.publish(trades);
+                // Neither the checkpoint nor this marker advances when either sink fails.
+                flushedSequence = sequence;
+            }
+            orderChanges.clear();
+            trades.clear();
+            messages = 0;
         }
     }
 
