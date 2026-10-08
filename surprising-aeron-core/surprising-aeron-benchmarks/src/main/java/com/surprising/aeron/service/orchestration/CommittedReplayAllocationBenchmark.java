@@ -15,6 +15,8 @@ import org.openjdk.jmh.annotations.*;
 @Warmup(iterations = 3, time = 2)
 @Measurement(iterations = 3, time = 2)
 @Fork(value = 2, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseZGC",
+        "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED", "--enable-native-access=ALL-UNNAMED",
         "-Dsurprising.aeron.matching-engines=1", "-Dsurprising.aeron.matcher-window-size=256"})
 public class CommittedReplayAllocationBenchmark {
     CommittedTradeReplay replay;
