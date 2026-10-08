@@ -242,3 +242,17 @@ HotSpot Corretto 27 下 Gateway 模块测试 820 项：0 失败、0 错误、9 �
 清理状态：本轮 Gateway、六 Core、管理端预览、Kafka、Redis、独立 PostgreSQL 均已停止。
 本轮独立构建树、数据库、Kafka 数据、Archive、Aeron 目录及临时日志清理；结果以本节记录为准。
 共享 PostgreSQL 5432 保持运行，工作区原有修改和历史运行目录保持原样。
+
+## 单分区测试环境的消费者并发
+
+`scripts/linear-perpetual-single-node.sh` 自动加载
+`deployment/test-single-node/kafka-single-partition.env`，为单分区测试部署统一设置监听器、
+行情消费、指数、标记价格、保险、资金费、WebSocket Kafka 及 K 线 Streams 的并发为 1。
+产品线接入仍读取后台数据库；此文件只负责测试部署的技术资源参数，不包含业务设置。
+普通 Spring Kafka 消费者使用阻塞 poll；没有把 poll 超时改为零。
+启用 Aeron 实时链路时 `KafkaFanoutConsumer` 不创建监听器，不会同时启动 Kafka 和 Aeron 两套推送消费。
+
+本地验证：`bash -n`、`git diff --check` 通过；使用真实单节点入口配合隔离的下级启动桩，
+确认九个并发/线程环境变量均传给下级进程为 1，旧做市并发 8、标记并发 2、Streams 线程 2 被覆盖。
+验证未启动任何本地服务。上线验收还应通过 Kafka Admin 查看实际消费组成员和分区分配，
+不能仅根据环境变量推断没有闲置消费者。

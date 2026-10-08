@@ -4,6 +4,10 @@ set -euo pipefail
 # Server/test entrypoint. The generic launcher still owns the process lifecycle;
 # this file only fixes the product line and the single-node deployment boundary.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 单分区测试部署统一采用配套消费者并发，避免依赖旧环境遗留的 2/8 线程配置。
+set -a
+source "$ROOT_DIR/deployment/test-single-node/kafka-single-partition.env"
+set +a
 
 case "${1:-}" in
   start|up) ACTION=up; shift ;;
