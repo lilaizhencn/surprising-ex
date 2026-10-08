@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.protocol.RealtimeFrameCodec;
 import io.aeron.Aeron;
 import io.aeron.FragmentAssembler;
+import org.agrona.concurrent.BackoffIdleStrategy;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
@@ -35,11 +36,12 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
                     });
                     try (var subscription = aeron.addSubscription(channel, streamId, null,
                             unavailable -> { synchronized (assembler) { assembler.freeSessionBuffer(unavailable.sessionId()); } })) {
+                        var idle = new BackoffIdleStrategy(0, 0, 100_000L, 250_000L);
                         ready = true;
                         while (running && ready && !subscription.isClosed() && !aeron.isClosed()) {
                             int fragments;
                             synchronized (assembler) { fragments = subscription.poll(assembler, 64); }
-                            if (fragments == 0) LockSupport.parkNanos(100_000);
+                            idle.idle(fragments);
                         }
                     }
                 } catch (RuntimeException failure) {

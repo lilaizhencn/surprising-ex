@@ -25,7 +25,9 @@ public final class AeronRealtimeSender implements AutoCloseable {
                 UnsafeBuffer buffer = new UnsafeBuffer(new byte[0]);
                 while (running && !aeron.isClosed() && !publication.isClosed()) {
                     byte[] bytes = outbox.poll();
-                    if (bytes == null) { LockSupport.parkNanos(100_000); continue; }
+                    // Commits wake this worker immediately. The bounded wait also checks
+                    // transport health when the trading owner has no events to publish.
+                    if (bytes == null) { outbox.awaitData(100_000_000L); continue; }
                     buffer.wrap(bytes);
                     long result = publication.offer(buffer, 0, bytes.length);
                     if (result > 0) sent.increment(); else dropped.increment();

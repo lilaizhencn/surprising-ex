@@ -39,3 +39,25 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 ### 连接池建连期限与业务请求期限
 
 `SurprisingAeronClient.AsyncConnection` 的握手期限默认 30 秒，可用 `surprising.aeron.client.connect-timeout-ms` 设置；业务命令/查询继续使用原来的 responseTimeout。连接建立涉及 Driver 分配日志缓冲区和 Cluster 握手，不能因为一次 5 秒业务请求超时就不断重建连接资源。本地抓到连接池连续 NOT_CONNECTED、核心 Driver 忙于预触碰新缓冲区；此项只延长握手期限，不重试未知结果的资金命令、不放宽业务请求成功标准。
+
+
+## 空闲等待优化（2026-10-08）
+
+`RealtimeOutbox.commit` 在发布完整回调后唤醒唯一发送线程。消费者先登记等待线程再检查队列，避免提交与入睡交错时丢失唤醒；stage/abort 不唤醒或暴露未提交消息。发送端空队列最多等待 100ms，仍定期检查 Driver 健康，关闭时中断等待。
+
+`AeronClientPool.EgressDispatcher` 没有排队或在途请求时，将等待从 100µs 逐步延长到 1ms；新请求沿用入队唤醒，在途响应保持 100µs 轮询，心跳与重连期限限制最长等待。`AeronRealtimeReceiver` 没有跨进程入队通知，采用 100–250µs 退避，收到消息后重置。未修改命令身份、未知结果处理、产品线或连接隔离。
+
+HotSpot JDK 27 本地对比基线 `292e4e04`：10 个双 lane 客户端池，加一对真实 IPC Sender/Receiver；预热后用 ThreadMXBean 统计这 12 个线程的 2 秒 CPU 时间，另录制有大小上限的 JFR。200 条 IPC 消息逐条发送，间隔 10ms，在 JFR 录制之外统计发送至接收回调的延迟。
+
+| 指标 | 优化前 | 优化后 |
+| --- | ---: | ---: |
+| 目标线程 2 秒 CPU 时间 | 1273.855ms | 229.707ms |
+| JFR 中 dispatcher park 次数（合计） | 151737 | 16655 |
+| JFR 中 sender park 次数 | 15167 | 20 |
+| JFR 中 receiver park 次数 | 15163 | 6150 |
+| IPC P50 | 276.0µs | 348.8µs |
+| IPC P99 | 405.3µs | 529.4µs |
+
+目标空闲线程 CPU 时间约减少 82%，代价是本组 IPC P99 增加约 0.124ms；这是组件采样，不是整台服务器 CPU 或真实交易吞吐结果。接收退避上限曾试验 1ms，因 P99 达约 1.50ms，最终收紧为 250µs。
+
+客户端模块及依赖测试通过；新增覆盖提交唤醒、未提交不可见、跨线程顺序，相关池、超时、真实 Driver 重连和分片测试通过。原始 JFR、临时编译程序及日志仅用于本轮验证，汇总后清理。

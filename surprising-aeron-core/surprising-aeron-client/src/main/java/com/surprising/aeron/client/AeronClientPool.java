@@ -784,8 +784,10 @@ public final class AeronClientPool implements AutoCloseable {
         public void run() {
             try {
                 openSessions();
+                long idleNanos = 100_000L;
                 while (!closed.get()) {
                     boolean worked = false;
+                    boolean hasRequests = false;
                     for (AgentLane lane : lanes) {
                         worked |= openSession(lane);
                     }
@@ -799,9 +801,20 @@ public final class AeronClientPool implements AutoCloseable {
                         worked |= admitQueued(lane);
                         expireQueued(lane);
                         expireAdmitted(lane);
+                        hasRequests |= !lane.pending.isEmpty() || !lane.mailbox.isEmpty()
+                                || lane.deferredAdminOffer != null;
                     }
+                    idleNanos = worked || hasRequests ? 100_000L : Math.min(idleNanos * 2, 1_000_000L);
                     if (!worked) {
-                        java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
+                        long now = System.nanoTime();
+                        long waitNanos = idleNanos;
+                        for (AgentLane lane : lanes) {
+                            long deadline = lane.session == null ? lane.reconnectAtNanos : lane.keepAliveAtNanos;
+                            waitNanos = Math.min(waitNanos, Math.max(1L, deadline - now));
+                        }
+                        // Queue admission already unparks this thread. In-flight responses
+                        // retain the short poll; idle sessions still service heartbeats/reconnects.
+                        java.util.concurrent.locks.LockSupport.parkNanos(this, waitNanos);
                         if (Thread.currentThread().isInterrupted()) {
                             if (!closed.get()) {
                                 dispatcherFailure.compareAndSet(null,
