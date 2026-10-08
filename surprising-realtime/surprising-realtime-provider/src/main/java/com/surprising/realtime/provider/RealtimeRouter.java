@@ -32,7 +32,13 @@ public final class RealtimeRouter implements AutoCloseable {
     private final SnapshotAssembler commits = new SnapshotAssembler();
     private final java.util.concurrent.atomic.AtomicLong queuedBytes =
             new java.util.concurrent.atomic.AtomicLong();
+    // Encoded transport retries belong only to the router thread, never to the trading Core.
+    // Global bounds also cover disconnected nodes; successful sends retain no frame copy.
     private final Map<String, Node> nodes = new HashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong pendingBytes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong pendingFrames = new java.util.concurrent.atomic.AtomicLong();
+    private final LongAdder transportExpired = new LongAdder(), transportCapacityDropped = new LongAdder();
+    private static final long SEND_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5);
     private final Map<ProductLine, ExclusivePublication> controls =
             new EnumMap<>(ProductLine.class);
     private final Map<ProductLine, Long> requestOffsets = new EnumMap<>(ProductLine.class);
@@ -62,6 +68,10 @@ public final class RealtimeRouter implements AutoCloseable {
         metrics.gauge("realtime.router.queued.bytes", queuedBytes);
         metrics.gauge("realtime.router.queued.frames", inbound, java.util.Collection::size);
         metrics.gauge("realtime.receiver.failures", receiver, AeronRealtimeReceiver::failures);
+        metrics.gauge("realtime.router.transport.pending.bytes", pendingBytes);
+        metrics.gauge("realtime.router.transport.pending.frames", pendingFrames);
+        metrics.gauge("realtime.router.transport.expired", transportExpired, LongAdder::sum);
+        metrics.gauge("realtime.router.transport.capacity.dropped", transportCapacityDropped, LongAdder::sum);
     }
 
     public RealtimeRouter(RealtimeRouterProperties config, StringRedisTemplate redis) {
@@ -118,6 +128,7 @@ public final class RealtimeRouter implements AutoCloseable {
                         refresh(aeron, now);
                         nextRefresh = now + 100;
                     }
+                    retryPending();
                     RealtimeFrame frame = inbound.poll(10, TimeUnit.MILLISECONDS);
                     if (frame != null) {
                         frames.add(frame);
@@ -133,7 +144,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 failures.increment();
                 java.util.concurrent.locks.LockSupport.parkNanos(1_000_000_000L);
             } finally {
-                nodes.values().forEach(n -> n.publication.close());
+                nodes.values().forEach(this::closeNode);
                 nodes.clear();
                 controls.values().forEach(ExclusivePublication::close);
                 controls.clear();
@@ -254,31 +265,94 @@ public final class RealtimeRouter implements AutoCloseable {
     private void sendToNodes(Aeron aeron, RealtimeFrame f, long now, Map<String, String> targets) {
         if (targets.isEmpty()) return;
         byte[] bytes = RealtimeFrameCodec.encode(f);
+        var buffer = new UnsafeBuffer(bytes);
         for (var entry : targets.entrySet()) {
             Node node = nodes.get(entry.getKey());
+            if (node != null && !node.endpoint.equals(entry.getValue())) {
+                closeNode(node);
+                nodes.remove(entry.getKey());
+                node = null;
+            }
             if (node == null) {
                 if (nodes.size() >= 64) {
                     transportDropped.increment();
+                    dirtySources.add(f.productLine());
                     continue;
                 }
-                node =
-                        new Node(
-                                aeron.addExclusivePublication(
-                                        new ChannelUriStringBuilder(entry.getValue())
-                                                .termLength(8 * 1024 * 1024)
-                                                .build(),
-                                        config.nodeStream()),
-                                now);
+                node = new Node(aeron.addExclusivePublication(
+                        new ChannelUriStringBuilder(entry.getValue()).termLength(8 * 1024 * 1024).build(),
+                        config.nodeStream()), entry.getValue(), now);
                 nodes.put(entry.getKey(), node);
             }
             node.lastUsed = now;
-            long result = node.publication.offer(new UnsafeBuffer(bytes));
-            if (result < 0) transportDropped.increment();
+            // A later update must not overtake an earlier update waiting for this same node.
+            if (!node.pending.isEmpty()) {
+                enqueue(node, bytes, f.productLine());
+                continue;
+            }
+            long result = node.publication.offer(buffer);
+            if (result > 0) continue;
             if (result == Publication.CLOSED || result == Publication.MAX_POSITION_EXCEEDED) {
-                node.publication.close();
+                transportDropped.increment();
+                dirtySources.add(f.productLine());
+                closeNode(node);
                 nodes.remove(entry.getKey());
+            } else enqueue(node, bytes, f.productLine());
+        }
+    }
+
+    private void enqueue(Node node, byte[] bytes, ProductLine product) {
+        if (pendingFrames.get() >= 8192 || pendingBytes.get() + bytes.length > 16 * 1024 * 1024) {
+            transportDropped.increment();
+            transportCapacityDropped.increment();
+            dirtySources.add(product);
+            return;
+        }
+        node.pending.addLast(new PendingFrame(new UnsafeBuffer(bytes), product, System.nanoTime()));
+        pendingFrames.incrementAndGet();
+        pendingBytes.addAndGet(bytes.length);
+    }
+
+    private void retryPending() {
+        if (pendingFrames.get() == 0) return;
+        long now = System.nanoTime();
+        var iterator = nodes.values().iterator();
+        while (iterator.hasNext()) {
+            Node node = iterator.next();
+            // One stalled publication must not monopolize the router or block other nodes.
+            for (int i = 0; i < 32 && !node.pending.isEmpty(); i++) {
+                PendingFrame frame = node.pending.getFirst();
+                if (now - frame.enqueuedAt >= SEND_TIMEOUT_NANOS) {
+                    discardFirst(node);
+                    transportExpired.increment();
+                    continue;
+                }
+                long result = node.publication.offer(frame.buffer);
+                if (result > 0) releaseFirst(node);
+                else if (result == Publication.CLOSED || result == Publication.MAX_POSITION_EXCEEDED) {
+                    closeNode(node);
+                    iterator.remove();
+                    break;
+                } else break;
             }
         }
+    }
+
+    private void releaseFirst(Node node) {
+        PendingFrame frame = node.pending.removeFirst();
+        pendingBytes.addAndGet(-frame.buffer.capacity());
+        pendingFrames.decrementAndGet();
+    }
+
+    private void discardFirst(Node node) {
+        dirtySources.add(node.pending.getFirst().product);
+        transportDropped.increment();
+        releaseFirst(node);
+    }
+
+    private void closeNode(Node node) {
+        while (!node.pending.isEmpty()) discardFirst(node);
+        node.publication.close();
     }
 
     private void resetSource(ProductLine product) {
@@ -294,7 +368,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 .removeIf(
                         n -> {
                             if (now - n.lastUsed <= 30_000) return false;
-                            n.publication.close();
+                            closeNode(n);
                             return true;
                         });
         outstanding.values().removeIf(r -> now - r.at > 5000);
@@ -379,13 +453,18 @@ public final class RealtimeRouter implements AutoCloseable {
 
     private static final class Node {
         final ExclusivePublication publication;
+        final String endpoint;
+        final ArrayDeque<PendingFrame> pending = new ArrayDeque<>();
         long lastUsed;
 
-        Node(ExclusivePublication p, long now) {
+        Node(ExclusivePublication p, String endpoint, long now) {
             publication = p;
+            this.endpoint = endpoint;
             lastUsed = now;
         }
     }
+
+    private record PendingFrame(UnsafeBuffer buffer, ProductLine product, long enqueuedAt) {}
 
     private record Request(long id, long at) {}
 }

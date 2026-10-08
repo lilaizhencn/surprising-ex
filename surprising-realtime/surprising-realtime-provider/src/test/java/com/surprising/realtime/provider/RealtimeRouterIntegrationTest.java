@@ -116,28 +116,13 @@ class RealtimeRouterIntegrationTest {
                         new RealtimeRoute(ProductLine.SPOT, 43, "USER", ""),
                         nodeB,
                         System.currentTimeMillis() + 30000);
-                // Initial offers can precede UDP image establishment. Independent public updates
-                // establish both images.
                 var publicRoute = new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "1");
                 routes.register(publicRoute, nodeA, System.currentTimeMillis() + 30000);
                 routes.register(publicRoute, nodeB, System.currentTimeMillis() + 30000);
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                while (receivedA.isEmpty() || receivedB.isEmpty()) {
-                    offer(
-                            publication,
-                            frame(
-                                    RealtimeFrame.Kind.MARK,
-                                    0,
-                                    1,
-                                    0,
-                                    0,
-                                    "1",
-                                    "",
-                                    new byte[] {'{', '}'}));
-                    if (System.nanoTime() > deadline)
-                        throw new AssertionError("node publications did not connect");
-                    Thread.sleep(20);
-                }
+                // Exactly one update: a cold UDP publication must retain it until connected.
+                offer(publication, frame(RealtimeFrame.Kind.MARK, 0, 1, 0, 0, "1", "", new byte[] {'{', '}'}));
+                await(() -> !receivedA.isEmpty() && !receivedB.isEmpty());
+                assertThat(router.dropped()).isZero();
                 receivedA.clear();
                 receivedB.clear();
                 // A burst spans several 256-frame drains. Every event remains ordered and
@@ -259,6 +244,70 @@ class RealtimeRouterIntegrationTest {
                     await(() -> !Objects.equals(previousEpoch, redis.opsForValue().get("rt:source:SPOT")));
                 }
             }
+        } finally {
+            factory.destroy();
+            server.destroy();
+            server.waitFor(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void retriesInOrderWithoutBlockingHealthyNodesAndExpiresDisconnectedQueues() throws Exception {
+        int redisPort = port();
+        Process server = new ProcessBuilder(System.getProperty("realtime.test.server", "redis-server"),
+                "--bind", "127.0.0.1", "--port", Integer.toString(redisPort), "--save", "", "--appendonly", "no")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        var factory = new LettuceConnectionFactory(
+                new org.springframework.data.redis.connection.RedisStandaloneConfiguration("127.0.0.1", redisPort),
+                org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration.builder().build());
+        factory.afterPropertiesSet();
+        factory.start();
+        try {
+            var redis = new StringRedisTemplate(factory);
+            await(() -> { try (var connection = factory.getConnection()) { return connection.ping() != null; }
+                catch (RuntimeException ignored) { return false; } });
+            String directory = temporary.resolve("retry-aeron").toString();
+            String healthyEndpoint = "aeron:udp?endpoint=127.0.0.1:" + port();
+            String delayedEndpoint = "aeron:udp?endpoint=127.0.0.1:" + port();
+            String deadEndpoint = "aeron:udp?endpoint=127.0.0.1:" + port();
+            var received = new LinkedBlockingQueue<RealtimeFrame>();
+            var delayed = new LinkedBlockingQueue<RealtimeFrame>();
+            var metrics = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+            try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                            .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+                 var healthy = new AeronRealtimeReceiver(directory, healthyEndpoint, 2103, received::add);
+                 var router = new RealtimeRouter(new RealtimeRouterProperties(directory, "aeron:ipc", 2101, 2103, Map.of()), redis, metrics)) {
+                await(healthy::ready);
+                var routes = new ValkeyRouteDirectory(redis);
+                var route = new RealtimeRoute(ProductLine.SPOT, 0, "MARK", "1");
+                for (var node : Map.of("healthy", healthyEndpoint, "delayed", delayedEndpoint, "dead", deadEndpoint).entrySet()) {
+                    String nodeId = UUID.randomUUID().toString();
+                    routes.heartbeat(nodeId, node.getValue(), Duration.ofSeconds(30));
+                    routes.register(route, nodeId, System.currentTimeMillis() + 30000);
+                }
+                for (int i = 1; i <= 3; i++)
+                    assertThat(router.offer(frame(RealtimeFrame.Kind.MARK, 0, i, 0, 0, "1", "", new byte[] {'{', '}'}))).isTrue();
+                await(() -> received.size() == 3);
+                assertThat(received.stream().map(RealtimeFrame::sequence).toList()).containsExactly(1L, 2L, 3L);
+                assertThat(router.dropped()).isZero();
+                assertThat(metrics.get("realtime.router.transport.pending.frames").gauge().value()).isEqualTo(6);
+                try (var late = new AeronRealtimeReceiver(directory, delayedEndpoint, 2103, delayed::add)) {
+                    await(() -> delayed.size() == 3);
+                    assertThat(delayed.stream().map(RealtimeFrame::sequence).toList()).containsExactly(1L, 2L, 3L);
+                    await(() -> metrics.get("realtime.router.transport.pending.frames").gauge().value() == 0);
+                    assertThat(metrics.get("realtime.router.transport.pending.bytes").gauge().value()).isZero();
+                    assertThat(metrics.get("realtime.router.transport.expired").gauge().value()).isEqualTo(3);
+                    assertThat(router.dropped()).isEqualTo(3);
+                    assertThat(router.failures()).isZero();
+                    // Shutdown must release a new disconnected queue as well.
+                    assertThat(router.offer(frame(RealtimeFrame.Kind.MARK, 0, 4, 0, 0, "1", "", new byte[] {'{', '}'}))).isTrue();
+                    await(() -> received.size() == 4 && delayed.size() == 4
+                            && metrics.get("realtime.router.transport.pending.frames").gauge().value() == 1);
+                }
+                router.close();
+                assertThat(metrics.get("realtime.router.transport.pending.frames").gauge().value()).isZero();
+                assertThat(metrics.get("realtime.router.transport.pending.bytes").gauge().value()).isZero();
+            } finally { metrics.close(); }
         } finally {
             factory.destroy();
             server.destroy();
