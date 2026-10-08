@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.stereotype.Service;
@@ -25,10 +26,12 @@ public class MatchingMarketDataService {
         String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
         List<OrderBookLevel> bids = book.levels().stream()
                 .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)
+                .sorted(Comparator.comparingLong(CoreBookLevelView::priceTicks).reversed())
                 .map(MatchingMarketDataService::toLevel)
                 .toList();
         List<OrderBookLevel> asks = book.levels().stream()
                 .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL)
+                .sorted(Comparator.comparingLong(CoreBookLevelView::priceTicks))
                 .map(MatchingMarketDataService::toLevel)
                 .toList();
         return new OrderBookSnapshotResponse(normalized, book.exportSequence(), depth,

@@ -13,6 +13,28 @@ import static org.assertj.core.api.Assertions.*;
 
 class MarketDataLocalTest {
     @Test
+    void publishesBestPricesFirstRegardlessOfCoreSerializationOrder() {
+        var client = mock(AeronClientPool.class);
+        var view = new CoreOrderBookView(321, List.of(
+                new CoreBookLevelView("1", CoreOrderSide.BUY, 98, 8, 2),
+                new CoreBookLevelView("1", CoreOrderSide.BUY, 99, 9, 3),
+                new CoreBookLevelView("1", CoreOrderSide.BUY, 100, 10, 4),
+                new CoreBookLevelView("1", CoreOrderSide.SELL, 103, 13, 7),
+                new CoreBookLevelView("1", CoreOrderSide.SELL, 101, 11, 5),
+                new CoreBookLevelView("1", CoreOrderSide.SELL, 102, 12, 6)));
+        when(client.query(eq(CoreMessageType.BOOK_STATE_QUERY), any(), eq(0L), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 321, CoreStateQueryCodec.encodeOrderBookView(view)));
+        var book = new MatchingMarketDataService(new OrderAeronGateway(client)).orderBookSnapshot("1", 3);
+        assertThat(book.sequence()).isEqualTo(321);
+        assertThat(book.bids()).extracting(com.surprising.trading.api.model.OrderBookLevel::priceTicks)
+                .containsExactly(100L, 99L, 98L);
+        assertThat(book.asks()).extracting(com.surprising.trading.api.model.OrderBookLevel::priceTicks)
+                .containsExactly(101L, 102L, 103L);
+        assertThat(book.bids().getFirst().quantitySteps()).isEqualTo(10);
+        assertThat(book.asks().getFirst().orderCount()).isEqualTo(5);
+    }
+
+    @Test
     void queriesSharedCoreClientAndPreservesBookShape() {
         var client = mock(AeronClientPool.class);
         var view = new CoreOrderBookView(123, List.of(
