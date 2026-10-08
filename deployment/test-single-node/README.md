@@ -15,6 +15,8 @@ Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍�
 
 已检查的服务器条件：JDK 27、Maven 3.8.7、约 47 GiB 内存、根盘约 254 GiB 可用；PostgreSQL 在 `127.0.0.1:5432`，Redis 在 `127.0.0.1:6379`，Kafka 容器在 `127.0.0.1:9092`。Nginx 已将 `ex-api.tokdou.com` 的 HTTP 和 `/ws/v1` WebSocket 请求转发到 Gateway `9094`。
 
+此测试部署的 Nginx 与 Gateway 同机，生产配置默认信任 `127.0.0.1` 和 `::1`，无需手动填写代理地址。若把 Gateway 放到独立云负载均衡之后，再通过 `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` 指定实际代理网段；只填写网关实际连接到的可信代理，不要设为全网。
+
 Kafka 当前没有业务 topic。启动前应确认 broker 的自动建 topic 策略；若关闭了自动建 topic，需要按 `ProductTopicNames` 为 `LINEAR_PERPETUAL` 创建 topic，并额外创建全局 `surprising.instrument.events.v1`。不能把其他产品线的 topic 或 consumer group 混用过来。
 
 ## 构建与安装

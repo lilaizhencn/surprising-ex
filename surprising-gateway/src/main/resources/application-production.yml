@@ -53,7 +53,8 @@ surprising:
     security:
       require-identity-for-private-routes: true
       admin-ip-allowlist: ${GATEWAY_ADMIN_IP_ALLOWLIST}
-      trusted-proxy-ip-allowlist: ${GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST}
+      # Test deployment uses Nginx on the same host. Override only when proxy hops are remote.
+      trusted-proxy-ip-allowlist: "${GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST:127.0.0.1,::1}"
       require-admin-mfa: true
       phone-registration-enabled: false
       require-email-verification: true
