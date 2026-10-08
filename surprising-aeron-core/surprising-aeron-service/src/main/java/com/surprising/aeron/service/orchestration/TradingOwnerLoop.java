@@ -22,6 +22,11 @@ import org.springframework.stereotype.Component;
 public final class TradingOwnerLoop implements Runnable {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TradingOwnerLoop.class);
     private static final long DEADLINE_NS = 30_000_000_000L;
+    private static final String ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY =
+            "surprising.aeron.owner-role-change-timeout-seconds";
+    private static final long DEFAULT_ROLE_CHANGE_TIMEOUT_SECONDS = 600;
+    private static final long ROLE_CHANGE_DEADLINE_NS = configuredRoleChangeDeadlineNanos(
+            System.getProperty(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY));
     private static final long INPUT_BYTES = 64L * 1024 * 1024;
     private static final String INPUT_BATCH_SIZE_PROPERTY =
             "surprising.aeron.owner-input-batch-size";
@@ -90,7 +95,7 @@ public final class TradingOwnerLoop implements Runnable {
             ownerEpoch = nextEpoch;
             processor.roleChange(role);
             return null;
-        }, true);
+        }, true, ROLE_CHANGE_DEADLINE_NS);
     }
 
     public byte[] captureSnapshot(long position, long timestamp) {
@@ -193,10 +198,14 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     private void enqueue(Input event) {
+        enqueue(event, DEADLINE_NS);
+    }
+
+    private void enqueue(Input event, long timeoutNanos) {
         int bytes = event.command == null ? 0 : event.command.payloadLength();
         if (bytes > INPUT_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
         long started = System.nanoTime();
-        long deadline = started + DEADLINE_NS;
+        long deadline = started + timeoutNanos;
         boolean reported = false;
         while (bytes > INPUT_BYTES - (inputProduced - inputConsumed) || !input.offer(event)) {
             if (!reported && System.nanoTime() - started >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
@@ -215,6 +224,10 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     private <T> T boundary(Supplier<T> action, boolean finish) {
+        return boundary(action, finish, DEADLINE_NS);
+    }
+
+    private <T> T boundary(Supplier<T> action, boolean finish, long timeoutNanos) {
         var completion = new CompletableFuture<T>();
         enqueue(new Input(null, null, 0, 0, () -> {
             try {
@@ -224,10 +237,20 @@ public final class TradingOwnerLoop implements Runnable {
                 completion.completeExceptionally(fatal);
                 throw fatal;
             }
-        }, 0, null));
-        long deadline = System.nanoTime() + DEADLINE_NS;
+        }, 0, null), timeoutNanos);
+        long deadline = System.nanoTime() + timeoutNanos;
         while (!completion.isDone()) awaitProgress(deadline);
         return completion.join();
+    }
+
+    static long configuredRoleChangeDeadlineNanos(String configuredSeconds) {
+        long seconds = configuredSeconds == null || configuredSeconds.isBlank()
+                ? DEFAULT_ROLE_CHANGE_TIMEOUT_SECONDS
+                : Long.parseLong(configuredSeconds.trim());
+        if (seconds < 30 || seconds > 1_800) {
+            throw new IllegalArgumentException(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY + " must be in [30,1800]");
+        }
+        return java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);
     }
 
     private void publishResponse(ClientSession session, CoreMessageHeader header, CoreResponse response,
