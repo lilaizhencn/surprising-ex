@@ -38,7 +38,7 @@ class LifecycleBusinessSettingsIntegrationTest {
         var funding = new FundingConfiguration().fundingProperties(env, risk);
         var beans = new StaticListableBeanFactory(line.isFundingProduct() ? Map.of("funding", funding) : Map.of());
         var service = new LifecycleBusinessSettingsService(jdbc, JsonMapper.builder().findAndAddModules().build(), risk,
-                beans.getBeanProvider(FundingProperties.class), liquidation, insurance, adl);
+                beans.getBeanProvider(FundingProperties.class), liquidation, insurance, adl, event -> {});
         service.initialize();
         return new Instance(service, funding, liquidation, insurance, adl);
     }

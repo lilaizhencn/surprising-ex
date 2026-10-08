@@ -113,3 +113,12 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 
 定向测试覆盖仅有触发工作、先扫描后强平、扫描关闭与失败后重试；HotSpot JDK 27 下 provider 及依赖
 `mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am package` 通过。
+
+
+## 生命周期维护调度（2026-10-08）
+
+`LifecycleMaintenanceScheduling` 按已安装业务配置的实际期限安排强平、保险、ADL，替代每项任务每 25ms 调用后自行判断间隔。资金费发布与结算仍只在永续产品装配，并沿用独立 `fundingScheduler`；不会与强平等任务争用同一调度池，也不增加线程。
+
+`LifecycleBusinessSettingsService.install` 安装属性与当前版本后发布现有 Settings。间隔变化只重排对应任务；执行中的任务完成后采用新间隔，旧回调通过代次检查失效。间隔从上次执行开始计算，并保留完成后至少 25ms 的原调度间隙；业务异常后继续安排下一轮，不中断资金费结算，也不改变业务幂等、产品线隔离或 Core 资金状态。
+
+新增调度组件仅拥有定时句柄、期限和执行状态，业务动作仍由既有 maintenance task/service 承担。HotSpot JDK 27 测试覆盖五条衍生产品装配、永续专属资金费及独立调度池、热更新与取消回调；资金费、强平、保险和生命周期相关回归通过。需要外部 PostgreSQL 的业务配置集成测试本轮跳过，未对五产品运行实际 HTTP → Core 交易及资金费结算的端到端或长稳测试。

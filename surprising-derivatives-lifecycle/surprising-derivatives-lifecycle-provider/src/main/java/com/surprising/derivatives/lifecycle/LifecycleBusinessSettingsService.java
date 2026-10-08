@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.time.Instant;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -28,10 +29,12 @@ public class LifecycleBusinessSettingsService {
     private final InsuranceProperties insurance;
     private final AdlProperties adl;
     private volatile Settings current;
+    private final ApplicationEventPublisher events;
 
     public LifecycleBusinessSettingsService(JdbcTemplate jdbc, ObjectMapper json, RiskProperties risk,
             ObjectProvider<FundingProperties> funding, LiquidationProperties liquidation,
-            InsuranceProperties insurance, AdlProperties adl) {
+            InsuranceProperties insurance, AdlProperties adl, ApplicationEventPublisher events) {
+        this.events = events;
         this.jdbc = jdbc; this.json = json; this.line = risk.getProductLine().name();
         this.funding = funding.getIfAvailable(); this.liquidation = liquidation;
         this.insurance = insurance; this.adl = adl;
@@ -111,5 +114,6 @@ public class LifecycleBusinessSettingsService {
         liquidation.setExecution(execution); liquidation.setCoordinator(coordinator);
         insurance.setCoverage(coverage); adl.setScanner(scanner);
         current = value;
+        events.publishEvent(value);
     }
 }
