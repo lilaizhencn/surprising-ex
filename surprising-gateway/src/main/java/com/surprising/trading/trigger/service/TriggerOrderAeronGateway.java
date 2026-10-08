@@ -1,6 +1,8 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.aeron.client.AeronClientPool;
+import io.aeron.driver.MediaDriver;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -30,11 +32,13 @@ import org.springframework.stereotype.Service;
 @Service
 public final class TriggerOrderAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
-    public TriggerOrderAeronGateway(TriggerProperties properties) {
+    public TriggerOrderAeronGateway(TriggerProperties properties,
+            @Qualifier("productCommandMediaDriver")
+            MediaDriver driver) {
         var aeron = properties.getAeron();
         this.clients = new AeronClientPool("trigger", properties.getProductLine(), aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "trigger-" + properties.getProductLine().name() + "-node-" + aeron.getNodeId());
+                "trigger-" + properties.getProductLine().name() + "-node-" + aeron.getNodeId(), driver);
     }
     public CoreResponse command(CoreMessageType type, UUID id, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, id, userId, payload);

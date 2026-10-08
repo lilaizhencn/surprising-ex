@@ -293,6 +293,10 @@ public final class CoreStateQueryCodec {
     }
 
     static void putText(java.nio.ByteBuffer output, String value, boolean optional) {
+        putText(output, value, optional, MAX_TEXT_BYTES);
+    }
+
+    static void putText(java.nio.ByteBuffer output, String value, boolean optional, int maxBytes) {
         if (value == null) throw new IllegalArgumentException(optional
                 ? "optional query text is required" : "query text is required");
         // The caller sizes the complete message first. Backfill the byte count while
@@ -322,7 +326,7 @@ public final class CoreStateQueryCodec {
             }
         }
         int length = output.position() - lengthOffset - Integer.BYTES;
-        if (length > MAX_TEXT_BYTES || !optional && length == 0) {
+        if (length > maxBytes || !optional && length == 0) {
             throw new IllegalArgumentException(optional
                     ? "invalid optional query text length" : "invalid query text length");
         }

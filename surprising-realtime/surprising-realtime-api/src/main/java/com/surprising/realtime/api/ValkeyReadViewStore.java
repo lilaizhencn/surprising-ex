@@ -91,15 +91,8 @@ public final class ValkeyReadViewStore {
                     users.computeIfAbsent(frame.userId(), ignored -> new ArrayList<>()).add(frame);
             if (users.isEmpty()) continue;
             long exportSequence = exportSequence(commit.getLast());
-            for (var frames : users.values()) {
-                var first = frames.getFirst();
-                var keys = keys(first.productLine(), first.userId());
-                var args = deltaArguments(frames, exportSequence);
-                var command = new byte[keys.size() + args.length][];
-                for (int i = 0; i < keys.size(); i++) command[i] = utf8(keys.get(i));
-                for (int i = 0; i < args.length; i++) command[keys.size() + i] = utf8((String) args[i]);
-                commands.add(command);
-            }
+            for (var frames : users.values())
+                commands.add(deltaCommand(frames, exportSequence));
         }
         if (commands.isEmpty()) return;
         byte[] script = utf8(DELTA.getScriptAsString());
@@ -109,6 +102,26 @@ public final class ValkeyReadViewStore {
                         org.springframework.data.redis.connection.ReturnType.INTEGER, 2, command);
             return null;
         });
+    }
+
+    /** Redis wire boundary: encode once as bytes, preserving each user's atomic commit. */
+    static byte[][] deltaCommand(List<RealtimeFrame> frames, long exportSequence) {
+        var first = frames.getFirst();
+        var keys = keys(first.productLine(), first.userId());
+        var command = new byte[3 + frames.size() * 3][];
+        command[0] = utf8(keys.getFirst());
+        command[1] = utf8(keys.getLast());
+        command[2] = RealtimeVersion.bytes(exportSequence, 0);
+        int index = 3;
+        for (var frame : frames) {
+            if (frame.userId() == 0 || frame.snapshotId() != 0 || frame.userId() != first.userId()
+                    || frame.productLine() != first.productLine())
+                throw new IllegalArgumentException("mixed user transaction");
+            command[index++] = utf8(field(frame));
+            command[index++] = RealtimeVersion.bytes(frame.sequence(), frame.ordinal());
+            command[index++] = Base64.getEncoder().encode(RealtimeFrameCodec.encode(frame));
+        }
+        return command;
     }
 
     private static Object[] deltaArguments(List<RealtimeFrame> frames, long exportSequence) {

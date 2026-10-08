@@ -1,6 +1,8 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.client.AeronClientPool;
+import io.aeron.driver.MediaDriver;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreLeverageView;
@@ -27,19 +29,21 @@ public class OrderAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
 
     @Autowired
-    public OrderAeronGateway(TradingOrderProperties properties) {
-        this(createClients(properties));
+    public OrderAeronGateway(TradingOrderProperties properties,
+            @Qualifier("productCommandMediaDriver")
+            MediaDriver driver) {
+        this(createClients(properties, driver));
     }
 
     public OrderAeronGateway(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
     }
 
-    private static AeronClientPool createClients(TradingOrderProperties properties) {
+    private static AeronClientPool createClients(TradingOrderProperties properties, MediaDriver driver) {
         TradingOrderProperties.Aeron aeron = properties.getAeron();
         return new AeronClientPool("order", properties.getKafka().getProductLine(), aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "order-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId());
+                "order-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId(), driver);
     }
 
     public CoreCommandOutcome commandOutcome(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

@@ -1,6 +1,8 @@
 package com.surprising.trading.maintenance;
 
 import com.surprising.aeron.client.AeronClientPool;
+import io.aeron.driver.MediaDriver;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.protocol.*;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.service.OrderAeronGateway;
@@ -12,8 +14,10 @@ import org.springframework.stereotype.Service;
 public class MaintenanceAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
     private final OrderAeronGateway views;
-    public MaintenanceAeronGateway(TradingOrderProperties properties) {
-        clients=clients(properties);
+    public MaintenanceAeronGateway(TradingOrderProperties properties,
+            @Qualifier("productCommandMediaDriver")
+            MediaDriver driver) {
+        clients=clients(properties, driver);
         views=new OrderAeronGateway(clients);
     }
     public CoreMaintenanceCodec.Page maintenance(String instrumentId,long afterUserId,int limit) { return views.maintenance(instrumentId,afterUserId,limit); }
@@ -23,10 +27,10 @@ public class MaintenanceAeronGateway implements AutoCloseable {
     public CoreSettlementProgressView settlementProgress(String instrumentId) { return views.settlementProgress(instrumentId); }
     public CoreResponse command(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return views.command(type,id,userId,payload); }
     public com.surprising.aeron.client.CoreCommandOutcome commandOutcome(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return clients.commandOutcome(type,id,userId,payload); }
-    private static AeronClientPool clients(TradingOrderProperties properties) {
+    private static AeronClientPool clients(TradingOrderProperties properties, MediaDriver driver) {
         var config=properties.getAeron(); var line=properties.getKafka().getProductLine();
         return new AeronClientPool("maintenance",line,config.getHostnames(),config.getEgressHostname(),
-                config.getResponseTimeout(),1,"maintenance-"+line.name()+"-node-"+config.getNodeId());
+                config.getResponseTimeout(),1,"maintenance-"+line.name()+"-node-"+config.getNodeId(),driver);
     }
     public List<CoreTriggerOrderStateView> openTriggers(long userId,String instrumentId,long before,int limit) {
         return triggerQuery(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,userId,new CoreTriggerOrderQuery(0,instrumentId,before,limit));

@@ -1,6 +1,10 @@
 package com.surprising.gateway.product;
 
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.aeron.client.SurprisingAeronClient;
+import io.aeron.driver.MediaDriver;
+import java.nio.file.Path;
+import java.util.UUID;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -17,6 +21,15 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
         com.surprising.websocket.provider.service.KafkaFanoutConsumer.class})
 @EnableKafka @EnableScheduling @EnableTransactionManagement
 public class ProductBusinessConfiguration {
+    /** Product context owns transport; business pools own only their separate sessions and queues. */
+    @Bean(name = "productCommandMediaDriver", destroyMethod = "close")
+    public MediaDriver productCommandMediaDriver(AccountProperties properties) {
+        String directory = Path.of(System.getProperty("java.io.tmpdir"),
+                "surprising-gateway-command-" + ProcessHandle.current().pid() + "-"
+                        + properties.getKafka().getProductLine() + "-" + UUID.randomUUID()).toString();
+        return SurprisingAeronClient.newMediaDriver(directory);
+    }
+
     // 公共 WebSocket 的配置位于父容器；每条产品线的 Kafka 订阅必须另行绑定。
     @org.springframework.context.annotation.Bean("surprising.websocket-com.surprising.websocket.provider.config.WebSocketProperties")
     public WebSocketProperties webSocketProperties(org.springframework.core.env.Environment environment) {

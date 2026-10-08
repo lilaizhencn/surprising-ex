@@ -84,6 +84,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean dispatcherStopped = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
+    private final boolean ownsMediaDriver;
     private final AtomicReference<RuntimeException> dispatcherFailure = new AtomicReference<>();
     private final AtomicLong adminActionRetries = new AtomicLong();
 
@@ -109,6 +110,15 @@ public final class AeronClientPool implements AutoCloseable {
             String sourceIdentity) {
         this(clientName, productLine, hostnames, egressHostname, responseTimeout, clientConnections,
                 sourceIdentity, UUID.randomUUID().toString());
+    }
+
+    /** The caller owns this driver and must keep it alive until all borrowing pools close. */
+    public AeronClientPool(
+            String clientName, ProductLine productLine, List<String> hostnames, String egressHostname,
+            Duration responseTimeout, int clientConnections, String sourceIdentity, MediaDriver driver) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout, sourceIdentity,
+                UUID.randomUUID().toString(), AeronClientCapacity.defaults().withCommandSessions(clientConnections),
+                null, true, Objects.requireNonNull(driver, "driver"));
     }
 
     public AeronClientPool(
@@ -148,6 +158,14 @@ public final class AeronClientPool implements AutoCloseable {
             AeronClientCapacity capacity,
             SessionFactory sessionFactory,
             boolean startAgents) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout, sourceIdentity, sourceEpoch,
+                capacity, sessionFactory, startAgents, null);
+    }
+
+    AeronClientPool(
+            String clientName, ProductLine productLine, List<String> hostnames, String egressHostname,
+            Duration responseTimeout, String sourceIdentity, String sourceEpoch, AeronClientCapacity capacity,
+            SessionFactory sessionFactory, boolean startAgents, MediaDriver borrowedDriver) {
         if (clientName == null || clientName.isBlank()) {
             throw new IllegalArgumentException("clientName is required");
         }
@@ -172,6 +190,8 @@ public final class AeronClientPool implements AutoCloseable {
         }
         this.sourceEpoch = sourceEpoch.trim();
         this.capacity = Objects.requireNonNull(capacity, "capacity");
+        this.ownsMediaDriver = borrowedDriver == null;
+        this.mediaDriver.set(borrowedDriver);
         this.sessionFactory = sessionFactory == null ? this::openSession : sessionFactory;
         if (sessionFactory == null) {
             sharedMediaDriver();
@@ -1141,7 +1161,7 @@ public final class AeronClientPool implements AutoCloseable {
             synchronized (mediaDriver) {
                 driver = mediaDriver.getAndSet(null);
             }
-            if (driver == null) {
+            if (driver == null || !ownsMediaDriver) {
                 return;
             }
             try {

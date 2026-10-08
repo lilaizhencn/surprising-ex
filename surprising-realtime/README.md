@@ -47,6 +47,13 @@ Router 在 Valkey 查询订阅节点，为每个目标 WS 节点维护一个 Pub
 每个用户、每次提交仍单独执行原子 Lua，不合并提交版本或资金事实。写入失败不继续向订阅节点发送。
 初始快照和来源切换先刷新前序提交，保持快照及增量的先后边界。
 
+`RealtimeFrameCodec` 直接向最终消息写入 UTF-8，解码时直接读取输入数组中的文本区间；
+保留 v1 字节格式、128/256 字节文本上限，以及 payload 的防御复制。
+Redis pipeline 在 `ValkeyReadViewStore.deltaCommand` 直接生成 Base64 字节，避免中间字符串再转 UTF-8。
+`RealtimeVersion.bytes` 直接生成 19 位日志位置和 10 位 ordinal 的补零 ASCII 版本号，
+替代 `String.format` 和数值装箱；保留冒号分隔、字典序及 `Long.MAX_VALUE` / snapshot fence 边界。
+Router 线程复用单个 256 帧批次列表，每轮结束（包括失败）清除引用，不缓存业务状态或订阅结果。
+
 realtime 使用 `spring-boot-starter-data-redis` 的 Lettuce。普通命令复用共享连接；
 pipeline 使用专用连接，因此显式引入 `commons-pool2` 并启用
 `spring.data.redis.lettuce.pool`：最大连接数/最大空闲数均为 4，最小空闲配置为 1，

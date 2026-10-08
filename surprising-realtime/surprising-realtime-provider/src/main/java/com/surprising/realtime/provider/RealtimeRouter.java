@@ -110,6 +110,8 @@ public final class RealtimeRouter implements AutoCloseable {
                                     resetSource(p);
                                 });
                 long nextRefresh = 0;
+                // Only this router thread owns the drain; release frame references after each batch.
+                var frames = new ArrayList<RealtimeFrame>(256);
                 while (running && !aeron.isClosed()) {
                     long now = System.currentTimeMillis();
                     if (now >= nextRefresh) {
@@ -118,10 +120,10 @@ public final class RealtimeRouter implements AutoCloseable {
                     }
                     RealtimeFrame frame = inbound.poll(10, TimeUnit.MILLISECONDS);
                     if (frame != null) {
-                        var frames = new ArrayList<RealtimeFrame>(256);
                         frames.add(frame);
                         inbound.drainTo(frames, 255);
-                        routeBatch(aeron, frames, now);
+                        try { routeBatch(aeron, frames, now); }
+                        finally { frames.clear(); }
                     }
                 }
             } catch (InterruptedException interrupted) {

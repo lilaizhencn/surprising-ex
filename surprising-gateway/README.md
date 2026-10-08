@@ -220,7 +220,12 @@ mvn -pl :surprising-gateway -am spring-boot:run
 
 `RealtimeWebSocketBridge` 明确依赖此 Driver：先创建 Driver，再启动接收器；Spring 关闭时先关闭接收器，再关闭 Driver。
 不强制删除现有目录，Aeron 检查心跳后拒绝覆盖活跃 Driver；正常重启复用目录，启动失败也由 Spring 清理已创建资源。
-Core 及订单客户端池原有 Driver 保持各自生命周期，交易主链路不迁移到应用侧 Driver。
+Core 保持原有 Driver 生命周期，交易命令不迁移到实时应用驱动。
+
+`product/ProductBusinessConfiguration.productCommandMediaDriver` 为每条启用产品线创建一个命令驱动。
+账户、订单、条件单、维护四个业务池借用此驱动，保留四套独立队列、会话、来源标识和容量。
+Spring 先销毁依赖该驱动的业务池，再关闭驱动；关闭一个池不会关闭其他池的传输。
+不同产品容器使用独立目录和驱动，热下线仅释放对应产品的资源。单永续 Gateway 为一个命令驱动加一个实时驱动。
 
 迁移先停止旧独立 app-media-driver，再启动新 gateway；同目录只允许一个所有者。
 启动顺序为 Core → gateway（内嵌 Driver）→ price → realtime（含成交导出/K 线）→ derivatives-lifecycle → maker。

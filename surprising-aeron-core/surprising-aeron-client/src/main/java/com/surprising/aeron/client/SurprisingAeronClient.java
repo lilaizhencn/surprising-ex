@@ -185,7 +185,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                 + '-' + MEDIA_DRIVER_SEQUENCE.incrementAndGet());
     }
 
-    static MediaDriver newMediaDriver(String aeronDirectoryName) {
+    /** Caller owns the driver; uses the same client threading configuration as standalone pools. */
+    public static MediaDriver newMediaDriver(String aeronDirectoryName) {
         MediaDriver.Context context = new MediaDriver.Context()
                 .threadingMode(clientThreadingMode())
                 .dirDeleteOnStart(true)

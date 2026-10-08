@@ -6,6 +6,11 @@
 `AERON_CLIENT_THREADING_MODE=DEDICATED`，JVM 属性优先；非法模式启动失败。
 各产品线和各命令池仍独立，此默认值不修改 Core/Archive 的 Driver 模式，也不合并命令执行通道。
 
+Gateway 的每个产品业务容器创建一个命令 MediaDriver，账户、订单、条件单和维护池通过
+`AeronClientPool(..., MediaDriver)` 借用该驱动，各自保留 source identity、会话、邮箱及背压额度。
+连接池只关闭自己的会话；驱动由产品容器在所有连接池关闭后销毁。独立应用未传入驱动时仍自行持有和关闭驱动。
+实时推送使用原有应用驱动，与命令传输分开；单产品 Gateway 因此从五个驱动减为两个，无需新增部署参数。
+
 `AeronRealtimeSender`、`AeronRealtimeReceiver` 是独立于 Cluster 命令客户端的实时传输组件。
 发送线程独占 Publication；接收线程使用 FragmentAssembler 重组消息并在回调内复制数据。
 业务线程只写 `RealtimeOutbox`，不调用 Aeron、Kafka、Valkey 或 socket。

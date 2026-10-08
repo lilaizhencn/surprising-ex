@@ -2,6 +2,8 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.AeronClientPool;
+import io.aeron.driver.MediaDriver;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOpenInterestCodec;
@@ -27,12 +29,14 @@ public class AccountAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
 
     @Autowired
-    public AccountAeronGateway(AccountProperties properties) {
+    public AccountAeronGateway(AccountProperties properties,
+            @Qualifier("productCommandMediaDriver")
+            MediaDriver driver) {
         ProductLine productLine = properties.getKafka().getProductLine();
         AccountProperties.Aeron aeron = properties.getAeron();
         this.clients = new AeronClientPool("account", productLine, aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                aeron.getSourceIdentity());
+                aeron.getSourceIdentity(), driver);
     }
 
     AccountAeronGateway(AeronClientPool clients) {
