@@ -4839,3 +4839,23 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-
 结论：正确性修复通过；性能为部分验证，不能据此声称稳定容量、p99 或速度提升。
 未运行真实网络/Archive 集群压测、API 延迟、NMT 或长稳；短基准不证明无泄漏，不能替代 256 in-flight 标准验收。
 本轮 fork 已退出；JFR、临时采集日志及已汇总 Core 测试报告在归档后清理，JSON 中路径仅供历史定位。
+
+
+## 2026-10-08 测试服务器只读资源观察
+
+目标：定位现有 U 本位永续三合约做市环境的 CPU、线程、内存及消费积压，未制定容量验收线，不额外发压。
+采集前计划位于服务器 resource-audit-20261008T140932Z/plan.json；12 vCPU、约 47 GiB、HotSpot JDK 27。
+五应用为 292e4e041d26e8929d890366a2cd708e063294f7；Core 保留 2026-10-06 进程，版本不冒认成新 master，二进制校验见 JSON。
+对照 commit：不适用（现有部署运行观察，没有版本对照）。
+
+两个无 profiler 的 30 秒窗口，整机 idle 约 59%/61%；Gateway 约 1.30–1.32 核、realtime 0.97–1.07 核、Core 1.15–1.24 核。
+另做三个独立进程 60 秒、profile 配置、单文件 24 MiB 上限的 JFR，实际合计约 4.9 MiB，DataLoss 为 0。
+确认候选：replay 撮合无进展自旋、Gateway 五个 MediaDriver/四个短周期 dispatcher、行情帧复制分配。
+Kafka 19 个活跃组均有分区，K 线 lag 为 0；五应用 UP、三合约 K 线持续更新。
+
+详细计划、命令、热点及下一步见 [资源观察记录](docs/validation/server-resource-observation-20261008.md)，
+原始位置、大小、SHA-256、JFR summary、分配/GC及进程指标见 [汇总 JSON](docs/validation/server-resource-observation-20261008.json)。
+结论：部分验证；本轮只读诊断，没有代码/配置调整，不能宣称优化收益、吞吐容量、p99 或无泄漏。
+无资金写入，无额外交易负载；未做 NMT、长稳、资金费/强平或恢复触发测试。
+
+清理：三个 resourceAudit 录制自动结束并复查；36 个原始/中间文件在汇总后删除，校验、summary、热点及指标保留在 JSON。原应用 JVM 全部保留。

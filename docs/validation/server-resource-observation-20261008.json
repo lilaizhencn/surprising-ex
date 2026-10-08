@@ -1,0 +1,1237 @@
+{
+  "plan": {
+    "purpose": "只读观察稳态 CPU/内存/线程/GC/消费积压，定位资源优化机会；不作容量或延迟验收",
+    "source": "292e4e041d26e8929d890366a2cd708e063294f7",
+    "productLines": [
+      "LINEAR_PERPETUAL"
+    ],
+    "load": "现有三合约做市，不额外发压，不改变配置，不重启",
+    "baselineSeconds": 30,
+    "jfrSeconds": 60,
+    "jfrMaxSize": "24m per process",
+    "jfrProcesses": [
+      "LINEAR_PERPETUAL/gateway",
+      "LINEAR_PERPETUAL/realtime",
+      "LINEAR_PERPETUAL/core"
+    ],
+    "limitations": "短时观察不能证明泄漏、容量或 p99；JFR 与无 profiler 窗口分开",
+    "pids": {
+      "LINEAR_PERPETUAL/gateway": 2184757,
+      "LINEAR_PERPETUAL/price": 2185010,
+      "LINEAR_PERPETUAL/realtime": 2185011,
+      "LINEAR_PERPETUAL/derivatives-lifecycle": 2185012,
+      "LINEAR_PERPETUAL/maker": 2186029,
+      "LINEAR_PERPETUAL/core": 2100963,
+      "kafka": 2176038
+    },
+    "coreArtifact": {
+      "path": "/opt/surprising-ex-20261006-admin-config/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "sha256": "4938f1b9bafaeec868e1b836d55ac4cb8590fdb151271bf76e3de9f5cfaff508",
+      "commit": "unknown; preserved running Core from 2026-10-06, not restarted for master app release"
+    }
+  },
+  "baseline": {
+    "durationSeconds": 31.41,
+    "processes": [
+      {
+        "service": "LINEAR_PERPETUAL/gateway",
+        "cpuPercentOneCore": 132.175,
+        "rssMB": 4808.6,
+        "pssMB": 4647.6,
+        "privateDirtyMB": 4321.1,
+        "threads": 98,
+        "fds": 152,
+        "minorFaultsPerSec": 127.6,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2184905,
+            "name": "/dev/sh..uctor]",
+            "state": "S",
+            "cpuPercentOneCore": 14.87,
+            "fullName": "/dev/shm/surprising-app-linear-perpetual [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2184942,
+            "name": "/tmp/su..uctor]",
+            "state": "R",
+            "cpuPercentOneCore": 11.081,
+            "fullName": "/tmp/surprising-aeron-8618522719418702804 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2184943,
+            "name": "order-e..atcher",
+            "state": "S",
+            "cpuPercentOneCore": 9.935,
+            "fullName": "order-egress-dispatcher"
+          },
+          {
+            "tid": 2184937,
+            "name": "trigger..atcher",
+            "state": "R",
+            "cpuPercentOneCore": 8.756,
+            "fullName": "trigger-egress-dispatcher"
+          },
+          {
+            "tid": 2184947,
+            "name": "/tmp/su..uctor]",
+            "state": "S",
+            "cpuPercentOneCore": 8.247,
+            "fullName": "/tmp/surprising-aeron-1526563859422994391 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2184931,
+            "name": "mainten..atcher",
+            "state": "S",
+            "cpuPercentOneCore": 7.515,
+            "fullName": "maintenance-egress-dispatcher"
+          },
+          {
+            "tid": 2184948,
+            "name": "account..atcher",
+            "state": "S",
+            "cpuPercentOneCore": 7.483,
+            "fullName": "account-egress-dispatcher"
+          },
+          {
+            "tid": 2184908,
+            "name": "realtim..ceiver",
+            "state": "S",
+            "cpuPercentOneCore": 7.324,
+            "fullName": "realtime-aeron-receiver"
+          },
+          {
+            "tid": 2184936,
+            "name": "/tmp/su..uctor]",
+            "state": "R",
+            "cpuPercentOneCore": 7.164,
+            "fullName": "/tmp/surprising-aeron--7027617779943330497 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2185300,
+            "name": "ForkJoi..rker-4",
+            "state": "S",
+            "cpuPercentOneCore": 5.923,
+            "fullName": "ForkJoinPool-1-worker-4"
+          },
+          {
+            "tid": 2184930,
+            "name": "/tmp/su..uctor]",
+            "state": "S",
+            "cpuPercentOneCore": 5.7,
+            "fullName": "/tmp/surprising-aeron-6011576276826690520 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2187826,
+            "name": "ForkJoi..ker-10",
+            "state": "R",
+            "cpuPercentOneCore": 3.598,
+            "fullName": "ForkJoinPool-1-worker-10"
+          },
+          {
+            "tid": 2186506,
+            "name": "ForkJoi..rker-9",
+            "state": "S",
+            "cpuPercentOneCore": 3.089,
+            "fullName": "ForkJoinPool-1-worker-9"
+          },
+          {
+            "tid": 2186269,
+            "name": "ForkJoi..rker-5",
+            "state": "S",
+            "cpuPercentOneCore": 3.057,
+            "fullName": "ForkJoinPool-1-worker-5"
+          },
+          {
+            "tid": 2184898,
+            "name": "ForkJoi..rker-2",
+            "state": "S",
+            "cpuPercentOneCore": 2.961,
+            "fullName": "ForkJoinPool-1-worker-2"
+          }
+        ]
+      },
+      {
+        "service": "LINEAR_PERPETUAL/price",
+        "cpuPercentOneCore": 61.136,
+        "rssMB": 2356.4,
+        "pssMB": 2318.2,
+        "privateDirtyMB": 2250.9,
+        "threads": 104,
+        "fds": 107,
+        "minorFaultsPerSec": 3.4,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2185472,
+            "name": "price-m..atcher",
+            "state": "S",
+            "cpuPercentOneCore": 8.725,
+            "fullName": "price-mark-egress-dispatcher"
+          },
+          {
+            "tid": 2185471,
+            "name": "/tmp/su..uctor]",
+            "state": "R",
+            "cpuPercentOneCore": 7.196,
+            "fullName": "/tmp/surprising-aeron--6337693820353617327 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2185581,
+            "name": "realtim..ceiver",
+            "state": "S",
+            "cpuPercentOneCore": 6.846,
+            "fullName": "realtime-aeron-receiver"
+          },
+          {
+            "tid": 2185469,
+            "name": "realtim..sender",
+            "state": "S",
+            "cpuPercentOneCore": 6.4,
+            "fullName": "realtime-aeron-sender"
+          },
+          {
+            "tid": 2185701,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.993,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1"
+          },
+          {
+            "tid": 2185388,
+            "name": "ForkJoi..rker-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.866,
+            "fullName": "ForkJoinPool-1-worker-1"
+          },
+          {
+            "tid": 2185110,
+            "name": "C2 Comp..hread0",
+            "state": "S",
+            "cpuPercentOneCore": 2.293,
+            "fullName": "C2 CompilerThread0"
+          },
+          {
+            "tid": 2185715,
+            "name": "HttpCli..rker-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.229,
+            "fullName": "HttpClient-2-Worker-1"
+          },
+          {
+            "tid": 2185690,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.165,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#6-0-C-1"
+          },
+          {
+            "tid": 2185714,
+            "name": "HttpCli..rker-0",
+            "state": "S",
+            "cpuPercentOneCore": 2.102,
+            "fullName": "HttpClient-2-Worker-0"
+          },
+          {
+            "tid": 2188047,
+            "name": "HttpCli..rker-5",
+            "state": "R",
+            "cpuPercentOneCore": 1.21,
+            "fullName": "HttpClient-2-Worker-5"
+          },
+          {
+            "tid": 2185389,
+            "name": "Master-Poller",
+            "state": "S",
+            "cpuPercentOneCore": 1.114,
+            "fullName": "Master-Poller"
+          },
+          {
+            "tid": 2185707,
+            "name": "price-s..uler-6",
+            "state": "S",
+            "cpuPercentOneCore": 1.019,
+            "fullName": "price-scheduler-6"
+          },
+          {
+            "tid": 2185393,
+            "name": "ForkJoi..rker-4",
+            "state": "S",
+            "cpuPercentOneCore": 0.987,
+            "fullName": "ForkJoinPool-1-worker-4"
+          },
+          {
+            "tid": 2185816,
+            "name": "kafka-p..ucer-1",
+            "state": "S",
+            "cpuPercentOneCore": 0.923,
+            "fullName": "kafka-producer-network-thread | surprising-price-provider-producer-1"
+          }
+        ]
+      },
+      {
+        "service": "LINEAR_PERPETUAL/realtime",
+        "cpuPercentOneCore": 106.606,
+        "rssMB": 2733.3,
+        "pssMB": 2664.9,
+        "privateDirtyMB": 2612.2,
+        "threads": 99,
+        "fds": 147,
+        "minorFaultsPerSec": 11.4,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2185823,
+            "name": "committ..export",
+            "state": "R",
+            "cpuPercentOneCore": 51.647,
+            "fullName": "committed-trade-export"
+          },
+          {
+            "tid": 2185461,
+            "name": "realtime-router",
+            "state": "R",
+            "cpuPercentOneCore": 9.107,
+            "fullName": "realtime-router"
+          },
+          {
+            "tid": 2185604,
+            "name": "lettuce..op-4-4",
+            "state": "R",
+            "cpuPercentOneCore": 8.948,
+            "fullName": "lettuce-nioEventLoop-4-4"
+          },
+          {
+            "tid": 2186010,
+            "name": "core-matcher-0",
+            "state": "R",
+            "cpuPercentOneCore": 8.916,
+            "fullName": "core-matcher-0"
+          },
+          {
+            "tid": 2185460,
+            "name": "realtim..ceiver",
+            "state": "R",
+            "cpuPercentOneCore": 8.534,
+            "fullName": "realtime-aeron-receiver"
+          },
+          {
+            "tid": 2185060,
+            "name": "C2 Comp..hread0",
+            "state": "S",
+            "cpuPercentOneCore": 2.834,
+            "fullName": "C2 CompilerThread0"
+          },
+          {
+            "tid": 2185491,
+            "name": "lettuce..op-4-3",
+            "state": "S",
+            "cpuPercentOneCore": 2.77,
+            "fullName": "lettuce-nioEventLoop-4-3"
+          },
+          {
+            "tid": 2186023,
+            "name": "core-ac..lane-3",
+            "state": "S",
+            "cpuPercentOneCore": 2.07,
+            "fullName": "core-account-lane-3"
+          },
+          {
+            "tid": 2185814,
+            "name": "surpris..read-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.006,
+            "fullName": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1"
+          },
+          {
+            "tid": 2186021,
+            "name": "core-ac..lane-1",
+            "state": "S",
+            "cpuPercentOneCore": 1.56,
+            "fullName": "core-account-lane-1"
+          },
+          {
+            "tid": 2186022,
+            "name": "core-ac..lane-2",
+            "state": "S",
+            "cpuPercentOneCore": 0.923,
+            "fullName": "core-account-lane-2"
+          },
+          {
+            "tid": 2185040,
+            "name": "ZDirector",
+            "state": "S",
+            "cpuPercentOneCore": 0.764,
+            "fullName": "ZDirector"
+          },
+          {
+            "tid": 2185801,
+            "name": "kafka-p..oducer",
+            "state": "S",
+            "cpuPercentOneCore": 0.605,
+            "fullName": "kafka-producer-network-thread | surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1-producer"
+          },
+          {
+            "tid": 2186699,
+            "name": "aeron-client",
+            "state": "S",
+            "cpuPercentOneCore": 0.509,
+            "fullName": "aeron-client"
+          },
+          {
+            "tid": 2186020,
+            "name": "core-ac..lane-0",
+            "state": "S",
+            "cpuPercentOneCore": 0.478,
+            "fullName": "core-account-lane-0"
+          }
+        ]
+      },
+      {
+        "service": "LINEAR_PERPETUAL/derivatives-lifecycle",
+        "cpuPercentOneCore": 39.134,
+        "rssMB": 1134.3,
+        "pssMB": 1106.5,
+        "privateDirtyMB": 1048.8,
+        "threads": 77,
+        "fds": 49,
+        "minorFaultsPerSec": 16.0,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2185373,
+            "name": "/tmp/su..uctor]",
+            "state": "S",
+            "cpuPercentOneCore": 9.489,
+            "fullName": "/tmp/surprising-aeron--1885547213972998216 [sender,receiver,aeron-md-nra,driver-conductor]"
+          },
+          {
+            "tid": 2185374,
+            "name": "derivat..atcher",
+            "state": "S",
+            "cpuPercentOneCore": 8.629,
+            "fullName": "derivatives-lifecycle-egress-dispatcher"
+          },
+          {
+            "tid": 2185598,
+            "name": "funding..uler-2",
+            "state": "S",
+            "cpuPercentOneCore": 2.898,
+            "fullName": "funding-scheduler-2"
+          },
+          {
+            "tid": 2185586,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.611,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#2-0-C-1"
+          },
+          {
+            "tid": 2185098,
+            "name": "C2 Comp..hread0",
+            "state": "S",
+            "cpuPercentOneCore": 2.452,
+            "fullName": "C2 CompilerThread0"
+          },
+          {
+            "tid": 2185597,
+            "name": "funding..uler-1",
+            "state": "S",
+            "cpuPercentOneCore": 1.815,
+            "fullName": "funding-scheduler-1"
+          },
+          {
+            "tid": 2185032,
+            "name": "ZWorkerOld#1",
+            "state": "S",
+            "cpuPercentOneCore": 1.21,
+            "fullName": "ZWorkerOld#1"
+          },
+          {
+            "tid": 2185588,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 1.21,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#3-0-C-1"
+          },
+          {
+            "tid": 2185063,
+            "name": "ZDriverMajor",
+            "state": "S",
+            "cpuPercentOneCore": 0.828,
+            "fullName": "ZDriverMajor"
+          },
+          {
+            "tid": 2185594,
+            "name": "derivat..ycle-2",
+            "state": "S",
+            "cpuPercentOneCore": 0.732,
+            "fullName": "derivatives-lifecycle-2"
+          },
+          {
+            "tid": 2185592,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 0.701,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#1-0-C-1"
+          },
+          {
+            "tid": 2185596,
+            "name": "derivat..ycle-4",
+            "state": "S",
+            "cpuPercentOneCore": 0.669,
+            "fullName": "derivatives-lifecycle-4"
+          },
+          {
+            "tid": 2185064,
+            "name": "ZDirector",
+            "state": "S",
+            "cpuPercentOneCore": 0.573,
+            "fullName": "ZDirector"
+          },
+          {
+            "tid": 2185601,
+            "name": "derivat..ycle-6",
+            "state": "S",
+            "cpuPercentOneCore": 0.573,
+            "fullName": "derivatives-lifecycle-6"
+          },
+          {
+            "tid": 2185377,
+            "name": "aeron-client",
+            "state": "S",
+            "cpuPercentOneCore": 0.509,
+            "fullName": "aeron-client"
+          }
+        ]
+      },
+      {
+        "service": "LINEAR_PERPETUAL/maker",
+        "cpuPercentOneCore": 44.865,
+        "rssMB": 2396.2,
+        "pssMB": 2374.7,
+        "privateDirtyMB": 2369.5,
+        "threads": 84,
+        "fds": 56,
+        "minorFaultsPerSec": 1.3,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2186265,
+            "name": "ForkJoi..rker-6",
+            "state": "S",
+            "cpuPercentOneCore": 6.082,
+            "fullName": "ForkJoinPool-1-worker-6"
+          },
+          {
+            "tid": 2186211,
+            "name": "ForkJoi..rker-1",
+            "state": "S",
+            "cpuPercentOneCore": 5.923,
+            "fullName": "ForkJoinPool-1-worker-1"
+          },
+          {
+            "tid": 2186425,
+            "name": "ForkJoi..rker-8",
+            "state": "S",
+            "cpuPercentOneCore": 4.681,
+            "fullName": "ForkJoinPool-1-worker-8"
+          },
+          {
+            "tid": 2186427,
+            "name": "ForkJoi..ker-10",
+            "state": "S",
+            "cpuPercentOneCore": 4.522,
+            "fullName": "ForkJoinPool-1-worker-10"
+          },
+          {
+            "tid": 2186428,
+            "name": "ForkJoi..ker-11",
+            "state": "S",
+            "cpuPercentOneCore": 4.235,
+            "fullName": "ForkJoinPool-1-worker-11"
+          },
+          {
+            "tid": 2186429,
+            "name": "ForkJoi..ker-12",
+            "state": "S",
+            "cpuPercentOneCore": 2.643,
+            "fullName": "ForkJoinPool-1-worker-12"
+          },
+          {
+            "tid": 2186072,
+            "name": "C2 Comp..hread0",
+            "state": "S",
+            "cpuPercentOneCore": 2.516,
+            "fullName": "C2 CompilerThread0"
+          },
+          {
+            "tid": 2186252,
+            "name": "org.spr..-0-C-1",
+            "state": "S",
+            "cpuPercentOneCore": 2.388,
+            "fullName": "org.springframework.kafka.KafkaListenerEndpointContainer#2-0-C-1"
+          },
+          {
+            "tid": 2186340,
+            "name": "HttpCli..rker-0",
+            "state": "S",
+            "cpuPercentOneCore": 1.528,
+            "fullName": "HttpClient-1-Worker-0"
+          },
+          {
+            "tid": 2186212,
+            "name": "Master-Poller",
+            "state": "S",
+            "cpuPercentOneCore": 1.369,
+            "fullName": "Master-Poller"
+          },
+          {
+            "tid": 2186341,
+            "name": "HttpCli..rker-1",
+            "state": "S",
+            "cpuPercentOneCore": 1.369,
+            "fullName": "HttpClient-1-Worker-1"
+          },
+          {
+            "tid": 2186345,
+            "name": "HttpCli..rker-2",
+            "state": "S",
+            "cpuPercentOneCore": 1.178,
+            "fullName": "HttpClient-1-Worker-2"
+          },
+          {
+            "tid": 2186214,
+            "name": "ForkJoi..rker-3",
+            "state": "S",
+            "cpuPercentOneCore": 1.146,
+            "fullName": "ForkJoinPool-1-worker-3"
+          },
+          {
+            "tid": 2186215,
+            "name": "ForkJoi..eduler",
+            "state": "S",
+            "cpuPercentOneCore": 1.146,
+            "fullName": "ForkJoinPool-1-delayScheduler"
+          },
+          {
+            "tid": 2186050,
+            "name": "ZDirector",
+            "state": "S",
+            "cpuPercentOneCore": 0.828,
+            "fullName": "ZDirector"
+          }
+        ]
+      },
+      {
+        "service": "LINEAR_PERPETUAL/core",
+        "cpuPercentOneCore": 115.013,
+        "rssMB": 3685.5,
+        "pssMB": 2924.8,
+        "privateDirtyMB": 2576.1,
+        "threads": 60,
+        "fds": 97,
+        "minorFaultsPerSec": 33.1,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2101121,
+            "name": "trading..ner--1",
+            "state": "R",
+            "cpuPercentOneCore": 19.423,
+            "fullName": "trading-owner--1"
+          },
+          {
+            "tid": 2101110,
+            "name": "receiver",
+            "state": "S",
+            "cpuPercentOneCore": 14.106,
+            "fullName": "receiver"
+          },
+          {
+            "tid": 2101109,
+            "name": "sender",
+            "state": "R",
+            "cpuPercentOneCore": 13.756,
+            "fullName": "sender"
+          },
+          {
+            "tid": 2101108,
+            "name": "driver-..ductor",
+            "state": "S",
+            "cpuPercentOneCore": 9.489,
+            "fullName": "driver-conductor"
+          },
+          {
+            "tid": 2101242,
+            "name": "core-matcher-0",
+            "state": "S",
+            "cpuPercentOneCore": 9.457,
+            "fullName": "core-matcher-0"
+          },
+          {
+            "tid": 2101115,
+            "name": "consens..-101-0",
+            "state": "S",
+            "cpuPercentOneCore": 8.597,
+            "fullName": "consensus-module-101-0"
+          },
+          {
+            "tid": 2101114,
+            "name": "archive..ductor",
+            "state": "S",
+            "cpuPercentOneCore": 7.769,
+            "fullName": "archive-conductor"
+          },
+          {
+            "tid": 2101117,
+            "name": "cluster..-101-0",
+            "state": "S",
+            "cpuPercentOneCore": 7.451,
+            "fullName": "clustered-service-101-0"
+          },
+          {
+            "tid": 2101133,
+            "name": "realtim..sender",
+            "state": "S",
+            "cpuPercentOneCore": 6.846,
+            "fullName": "realtime-aeron-sender"
+          },
+          {
+            "tid": 2101135,
+            "name": "realtim..ceiver",
+            "state": "R",
+            "cpuPercentOneCore": 6.464,
+            "fullName": "realtime-aeron-receiver"
+          },
+          {
+            "tid": 2101107,
+            "name": "aeron-md-nra",
+            "state": "S",
+            "cpuPercentOneCore": 2.452,
+            "fullName": "aeron-md-nra"
+          },
+          {
+            "tid": 2101248,
+            "name": "core-ac..lane-1",
+            "state": "S",
+            "cpuPercentOneCore": 1.974,
+            "fullName": "core-account-lane-1"
+          },
+          {
+            "tid": 2101250,
+            "name": "core-ac..lane-3",
+            "state": "R",
+            "cpuPercentOneCore": 1.783,
+            "fullName": "core-account-lane-3"
+          },
+          {
+            "tid": 2101249,
+            "name": "core-ac..lane-2",
+            "state": "S",
+            "cpuPercentOneCore": 1.114,
+            "fullName": "core-account-lane-2"
+          },
+          {
+            "tid": 2101043,
+            "name": "ZDirector",
+            "state": "S",
+            "cpuPercentOneCore": 1.083,
+            "fullName": "ZDirector"
+          }
+        ]
+      },
+      {
+        "service": "kafka",
+        "cpuPercentOneCore": 27.862,
+        "rssMB": 943.1,
+        "pssMB": 943.0,
+        "privateDirtyMB": 912.5,
+        "threads": 120,
+        "fds": 269,
+        "minorFaultsPerSec": 277.6,
+        "majorFaultsPerSec": 0.0,
+        "topThreads": [
+          {
+            "tid": 2177871,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 3.98,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177872,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 2.929,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177873,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 2.707,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177832,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 1.656,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177306,
+            "name": "C2 CompilerThre",
+            "state": "S",
+            "cpuPercentOneCore": 1.592,
+            "fullName": "C2 CompilerThre"
+          },
+          {
+            "tid": 2177834,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 1.369,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177819,
+            "name": "group-coordinat",
+            "state": "S",
+            "cpuPercentOneCore": 1.21,
+            "fullName": "group-coordinat"
+          },
+          {
+            "tid": 2177818,
+            "name": "group-coordinat",
+            "state": "S",
+            "cpuPercentOneCore": 0.955,
+            "fullName": "group-coordinat"
+          },
+          {
+            "tid": 2177829,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 0.892,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177833,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 0.828,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177830,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 0.796,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2178984,
+            "name": "executor-Fetch",
+            "state": "S",
+            "cpuPercentOneCore": 0.764,
+            "fullName": "executor-Fetch"
+          },
+          {
+            "tid": 2177828,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 0.701,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177835,
+            "name": "data-plane-kafk",
+            "state": "S",
+            "cpuPercentOneCore": 0.701,
+            "fullName": "data-plane-kafk"
+          },
+          {
+            "tid": 2177805,
+            "name": "ExpirationReape",
+            "state": "S",
+            "cpuPercentOneCore": 0.605,
+            "fullName": "ExpirationReape"
+          }
+        ]
+      }
+    ],
+    "machineCpuPercent": {
+      "user": 22.058,
+      "nice": 0.0,
+      "system": 15.573,
+      "idle": 59.438,
+      "iowait": 1.423,
+      "irq": 0.0,
+      "softirq": 1.508,
+      "steal": 0.0
+    }
+  },
+  "steadyConfirmation": {
+    "durationSeconds": 30.01064004190266,
+    "cpuPercentOneCore": {
+      "LINEAR_PERPETUAL/gateway": 130.487,
+      "LINEAR_PERPETUAL/price": 53.12,
+      "LINEAR_PERPETUAL/realtime": 97.236,
+      "LINEAR_PERPETUAL/derivatives-lifecycle": 32.09,
+      "LINEAR_PERPETUAL/maker": 39.054,
+      "LINEAR_PERPETUAL/core": 123.791,
+      "kafka": 21.392
+    },
+    "systemPercent": {
+      "user": 21.0,
+      "nice": 0.0,
+      "system": 15.134,
+      "idle": 61.06,
+      "iowait": 1.397,
+      "irq": 0.0,
+      "softirq": 1.408,
+      "steal": 0.0
+    }
+  },
+  "gcAllocation": {
+    "gateway": {
+      "threadAllocationStatsMBps": 7.238,
+      "coveredThreads": 78,
+      "maxPauseMs": null,
+      "recordedGCs": 0,
+      "dataLossEvents": 0,
+      "topAllocationThreads": [
+        {
+          "thread": "order-egress-dispatcher",
+          "bytes": 54881304,
+          "durationSeconds": 59.157559,
+          "MBps": 0.8847
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-7",
+          "bytes": 47868728,
+          "durationSeconds": 59.157559,
+          "MBps": 0.7717
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-6",
+          "bytes": 44517072,
+          "durationSeconds": 59.157559,
+          "MBps": 0.7177
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-1",
+          "bytes": 44302952,
+          "durationSeconds": 59.157559,
+          "MBps": 0.7142
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-5",
+          "bytes": 33799224,
+          "durationSeconds": 59.157559,
+          "MBps": 0.5449
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-8",
+          "bytes": 32257960,
+          "durationSeconds": 59.157559,
+          "MBps": 0.52
+        },
+        {
+          "thread": "ForkJoinPool-1-worker-3",
+          "bytes": 27857536,
+          "durationSeconds": 59.157559,
+          "MBps": 0.4491
+        }
+      ]
+    },
+    "realtime": {
+      "threadAllocationStatsMBps": 8.473,
+      "coveredThreads": 65,
+      "maxPauseMs": 0.2103,
+      "recordedGCs": 1,
+      "dataLossEvents": 0,
+      "topAllocationThreads": [
+        {
+          "thread": "committed-trade-export",
+          "bytes": 190851568,
+          "durationSeconds": 58.7333,
+          "MBps": 3.0989
+        },
+        {
+          "thread": "realtime-router",
+          "bytes": 164399800,
+          "durationSeconds": 58.7333,
+          "MBps": 2.6694
+        },
+        {
+          "thread": "lettuce-nioEventLoop-4-4",
+          "bytes": 59159840,
+          "durationSeconds": 58.7333,
+          "MBps": 0.9606
+        },
+        {
+          "thread": "realtime-aeron-receiver",
+          "bytes": 57296984,
+          "durationSeconds": 58.7333,
+          "MBps": 0.9304
+        },
+        {
+          "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+          "bytes": 17398896,
+          "durationSeconds": 58.7333,
+          "MBps": 0.2825
+        },
+        {
+          "thread": "lettuce-nioEventLoop-4-3",
+          "bytes": 11142200,
+          "durationSeconds": 58.7333,
+          "MBps": 0.1809
+        },
+        {
+          "thread": "core-account-lane-3",
+          "bytes": 6780728,
+          "durationSeconds": 58.7333,
+          "MBps": 0.1101
+        }
+      ]
+    },
+    "core": {
+      "threadAllocationStatsMBps": 2.006,
+      "coveredThreads": 34,
+      "maxPauseMs": 0.5917,
+      "recordedGCs": 1,
+      "dataLossEvents": 0,
+      "topAllocationThreads": [
+        {
+          "thread": "trading-owner--1",
+          "bytes": 89052120,
+          "durationSeconds": 59.744686,
+          "MBps": 1.4215
+        },
+        {
+          "thread": "core-matcher-0",
+          "bytes": 22485936,
+          "durationSeconds": 59.744686,
+          "MBps": 0.3589
+        },
+        {
+          "thread": "core-account-lane-3",
+          "bytes": 5985848,
+          "durationSeconds": 59.744686,
+          "MBps": 0.0955
+        },
+        {
+          "thread": "core-account-lane-1",
+          "bytes": 3076744,
+          "durationSeconds": 59.744686,
+          "MBps": 0.0491
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "bytes": 2327552,
+          "durationSeconds": 59.744686,
+          "MBps": 0.0372
+        },
+        {
+          "thread": "core-account-lane-2",
+          "bytes": 1075600,
+          "durationSeconds": 59.744686,
+          "MBps": 0.0172
+        },
+        {
+          "thread": "receiver",
+          "bytes": 872760,
+          "durationSeconds": 59.744686,
+          "MBps": 0.0139
+        }
+      ]
+    }
+  },
+  "resourceStructure": {
+    "gateway": {
+      "sharedMediaDrivers": [
+        "/dev/shm/surprising-app-linear-perpetual [sender,receiver,aeron-md-nra,driver-conductor]",
+        "/tmp/surprising-aeron-6011576276826690520 [sender,receiver,aeron-md-nra,driver-conductor]",
+        "/tmp/surprising-aeron--7027617779943330497 [sender,receiver,aeron-md-nra,driver-conductor]",
+        "/tmp/surprising-aeron-8618522719418702804 [sender,receiver,aeron-md-nra,driver-conductor]",
+        "/tmp/surprising-aeron-1526563859422994391 [sender,receiver,aeron-md-nra,driver-conductor]"
+      ],
+      "egressDispatchers": [
+        "maintenance-egress-dispatcher",
+        "trigger-egress-dispatcher",
+        "order-egress-dispatcher",
+        "account-egress-dispatcher"
+      ],
+      "heapBefore": "2184757:\nZHeap            used 352M, capacity 3862M, max capacity 4096M\n Cache           3510M (3)\n  size classes   64M (1), 256M (1), 2G (1)\n",
+      "heapAfter": "2184757:\nZHeap            used 1324M, capacity 3862M, max capacity 4096M\n Cache           2538M (2)\n  size classes   256M (1), 2G (1)\n"
+    },
+    "price": {
+      "sharedMediaDrivers": [
+        "/tmp/surprising-aeron--6337693820353617327 [sender,receiver,aeron-md-nra,driver-conductor]"
+      ],
+      "egressDispatchers": [
+        "price-mark-egress-dispatcher"
+      ],
+      "heapBefore": "2185010:\nZHeap            used 324M, capacity 1818M, max capacity 2048M\n Cache           1494M (2)\n  size classes   128M (1), 1G (1)\n",
+      "heapAfter": "2185010:\nZHeap            used 894M, capacity 1818M, max capacity 2048M\n Cache           924M (2)\n  size classes   128M (1), 512M (1)\n"
+    },
+    "realtime": {
+      "sharedMediaDrivers": [],
+      "egressDispatchers": [],
+      "heapBefore": "2185011:\nZHeap            used 946M, capacity 2022M, max capacity 2048M\n Cache           1076M (7)\n  size classes   8M (2), 16M (1), 32M (1), 128M (2), 512M (1)\n",
+      "heapAfter": "2185011:\nZHeap            used 414M, capacity 2022M, max capacity 2048M\n Cache           1608M (14)\n  size classes   2M (2), 8M (3), 16M (4), 128M (4), 512M (1)\n"
+    },
+    "derivatives-lifecycle": {
+      "sharedMediaDrivers": [
+        "/tmp/surprising-aeron--1885547213972998216 [sender,receiver,aeron-md-nra,driver-conductor]"
+      ],
+      "egressDispatchers": [
+        "derivatives-lifecycle-egress-dispatcher"
+      ],
+      "heapBefore": "2185012:\nZHeap            used 356M, capacity 640M, max capacity 2048M\n Cache           284M (2)\n  size classes   64M (1), 128M (1)\n",
+      "heapAfter": "2185012:\nZHeap            used 202M, capacity 640M, max capacity 2048M\n Cache           438M (2)\n  size classes   128M (2)\n"
+    },
+    "maker": {
+      "sharedMediaDrivers": [],
+      "egressDispatchers": [],
+      "heapBefore": "2186029:\nZHeap            used 1324M, capacity 1932M, max capacity 2048M\n Cache           608M (1)\n  size classes   512M (1)\n",
+      "heapAfter": "2186029:\nZHeap            used 1588M, capacity 1932M, max capacity 2048M\n Cache           344M (1)\n  size classes   256M (1)\n"
+    },
+    "core": {
+      "sharedMediaDrivers": [],
+      "egressDispatchers": [],
+      "heapBefore": "2100963:\nZHeap            used 736M, capacity 886M, max capacity 8192M\n Cache           150M (1)\n  size classes   128M (1)\n",
+      "heapAfter": "2100963:\nZHeap            used 214M, capacity 942M, max capacity 8192M\n Cache           728M (6)\n  size classes   8M (1), 16M (1), 32M (1), 64M (1), 128M (1), 256M (1)\n"
+    },
+    "kafka": {
+      "sharedMediaDrivers": [],
+      "egressDispatchers": [],
+      "heapBefore": "2176038:\n garbage-first heap   total 1048576K, used 561942K [0x00000000c0000000, 0x0000000100000000)\n  region size 1024K, 372 young (380928K), 11 survivors (11264K)\n Metaspace       used 12591K, committed 13760K, reserved 1114112K\n  class space    used 1179K, committed 1664K, reserved 1048576K\n",
+      "heapAfter": "2176038:\n garbage-first heap   total 1048576K, used 745487K [0x00000000c0000000, 0x0000000100000000)\n  region size 1024K, 551 young (564224K), 11 survivors (11264K)\n Metaspace       used 12609K, committed 13760K, reserved 1114112K\n  class space    used 1179K, committed 1664K, reserved 1048576K\n"
+    }
+  },
+  "kafkaLagLines": [
+    "GROUP=surprising-linear-perp-order-instrument-snapshot-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-linear-perp-mark-price-v1 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-maker-quote-wakeup-09ace093-2333-4903-b1f9-a27fa90a6d16 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=1",
+    "GROUP=surprising-funding-rate-cache-54df5fdd-e8ac-4975-afe6-6ca637a4f63b MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-candlestick-instrument-snapshot-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-linear-perp-index-instrument-snapshot-v1 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-order-instrument-lifecycle-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-index-price-v1-audit-writer MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-mark-price-v1-audit-writer MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-order-fee-snapshot-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-market-maker-instrument-snapshot-LINEAR_PERPETUAL-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=gateway-mark-LINEAR_PERPETUAL-1f1016ca-b03f-4b6a-97e0-0a842a81d28e MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perpetual-candlestick-verified-20261007 MEMBERS=1 COMMITTED_PARTITIONS=2 OFFSET_LAG=0",
+    "GROUP=surprising-adl-mark-price-7e6eb2a0-2255-4af7-ad12-7ea08262e255 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-instrument-lifecycle-drain-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-linear-perp-insurance-v1 NO_COMMITTED_OFFSETS",
+    "GROUP=surprising-market-maker-mark-price-e3049cf5-68e9-411f-84b5-e1edd52112e6 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-mark-instrument-snapshot-v1 MEMBERS=1 COMMITTED_PARTITIONS=1 OFFSET_LAG=0",
+    "GROUP=surprising-linear-perp-insurance-instrument-snapshot-v1 NO_COMMITTED_OFFSETS",
+    "ACTIVE_GROUPS=19 UNASSIGNED_MEMBERS=0 TOTAL_OFFSET_LAG=1 MAX_PARTITION_LAG=1"
+  ],
+  "health": {
+    "gateway": "UP",
+    "price": "UP",
+    "realtime": "UP",
+    "derivatives-lifecycle": "UP",
+    "maker": "UP",
+    "latestCandles": {
+      "604": {
+        "ageSeconds": 57,
+        "tradeCount": 6
+      },
+      "653": {
+        "ageSeconds": 57,
+        "tradeCount": 6
+      },
+      "866": {
+        "ageSeconds": 57,
+        "tradeCount": 6
+      }
+    }
+  },
+  "jfrArtifacts": [
+    {
+      "path": "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core.jfr",
+      "sizeBytes": 1069342,
+      "sha256": "a2529bb8295fd75ea6734b318a498609cf6cae182245033a30ae98c2acc37d60",
+      "summary": "\n Version: 2.1\n Chunks: 1\n Start: 2026-10-08 14:10:21 (UTC)\n Duration: 60 s\n\n Event Type                              Count  Size (bytes) \n=============================================================\n jdk.ThreadPark                          12124        435981\n jdk.ThreadSleep                          7901        165921\n jdk.ExecutionSample                       816         10608\n jdk.ModuleExport                          791         10132\n jdk.NativeMethodSample                    776         10088\n jdk.BooleanFlag                           475         15370\n jdk.ActiveSetting                         387         10767\n jdk.ObjectAllocationSample                349          5907\n jdk.Checkpoint                            188        240979\n jdk.ModuleRequire                         158          1896\n jdk.LongFlag                              136          4641\n jdk.ThreadCPULoad                         120          2160\n jdk.InitialEnvironmentVariable            102          5748\n jdk.UnsignedLongFlag                       83          2932\n jdk.ThreadAllocationStatistics             70           918\n jdk.CPULoad                                59          1239\n jdk.ClassLoadingStatistics                 59           767\n jdk.CompilerStatistics                     59          2006\n jdk.ExceptionStatistics                    59           708\n jdk.JavaThreadStatistics                   59           767\n jdk.ResidentSetSize                        59          1121\n jdk.NativeLibrary                          52          3518\n jdk.FileWrite                              46          1081\n jdk.InitialSecurityProperty                46          2415\n jdk.UnsignedIntFlag                        44          1516\n jdk.IntFlag                                43          1615\n jdk.NetworkUtilization                     43           708\n jdk.StringFlag                             32           991\n jdk.ZPageAllocation                        28           868\n jdk.InitialSystemProperty                  26          1765\n jdk.ExecuteVMOperation                     24           436\n jdk.CompilerQueueUtilization               22           466\n jdk.DoubleFlag                             16           677\n jdk.GCPhaseConcurrent                      12           496\n jdk.DirectBufferStatistics                 11           264\n jdk.GCPhaseConcurrentLevel1                 9           381\n jdk.ClassLoaderStatistics                   8           238\n jdk.SafepointBegin                          8           136\n jdk.FileRead                                7           172\n jdk.FinalizerStatistics                     7           112\n jdk.CodeCacheStatistics                     6           210\n jdk.ZRelocationSetGroup                     6           142\n jdk.GCPhasePause                            5           177\n jdk.StringTableStatistics                   5           200\n jdk.SymbolTableStatistics                   5           200\n jdk.ThreadContextSwitchRate                 5            65\n jdk.GCHeapMemoryPoolUsage                   4           175\n jdk.GCReferenceStatistics                   4            55\n jdk.MetaspaceChunkFreeListSummary           4            84\n jdk.Deoptimization                          2            54\n jdk.GCConfiguration                         2            54\n jdk.GCHeapMemoryUsage                       2            47\n jdk.GCHeapSummary                           2            95\n jdk.GCPhaseConcurrentLevel2                 2            65\n jdk.JavaMonitorStatistics                   2            20\n jdk.MetaspaceSummary                        2           108\n jdk.PhysicalMemory                          2            40\n jdk.SwapSpace                               2            38\n jdk.ThreadEnd                               2            22\n jdk.ZRelocationSet                          2            52\n jdk.ActiveRecording                         1            56\n jdk.CPUInformation                          1          1443\n jdk.CPUTimeStampCounter                     1            21\n jdk.CodeCacheConfiguration                  1            48\n jdk.CompilerConfiguration                   1            13\n jdk.GCHeapConfiguration                     1            29\n jdk.GCSurvivorConfiguration                 1            12\n jdk.GCTLABConfiguration                     1            14\n jdk.GarbageCollection                       1            25\n jdk.JVMInformation                          1          1366\n jdk.JavaMonitorEnter                        1            26\n jdk.JavaMonitorWait                         1            32\n jdk.Metadata                                1        115427\n jdk.OSInformation                           1           246\n jdk.ThreadStart                             1            13\n jdk.VirtualizationInformation               1            29\n jdk.YoungGenerationConfiguration            1            23\n jdk.ZOldGarbageCollection                   1            18\n jdk.ZYoungGarbageCollection                 1            19\n jdk.AllocationRequiringGC                   0             0\n jdk.BooleanFlagChanged                      0             0\n jdk.CPUTimeSample                           0             0\n jdk.CPUTimeSamplesLost                      0             0\n jdk.ClassDefine                             0             0\n jdk.ClassLoad                               0             0\n jdk.ClassRedefinition                       0             0\n jdk.ClassUnload                             0             0\n jdk.CodeCacheFull                           0             0\n jdk.Compilation                             0             0\n jdk.CompilationFailure                      0             0\n jdk.CompilerInlining                        0             0\n jdk.CompilerPhase                           0             0\n jdk.ConcurrentModeFailure                   0             0\n jdk.ContainerCPUThrottling                  0             0\n jdk.ContainerCPUUsage                       0             0\n jdk.ContainerConfiguration                  0             0\n jdk.ContainerIOUsage                        0             0\n jdk.ContainerMemoryUsage                    0             0\n jdk.ContinuationFreeze                      0             0\n jdk.ContinuationFreezeFast                  0             0\n jdk.ContinuationFreezeSlow                  0             0\n jdk.ContinuationThaw                        0             0\n jdk.ContinuationThawFast                    0             0\n jdk.ContinuationThawSlow                    0             0\n jdk.DataLoss                                0             0\n jdk.DeprecatedInvocation                    0             0\n jdk.Deserialization                         0             0\n jdk.DoubleFlagChanged                       0             0\n jdk.DumpReason                              0             0\n jdk.EvacuationFailed                        0             0\n jdk.EvacuationInformation                   0             0\n jdk.FileForce                               0             0\n jdk.FinalFieldMutation                      0             0\n jdk.Flush                                   0             0\n jdk.G1AdaptiveIHOP                          0             0\n jdk.G1BasicIHOP                             0             0\n jdk.G1EvacuationOldStatistics               0             0\n jdk.G1EvacuationYoungStatistics             0             0\n jdk.G1GarbageCollection                     0             0\n jdk.G1HeapRegionInformation                 0             0\n jdk.G1HeapRegionTypeChange                  0             0\n jdk.G1HeapSummary                           0             0\n jdk.G1MMU                                   0             0\n jdk.GCCPUTime                               0             0\n jdk.GCPhaseParallel                         0             0\n jdk.GCPhasePauseLevel1                      0             0\n jdk.GCPhasePauseLevel2                      0             0\n jdk.GCPhasePauseLevel3                      0             0\n jdk.GCPhasePauseLevel4                      0             0\n jdk.HeapDump                                0             0\n jdk.IntFlagChanged                          0             0\n jdk.JITRestart                              0             0\n jdk.JavaAgent                               0             0\n jdk.JavaErrorThrow                          0             0\n jdk.JavaExceptionThrow                      0             0\n jdk.JavaMonitorDeflate                      0             0\n jdk.JavaMonitorInflate                      0             0\n jdk.JavaMonitorNotify                       0             0\n jdk.LongFlagChanged                         0             0\n jdk.MetaspaceAllocationFailure              0             0\n jdk.MetaspaceGCThreshold                    0             0\n jdk.MetaspaceOOM                            0             0\n jdk.MethodTiming                            0             0\n jdk.MethodTrace                             0             0\n jdk.NativeAgent                             0             0\n jdk.NativeLibraryLoad                       0             0\n jdk.NativeLibraryUnload                     0             0\n jdk.NativeMemoryUsage                       0             0\n jdk.NativeMemoryUsageTotal                  0             0\n jdk.ObjectAllocationInNewTLAB               0             0\n jdk.ObjectAllocationOutsideTLAB             0             0\n jdk.ObjectCount                             0             0\n jdk.ObjectCountAfterGC                      0             0\n jdk.OldGarbageCollection                    0             0\n jdk.OldObjectSample                         0             0\n jdk.PSHeapSummary                           0             0\n jdk.ParallelOldGarbageCollection            0             0\n jdk.ProcessStart                            0             0\n jdk.PromoteObjectInNewPLAB                  0             0\n jdk.PromoteObjectOutsidePLAB                0             0\n jdk.PromotionFailed                         0             0\n jdk.RedefineClasses                         0             0\n jdk.ReservedStackActivation                 0             0\n jdk.RetransformClasses                      0             0\n jdk.SafepointEnd                            0             0\n jdk.SafepointLatency                        0             0\n jdk.SafepointStateSynchronization           0             0\n jdk.SecurityPropertyModification            0             0\n jdk.SecurityProviderService                 0             0\n jdk.SerializationMisdeclaration             0             0\n jdk.ShenandoahEvacuationInformation         0             0\n jdk.ShenandoahHeapRegionInformation         0             0\n jdk.ShenandoahHeapRegionStateChange         0             0\n jdk.ShenandoahPromotionInformation          0             0\n jdk.Shutdown                                0             0\n jdk.SocketRead                              0             0\n jdk.SocketWrite                             0             0\n jdk.StringDeduplication                     0             0\n jdk.StringFlagChanged                       0             0\n jdk.SyncOnValueBasedClass                   0             0\n jdk.SystemGC                                0             0\n jdk.SystemProcess                           0             0\n jdk.TLSHandshake                            0             0\n jdk.TenuringDistribution                    0             0\n jdk.ThreadDump                              0             0\n jdk.UnsignedIntFlagChanged                  0             0\n jdk.UnsignedLongFlagChanged                 0             0\n jdk.VirtualThreadEnd                        0             0\n jdk.VirtualThreadPinned                     0             0\n jdk.VirtualThreadStart                      0             0\n jdk.VirtualThreadSubmitFailed               0             0\n jdk.X509Certificate                         0             0\n jdk.X509Validation                          0             0\n jdk.YoungGarbageCollection                  0             0\n jdk.ZAllocationStall                        0             0\n jdk.ZStatisticsCounter                      0             0\n jdk.ZStatisticsSampler                      0             0\n jdk.ZThreadPhase                            0             0\n jdk.ZUncommit                               0             0\n surprising.LaneCommitLatency                0             0\n surprising.OwnerSettlementMerge             0             0\n",
+      "deletedAfterAggregation": true
+    },
+    {
+      "path": "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime.jfr",
+      "sizeBytes": 1540141,
+      "sha256": "2febb45ef3ff14da6059a9cc9bacea6e7d9a475d17b31f8890c3121a2c975dde",
+      "summary": "\n Version: 2.1\n Chunks: 1\n Start: 2026-10-08 14:10:18 (UTC)\n Duration: 60 s\n\n Event Type                                                         Count  Size (bytes) \n========================================================================================\n jdk.ThreadSleep                                                     8267        165180\n jdk.ThreadPark                                                      7931        306467\n jdk.NativeMethodSample                                              2053         22998\n jdk.ExecutionSample                                                 2045         23543\n jdk.ObjectAllocationSample                                          1976         31383\n jdk.ModuleExport                                                    1624         19353\n jdk.SocketRead                                                      1215         50780\n jdk.JavaMonitorWait                                                  597         16125\n jdk.BooleanFlag                                                      475         14895\n jdk.SocketWrite                                                      453         18440\n jdk.ActiveSetting                                                    417         11703\n jdk.JavaExceptionThrow                                               386          5941\n jdk.SystemProcess                                                    251          9077\n jdk.Checkpoint                                                       189        675177\n jdk.ThreadCPULoad                                                    187          3179\n jdk.ModuleRequire                                                    161          1771\n jdk.LongFlag                                                         136          4505\n jdk.ThreadAllocationStatistics                                       134          1607\n jdk.InitialEnvironmentVariable                                       120          7029\n jdk.UnsignedLongFlag                                                  83          2849\n jdk.CPULoad                                                           57          1140\n jdk.ClassLoadingStatistics                                            57           684\n jdk.CompilerStatistics                                                57          1881\n jdk.ExceptionStatistics                                               57           660\n jdk.JavaThreadStatistics                                              57           684\n jdk.ResidentSetSize                                                   57          1026\n jdk.NativeLibrary                                                     54          3626\n jdk.InitialSecurityProperty                                           46          2415\n jdk.UnsignedIntFlag                                                   44          1472\n jdk.IntFlag                                                           43          1572\n jdk.NetworkUtilization                                                40           620\n jdk.StringFlag                                                        32           959\n jdk.ExecuteVMOperation                                                26           446\n jdk.CompilerQueueUtilization                                          22           468\n jdk.JavaMonitorEnter                                                  20           509\n jdk.Compilation                                                       16           487\n jdk.Deoptimization                                                    16           403\n jdk.DoubleFlag                                                        16           661\n jdk.InitialSystemProperty                                             15          1083\n jdk.ClassRedefinition                                                 14           173\n jdk.ClassLoaderStatistics                                             12           344\n jdk.DirectBufferStatistics                                            11           220\n jdk.FinalizerStatistics                                               10           157\n jdk.SafepointBegin                                                    10           151\n jdk.CodeCacheStatistics                                                6           204\n jdk.MetaspaceChunkFreeListSummary                                      6           114\n jdk.ZRelocationSetGroup                                                6           146\n jdk.GCPhaseConcurrent                                                  5           195\n jdk.StringTableStatistics                                              5           195\n jdk.SymbolTableStatistics                                              5           195\n jdk.ThreadContextSwitchRate                                            5            60\n jdk.GCHeapMemoryPoolUsage                                              4           171\n jdk.ThreadEnd                                                          4            40\n jdk.CompilationFailure                                                 3           171\n jdk.GCHeapSummary                                                      3           138\n jdk.GCPhaseConcurrentLevel1                                            3           120\n jdk.GCPhasePause                                                       3            95\n jdk.MetaspaceSummary                                                   3           156\n jdk.ThreadStart                                                        3            36\n jdk.GCConfiguration                                                    2            52\n jdk.GCHeapMemoryUsage                                                  2            46\n jdk.JavaMonitorStatistics                                              2            18\n jdk.PhysicalMemory                                                     2            38\n jdk.SwapSpace                                                          2            36\n jdk.ZPageAllocation                                                    2            53\n jdk.ZRelocationSet                                                     2            51\n jdk.ZYoungGarbageCollection                                            2            34\n jdk.ActiveRecording                                                    1            56\n jdk.CPUInformation                                                     1          1442\n jdk.CPUTimeStampCounter                                                1            20\n jdk.CodeCacheConfiguration                                             1            47\n jdk.CompilerConfiguration                                              1            12\n jdk.FileForce                                                          1           126\n jdk.FileRead                                                           1            25\n jdk.GCHeapConfiguration                                                1            28\n jdk.GCSurvivorConfiguration                                            1            11\n jdk.GCTLABConfiguration                                                1            13\n jdk.GarbageCollection                                                  1            23\n jdk.JVMInformation                                                     1           798\n jdk.Metadata                                                           1        120953\n jdk.OSInformation                                                      1           245\n jdk.RetransformClasses                                                 1            17\n jdk.VirtualizationInformation                                          1            28\n jdk.YoungGenerationConfiguration                                       1            22\n io.lettuce.core.event.connection.JfrConnectEvent                       0             0\n io.lettuce.core.event.connection.JfrConnectedEvent                     0             0\n io.lettuce.core.event.connection.JfrConnectionActivatedEvent           0             0\n io.lettuce.core.event.connection.JfrConnectionCreatedEvent             0             0\n io.lettuce.core.event.connection.JfrConnectionDeactivatedEvent         0             0\n io.lettuce.core.event.connection.JfrDisconnectedEvent                  0             0\n io.netty.AllocateBuffer                                                0             0\n io.netty.AllocateChunk                                                 0             0\n io.netty.FreeBuffer                                                    0             0\n io.netty.ReallocateBuffer                                              0             0\n jdk.AllocationRequiringGC                                              0             0\n jdk.BooleanFlagChanged                                                 0             0\n jdk.CPUTimeSample                                                      0             0\n jdk.CPUTimeSamplesLost                                                 0             0\n jdk.ClassDefine                                                        0             0\n jdk.ClassLoad                                                          0             0\n jdk.ClassUnload                                                        0             0\n jdk.CodeCacheFull                                                      0             0\n jdk.CompilerInlining                                                   0             0\n jdk.CompilerPhase                                                      0             0\n jdk.ConcurrentModeFailure                                              0             0\n jdk.ContainerCPUThrottling                                             0             0\n jdk.ContainerCPUUsage                                                  0             0\n jdk.ContainerConfiguration                                             0             0\n jdk.ContainerIOUsage                                                   0             0\n jdk.ContainerMemoryUsage                                               0             0\n jdk.ContinuationFreeze                                                 0             0\n jdk.ContinuationFreezeFast                                             0             0\n jdk.ContinuationFreezeSlow                                             0             0\n jdk.ContinuationThaw                                                   0             0\n jdk.ContinuationThawFast                                               0             0\n jdk.ContinuationThawSlow                                               0             0\n jdk.DataLoss                                                           0             0\n jdk.DeprecatedInvocation                                               0             0\n jdk.Deserialization                                                    0             0\n jdk.DoubleFlagChanged                                                  0             0\n jdk.DumpReason                                                         0             0\n jdk.EvacuationFailed                                                   0             0\n jdk.EvacuationInformation                                              0             0\n jdk.FileWrite                                                          0             0\n jdk.FinalFieldMutation                                                 0             0\n jdk.Flush                                                              0             0\n jdk.G1AdaptiveIHOP                                                     0             0\n jdk.G1BasicIHOP                                                        0             0\n jdk.G1EvacuationOldStatistics                                          0             0\n jdk.G1EvacuationYoungStatistics                                        0             0\n jdk.G1GarbageCollection                                                0             0\n jdk.G1HeapRegionInformation                                            0             0\n jdk.G1HeapRegionTypeChange                                             0             0\n jdk.G1HeapSummary                                                      0             0\n jdk.G1MMU                                                              0             0\n jdk.GCCPUTime                                                          0             0\n jdk.GCPhaseConcurrentLevel2                                            0             0\n jdk.GCPhaseParallel                                                    0             0\n jdk.GCPhasePauseLevel1                                                 0             0\n jdk.GCPhasePauseLevel2                                                 0             0\n jdk.GCPhasePauseLevel3                                                 0             0\n jdk.GCPhasePauseLevel4                                                 0             0\n jdk.GCReferenceStatistics                                              0             0\n jdk.HeapDump                                                           0             0\n jdk.IntFlagChanged                                                     0             0\n jdk.JITRestart                                                         0             0\n jdk.JavaAgent                                                          0             0\n jdk.JavaErrorThrow                                                     0             0\n jdk.JavaMonitorDeflate                                                 0             0\n jdk.JavaMonitorInflate                                                 0             0\n jdk.JavaMonitorNotify                                                  0             0\n jdk.LongFlagChanged                                                    0             0\n jdk.MetaspaceAllocationFailure                                         0             0\n jdk.MetaspaceGCThreshold                                               0             0\n jdk.MetaspaceOOM                                                       0             0\n jdk.MethodTiming                                                       0             0\n jdk.MethodTrace                                                        0             0\n jdk.NativeAgent                                                        0             0\n jdk.NativeLibraryLoad                                                  0             0\n jdk.NativeLibraryUnload                                                0             0\n jdk.NativeMemoryUsage                                                  0             0\n jdk.NativeMemoryUsageTotal                                             0             0\n jdk.ObjectAllocationInNewTLAB                                          0             0\n jdk.ObjectAllocationOutsideTLAB                                        0             0\n jdk.ObjectCount                                                        0             0\n jdk.ObjectCountAfterGC                                                 0             0\n jdk.OldGarbageCollection                                               0             0\n jdk.OldObjectSample                                                    0             0\n jdk.PSHeapSummary                                                      0             0\n jdk.ParallelOldGarbageCollection                                       0             0\n jdk.ProcessStart                                                       0             0\n jdk.PromoteObjectInNewPLAB                                             0             0\n jdk.PromoteObjectOutsidePLAB                                           0             0\n jdk.PromotionFailed                                                    0             0\n jdk.RedefineClasses                                                    0             0\n jdk.ReservedStackActivation                                            0             0\n jdk.SafepointEnd                                                       0             0\n jdk.SafepointLatency                                                   0             0\n jdk.SafepointStateSynchronization                                      0             0\n jdk.SecurityPropertyModification                                       0             0\n jdk.SecurityProviderService                                            0             0\n jdk.SerializationMisdeclaration                                        0             0\n jdk.ShenandoahEvacuationInformation                                    0             0\n jdk.ShenandoahHeapRegionInformation                                    0             0\n jdk.ShenandoahHeapRegionStateChange                                    0             0\n jdk.ShenandoahPromotionInformation                                     0             0\n jdk.Shutdown                                                           0             0\n jdk.StringDeduplication                                                0             0\n jdk.StringFlagChanged                                                  0             0\n jdk.SyncOnValueBasedClass                                              0             0\n jdk.SystemGC                                                           0             0\n jdk.TLSHandshake                                                       0             0\n jdk.TenuringDistribution                                               0             0\n jdk.ThreadDump                                                         0             0\n jdk.UnsignedIntFlagChanged                                             0             0\n jdk.UnsignedLongFlagChanged                                            0             0\n jdk.VirtualThreadEnd                                                   0             0\n jdk.VirtualThreadPinned                                                0             0\n jdk.VirtualThreadStart                                                 0             0\n jdk.VirtualThreadSubmitFailed                                          0             0\n jdk.X509Certificate                                                    0             0\n jdk.X509Validation                                                     0             0\n jdk.YoungGarbageCollection                                             0             0\n jdk.ZAllocationStall                                                   0             0\n jdk.ZOldGarbageCollection                                              0             0\n jdk.ZStatisticsCounter                                                 0             0\n jdk.ZStatisticsSampler                                                 0             0\n jdk.ZThreadPhase                                                       0             0\n jdk.ZUncommit                                                          0             0\n surprising.LaneCommitLatency                                           0             0\n surprising.OwnerSettlementMerge                                        0             0\n",
+      "deletedAfterAggregation": true
+    },
+    {
+      "path": "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway.jfr",
+      "sizeBytes": 2523618,
+      "sha256": "976139a67d87d6f13773172cbd02ef48ff655e33eaa8f3388a00dcafb703f7c9",
+      "summary": "\n Version: 2.1\n Chunks: 1\n Start: 2026-10-08 14:10:15 (UTC)\n Duration: 60 s\n\n Event Type                                                       Count  Size (bytes) \n======================================================================================\n jdk.ThreadSleep                                                  23509        447484\n jdk.ThreadPark                                                   14595        521135\n jdk.NativeMethodSample                                            2070         24217\n jdk.ObjectAllocationSample                                        1995         33812\n jdk.ModuleExport                                                  1482         17649\n jdk.ExecutionSample                                               1243         15915\n jdk.JavaMonitorWait                                                732         19772\n jdk.BooleanFlag                                                    475         14895\n jdk.SocketWrite                                                    470         20115\n jdk.ActiveSetting                                                  408         11435\n jdk.SocketRead                                                     403         17344\n jdk.ThreadCPULoad                                                  303          5209\n jdk.Checkpoint                                                     251       1198716\n jdk.SystemProcess                                                  251          9046\n jdk.ModuleRequire                                                  160          1760\n jdk.ThreadAllocationStatistics                                     160          1973\n jdk.LongFlag                                                       136          4505\n jdk.InitialEnvironmentVariable                                     123          6669\n surprising.ClientTransportBoundary                                 111          5429\n jdk.UnsignedLongFlag                                                83          2849\n jdk.CPULoad                                                         58          1160\n jdk.ClassLoadingStatistics                                          58           696\n jdk.CompilerStatistics                                              58          1972\n jdk.ExceptionStatistics                                             58           638\n jdk.JavaThreadStatistics                                            58           696\n jdk.ResidentSetSize                                                 58          1044\n jdk.InitialSecurityProperty                                         46          2415\n jdk.NativeLibrary                                                   44          2988\n jdk.UnsignedIntFlag                                                 44          1472\n jdk.IntFlag                                                         43          1572\n jdk.NetworkUtilization                                              40           620\n jdk.JavaMonitorEnter                                                39           989\n jdk.StringFlag                                                      32           959\n jdk.Compilation                                                     22           662\n jdk.CompilerQueueUtilization                                        22           468\n jdk.DoubleFlag                                                      16           661\n jdk.InitialSystemProperty                                           15          1000\n jdk.Deoptimization                                                  12           323\n jdk.DirectBufferStatistics                                          11           264\n jdk.ClassLoaderStatistics                                           10           294\n jdk.ClassRedefinition                                                8            97\n jdk.JavaExceptionThrow                                               8           162\n jdk.CodeCacheStatistics                                              6           204\n jdk.ExecuteVMOperation                                               6           112\n jdk.StringTableStatistics                                            5           195\n jdk.SymbolTableStatistics                                            5           195\n jdk.ThreadContextSwitchRate                                          5            60\n jdk.ThreadEnd                                                        5            58\n jdk.GCHeapMemoryPoolUsage                                            4           172\n jdk.SafepointBegin                                                   4            62\n jdk.FinalizerStatistics                                              3            45\n jdk.ThreadStart                                                      3            46\n jdk.FileRead                                                         2            65\n jdk.GCConfiguration                                                  2            52\n jdk.GCHeapMemoryUsage                                                2            46\n jdk.JavaMonitorStatistics                                            2            19\n jdk.PhysicalMemory                                                   2            38\n jdk.SwapSpace                                                        2            36\n jdk.ActiveRecording                                                  1            56\n jdk.CPUInformation                                                   1          1442\n jdk.CPUTimeStampCounter                                              1            20\n jdk.CodeCacheConfiguration                                           1            47\n jdk.CompilationFailure                                               1            57\n jdk.CompilerConfiguration                                            1            12\n jdk.GCHeapConfiguration                                              1            28\n jdk.GCSurvivorConfiguration                                          1            11\n jdk.GCTLABConfiguration                                              1            13\n jdk.JVMInformation                                                   1           755\n jdk.Metadata                                                         1        118283\n jdk.OSInformation                                                    1           245\n jdk.RetransformClasses                                               1            18\n jdk.VirtualizationInformation                                        1            28\n jdk.YoungGenerationConfiguration                                     1            22\n jdk.ZPageAllocation                                                  1            27\n io.lettuce.core.event.connection.JfrConnectEvent                     0             0\n io.lettuce.core.event.connection.JfrConnectedEvent                   0             0\n io.lettuce.core.event.connection.JfrConnectionActivatedEvent         0             0\n io.lettuce.core.event.connection.JfrConnectionCreatedEvent           0             0\n io.netty.AllocateBuffer                                              0             0\n io.netty.AllocateChunk                                               0             0\n io.netty.FreeBuffer                                                  0             0\n io.netty.ReallocateBuffer                                            0             0\n jdk.AllocationRequiringGC                                            0             0\n jdk.BooleanFlagChanged                                               0             0\n jdk.CPUTimeSample                                                    0             0\n jdk.CPUTimeSamplesLost                                               0             0\n jdk.ClassDefine                                                      0             0\n jdk.ClassLoad                                                        0             0\n jdk.ClassUnload                                                      0             0\n jdk.CodeCacheFull                                                    0             0\n jdk.CompilerInlining                                                 0             0\n jdk.CompilerPhase                                                    0             0\n jdk.ConcurrentModeFailure                                            0             0\n jdk.ContainerCPUThrottling                                           0             0\n jdk.ContainerCPUUsage                                                0             0\n jdk.ContainerConfiguration                                           0             0\n jdk.ContainerIOUsage                                                 0             0\n jdk.ContainerMemoryUsage                                             0             0\n jdk.ContinuationFreeze                                               0             0\n jdk.ContinuationFreezeFast                                           0             0\n jdk.ContinuationFreezeSlow                                           0             0\n jdk.ContinuationThaw                                                 0             0\n jdk.ContinuationThawFast                                             0             0\n jdk.ContinuationThawSlow                                             0             0\n jdk.DataLoss                                                         0             0\n jdk.DeprecatedInvocation                                             0             0\n jdk.Deserialization                                                  0             0\n jdk.DoubleFlagChanged                                                0             0\n jdk.DumpReason                                                       0             0\n jdk.EvacuationFailed                                                 0             0\n jdk.EvacuationInformation                                            0             0\n jdk.FileForce                                                        0             0\n jdk.FileWrite                                                        0             0\n jdk.FinalFieldMutation                                               0             0\n jdk.Flush                                                            0             0\n jdk.G1AdaptiveIHOP                                                   0             0\n jdk.G1BasicIHOP                                                      0             0\n jdk.G1EvacuationOldStatistics                                        0             0\n jdk.G1EvacuationYoungStatistics                                      0             0\n jdk.G1GarbageCollection                                              0             0\n jdk.G1HeapRegionInformation                                          0             0\n jdk.G1HeapRegionTypeChange                                           0             0\n jdk.G1HeapSummary                                                    0             0\n jdk.G1MMU                                                            0             0\n jdk.GCCPUTime                                                        0             0\n jdk.GCHeapSummary                                                    0             0\n jdk.GCPhaseConcurrent                                                0             0\n jdk.GCPhaseConcurrentLevel1                                          0             0\n jdk.GCPhaseConcurrentLevel2                                          0             0\n jdk.GCPhaseParallel                                                  0             0\n jdk.GCPhasePause                                                     0             0\n jdk.GCPhasePauseLevel1                                               0             0\n jdk.GCPhasePauseLevel2                                               0             0\n jdk.GCPhasePauseLevel3                                               0             0\n jdk.GCPhasePauseLevel4                                               0             0\n jdk.GCReferenceStatistics                                            0             0\n jdk.GarbageCollection                                                0             0\n jdk.HeapDump                                                         0             0\n jdk.IntFlagChanged                                                   0             0\n jdk.JITRestart                                                       0             0\n jdk.JavaAgent                                                        0             0\n jdk.JavaErrorThrow                                                   0             0\n jdk.JavaMonitorDeflate                                               0             0\n jdk.JavaMonitorInflate                                               0             0\n jdk.JavaMonitorNotify                                                0             0\n jdk.LongFlagChanged                                                  0             0\n jdk.MetaspaceAllocationFailure                                       0             0\n jdk.MetaspaceChunkFreeListSummary                                    0             0\n jdk.MetaspaceGCThreshold                                             0             0\n jdk.MetaspaceOOM                                                     0             0\n jdk.MetaspaceSummary                                                 0             0\n jdk.MethodTiming                                                     0             0\n jdk.MethodTrace                                                      0             0\n jdk.NativeAgent                                                      0             0\n jdk.NativeLibraryLoad                                                0             0\n jdk.NativeLibraryUnload                                              0             0\n jdk.NativeMemoryUsage                                                0             0\n jdk.NativeMemoryUsageTotal                                           0             0\n jdk.ObjectAllocationInNewTLAB                                        0             0\n jdk.ObjectAllocationOutsideTLAB                                      0             0\n jdk.ObjectCount                                                      0             0\n jdk.ObjectCountAfterGC                                               0             0\n jdk.OldGarbageCollection                                             0             0\n jdk.OldObjectSample                                                  0             0\n jdk.PSHeapSummary                                                    0             0\n jdk.ParallelOldGarbageCollection                                     0             0\n jdk.ProcessStart                                                     0             0\n jdk.PromoteObjectInNewPLAB                                           0             0\n jdk.PromoteObjectOutsidePLAB                                         0             0\n jdk.PromotionFailed                                                  0             0\n jdk.RedefineClasses                                                  0             0\n jdk.ReservedStackActivation                                          0             0\n jdk.SafepointEnd                                                     0             0\n jdk.SafepointLatency                                                 0             0\n jdk.SafepointStateSynchronization                                    0             0\n jdk.SecurityPropertyModification                                     0             0\n jdk.SecurityProviderService                                          0             0\n jdk.SerializationMisdeclaration                                      0             0\n jdk.ShenandoahEvacuationInformation                                  0             0\n jdk.ShenandoahHeapRegionInformation                                  0             0\n jdk.ShenandoahHeapRegionStateChange                                  0             0\n jdk.ShenandoahPromotionInformation                                   0             0\n jdk.Shutdown                                                         0             0\n jdk.StringDeduplication                                              0             0\n jdk.StringFlagChanged                                                0             0\n jdk.SyncOnValueBasedClass                                            0             0\n jdk.SystemGC                                                         0             0\n jdk.TLSHandshake                                                     0             0\n jdk.TenuringDistribution                                             0             0\n jdk.ThreadDump                                                       0             0\n jdk.UnsignedIntFlagChanged                                           0             0\n jdk.UnsignedLongFlagChanged                                          0             0\n jdk.VirtualThreadEnd                                                 0             0\n jdk.VirtualThreadPinned                                              0             0\n jdk.VirtualThreadStart                                               0             0\n jdk.VirtualThreadSubmitFailed                                        0             0\n jdk.X509Certificate                                                  0             0\n jdk.X509Validation                                                   0             0\n jdk.YoungGarbageCollection                                           0             0\n jdk.ZAllocationStall                                                 0             0\n jdk.ZOldGarbageCollection                                            0             0\n jdk.ZRelocationSet                                                   0             0\n jdk.ZRelocationSetGroup                                              0             0\n jdk.ZStatisticsCounter                                               0             0\n jdk.ZStatisticsSampler                                               0             0\n jdk.ZThreadPhase                                                     0             0\n jdk.ZUncommit                                                        0             0\n jdk.ZYoungGarbageCollection                                          0             0\n",
+      "deletedAfterAggregation": true
+    }
+  ],
+  "profiles": {
+    "gateway": {
+      "methods": "\n                                                               Java Methods that Execute the Most\n\nMethod                                                                                                                                          Samples Percent\n----------------------------------------------------------------------------------------------------------------------------------------------- ------- -------\njava.util.HashMap.getNode(Object)                                                                                                                    43   3.46%\norg.agrona.collections.Long2LongHashMap$AbstractIterator.findNext()                                                                                  35   2.82%\nio.aeron.driver.PublicationImage.trackRebuild(long)                                                                                                  25   2.01%\norg.agrona.concurrent.status.UnsafeBufferPosition.proposeMaxRelease(long)                                                                            21   1.69%\nio.aeron.driver.DriverConductor.doWork()                                                                                                             18   1.45%\nio.aeron.Image.poll(FragmentHandler, int)                                                                                                            17   1.37%\nio.aeron.driver.media.DataTransportPoller.receive(DataTransportPoller$ChannelAndTransport)                                                           14   1.13%\nio.aeron.driver.NetworkPublication.hasSubscribers()                                                                                                  14   1.13%\norg.apache.catalina.connector.RequestFacade.getAttribute(String)                                                                                     14   1.13%\nsun.nio.ch.DatagramChannelImpl.receive0(FileDescriptor, long, int, long, boolean)                                                                    14   1.13%\nio.aeron.driver.Sender.doSend(long)                                                                                                                  13   1.05%\njava.util.concurrent.locks.AbstractQueuedSynchronizer.signalNext(AbstractQueuedSynchronizer$Node)                                                    11   0.88%\ncom.surprising.aeron.client.AeronClientPool$EgressDispatcher.pollSession(AeronClientPool$AgentLane)                                                  11   0.88%\nio.aeron.driver.ReceiverLivenessTracker.onIdle(long, long)                                                                                           11   0.88%\nsun.nio.ch.DatagramChannelImpl.receiveIntoNativeBuffer(ByteBuffer, int, int, boolean)                                                                10   0.80%\njava.util.HashMap.putVal(int, Object, Object, boolean, boolean)                                                                                      10   0.80%\njava.util.concurrent.locks.LockSupport.parkNanos(long)                                                                                               10   0.80%\nio.aeron.driver.NativeResourceAgent.freeEndOfLifeResources()                                                                                          9   0.72%\ntools.jackson.databind.ser.BeanPropertyWriter.serializeAsProperty(Object, JsonGenerator, SerializationContext)                                        9   0.72%\njava.util.concurrent.ConcurrentHashMap.putVal(Object, Object, boolean)                                                                                8   0.64%\njava.util.concurrent.locks.LockSupport.parkNanos(Object, long)                                                                                        8   0.64%\njava.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                    7   0.56%\njava.io.InputStream.readNBytes(int)                                                                                                                   7   0.56%\ncom.surprising.aeron.client.AeronClientPool$EgressDispatcher.run()                                                                                    7   0.56%\njava.util.concurrent.ConcurrentHashMap.remove(Object)                                                                                                 7   0.56%",
+      "allocation": "\n                                                                       Allocation by Site\n\nMethod                                                                                                                                      Allocation Pressure\n------------------------------------------------------------------------------------------------------------------------------------------- -------------------\njava.util.LinkedHashMap$LinkedEntrySet.iterator()                                                                                                         6.12%\njava.util.LinkedHashMap.newNode(int, Object, Object, HashMap$Node)                                                                                        4.96%\njava.lang.invoke.DirectMethodHandle.allocateInstance(Object)                                                                                              4.28%\njava.util.Arrays.copyOfRange(byte[], int, int)                                                                                                            3.54%\njava.util.HashMap.resize()                                                                                                                                3.34%\njava.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                                                                   2.35%\njava.util.ArrayList.grow(int)                                                                                                                             2.13%\njava.lang.Long.valueOf(long)                                                                                                                              2.05%\norg.hibernate.validator.internal.engine.path.MutableNode.createNode(MutableNode)                                                                          1.80%\norg.hibernate.validator.internal.engine.validationcontext.AbstractValidationContext.createConstraintValidatorContextFor(...)                              1.70%\njava.lang.StringUTF16.compress(char[], int, int)                                                                                                          1.68%\njava.io.InputStream.readNBytes(int)                                                                                                                       1.61%\njava.util.concurrent.ConcurrentHashMap.putVal(Object, Object, boolean)                                                                                    1.59%\ncom.surprising.aeron.client.SurprisingAeronClient.onMessage(long, long, DirectBuffer, int, int, Header)                                                   1.39%\njava.math.BigInteger.multiplyByInt(int[], int, int)                                                                                                       1.29%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.readOrderState(CoreStateQueryCodec$Reader)                                                              1.29%\njava.util.HashMap.newNode(int, Object, Object, HashMap$Node)                                                                                              1.14%\ncom.surprising.aeron.protocol.CoreMessageCodec.decode(byte[])                                                                                             1.14%\norg.postgresql.core.PGStream.receiveTupleV3()                                                                                                             0.99%\ntools.jackson.core.util.TextBuffer.setCurrentAndReturn(int)                                                                                               0.88%\norg.postgresql.util.ByteConverter.numeric(byte[], int, int)                                                                                               0.88%\ncom.surprising.trading.order.service.AeronOrderCommandService.requireOrder(CoreOrderStateView, String)                                                    0.87%\norg.springframework.core.ResolvableType.forType(Type, SerializableTypeWrapper$TypeProvider, ResolvableType$VariableResolver)                              0.84%\ncom.surprising.aeron.protocol.CoreProtocol.decodeResponse(byte[])                                                                                         0.79%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderBookView(byte[])                                                                             0.74%"
+    },
+    "realtime": {
+      "methods": "\n                                                               Java Methods that Execute the Most\n\nMethod                                                                                                                                          Samples Percent\n----------------------------------------------------------------------------------------------------------------------------------------------- ------- -------\ncom.surprising.aeron.service.orchestration.OrderedCommitCoordinator.advanceMatchingProgress(long, long, long)                                       317  15.50%\ncom.surprising.aeron.service.orchestration.PendingMatchingRing.pendingAt(int)                                                                       310  15.16%\ncom.surprising.aeron.service.orchestration.OrderedCommitCoordinator.dispatchReadyPlaceSettlements(long, long, long)                                 189   9.24%\ncom.surprising.aeron.service.matcher.MatcherCommandPipeline.rethrowPublicationFailure()                                                             156   7.63%\ncom.surprising.aeron.service.state.MatcherSettlementEvent.completedLaneMask()                                                                       124   6.06%\ncom.surprising.aeron.service.orchestration.OrderedCommitCoordinator.commitReadyMatching(...)                                                         46   2.25%\ncom.surprising.aeron.service.state.TradingRuntimeState.assertAccountLanesHealthy()                                                                   36   1.76%\nio.netty.channel.AbstractChannelHandlerContext.write(Object, boolean, ChannelPromise)                                                                25   1.22%\ncom.surprising.aeron.service.state.TradingRuntimeState$LaneMutationTask.await()                                                                      22   1.08%\njdk.internal.util.DecimalDigits.uncheckedGetCharsLatin1(long, int, byte[])                                                                           15   0.73%\ncom.surprising.aeron.protocol.RealtimeFrameCodec.decode(byte[])                                                                                      13   0.64%\nio.micrometer.common.KeyValues.and(KeyValue[])                                                                                                       13   0.64%\norg.agrona.collections.Long2ObjectHashMap.getMapped(long)                                                                                            13   0.64%\ncom.surprising.aeron.service.orchestration.OrderedCommitCoordinator.commitReadyMatching(...)                                                         12   0.59%\ncom.surprising.aeron.service.orchestration.CoreRuntimeLifecycle.assertHealthy()                                                                      11   0.54%\ncom.surprising.aeron.service.state.index.ActiveOrderIndex.inspect(long, String, CorePositionSide, CoreOrderSide, CoreMarginMode)                     10   0.49%\njava.lang.ThreadLocal$ThreadLocalMap.getEntryAfterMiss(ThreadLocal, int, ThreadLocal$ThreadLocalMap$Entry)                                           10   0.49%\njava.util.HashMap.getNode(Object)                                                                                                                     9   0.44%\njava.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                    9   0.44%\njava.io.ByteArrayOutputStream.ensureCapacity(int)                                                                                                     9   0.44%\njava.util.ComparableTimSort.countRunAndMakeAscending(Object[], int, int)                                                                              8   0.39%\ncom.surprising.realtime.provider.export.CommittedTradeExporter.run(AtomicBoolean, Consumer, long)                                                     8   0.39%\ncom.surprising.realtime.provider.RealtimeRouter.run()                                                                                                 7   0.34%\ncom.surprising.aeron.service.orchestration.CommittedTradeReplay.apply(byte[], long, long)                                                             7   0.34%\nio.aeron.Image.poll(FragmentHandler, int)                                                                                                             7   0.34%",
+      "allocation": "\n                                                                       Allocation by Site\n\nMethod                                                                                                                                      Allocation Pressure\n------------------------------------------------------------------------------------------------------------------------------------------- -------------------\njava.util.Arrays.copyOf(byte[], int)                                                                                                                     10.39%\njava.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                                                                   6.72%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                                                                          5.14%\ncom.surprising.aeron.protocol.RealtimeFrameCodec.get(ByteBuffer, int)                                                                                     3.78%\ncom.surprising.aeron.protocol.RealtimeFrame.<init>(ProductLine, RealtimeFrame$Kind, long, long, int, long, long, String, String, byte[])                  2.69%\ncom.surprising.aeron.protocol.RealtimeFrame$Kind.values()                                                                                                 2.52%\ncom.surprising.aeron.client.AeronRealtimeReceiver.lambda$new$1(Consumer, DirectBuffer, int, int, Header)                                                  2.18%\njava.util.Base64$Encoder.encode(byte[])                                                                                                                   2.14%\njava.util.HashMap.resize()                                                                                                                                2.05%\njava.util.Arrays.copyOfRange(byte[], int, int)                                                                                                            1.95%\njava.util.HashMap.newNode(int, Object, Object, HashMap$Node)                                                                                              1.83%\ncom.surprising.aeron.protocol.RealtimeFrameCodec.decode(byte[])                                                                                           1.73%\njava.util.ArrayList.grow(int)                                                                                                                             1.66%\njava.util.ArrayList.<init>(int)                                                                                                                           1.64%\njava.util.Arrays.copyOf(Object[], int)                                                                                                                    1.43%\ncom.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec$SectionedSnapshot.toByteArray()                                            1.34%\nio.aeron.cluster.RecordingLog.captureEntriesFromBuffer(long, ByteBuffer, UnsafeBuffer, ArrayList)                                                         1.28%\njava.lang.Long.toString(long)                                                                                                                             1.16%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.readOrderState(CoreStateQueryCodec$Reader)                                                              1.14%\njava.lang.invoke.DirectMethodHandle.allocateInstance(Object)                                                                                              1.10%\nio.micrometer.observation.Observation$Context.<init>()                                                                                                    1.04%\nio.micrometer.core.instrument.Tag.of(String, String)                                                                                                      1.00%\ncom.surprising.aeron.service.state.realtime.RealtimeStateCapture.order(OrderRuntime)                                                                      0.99%\ncom.surprising.aeron.protocol.RealtimeFrame.payload()                                                                                                     0.96%\njava.lang.AbstractStringBuilder.<init>(int)                                                                                                               0.93%"
+    },
+    "core": {
+      "methods": "\n                                                               Java Methods that Execute the Most\n\nMethod                                                                                                                                          Samples Percent\n----------------------------------------------------------------------------------------------------------------------------------------------- ------- -------\nio.aeron.driver.NetworkPublication.updatePublisherPositionAndLimit()                                                                                 27   3.31%\ncom.surprising.aeron.service.state.index.ActiveOrderIndex.inspect(long, String, CorePositionSide, CoreOrderSide, CoreMarginMode)                     24   2.94%\norg.agrona.collections.Long2ObjectHashMap.getMapped(long)                                                                                            24   2.94%\nio.aeron.Image.controlledPoll(ControlledFragmentHandler, int)                                                                                        24   2.94%\nio.aeron.driver.ReceiverLivenessTracker.onIdle(long, long)                                                                                           22   2.70%\njava.lang.ThreadLocal$ThreadLocalMap.getEntryAfterMiss(ThreadLocal, int, ThreadLocal$ThreadLocalMap$Entry)                                           20   2.45%\ncom.surprising.aeron.service.orchestration.TradingOwnerLoop.run()                                                                                    15   1.84%\nio.aeron.archive.ControlSession.doWork()                                                                                                             15   1.84%\norg.agrona.concurrent.OneToOneConcurrentArrayQueue.poll()                                                                                            14   1.72%\njava.util.HashMap.getNode(Object)                                                                                                                    13   1.59%\ncom.surprising.aeron.service.orchestration.TradingCoreRuntime.pollRealtimeBook()                                                                     13   1.59%\ncom.surprising.aeron.service.orchestration.TradingCoreOwner.progressCommandsInScope()                                                                13   1.59%\ncom.surprising.aeron.service.orchestration.PendingMatchingRing.linked(int)                                                                           12   1.47%\nio.aeron.driver.PublicationImage.trackRebuild(long)                                                                                                  12   1.47%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                                                                     12   1.47%\njava.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                   11   1.35%\norg.agrona.concurrent.ringbuffer.ManyToOneRingBuffer.controlledRead(ControlledMessageHandler, int)                                                   10   1.23%\njava.util.concurrent.locks.LockSupport.parkNanos(long)                                                                                               10   1.23%\ncom.surprising.aeron.service.orchestration.TradingCoreRuntime.drainMatchingCompletions()                                                              9   1.10%\ncom.surprising.aeron.service.orchestration.MatchingPipelineProgress.hasLocalMatchingWork()                                                            9   1.10%\nio.aeron.driver.IpcPublication.updatePublisherPositionAndLimit()                                                                                      9   1.10%\nio.aeron.driver.NetworkPublication.hasGroupSemantics()                                                                                                9   1.10%\nio.aeron.driver.NetworkPublication.cleanBufferTo(long)                                                                                                8   0.98%\norg.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.probe(long)                                                                        8   0.98%\nio.aeron.driver.media.DataTransportPoller.poll(DataTransportPoller$ChannelAndTransport)                                                               7   0.86%",
+      "allocation": "\n                                                                       Allocation by Site\n\nMethod                                                                                                                                      Allocation Pressure\n------------------------------------------------------------------------------------------------------------------------------------------- -------------------\njava.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                                                                  11.82%\njava.util.Arrays.copyOf(byte[], int)                                                                                                                      9.15%\njava.util.ImmutableCollections$AbstractImmutableList.iterator()                                                                                           4.84%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                                                                          4.81%\njava.lang.invoke.DirectMethodHandle.allocateInstance(Object)                                                                                              4.36%\ncom.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bookLevels(String, L2MarketData)                                                   4.01%\ncom.surprising.aeron.protocol.CoreStateQueryCodec$Writer.<init>(int)                                                                                      3.95%\ncom.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(TradingRuntimeState, RuntimeIdentityRegistry, long)                          3.60%\nexchange.core2.core.common.MatcherResult$MarketData.from(L2MarketData)                                                                                    3.59%\njava.util.Arrays.copyOfRange(byte[], int, int)                                                                                                            3.21%\nexchange.core2.core.common.L2MarketData.<init>(int, int)                                                                                                  2.95%\ncom.surprising.aeron.service.state.TradingRuntimeState.preparedOrder(ProductLine, long, ResolvedPlaceOrder, UUID, int, long, long)                        2.53%\ncom.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolveValues(...)                                                                 2.35%\ncom.surprising.aeron.service.state.RiskScanCoordinator.cursor(RiskScanRuntime, boolean, long, long)                                                       2.28%\ncom.surprising.aeron.service.state.OrderRuntime.snapshot()                                                                                                1.57%\nexchange.core2.core.common.MatcherResult.from(long, OrderCommand)                                                                                         1.48%\njava.util.Arrays.copyOf(Object[], int)                                                                                                                    1.48%\ncom.surprising.aeron.service.state.RiskScanCoordinator.laneInput(RiskScanRuntime, int, RiskLaneProgress)                                                  1.47%\ncom.surprising.aeron.service.state.realtime.RealtimeStateCapture.order(OrderRuntime)                                                                      1.46%\njava.util.ArrayList.grow(int)                                                                                                                             1.27%\ncom.surprising.aeron.service.state.risk.RiskScanRuntime.withLaneProgress(List)                                                                            1.27%\ncom.surprising.aeron.service.orchestration.CoreMatchingFlow.replacementForAmend(AmendOrderCommand, OrderRuntime)                                          1.26%\ncom.surprising.aeron.protocol.CorePositionSide.values()                                                                                                   1.26%\njava.lang.Long.valueOf(long)                                                                                                                              1.26%\ncom.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode(DirectBuffer, int, int)                                             1.25%"
+    }
+  },
+  "cleanup": {
+    "recordings": "all three auto-stopped; JFR.check confirmed resourceAudit absent",
+    "rawArtifacts": "raw JFR/thread/heap/event dumps removed after aggregation; paths in metadata are historical",
+    "removedPaths": [
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core.jfr",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime.jfr",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway.jfr",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/kafka-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-price-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-maker-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-derivatives-lifecycle-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway-threads-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-derivatives-lifecycle-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/kafka-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-maker-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-price-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime-threads-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-derivatives-lifecycle-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-maker-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-price-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/kafka-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core-heap-before.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-maker-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-derivatives-lifecycle-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-price-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/kafka-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime-heap-after.txt",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-realtime-jfr-gc-allocation-events.json",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-core-jfr-gc-allocation-events.json",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/LINEAR_PERPETUAL-gateway-jfr-gc-allocation-events.json",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/system-samples.json",
+      "/var/backups/surprising/resource-audit-20261008T140932Z/ResourceKafkaLag.class"
+    ],
+    "applications": "original seven JVM processes preserved; no deployment or configuration changes"
+  }
+}
