@@ -4922,3 +4922,8 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 新增 MakerConfigurationReadBenchmark 直接调用实际配置缓存方法，三策略，测量前 JDBC fixture 各加载一次定义/覆盖，teardown 校验测量期间无额外查询；不把 fixture 解释为 PostgreSQL 性能。参数仍为 3×2s 预热、3×2s 测量、两 fork 无 profiler 主轮、单 fork 独立 GC，512MiB ZGC。真实 PostgreSQL 正确性单列，服务器实际进程 JFR 归因单列。最终修复部署完成后重新预热600秒并完整观测7200秒，部署前窗口不计入。
 
 报价槽位补充计划：实际 liquidityReplacements 当前主轮观察 240 报价 464642 B/轮，定位到双层匹配反复拼接 quotePrefix。直接解析现有 clientOrderId 的 canonical 方向/非负整型档位，无新索引/缓存/共享状态；严格保留前缀隔离、前导零拒绝与分隔符要求。修改后只运行当前源码同配置的主轮/独立 GC，覆盖 20/120 档，并以已有对账及新增边界测试验证业务，不重跑历史源码作对照。
+
+
+### 2026-10-09 补充计划：实际做市补单扫描
+
+最终版本预热末 JFR 的 maker Java execution sample 指向 placeMissingQuotes 的嵌套 Stream/Sink，分配采样亦出现 StreamSupport；正常已铺满盘口仍为每个期望报价创建 Stream，并分别扫描相同挂单。保持无新容器/索引/缓存，以直接循环累计买卖数量，并合并已有槽位及交叉挂单判断；保留精确算术、占位 null、未终态订单容量和批次确认语义。新增 quoteRefillScan 直接调用实际 placeMissingQuotes（20/120 档、已有双边订单），teardown 验证未改变挂单且未新增订单；原有补单/拒单/交叉保护回归及 maker 模块测试。JMH 仍主轮两 fork、3×2s 预热/3×2s 测量、512MiB ZGC，独立 GC 一 fork。只测当前 master，不重跑旧源码。服务器 maker 单独构建/发布，部署前观测不计入最终7200秒，重新完整预热及长稳。

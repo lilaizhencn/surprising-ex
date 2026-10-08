@@ -1005,25 +1005,24 @@ public class MarketMakerService {
         List<DesiredQuote> missingQuotes = new ArrayList<>();
         // Existing orders still consume Core's pending-position limit until cancellation completes.
         // Never briefly exceed this side's planned ladder while refilling traded slots.
-        long bidCapacity = Math.subtractExact(
-                plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)
-                        .mapToLong(DesiredQuote::quantitySteps).reduce(0L, Math::addExact),
-                kept.stream().filter(order -> order != null && order.side() == OrderSide.BUY)
-                        .mapToLong(OrderResponse::remainingQuantitySteps).reduce(0L, Math::addExact));
-        long askCapacity = Math.subtractExact(
-                plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL)
-                        .mapToLong(DesiredQuote::quantitySteps).reduce(0L, Math::addExact),
-                kept.stream().filter(order -> order != null && order.side() == OrderSide.SELL)
-                        .mapToLong(OrderResponse::remainingQuantitySteps).reduce(0L, Math::addExact));
+        long plannedBids = 0L, plannedAsks = 0L, restingBids = 0L, restingAsks = 0L;
+        for (DesiredQuote quote : plan.quotes()) {
+            if (quote.side() == OrderSide.BUY) plannedBids = Math.addExact(plannedBids, quote.quantitySteps());
+            else if (quote.side() == OrderSide.SELL) plannedAsks = Math.addExact(plannedAsks, quote.quantitySteps());
+        }
+        for (OrderResponse order : kept) {
+            if (order == null) continue;
+            if (order.side() == OrderSide.BUY) restingBids = Math.addExact(restingBids, order.remainingQuantitySteps());
+            else if (order.side() == OrderSide.SELL) restingAsks = Math.addExact(restingAsks, order.remainingQuantitySteps());
+        }
+        long bidCapacity = Math.subtractExact(plannedBids, restingBids);
+        long askCapacity = Math.subtractExact(plannedAsks, restingAsks);
         for (DesiredQuote quote : plan.quotes()) {
             if (kept.size() >= maxOpenOrders) {
                 break;
             }
             // Waiting opposite quotes must be canceled before submitting a crossing post-only replacement.
-            boolean blockedByOwnQuote = kept.stream().filter(this::isLive).anyMatch(order ->
-                    order.side() != quote.side() && (quote.side() == OrderSide.BUY
-                            ? quote.priceTicks() >= order.priceTicks() : quote.priceTicks() <= order.priceTicks()));
-            if (blockedByOwnQuote || hasOwnedQuoteSlot(kept, quote, accountPrefix)) {
+            if (occupiedOrCrossingQuote(kept, quote, accountPrefix)) {
                 continue;
             }
             if (quote.side() == OrderSide.BUY && quote.quantitySteps() > bidCapacity
@@ -1118,9 +1117,15 @@ public class MarketMakerService {
                 .anyMatch(order -> matchesQuote(order, quote, accountPrefix, quoting));
     }
 
-    private boolean hasOwnedQuoteSlot(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
-        return orders.stream().anyMatch(order -> order != null
-                && quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level());
+    /** Existing own slots and live opposite quotes block replenishment, including pending cancels. */
+    private boolean occupiedOrCrossingQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
+        for (OrderResponse order : orders) {
+            if (order == null) continue;
+            if (quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level()) return true;
+            if (isLive(order) && order.side() != quote.side() && (quote.side() == OrderSide.BUY
+                    ? quote.priceTicks() >= order.priceTicks() : quote.priceTicks() <= order.priceTicks())) return true;
+        }
+        return false;
     }
 
     private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {

@@ -27,7 +27,7 @@ public class MakerReconciliationAllocationBenchmark {
     List<OrderResponse> orders;
     List<OrderResponse> replacements;
     List<Long> removedIds;
-    MethodHandle replace, update;
+    MethodHandle replace, update, refill;
     Map<String, Object> cache;
     final String prefix = "mm-benchmark-7-";
     final long bid = Long.MAX_VALUE / 100, ask = bid + 1;
@@ -36,6 +36,7 @@ public class MakerReconciliationAllocationBenchmark {
         var properties = new MarketMakerProperties();
         quoting = properties.getQuoting();
         quoting.setLinearLiquidityTargetNotionalUnits(1);
+        quoting.setMaxOpenOrdersPerAccountSymbol(512);
         quoting.setLiquiditySlippagePpm(100);
         var constructor = MarketMakerService.class.getDeclaredConstructors()[0];
         Object[] dependencies = new Object[constructor.getParameterCount()];
@@ -63,6 +64,12 @@ public class MakerReconciliationAllocationBenchmark {
                         OrderResponse.class, String.class, long.class, long.class, MarketMakerProperties.Quoting.class)).bindTo(service);
         update = lookup.findVirtual(MarketMakerService.class, "updateCachedOrders",
                 MethodType.methodType(void.class, ProductLine.class, long.class, String.class, List.class, List.class)).bindTo(service);
+        Class<?> reconcile = Class.forName(MarketMakerService.class.getName() + "$ReconcileResult");
+        refill = lookup.findVirtual(MarketMakerService.class, "placeMissingQuotes",
+                MethodType.methodType(reconcile, MarketMakerProperties.Strategy.class, long.class, String.class,
+                        QuotePlan.class, List.class, String.class, long.class)).bindTo(service)
+                .asType(MethodType.methodType(Object.class, MarketMakerProperties.Strategy.class, long.class,
+                        String.class, QuotePlan.class, List.class, String.class, long.class));
         var field = MarketMakerService.class.getDeclaredField("openOrderSnapshots"); field.setAccessible(true);
         cache = (Map<String, Object>) field.get(service);
         Class<?> snapshot = Class.forName(MarketMakerService.class.getName() + "$CachedOpenOrders");
@@ -78,6 +85,16 @@ public class MakerReconciliationAllocationBenchmark {
         }
         if (matched != levels * 2) throw new IllegalStateException("liquidity slot matching incorrect");
         return matched;
+    }
+
+    /** A populated ladder must only be checked; no HTTP or replacement order is needed. */
+    @Benchmark public Object quoteRefillScan() throws Throwable {
+        return (Object) refill.invokeExact(strategy, 7L, "604", plan, orders, prefix, 1L);
+    }
+
+    @TearDown public void verifyPopulatedLadder() {
+        if (orders.size() != levels * 2 || orders.contains(null))
+            throw new IllegalStateException("refill changed a populated ladder");
     }
 
     @Benchmark public Object confirmedBatchSnapshot() throws Throwable {
