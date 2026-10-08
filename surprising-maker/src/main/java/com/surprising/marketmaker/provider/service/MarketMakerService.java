@@ -450,11 +450,12 @@ public class MarketMakerService {
             long staleOwned = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                     ? ownedLive.size() : 0;
             int desiredQuotes = plan.quotes().size();
+            var quoting = properties.getQuoting();
             long matchedDesired = plan.quotes().stream()
-                    .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix))
+                    .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix, quoting))
                     .count();
             long offTargetOwned = ownedLive.stream()
-                    .filter(order -> plan.quotes().stream().noneMatch(quote -> matchesQuote(order, quote, accountPrefix)))
+                    .filter(order -> plan.quotes().stream().noneMatch(quote -> matchesQuote(order, quote, accountPrefix, quoting)))
                     .count();
             long missingDesired = Math.max(0, desiredQuotes - matchedDesired);
             long maxInventory = effectiveMaxInventorySteps(strategy);
@@ -877,6 +878,7 @@ public class MarketMakerService {
                                       long cycleSequence,
                                       Instant now) {
         String accountPrefix = accountPrefix(strategy, instrumentId, accountId);
+        var quoting = properties.getQuoting();
         List<OrderResponse> owned = openOrders.stream()
                 .filter(order -> ownsOrder(accountPrefix, order))
                 // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用目标报价档位。
@@ -895,7 +897,7 @@ public class MarketMakerService {
         long previousAsk = owned.stream().filter(order -> order.side() == OrderSide.SELL)
                 .mapToLong(OrderResponse::priceTicks).min().orElse(Long.MAX_VALUE);
         List<CancelOrderRequest> cancelRequests = owned.stream()
-                .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now))
+                .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now, quoting))
                 // Move quotes that would cross the new opposite side first, preserving post-only semantics.
                 .sorted(Comparator.<OrderResponse>comparingInt(order ->
                         order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
@@ -929,7 +931,7 @@ public class MarketMakerService {
             for (CancelOrderRequest request : batch) {
                 OrderResponse old = kept.stream().filter(order -> order.orderId() == request.orderId())
                         .findFirst().orElse(null);
-                DesiredQuote best = liquidityQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk);
+                DesiredQuote best = liquidityQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk, quoting);
                 if (best == null) cancellations.add(request);
                 else amendments.put(request.orderId(), best);
             }
@@ -962,17 +964,18 @@ public class MarketMakerService {
     }
 
     private DesiredQuote liquidityQuoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
-            OrderResponse old, String prefix, long bid, long ask) {
-        if (old == null || properties.getQuoting().getLinearLiquidityTargetNotionalUnits() == 0
+            OrderResponse old, String prefix, long bid, long ask, MarketMakerProperties.Quoting quoting) {
+        if (old == null || quoting.getLinearLiquidityTargetNotionalUnits() == 0
                 || (strategy.getProductLine() != ProductLine.LINEAR_PERPETUAL
                 && strategy.getProductLine() != ProductLine.LINEAR_DELIVERY)) return null;
-        return plan.quotes().stream().filter(quote -> quote.side() == old.side()
-                && java.math.BigInteger.valueOf(Math.abs(quote.priceTicks() - (quote.side() == OrderSide.BUY ? bid : ask)))
-                        .multiply(java.math.BigInteger.valueOf(1_000_000L)).compareTo(
-                                java.math.BigInteger.valueOf(quote.side() == OrderSide.BUY ? bid : ask)
-                                        .multiply(java.math.BigInteger.valueOf(properties.getQuoting().getLiquiditySlippagePpm()))) <= 0
-                && old.clientOrderId().startsWith(quotePrefix(prefix, quote.side(), quote.level())))
-                .findFirst().orElse(null);
+        long best = old.side() == OrderSide.BUY ? bid : ask;
+        long tolerance = ppmFloor(best, quoting.getLiquiditySlippagePpm());
+        for (var quote : plan.quotes()) {
+            if (quote.side() != old.side()
+                    || !old.clientOrderId().startsWith(quotePrefix(prefix, quote.side(), quote.level()))) continue;
+            if (Math.abs(quote.priceTicks() - best) <= tolerance) return quote;
+        }
+        return null;
     }
 
     /** Batch transport with per-item confirmation; a batch is not an all-or-nothing transaction. */
@@ -994,6 +997,7 @@ public class MarketMakerService {
                         || result.results().size() != batch.size())
                     throw new IllegalStateException("quote amendments not confirmed: " + receiptMessage(receipt));
                 boolean[] confirmed = new boolean[batch.size()];
+                List<OrderResponse> replacements = new ArrayList<>(batch.size());
                 for (var item : result.results()) {
                     if (!item.success() || item.index() < 0 || item.index() >= batch.size()
                             || confirmed[item.index()] || item.amend() == null
@@ -1005,10 +1009,11 @@ public class MarketMakerService {
                             || !request.newClientOrderId().equals(replacement.clientOrderId()))
                         throw new IllegalStateException("quote amendment identity or status mismatch");
                     confirmed[item.index()] = true;
-                    forgetOrder(strategy.getProductLine(), accountId, instrumentId, request.orderId());
-                    rememberOrder(strategy.getProductLine(), accountId, instrumentId, replacement);
-                    updated.add(replacement);
+                    replacements.add(replacement);
                 }
+                updateCachedOrders(strategy.getProductLine(), accountId, instrumentId,
+                        batch.stream().map(AmendOrderRequest::orderId).toList(), replacements);
+                updated.addAll(replacements);
             }
             return updated;
         } catch (RuntimeException ex) {
@@ -1074,6 +1079,7 @@ public class MarketMakerService {
                     if (batch == null) {
                         throw new IllegalStateException(receiptMessage(receipt));
                     }
+                    List<OrderResponse> confirmedOrders = new ArrayList<>(batchRequests.size());
                     for (int i = 0; i < batchRequests.size(); i++) {
                         int resultIndex = i;
                         var item = batch.results().stream()
@@ -1092,7 +1098,7 @@ public class MarketMakerService {
                                             response == null ? null : response.rejectReason()));
                             continue;
                         }
-                        rememberOrder(strategy.getProductLine(), accountId, instrumentId, response);
+                        confirmedOrders.add(response);
                         submitted++;
                         // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
                         int placeholder = kept.indexOf(null);
@@ -1102,6 +1108,7 @@ public class MarketMakerService {
                             kept.add(response);
                         }
                     }
+                    updateCachedOrders(strategy.getProductLine(), accountId, instrumentId, List.of(), confirmedOrders);
                 } catch (RuntimeException ex) {
                     // Core may have accepted the batch before the response was lost. Stop this
                     // cycle before canceling more liquidity, then query actual orders next time.
@@ -1125,21 +1132,21 @@ public class MarketMakerService {
     private boolean shouldKeep(OrderResponse order,
                                List<DesiredQuote> desiredQuotes,
                                String accountPrefix,
-                               Instant now) {
-        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, now));
+                               Instant now, MarketMakerProperties.Quoting quoting) {
+        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, now, quoting));
     }
 
     private boolean isFreshQuote(OrderResponse order,
                                  DesiredQuote quote,
                                  String accountPrefix,
-                                 Instant now) {
-        return isLive(order) && matchesQuote(order, quote, accountPrefix);
+                                 Instant now, MarketMakerProperties.Quoting quoting) {
+        return isLive(order) && matchesQuote(order, quote, accountPrefix, quoting);
     }
 
-    private boolean hasLiveQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
+    private boolean hasLiveQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {
         return orders.stream()
                 .filter(this::isLive)
-                .anyMatch(order -> matchesQuote(order, quote, accountPrefix));
+                .anyMatch(order -> matchesQuote(order, quote, accountPrefix, quoting));
     }
 
     private boolean hasOwnedQuoteSlot(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
@@ -1148,27 +1155,30 @@ public class MarketMakerService {
                 && order.clientOrderId().startsWith(prefix));
     }
 
-    private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix) {
+    private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {
         String expectedPrefix = quotePrefix(accountPrefix, quote.side(), quote.level());
         return order.clientOrderId() != null
                 && order.clientOrderId().startsWith(expectedPrefix)
                 && order.side() == quote.side()
                 && Math.abs(order.priceTicks() - quote.priceTicks())
-                <= Math.max(properties.getQuoting().getRefreshThresholdTicks(),
-                        java.math.BigInteger.valueOf(quote.priceTicks())
-                                .multiply(java.math.BigInteger.valueOf(properties.getQuoting().getRefreshTolerancePpm()))
-                                .divide(java.math.BigInteger.valueOf(1_000_000L)).longValueExact())
-                && quantityWithinRefreshTolerance(order.remainingQuantitySteps(), quote.quantitySteps());
+                <= Math.max(quoting.getRefreshThresholdTicks(), ppmFloor(quote.priceTicks(), quoting.getRefreshTolerancePpm()))
+                && quantityWithinRefreshTolerance(order.remainingQuantitySteps(), quote.quantitySteps(), quoting);
     }
 
-    private boolean quantityWithinRefreshTolerance(long resting, long desired) {
-        long ppm = properties.getQuoting().getQuantityRefreshTolerancePpm();
+    private boolean quantityWithinRefreshTolerance(long resting, long desired, MarketMakerProperties.Quoting quoting) {
+        long ppm = quoting.getQuantityRefreshTolerancePpm();
         if (ppm == 0L) return resting == desired;
         if (resting < 0L || desired <= 0L) return false;
-        long tolerance = (desired / 1_000_000L) * ppm
-                + (desired % 1_000_000L) * ppm / 1_000_000L;
+        long tolerance = ppmFloor(desired, ppm);
         long difference = resting >= desired ? resting - desired : desired - resting;
         return difference <= tolerance;
+    }
+
+    /** Exact floor(value * ppm / 1e6) without overflowing the intermediate product. */
+    static long ppmFloor(long value, long ppm) {
+        if (value < 0 || ppm < 0 || ppm > 1_000_000L)
+            throw new IllegalArgumentException("positive value and ppm in [0, 1000000] required");
+        return (value / 1_000_000L) * ppm + (value % 1_000_000L) * ppm / 1_000_000L;
     }
 
     private boolean isLive(OrderResponse order) {
@@ -1453,6 +1463,7 @@ public class MarketMakerService {
                     failed.addAll(batchRequests);
                     continue;
                 }
+                List<Long> confirmedIds = new ArrayList<>(batchRequests.size());
                 for (int i = 0; i < batchRequests.size(); i++) {
                     int requestIndex = i;
                     boolean success = response.results().stream()
@@ -1460,11 +1471,12 @@ public class MarketMakerService {
                     CancelOrderRequest request = batchRequests.get(i);
                     if (success) {
                         canceled++;
-                        forgetOrder(productLine, accountId, instrumentId, request.orderId());
+                        confirmedIds.add(request.orderId());
                     } else {
                         failed.add(request);
                     }
                 }
+                updateCachedOrders(productLine, accountId, instrumentId, confirmedIds, List.of());
             } catch (RuntimeException ex) {
                 log.warn("做市批量撤单状态不确定 accountId={} instrumentId={} error={}", accountId, instrumentId, ex.getMessage());
                 failed.addAll(batchRequests);
@@ -1505,24 +1517,20 @@ public class MarketMakerService {
         return orders;
     }
 
-    private void rememberOrder(ProductLine productLine, long accountId, String instrumentId, OrderResponse order) {
-        if (order == null) {
-            return;
-        }
+    /** Update the derived order snapshot once per confirmed batch; uncertain batches invalidate it. */
+    private void updateCachedOrders(ProductLine productLine, long accountId, String instrumentId,
+            List<Long> removedIds, List<OrderResponse> replacements) {
+        if (removedIds.isEmpty() && replacements.isEmpty()) return;
         String key = orderSnapshotKey(productLine, accountId, instrumentId);
         openOrderSnapshots.computeIfPresent(key, (ignored, cached) -> {
-            List<OrderResponse> orders = new ArrayList<>(cached.orders());
-            orders.removeIf(existing -> existing != null && existing.orderId() == order.orderId());
-            orders.add(order);
+            var replacedIds = new java.util.HashSet<>(removedIds);
+            for (var order : replacements) replacedIds.add(order.orderId());
+            List<OrderResponse> orders = new ArrayList<>(cached.orders().size() + replacements.size());
+            for (var order : cached.orders())
+                if (!replacedIds.contains(order.orderId())) orders.add(order);
+            orders.addAll(replacements);
             return new CachedOpenOrders(List.copyOf(orders), cached.refreshedAt());
         });
-    }
-
-    private void forgetOrder(ProductLine productLine, long accountId, String instrumentId, long orderId) {
-        String key = orderSnapshotKey(productLine, accountId, instrumentId);
-        openOrderSnapshots.computeIfPresent(key, (ignored, cached) -> new CachedOpenOrders(
-                cached.orders().stream().filter(order -> order == null || order.orderId() != orderId).toList(),
-                cached.refreshedAt()));
     }
 
     private String orderSnapshotKey(ProductLine productLine, long accountId, String instrumentId) {

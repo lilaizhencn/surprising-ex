@@ -263,9 +263,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private List<ReferenceOrderBookLevel> convertDelta(List<ParsedLevel> levels, InstrumentResponse instrument,
                                                         MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
+        var referenceMarket = properties.getReferenceMarket();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument, source);
+            long quantitySteps = toSteps(level.quantity(), instrument, source, referenceMarket);
             if (priceTicks > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -276,9 +277,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private List<ReferenceOrderBookLevel> convert(List<ParsedLevel> levels, InstrumentResponse instrument,
                                                    MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
+        var referenceMarket = properties.getReferenceMarket();
         for (ParsedLevel level : levels) {
             long priceTicks = toTicks(level.price(), instrument.pricePrecision());
-            long quantitySteps = toSteps(level.quantity(), instrument, source);
+            long quantitySteps = toSteps(level.quantity(), instrument, source, referenceMarket);
             if (priceTicks > 0 && quantitySteps > 0) {
                 result.add(new ReferenceOrderBookLevel(priceTicks, quantitySteps));
             }
@@ -293,7 +295,8 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private long toSteps(BigDecimal quantity, InstrumentResponse instrument,
-                         MarketMakerProperties.ReferenceMarket.Source source) {
+                         MarketMakerProperties.ReferenceMarket.Source source,
+                         MarketMakerProperties.ReferenceMarket referenceMarket) {
         BigDecimal size = quantity;
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
                 || instrument.contractType() == com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY) {
@@ -303,11 +306,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             size = size.movePointRight(Math.max(0, instrument.quantityPrecision()));
         }
         long rawSteps = size
-                .multiply(BigDecimal.valueOf(Math.max(1L, properties.getReferenceMarket().getQuantityScalePpm())))
+                .multiply(BigDecimal.valueOf(Math.max(1L, referenceMarket.getQuantityScalePpm())))
                 .multiply(BigDecimal.valueOf(source.getQuantityScalePpm()))
                 .divide(ONE_PPM.multiply(ONE_PPM), 0, RoundingMode.HALF_UP)
                 .longValueExact();
-        MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
         long minQuantity = Math.max(1L, referenceMarket.getMinQuantitySteps());
         long maxQuantity = Math.max(minQuantity, referenceMarket.getMaxQuantitySteps());
         if (rawSteps <= 0) {
