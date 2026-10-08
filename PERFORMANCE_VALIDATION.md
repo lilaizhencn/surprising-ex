@@ -4876,3 +4876,27 @@ HotSpot Corretto 27 / Maven 3.9.16，macOS 26.7.2，16 逻辑 CPU、16 GiB RAM�
 结论：功能通过，资源局部验证。未部署服务器，未做完整 HTTP/Kafka/做市负载、NMT、长稳或业务 p99，不能据此宣称整机收益或容量。最后一轮无 swap-in/out/page-out 增量。
 全部实际命令、逐类结果、JMH 原始样本、JFR summary/分配/GC 聚合、路径及 SHA-256 见 [验证记录](docs/validation/gateway-realtime-resource-optimization-20261008.md) 和同名 JSON。
 清理完成：仅删除本轮独立源码/构建、临时 Core/驱动数据、日志、录制及中间报告，保留已入档汇总；本轮进程已结束，原服务与其他工作区改动保留。
+
+
+## 2026-10-08：测试服务器工作与分配补充观察
+
+采集前锁定只读诊断计划，UTC 15:13:01–15:16:12；无额外发压、资金写入、配置调整或部署。
+12 vCPU、约 47 GiB、HotSpot JDK 27 / Maven 3.8.7，LINEAR_PERPETUAL 三合约现有做市，SPOT 停止。
+五应用仍为 292e4e04；Core 保留旧二进制，commit 未确认、SHA-256 已入档。本地审阅 master d998c63d。
+对照 commit：不适用，只观察实际部署；没有检出或重跑旧代码。
+
+前后各约 32 秒无 profiler 窗口，整机 idle 59.35% / 59.61%；六应用各 60 秒 JFR，16 MiB/进程上限。
+另预写计划补录 price 异常 10 秒/8 MiB；七份合计 11,870,853 bytes，未发现 DataLoss。
+可观测平台线程分配 maker 24.65、realtime 10.23、Gateway 8.87、price 5.28、Core 2.57、lifecycle 1.40 MiB/s；不完整覆盖虚拟/短命线程。
+新增定位：做市报价 BigInteger 重复计算、配置 CGLIB/校验调用、改单逐项复制订单快照；
+price 正常过滤异常 15,210 次/60秒，三币共享连接逐源重复解析和正则编译；
+Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测异常 2,489 次/60秒。
+重新确认 realtime 导出等待约 0.50–0.52 核，匹配无进展仍自旋。已有 master 驱动/编解码/调度/批量优化尚未部署，单独标记。
+
+五应用健康 UP，57 topics/57 partitions，19 Stable 组；活跃且有提交位点的总 lag 为 4，K线 Streams lag 0，未提交位点不填零。
+实时 transport dropped 约200秒增加2，原因未定位；不能以健康UP代替推送完整性。最大观测 GC phase pause 0.737ms。
+结论为部分验证：确认候选，未实施或证明节省；未进行容量/p99、资金守恒、快照恢复、NMT/native 或长稳验收。
+
+完整计划、命令、方法和正确性边界见 [工作与分配观察](docs/validation/server-work-allocation-observation-20261008.md)，
+系统窗口、指标增量、JFR summary/view、热点与异常、PID/JAR/文件校验及清理见同名 JSON。
+七份录制自动结束并 JFR.check 确认，汇总校验后仅清理本轮原始/中间文件；准确清理数量记录在 JSON。原应用、Core Archive、业务 checkpoint、Kafka 均保留。
