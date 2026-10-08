@@ -39,6 +39,25 @@ class RealtimeFrameCodecTest {
    assertThat(decoded).usingRecursiveComparison().isEqualTo(f);assertThat(decoded.payload()).containsExactly((byte)1,(byte)2,(byte)3);
   }
  }
+ @Test void decodesBoundedHeapDirectAndReadOnlyBuffersWithoutBorrowingTheirStorage() {
+  for(var product:ProductLine.values()) for(var kind:RealtimeFrame.Kind.values()) {
+   var expected=new RealtimeFrame(product,kind,42,123,3,4,0,"币对😀","订单",new byte[]{1,2,3});
+   byte[] encoded=RealtimeFrameCodec.encode(expected);
+   for(boolean direct:new boolean[]{false,true}) {
+    var buffer=direct?java.nio.ByteBuffer.allocateDirect(encoded.length+24):java.nio.ByteBuffer.allocate(encoded.length+24);
+    buffer.position(11);buffer.put(encoded);buffer.limit(buffer.position());buffer.position(11);
+    var borrowed=buffer.asReadOnlyBuffer();
+    var decoded=RealtimeFrameCodec.decode(borrowed);
+    assertThat(borrowed.position()).isEqualTo(11);
+    assertThat(decoded).usingRecursiveComparison().isEqualTo(expected);
+    buffer.put(11+encoded.length-1,(byte)99);
+    byte[] exposed=decoded.payload();exposed[0]=99;
+    assertThat(decoded.payload()).containsExactly((byte)1,(byte)2,(byte)3);
+    buffer.limit(buffer.limit()-1);
+    assertThatThrownBy(()->RealtimeFrameCodec.decode(buffer)).isInstanceOf(IllegalArgumentException.class);
+   }
+  }
+ }
  @Test void rejectsMalformedAndOversizedEnvelopes() {
   var f=new RealtimeFrame(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,1,2,3,4,0,"1","1",new byte[2]);
   byte[] valid=RealtimeFrameCodec.encode(f);

@@ -62,10 +62,16 @@ public final class RealtimeFrameCodec {
         return b.array();
     }
     public static RealtimeFrame decode(byte[] bytes) {
-        if (bytes == null || bytes.length < 64 || bytes.length > MAX_FRAME_BYTES)
+        if (bytes == null) throw new IllegalArgumentException("invalid realtime frame size");
+        return decode(ByteBuffer.wrap(bytes));
+    }
+
+    /** Decodes within the caller's bounds; no reference to the borrowed transport buffer escapes. */
+    public static RealtimeFrame decode(ByteBuffer bytes) {
+        if (bytes == null || bytes.remaining() < 64 || bytes.remaining() > MAX_FRAME_BYTES)
             throw new IllegalArgumentException("invalid realtime frame size");
         try {
-            ByteBuffer b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer b = bytes.slice().order(ByteOrder.LITTLE_ENDIAN);
             if (b.getInt() != MAGIC || b.getInt() != 1) throw new IllegalArgumentException("realtime protocol mismatch");
             int product = b.getInt(), kind = b.getInt();
             if (product < 0 || product >= PRODUCTS.length || kind < 0 || kind >= KINDS.length)
@@ -85,9 +91,15 @@ public final class RealtimeFrameCodec {
     private static void put(ByteBuffer b, byte[] value) { b.putInt(value.length).put(value); }
     private static String text(ByteBuffer b, int max) {
         int n = fieldLength(b, max);
-        String value = new String(b.array(), b.arrayOffset() + b.position(), n, StandardCharsets.UTF_8);
-        b.position(b.position() + n);
-        return value;
+        if (b.hasArray()) {
+            String value = new String(b.array(), b.arrayOffset() + b.position(), n, StandardCharsets.UTF_8);
+            b.position(b.position() + n);
+            return value;
+        }
+        // Direct/read-only transport buffers expose no array. Only the small text field is copied.
+        byte[] value = new byte[n];
+        b.get(value);
+        return new String(value, StandardCharsets.UTF_8);
     }
     private static byte[] get(ByteBuffer b, int max) {
         int n = fieldLength(b, max);
