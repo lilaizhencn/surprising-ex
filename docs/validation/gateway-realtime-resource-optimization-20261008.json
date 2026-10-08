@@ -1,0 +1,2840 @@
+{
+  "codeCommit": "8a8ce3cb89a613da12e362f3914ae95a0bec8b1b",
+  "integrationBase": "243158a8a0dc90aeb8cdfcab509685c4b5c95408",
+  "initialBase": "bae5cfdb6731bb074c7e9f67518ada5fa8dd8570",
+  "date": "2026-10-08",
+  "scope": "Gateway command driver sharing per product; realtime v1 codec, Redis bytes/version and router batch allocations; no server deployment",
+  "plan": {
+    "root": "/Users/atomex/Desktop/surprising/surprising-ex",
+    "work": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v",
+    "startCommit": "bae5cfdb6731bb074c7e9f67518ada5fa8dd8570",
+    "scope": [
+      "Gateway product-scoped command MediaDriver shared by four pools, borrowed ownership",
+      "Realtime encoding temporary arrays, Redis byte pipeline commands, router batch reuse"
+    ],
+    "correctness": [
+      "independent sessions/control capacity/source identities and six product isolation",
+      "wire byte equality, payload defensive copying, malformed/truncated rejection",
+      "Redis per-user per-commit atomicity, fencing/ordering, snapshots"
+    ],
+    "validation": [
+      "client + protocol full module tests",
+      "Gateway affected tests and six-product money/state tests",
+      "realtime API real Redis integration and router tests",
+      "JMH current APIs/shared versus owned configuration; separate -prof gc and JFR, max 24m",
+      "real single-node Core transport functional/money/snapshot checks"
+    ],
+    "performanceThresholds": {
+      "sharedDrivers": "4 command drivers to 1; session/capacity unchanged",
+      "functionalFailures": 0,
+      "microbench": "diagnostic only, no capacity/p99 threshold; no old checkout",
+      "inFlight": 256
+    },
+    "jdk": "HotSpot27",
+    "serverDeployment": "only after local verification; no SPOT startup"
+  },
+  "environment": {
+    "platform": "macOS-26.7.2-x86_64-i386-64bit-Mach-O",
+    "jdk": "openjdk version \"27\" 2026-09-15\nOpenJDK Runtime Environment Corretto-27.0.0.33.1 (build 27+33-FR)\nOpenJDK 64-Bit Server VM Corretto-27.0.0.33.1 (build 27+33-FR, mixed mode, sharing)\n",
+    "cpu": "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz",
+    "logicalCpu": 16,
+    "ramGiB": 16,
+    "maven": "3.9.16",
+    "heap": "512 MiB",
+    "gc": "ZGC for unprofiled and -prof gc; initial attribution JFR default G1; final JFR ZGC",
+    "interference": "Shared developer workstation; concurrent Maven builds occurred during integration. No isolation or capacity claim. Final throughput variance is reported by JMH.",
+    "vmBefore": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   841781.\nPages active:                                1016850.\nPages inactive:                               835675.\nPages speculative:                            179149.\nPages throttled:                                   0.\nPages wired down:                             841982.\nPages purgeable:                                9010.\n\"Translation faults\":                      384154212.\nPages copy-on-write:                        15550929.\nPages zero filled:                         259853455.\nPages reactivated:                          16264284.\nPages purged:                                1377224.\nFile-backed pages:                            922737.\nAnonymous pages:                             1108937.\nPages stored in compressor:                  1534083.\nPages occupied by compressor:                 477932.\nDecompressions:                              7820321.\nCompressions:                               13909762.\nPageins:                                    42310084.\nPageouts:                                      63018.\nSwapins:                                       27056.\nSwapouts:                                     122046.\n",
+    "vmAfter": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   767904.\nPages active:                                1052661.\nPages inactive:                               872240.\nPages speculative:                            179369.\nPages throttled:                                   0.\nPages wired down:                             843363.\nPages purgeable:                                9228.\n\"Translation faults\":                      387599460.\nPages copy-on-write:                        15713646.\nPages zero filled:                         262509877.\nPages reactivated:                          16264878.\nPages purged:                                1377224.\nFile-backed pages:                            908882.\nAnonymous pages:                             1195388.\nPages stored in compressor:                  1533618.\nPages occupied by compressor:                 477739.\nDecompressions:                              7822323.\nCompressions:                               13909762.\nPageins:                                    42440728.\nPageouts:                                      63018.\nSwapins:                                       27056.\nSwapouts:                                     122046.\n"
+  },
+  "tests": {
+    "totals": {
+      "tests": 286,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    "classes": [
+      {
+        "name": "com.surprising.product.api.InstrumentIdsTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.product.api.ProductLineTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.product.api.ProductTopicNamesTest",
+        "tests": 3,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.account.provider.service.AccountAeronGatewayTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.gateway.provider.product.ProductCommandMediaDriverTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.gateway.provider.config.GatewayMediaDriverConfigurationTest",
+        "tests": 7,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.gateway.provider.product.SharedCommandTransportIntegrationTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.provider.MarketApplicationContextTest",
+        "tests": 20,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.ArchiveReplayIntegrationTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.ArchiveReplayTest",
+        "tests": 5,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.provider.RealtimeRouterPropertiesTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.api.ValkeyReadViewIntegrationTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.api.RealtimeVersionEncodingTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.realtime.api.RealtimeDeltaCommandTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.SettlementSolvencyBenchmarkTest",
+        "tests": 3,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.DerivativeRiskBoundaryBenchmarkTest",
+        "tests": 3,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmarkTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.RealtimeWorkloadTest",
+        "tests": 12,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronClientPoolTest",
+        "tests": 8,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.BorrowedMediaDriverTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.CoreQueryClassTest",
+        "tests": 3,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronClientAgentTest",
+        "tests": 23,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.RealtimeOutboxTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronClientCapacityTest",
+        "tests": 3,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+        "tests": 5,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+        "tests": 6,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.OrderExecutionValueTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+        "tests": 14,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+        "tests": 8,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreInputEventCodecTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreResponseTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+        "tests": 11,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+        "tests": 14,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+        "tests": 5,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.surprising.aeron.protocol.WireCodeLookupTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "sourceSha256": {
+    "surprising-aeron-core/surprising-aeron-client/src/main/java/com/surprising/aeron/client/AeronClientPool.java": "66fb500e55e0eb882f68e4b0fda861aaeb24115205bed006f5bf203b838e21f9",
+    "surprising-aeron-core/surprising-aeron-client/src/main/java/com/surprising/aeron/client/SurprisingAeronClient.java": "f0740902c9c40f2e4f9a9f1cf0b8a844e02edcc46f68a914a4461a6b04d67bcd",
+    "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/RealtimeFrameCodec.java": "3eaa505949351a59b0c4d28761371ca07a33f8733cfaa291c25c9e1ccae043fe",
+    "surprising-gateway/src/main/java/com/surprising/gateway/product/ProductBusinessConfiguration.java": "bc2e78ad1e2629a879d37c9db397a4657ba32e7b5dacec690743b397f19adf07",
+    "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountAeronGateway.java": "2fce5f069792c1b2274ebb85eb63225fbf9e38b0b704a2c38a174cf0a98c8783",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderAeronGateway.java": "cad4bdbcbfc272f365a84725a45dcd4a1368da164d6628e712e8afbb6c26c2ea",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java": "04b20bcf0951b992e01af6ef08f8fbdfc978af250236139687d1ed16382b513b",
+    "surprising-gateway/src/main/java/com/surprising/trading/maintenance/MaintenanceAeronGateway.java": "90df458c06509a67460c57767630b0b87355a99e3febeced8bae5e04493a41fd",
+    "surprising-realtime/surprising-realtime-api/src/main/java/com/surprising/realtime/api/ValkeyReadViewStore.java": "3c3e179f9487725f342207cb4da08e20db35c72ceceef7f1afec8ca41ca2cea8",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/RealtimeRouter.java": "afe75e08f43bb13abfd7cc6964ca3ed515e030658d2cfbb901b7278d23e3c709",
+    "surprising-aeron-core/surprising-aeron-client/src/test/java/com/surprising/aeron/client/BorrowedMediaDriverTest.java": "5ff769a748fff4c5e33ce375e5c481380ad8ff4fa2ae1f86a177ea6908fb21de",
+    "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/RealtimeWireCompatibilityTest.java": "6f30fbac26b978623ead961001040a97f6544d09d4bd434855294ea6494dea5d",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/ProductCommandMediaDriverTest.java": "c6d1df217514cd887eabfe148d242debd410960214a187697609fbdda191eccd",
+    "surprising-realtime/surprising-realtime-api/src/test/java/com/surprising/realtime/api/RealtimeDeltaCommandTest.java": "e2940acc6c909d67b73b58944c078deb09e9f2cb313c1916d9896be1dfe0a73f",
+    "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/realtime/api/RealtimeAllocationBenchmark.java": "eefc1a3016bb8229faead526a6251db7c2e70e570db393568b0fa8e5620bb45d",
+    "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreStateQueryCodec.java": "8695cd8d8e0e8f0f4308ae47b99049bd129e7491948ca7b1ec5358379e6858c7",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/SharedCommandTransportIntegrationTest.java": "300fa8c492601119774d7c9a5a8f14c90cfd5f824f41b31d124776d6fa7a2f6a",
+    "surprising-aeron-core/surprising-aeron-client/README.md": "efa8c19c57067e4f77c610fc7b7d666f24dbed1b7b06073a6759c521028a1e56",
+    "surprising-gateway/README.md": "d7974a3461bea34ab371884ba6c96cee30b1f4572c8c1fc8265e1715b9f6862a",
+    "surprising-realtime/README.md": "083373b9febd7d16fdb8616a2942eeafbcf2d1b6bbd4307ad3d4ddfc983d1551",
+    "surprising-realtime/surprising-realtime-api/src/main/java/com/surprising/realtime/api/RealtimeVersion.java": "add67af6844b8358599b4037b9c73920e30f97f365d3effe008cc222ba347578",
+    "surprising-realtime/surprising-realtime-api/src/test/java/com/surprising/realtime/api/RealtimeVersionEncodingTest.java": "36b34eae7143d43d6e34ce2b5fe6b3752b62ce9a979945c09702bfd1796834be"
+  },
+  "driverProbe": {
+    "four": "drivers=4 newThreads=5 elapsedSeconds=10.001 threadCpuPercentOneCore=9.146 directoryBytes=197148672\nthread=InnocuousThread-1\nthread=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-four/driver-0 [sender,receiver,aeron-md-nra,driver-conductor]\nthread=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-four/driver-1 [sender,receiver,aeron-md-nra,driver-conductor]\nthread=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-four/driver-2 [sender,receiver,aeron-md-nra,driver-conductor]\nthread=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-four/driver-3 [sender,receiver,aeron-md-nra,driver-conductor]\n",
+    "one": "drivers=1 newThreads=2 elapsedSeconds=10.004 threadCpuPercentOneCore=3.386 directoryBytes=49287168\nthread=InnocuousThread-1\nthread=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-one/driver-0 [sender,receiver,aeron-md-nra,driver-conductor]\n",
+    "meaning": "Current MediaDriver factory, four versus one simultaneously running SHARED drivers; 2 s settle + 10 s idle measurement. Directory sizes are logical file sizes, not RSS/NMT.",
+    "source": "import com.surprising.aeron.client.SurprisingAeronClient;\nimport io.aeron.driver.MediaDriver;\nimport java.lang.management.ManagementFactory;\nimport java.nio.file.*;\nimport java.util.*;\npublic class DriverResourceProbe {\n public static void main(String[] args) throws Exception {\n  int count=Integer.parseInt(args[0]);\n  var root=Path.of(args[1]);Files.createDirectories(root);\n  var threads=ManagementFactory.getThreadMXBean();\n  var before=new HashSet<Long>();for(long id:threads.getAllThreadIds())before.add(id);\n  var drivers=new ArrayList<MediaDriver>();\n  try {\n   for(int i=0;i<count;i++)drivers.add(SurprisingAeronClient.newMediaDriver(root.resolve(\"driver-\"+i).toString()));\n   Thread.sleep(2000);\n   var ids=Arrays.stream(threads.getAllThreadIds()).filter(id->!before.contains(id)).toArray();\n   long cpuBefore=0;for(long id:ids)cpuBefore+=Math.max(0,threads.getThreadCpuTime(id));\n   long start=System.nanoTime();Thread.sleep(10000);long elapsed=System.nanoTime()-start;\n   long cpuAfter=0;for(long id:ids)cpuAfter+=Math.max(0,threads.getThreadCpuTime(id));\n   long bytes;try(var files=Files.walk(root)){bytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}\n   System.out.printf(java.util.Locale.ROOT,\"drivers=%d newThreads=%d elapsedSeconds=%.3f threadCpuPercentOneCore=%.3f directoryBytes=%d%n\",count,ids.length,elapsed/1e9,100.0*(cpuAfter-cpuBefore)/elapsed,bytes);\n   for(long id:ids)System.out.println(\"thread=\"+threads.getThreadInfo(id).getThreadName());\n  } finally {for(var driver:drivers)driver.close();}\n  try(var files=Files.walk(root)){if(files.anyMatch(Files::isRegularFile))throw new IllegalStateException(\"driver artifacts not released\");}\n }\n}\n"
+  },
+  "benchmarks": {
+    "main": [
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.decode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 14262262.487052903,
+          "scoreError": 781664.3373774968,
+          "scoreConfidence": [
+            13480598.149675407,
+            15043926.824430399
+          ],
+          "scorePercentiles": {
+            "0.0": 13671266.087289928,
+            "50.0": 14123810.484996792,
+            "90.0": 15401560.218946151,
+            "95.0": 15489443.216294592,
+            "99.0": 15489443.216294592,
+            "99.9": 15489443.216294592,
+            "99.99": 15489443.216294592,
+            "99.999": 15489443.216294592,
+            "99.9999": 15489443.216294592,
+            "100.0": 15489443.216294592
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              13756502.480292914,
+              14171326.585414145,
+              14014474.34849843,
+              13671266.087289928,
+              14363127.217956346
+            ],
+            [
+              14610613.242810179,
+              14076294.38457944,
+              15489443.216294592,
+              14404324.034114819,
+              14065253.273278236
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.decode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 1255246.6952679367,
+          "scoreError": 66844.35911744118,
+          "scoreConfidence": [
+            1188402.3361504956,
+            1322091.0543853778
+          ],
+          "scorePercentiles": {
+            "0.0": 1186301.322039308,
+            "50.0": 1268921.4858560208,
+            "90.0": 1312326.7496637583,
+            "95.0": 1312557.5716964651,
+            "99.0": 1312557.5716964651,
+            "99.9": 1312557.5716964651,
+            "99.99": 1312557.5716964651,
+            "99.999": 1312557.5716964651,
+            "99.9999": 1312557.5716964651,
+            "100.0": 1312557.5716964651
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              1273406.1150499224,
+              1252670.963306974,
+              1273354.9393666093,
+              1207512.7130424401,
+              1312557.5716964651
+            ],
+            [
+              1268160.1955665608,
+              1310249.3513693972,
+              1186301.322039308,
+              1269682.776145481,
+              1198571.00509621
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.encode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 15050990.788116235,
+          "scoreError": 454900.2188574733,
+          "scoreConfidence": [
+            14596090.569258763,
+            15505891.006973708
+          ],
+          "scorePercentiles": {
+            "0.0": 14662052.671230659,
+            "50.0": 15011013.007940087,
+            "90.0": 15499930.859595798,
+            "95.0": 15516487.968115427,
+            "99.0": 15516487.968115427,
+            "99.9": 15516487.968115427,
+            "99.99": 15516487.968115427,
+            "99.999": 15516487.968115427,
+            "99.9999": 15516487.968115427,
+            "100.0": 15516487.968115427
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              14822742.30036742,
+              15070137.570887167,
+              14951888.444993006,
+              15286360.262067327,
+              15350916.882919144
+            ],
+            [
+              15516487.968115427,
+              14705963.969062362,
+              14662052.671230659,
+              15315916.900698727,
+              14827440.9108211
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.encode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 2352504.1563730813,
+          "scoreError": 188074.90676707626,
+          "scoreConfidence": [
+            2164429.249606005,
+            2540579.0631401576
+          ],
+          "scorePercentiles": {
+            "0.0": 2161104.5256936136,
+            "50.0": 2355800.681159628,
+            "90.0": 2517465.12247389,
+            "95.0": 2521528.6474538376,
+            "99.0": 2521528.6474538376,
+            "99.9": 2521528.6474538376,
+            "99.99": 2521528.6474538376,
+            "99.999": 2521528.6474538376,
+            "99.9999": 2521528.6474538376,
+            "100.0": 2521528.6474538376
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              2213699.0648034313,
+              2335226.9558392325,
+              2469991.0688371058,
+              2436610.361135837,
+              2289273.1643331815
+            ],
+            [
+              2376374.4064800236,
+              2480893.3976543597,
+              2161104.5256936136,
+              2521528.6474538376,
+              2240339.971500191
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 4040485.4615876093,
+          "scoreError": 328559.3477435765,
+          "scoreConfidence": [
+            3711926.113844033,
+            4369044.809331186
+          ],
+          "scorePercentiles": {
+            "0.0": 3578861.356039943,
+            "50.0": 4103664.567393516,
+            "90.0": 4235396.483566359,
+            "95.0": 4241545.427834393,
+            "99.0": 4241545.427834393,
+            "99.9": 4241545.427834393,
+            "99.99": 4241545.427834393,
+            "99.999": 4241545.427834393,
+            "99.9999": 4241545.427834393,
+            "100.0": 4241545.427834393
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              4089774.337192267,
+              4180055.9851540467,
+              4241545.427834393,
+              4108569.7853751667,
+              4098759.349411866
+            ],
+            [
+              3705593.906147374,
+              3578861.356039943,
+              4136217.948806831,
+              4173096.4401754765,
+              4092380.079738738
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 765838.6954583141,
+          "scoreError": 150611.30798031646,
+          "scoreConfidence": [
+            615227.3874779977,
+            916450.0034386306
+          ],
+          "scorePercentiles": {
+            "0.0": 635768.5373044307,
+            "50.0": 808372.393285643,
+            "90.0": 887404.7764089553,
+            "95.0": 890884.7024918974,
+            "99.0": 890884.7024918974,
+            "99.9": 890884.7024918974,
+            "99.99": 890884.7024918974,
+            "99.999": 890884.7024918974,
+            "99.9999": 890884.7024918974,
+            "100.0": 890884.7024918974
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              841830.5936897615,
+              639978.3176622462,
+              642266.5125748264,
+              635768.5373044307,
+              704227.0404465757
+            ],
+            [
+              816249.558646371,
+              800495.2279249149,
+              890884.7024918974,
+              830601.0221796405,
+              856085.4416624766
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.client.ClientSourceOrderingBenchmark.dispatch",
+        "mode": "thrpt",
+        "threads": 4,
+        "forks": 2,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 1362083.9158523441,
+          "scoreError": 47345.22871232621,
+          "scoreConfidence": [
+            1314738.687140018,
+            1409429.1445646703
+          ],
+          "scorePercentiles": {
+            "0.0": 1313140.1300993243,
+            "50.0": 1363803.9035730828,
+            "90.0": 1403155.94606806,
+            "95.0": 1403882.8660510427,
+            "99.0": 1403882.8660510427,
+            "99.9": 1403882.8660510427,
+            "99.99": 1403882.8660510427,
+            "99.999": 1403882.8660510427,
+            "99.9999": 1403882.8660510427,
+            "100.0": 1403882.8660510427
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              1359524.397464476,
+              1343953.8756242418,
+              1332283.016954502,
+              1368083.4096816892,
+              1331716.0509795751
+            ],
+            [
+              1396613.666221215,
+              1403882.8660510427,
+              1395381.4919277313,
+              1376260.2535196436,
+              1313140.1300993243
+            ]
+          ]
+        },
+        "secondaryMetrics": {}
+      }
+    ],
+    "gc": [
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.decode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 15075359.069546867,
+          "scoreError": 2237670.7548172288,
+          "scoreConfidence": [
+            12837688.314729638,
+            17313029.824364096
+          ],
+          "scorePercentiles": {
+            "0.0": 14590474.600652741,
+            "50.0": 14975655.133169407,
+            "90.0": 16017986.444095042,
+            "95.0": 16017986.444095042,
+            "99.0": 16017986.444095042,
+            "99.9": 16017986.444095042,
+            "99.99": 16017986.444095042,
+            "99.999": 16017986.444095042,
+            "99.9999": 16017986.444095042,
+            "100.0": 16017986.444095042
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              15173004.570554417,
+              14619674.599262718,
+              14590474.600652741,
+              16017986.444095042,
+              14975655.133169407
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 6783.130903776238,
+            "scoreError": 1005.3329711188229,
+            "scoreConfidence": [
+              5777.797932657415,
+              7788.46387489506
+            ],
+            "scorePercentiles": {
+              "0.0": 6565.01090739035,
+              "50.0": 6737.508429916971,
+              "90.0": 7206.659063653799,
+              "95.0": 7206.659063653799,
+              "99.0": 7206.659063653799,
+              "99.9": 7206.659063653799,
+              "99.99": 7206.659063653799,
+              "99.999": 7206.659063653799,
+              "99.9999": 7206.659063653799,
+              "100.0": 7206.659063653799
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                6827.44595925384,
+                6579.030158666229,
+                6565.01090739035,
+                7206.659063653799,
+                6737.508429916971
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 472.0006528924605,
+            "scoreError": 9.279914422789816e-05,
+            "scoreConfidence": [
+              472.00056009331627,
+              472.0007456916047
+            ],
+            "scorePercentiles": {
+              "0.0": 472.00061426858343,
+              "50.0": 472.0006550549616,
+              "90.0": 472.0006747647111,
+              "95.0": 472.0006747647111,
+              "99.0": 472.0006747647111,
+              "99.9": 472.0006747647111,
+              "99.99": 472.0006747647111,
+              "99.999": 472.0006747647111,
+              "99.9999": 472.0006747647111,
+              "100.0": 472.0006747647111
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                472.0006491898815,
+                472.000671184165,
+                472.0006747647111,
+                472.00061426858343,
+                472.0006550549616
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 367.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              367.0,
+              367.0
+            ],
+            "scorePercentiles": {
+              "0.0": 66.0,
+              "50.0": 74.0,
+              "90.0": 78.0,
+              "95.0": 78.0,
+              "99.0": 78.0,
+              "99.9": 78.0,
+              "99.99": 78.0,
+              "99.999": 78.0,
+              "99.9999": 78.0,
+              "100.0": 78.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                74.0,
+                71.0,
+                66.0,
+                78.0,
+                78.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 207.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              207.0,
+              207.0
+            ],
+            "scorePercentiles": {
+              "0.0": 38.0,
+              "50.0": 41.0,
+              "90.0": 45.0,
+              "95.0": 45.0,
+              "99.0": 45.0,
+              "99.9": 45.0,
+              "99.99": 45.0,
+              "99.999": 45.0,
+              "99.9999": 45.0,
+              "100.0": 45.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                42.0,
+                41.0,
+                38.0,
+                45.0,
+                41.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.decode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 1256083.1484381063,
+          "scoreError": 353331.3886154953,
+          "scoreConfidence": [
+            902751.759822611,
+            1609414.5370536016
+          ],
+          "scorePercentiles": {
+            "0.0": 1155721.3476922354,
+            "50.0": 1211380.0688983605,
+            "90.0": 1366968.8030702523,
+            "95.0": 1366968.8030702523,
+            "99.0": 1366968.8030702523,
+            "99.9": 1366968.8030702523,
+            "99.99": 1366968.8030702523,
+            "99.999": 1366968.8030702523,
+            "99.9999": 1366968.8030702523,
+            "100.0": 1366968.8030702523
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              1366968.8030702523,
+              1207111.0822567483,
+              1339234.4402729347,
+              1211380.0688983605,
+              1155721.3476922354
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 10068.25351901229,
+            "scoreError": 2833.453730207727,
+            "scoreConfidence": [
+              7234.799788804564,
+              12901.707249220017
+            ],
+            "scorePercentiles": {
+              "0.0": 9263.246842448214,
+              "50.0": 9708.726257023092,
+              "90.0": 10957.216947986322,
+              "95.0": 10957.216947986322,
+              "99.0": 10957.216947986322,
+              "99.9": 10957.216947986322,
+              "99.99": 10957.216947986322,
+              "99.999": 10957.216947986322,
+              "99.9999": 10957.216947986322,
+              "100.0": 10957.216947986322
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                10957.216947986322,
+                9676.7398861617,
+                10735.337661442123,
+                9708.726257023092,
+                9263.246842448214
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 8408.007856785629,
+            "scoreError": 0.002205638985201799,
+            "scoreConfidence": [
+              8408.005651146645,
+              8408.010062424613
+            ],
+            "scorePercentiles": {
+              "0.0": 8408.0071890978,
+              "50.0": 8408.00810930767,
+              "90.0": 8408.008510123487,
+              "95.0": 8408.008510123487,
+              "99.0": 8408.008510123487,
+              "99.9": 8408.008510123487,
+              "99.99": 8408.008510123487,
+              "99.999": 8408.008510123487,
+              "99.9999": 8408.008510123487,
+              "100.0": 8408.008510123487
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                8408.0071890978,
+                8408.008154592797,
+                8408.00732080639,
+                8408.00810930767,
+                8408.008510123487
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 562.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              562.0,
+              562.0
+            ],
+            "scorePercentiles": {
+              "0.0": 102.0,
+              "50.0": 118.0,
+              "90.0": 118.0,
+              "95.0": 118.0,
+              "99.0": 118.0,
+              "99.9": 118.0,
+              "99.99": 118.0,
+              "99.999": 118.0,
+              "99.9999": 118.0,
+              "100.0": 118.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                118.0,
+                106.0,
+                118.0,
+                118.0,
+                102.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 310.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              310.0,
+              310.0
+            ],
+            "scorePercentiles": {
+              "0.0": 57.0,
+              "50.0": 60.0,
+              "90.0": 74.0,
+              "95.0": 74.0,
+              "99.0": 74.0,
+              "99.9": 74.0,
+              "99.99": 74.0,
+              "99.999": 74.0,
+              "99.9999": 74.0,
+              "100.0": 74.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                58.0,
+                61.0,
+                57.0,
+                74.0,
+                60.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.encode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 15340427.756175688,
+          "scoreError": 2081380.0809360333,
+          "scoreConfidence": [
+            13259047.675239654,
+            17421807.83711172
+          ],
+          "scorePercentiles": {
+            "0.0": 14588491.48415337,
+            "50.0": 15587369.2281955,
+            "90.0": 15892643.989502002,
+            "95.0": 15892643.989502002,
+            "99.0": 15892643.989502002,
+            "99.9": 15892643.989502002,
+            "99.99": 15892643.989502002,
+            "99.999": 15892643.989502002,
+            "99.9999": 15892643.989502002,
+            "100.0": 15892643.989502002
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              15660499.487898957,
+              14588491.48415337,
+              15587369.2281955,
+              14973134.59112862,
+              15892643.989502002
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 4094.9583224546827,
+            "scoreError": 554.9910609553413,
+            "scoreConfidence": [
+              3539.9672614993415,
+              4649.949383410024
+            ],
+            "scorePercentiles": {
+              "0.0": 3894.2490740360417,
+              "50.0": 4160.774326201367,
+              "90.0": 4242.016330545307,
+              "95.0": 4242.016330545307,
+              "99.0": 4242.016330545307,
+              "99.9": 4242.016330545307,
+              "99.99": 4242.016330545307,
+              "99.999": 4242.016330545307,
+              "99.9999": 4242.016330545307,
+              "100.0": 4242.016330545307
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                4180.465124306292,
+                3894.2490740360417,
+                4160.774326201367,
+                3997.286757184405,
+                4242.016330545307
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 280.0006435295034,
+            "scoreError": 9.169418710692154e-05,
+            "scoreConfidence": [
+              280.0005518353163,
+              280.0007352236905
+            ],
+            "scorePercentiles": {
+              "0.0": 280.00061939144285,
+              "50.0": 280.0006334227757,
+              "90.0": 280.00067702081265,
+              "95.0": 280.00067702081265,
+              "99.0": 280.00067702081265,
+              "99.9": 280.00067702081265,
+              "99.99": 280.00067702081265,
+              "99.999": 280.00067702081265,
+              "99.9999": 280.00067702081265,
+              "100.0": 280.00067702081265
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                280.0006287168864,
+                280.00067702081265,
+                280.0006334227757,
+                280.00065909559925,
+                280.00061939144285
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 212.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              212.0,
+              212.0
+            ],
+            "scorePercentiles": {
+              "0.0": 40.0,
+              "50.0": 42.0,
+              "90.0": 46.0,
+              "95.0": 46.0,
+              "99.0": 46.0,
+              "99.9": 46.0,
+              "99.99": 46.0,
+              "99.999": 46.0,
+              "99.9999": 46.0,
+              "100.0": 46.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                40.0,
+                44.0,
+                40.0,
+                42.0,
+                46.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 138.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              138.0,
+              138.0
+            ],
+            "scorePercentiles": {
+              "0.0": 17.0,
+              "50.0": 30.0,
+              "90.0": 42.0,
+              "95.0": 42.0,
+              "99.0": 42.0,
+              "99.9": 42.0,
+              "99.99": 42.0,
+              "99.999": 42.0,
+              "99.9999": 42.0,
+              "100.0": 42.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                17.0,
+                42.0,
+                19.0,
+                30.0,
+                30.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.encode",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 2306010.661139322,
+          "scoreError": 389304.49141911307,
+          "scoreConfidence": [
+            1916706.169720209,
+            2695315.152558435
+          ],
+          "scorePercentiles": {
+            "0.0": 2193032.0479666223,
+            "50.0": 2367904.085831945,
+            "90.0": 2389977.7629638733,
+            "95.0": 2389977.7629638733,
+            "99.0": 2389977.7629638733,
+            "99.9": 2389977.7629638733,
+            "99.99": 2389977.7629638733,
+            "99.999": 2389977.7629638733,
+            "99.9999": 2389977.7629638733,
+            "100.0": 2389977.7629638733
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              2389977.7629638733,
+              2193032.0479666223,
+              2380947.2585710995,
+              2367904.085831945,
+              2198192.150363069
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 9338.921574696715,
+            "scoreError": 1576.1610468466595,
+            "scoreConfidence": [
+              7762.760527850055,
+              10915.082621543374
+            ],
+            "scorePercentiles": {
+              "0.0": 8881.895914733866,
+              "50.0": 9591.131731507097,
+              "90.0": 9678.594570713582,
+              "95.0": 9678.594570713582,
+              "99.0": 9678.594570713582,
+              "99.9": 9678.594570713582,
+              "99.99": 9678.594570713582,
+              "99.999": 9678.594570713582,
+              "99.9999": 9678.594570713582,
+              "100.0": 9678.594570713582
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                9678.594570713582,
+                8881.895914733866,
+                9641.108287680177,
+                9591.131731507097,
+                8901.877368848849
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 4248.0042673367225,
+            "scoreError": 0.0007214483356608673,
+            "scoreConfidence": [
+              4248.003545888387,
+              4248.004988785058
+            ],
+            "scorePercentiles": {
+              "0.0": 4248.004115992053,
+              "50.0": 4248.004138350134,
+              "90.0": 4248.004478480736,
+              "95.0": 4248.004478480736,
+              "99.0": 4248.004478480736,
+              "99.9": 4248.004478480736,
+              "99.99": 4248.004478480736,
+              "99.999": 4248.004478480736,
+              "99.9999": 4248.004478480736,
+              "100.0": 4248.004478480736
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                4248.004115992053,
+                4248.004478480736,
+                4248.004138350134,
+                4248.0041377751395,
+                4248.004466085549
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 514.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              514.0,
+              514.0
+            ],
+            "scorePercentiles": {
+              "0.0": 96.0,
+              "50.0": 106.0,
+              "90.0": 106.0,
+              "95.0": 106.0,
+              "99.0": 106.0,
+              "99.9": 106.0,
+              "99.99": 106.0,
+              "99.999": 106.0,
+              "99.9999": 106.0,
+              "100.0": 106.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                106.0,
+                96.0,
+                106.0,
+                106.0,
+                100.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 283.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              283.0,
+              283.0
+            ],
+            "scorePercentiles": {
+              "0.0": 45.0,
+              "50.0": 60.0,
+              "90.0": 63.0,
+              "95.0": 63.0,
+              "99.0": 63.0,
+              "99.9": 63.0,
+              "99.99": 63.0,
+              "99.999": 63.0,
+              "99.9999": 63.0,
+              "100.0": 63.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                61.0,
+                45.0,
+                54.0,
+                60.0,
+                63.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "128"
+        },
+        "primaryMetric": {
+          "score": 4289837.422769339,
+          "scoreError": 515505.2951434132,
+          "scoreConfidence": [
+            3774332.1276259255,
+            4805342.717912752
+          ],
+          "scorePercentiles": {
+            "0.0": 4121175.0204096474,
+            "50.0": 4266618.288091449,
+            "90.0": 4494797.236811033,
+            "95.0": 4494797.236811033,
+            "99.0": 4494797.236811033,
+            "99.9": 4494797.236811033,
+            "99.99": 4494797.236811033,
+            "99.999": 4494797.236811033,
+            "99.9999": 4494797.236811033,
+            "100.0": 4494797.236811033
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              4494797.236811033,
+              4121175.0204096474,
+              4265834.369694392,
+              4266618.288091449,
+              4300762.198840167
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 4122.0214592119355,
+            "scoreError": 493.61037163113684,
+            "scoreConfidence": [
+              3628.4110875807987,
+              4615.631830843073
+            ],
+            "scorePercentiles": {
+              "0.0": 3960.4783036765093,
+              "50.0": 4099.743057094821,
+              "90.0": 4318.264543790833,
+              "95.0": 4318.264543790833,
+              "99.0": 4318.264543790833,
+              "99.9": 4318.264543790833,
+              "99.99": 4318.264543790833,
+              "99.999": 4318.264543790833,
+              "99.9999": 4318.264543790833,
+              "100.0": 4318.264543790833
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                4318.264543790833,
+                3960.4783036765093,
+                4099.246995512609,
+                4099.743057094821,
+                4132.374395984906
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 1008.0022885543069,
+            "scoreError": 0.0003007959651052453,
+            "scoreConfidence": [
+              1008.0019877583418,
+              1008.002589350272
+            ],
+            "scorePercentiles": {
+              "0.0": 1008.0021740738165,
+              "50.0": 1008.0022929045919,
+              "90.0": 1008.0023933700165,
+              "95.0": 1008.0023933700165,
+              "99.0": 1008.0023933700165,
+              "99.9": 1008.0023933700165,
+              "99.99": 1008.0023933700165,
+              "99.999": 1008.0023933700165,
+              "99.9999": 1008.0023933700165,
+              "100.0": 1008.0023933700165
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                1008.0021740738165,
+                1008.0023933700165,
+                1008.002303109524,
+                1008.0022929045919,
+                1008.002279313586
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 214.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              214.0,
+              214.0
+            ],
+            "scorePercentiles": {
+              "0.0": 38.0,
+              "50.0": 42.0,
+              "90.0": 46.0,
+              "95.0": 46.0,
+              "99.0": 46.0,
+              "99.9": 46.0,
+              "99.99": 46.0,
+              "99.999": 46.0,
+              "99.9999": 46.0,
+              "100.0": 46.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                46.0,
+                38.0,
+                46.0,
+                42.0,
+                42.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 153.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              153.0,
+              153.0
+            ],
+            "scorePercentiles": {
+              "0.0": 25.0,
+              "50.0": 30.0,
+              "90.0": 35.0,
+              "95.0": 35.0,
+              "99.0": 35.0,
+              "99.9": 35.0,
+              "99.99": 35.0,
+              "99.999": 35.0,
+              "99.9999": 35.0,
+              "100.0": 35.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                30.0,
+                25.0,
+                35.0,
+                35.0,
+                28.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+        "mode": "thrpt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms512m",
+          "-Xmx512m",
+          "-XX:+UseZGC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 5,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 5,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "params": {
+          "payloadBytes": "4096"
+        },
+        "primaryMetric": {
+          "score": 827952.2602503912,
+          "scoreError": 193231.05409984043,
+          "scoreConfidence": [
+            634721.2061505507,
+            1021183.3143502317
+          ],
+          "scorePercentiles": {
+            "0.0": 768997.589046743,
+            "50.0": 810720.3372997418,
+            "90.0": 900902.4115330131,
+            "95.0": 900902.4115330131,
+            "99.0": 900902.4115330131,
+            "99.9": 900902.4115330131,
+            "99.99": 900902.4115330131,
+            "99.999": 900902.4115330131,
+            "99.9999": 900902.4115330131,
+            "100.0": 900902.4115330131
+          },
+          "scoreUnit": "ops/s",
+          "rawData": [
+            [
+              900902.4115330131,
+              807511.7654418931,
+              851629.1979305656,
+              810720.3372997418,
+              768997.589046743
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 8102.031594629896,
+            "scoreError": 1891.4229848343869,
+            "scoreConfidence": [
+              6210.608609795509,
+              9993.454579464284
+            ],
+            "scorePercentiles": {
+              "0.0": 7524.594196639198,
+              "50.0": 7933.447154415813,
+              "90.0": 8816.127439734935,
+              "95.0": 8816.127439734935,
+              "99.0": 8816.127439734935,
+              "99.9": 8816.127439734935,
+              "99.99": 8816.127439734935,
+              "99.999": 8816.127439734935,
+              "99.9999": 8816.127439734935,
+              "100.0": 8816.127439734935
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                8816.127439734935,
+                7902.58915762542,
+                8333.400024734108,
+                7933.447154415813,
+                7524.594196639198
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 10264.011895925332,
+            "scoreError": 0.002765936682463701,
+            "scoreConfidence": [
+              10264.00912998865,
+              10264.014661862015
+            ],
+            "scorePercentiles": {
+              "0.0": 10264.010902847995,
+              "50.0": 10264.012143705426,
+              "90.0": 10264.0127338296,
+              "95.0": 10264.0127338296,
+              "99.0": 10264.0127338296,
+              "99.9": 10264.0127338296,
+              "99.99": 10264.0127338296,
+              "99.999": 10264.0127338296,
+              "99.9999": 10264.0127338296,
+              "100.0": 10264.0127338296
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                10264.010902847995,
+                10264.012243245352,
+                10264.011455998289,
+                10264.012143705426,
+                10264.0127338296
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 440.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              440.0,
+              440.0
+            ],
+            "scorePercentiles": {
+              "0.0": 80.0,
+              "50.0": 86.0,
+              "90.0": 98.0,
+              "95.0": 98.0,
+              "99.0": 98.0,
+              "99.9": 98.0,
+              "99.99": 98.0,
+              "99.999": 98.0,
+              "99.9999": 98.0,
+              "100.0": 98.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                98.0,
+                86.0,
+                94.0,
+                80.0,
+                82.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 254.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              254.0,
+              254.0
+            ],
+            "scorePercentiles": {
+              "0.0": 36.0,
+              "50.0": 51.0,
+              "90.0": 60.0,
+              "95.0": 60.0,
+              "99.0": 60.0,
+              "99.9": 60.0,
+              "99.99": 60.0,
+              "99.999": 60.0,
+              "99.9999": 60.0,
+              "100.0": 60.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                56.0,
+                51.0,
+                60.0,
+                36.0,
+                51.0
+              ]
+            ]
+          }
+        }
+      }
+    ],
+    "clientCompletion": [
+      "clientSourceOrder=PASS totalWindow=256 offered=13040256 terminal=13040256 unfinished=0",
+      "clientSourceOrder=PASS totalWindow=256 offered=13326400 terminal=13326400 unfinished=0"
+    ],
+    "diagnosticIterationBeforeVersionChange": {
+      "redisMain": [
+        {
+          "jmhVersion": "1.37",
+          "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+          "mode": "thrpt",
+          "threads": 1,
+          "forks": 2,
+          "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+          "jvmArgs": [
+            "-Xms512m",
+            "-Xmx512m",
+            "-XX:+UseZGC"
+          ],
+          "jdkVersion": "27",
+          "vmName": "OpenJDK 64-Bit Server VM",
+          "vmVersion": "27+33-FR",
+          "warmupIterations": 5,
+          "warmupTime": "1 s",
+          "warmupBatchSize": 1,
+          "measurementIterations": 5,
+          "measurementTime": "1 s",
+          "measurementBatchSize": 1,
+          "params": {
+            "payloadBytes": "128"
+          },
+          "primaryMetric": {
+            "score": 1067161.0654595443,
+            "scoreError": 26596.825805959026,
+            "scoreConfidence": [
+              1040564.2396535852,
+              1093757.8912655034
+            ],
+            "scorePercentiles": {
+              "0.0": 1030689.3595500399,
+              "50.0": 1068965.5917200223,
+              "90.0": 1088973.5791116327,
+              "95.0": 1089152.497649609,
+              "99.0": 1089152.497649609,
+              "99.9": 1089152.497649609,
+              "99.99": 1089152.497649609,
+              "99.999": 1089152.497649609,
+              "99.9999": 1089152.497649609,
+              "100.0": 1089152.497649609
+            },
+            "scoreUnit": "ops/s",
+            "rawData": [
+              [
+                1030689.3595500399,
+                1068382.0773673246,
+                1069549.10607272,
+                1087363.3122698439,
+                1082565.233678749
+              ],
+              [
+                1071050.9975741839,
+                1058755.6230491058,
+                1089152.497649609,
+                1053260.9240305123,
+                1060841.5233533543
+              ]
+            ]
+          },
+          "secondaryMetrics": {}
+        },
+        {
+          "jmhVersion": "1.37",
+          "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+          "mode": "thrpt",
+          "threads": 1,
+          "forks": 2,
+          "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+          "jvmArgs": [
+            "-Xms512m",
+            "-Xmx512m",
+            "-XX:+UseZGC"
+          ],
+          "jdkVersion": "27",
+          "vmName": "OpenJDK 64-Bit Server VM",
+          "vmVersion": "27+33-FR",
+          "warmupIterations": 5,
+          "warmupTime": "1 s",
+          "warmupBatchSize": 1,
+          "measurementIterations": 5,
+          "measurementTime": "1 s",
+          "measurementBatchSize": 1,
+          "params": {
+            "payloadBytes": "4096"
+          },
+          "primaryMetric": {
+            "score": 502346.18549622037,
+            "scoreError": 38634.09003778993,
+            "scoreConfidence": [
+              463712.0954584304,
+              540980.2755340103
+            ],
+            "scorePercentiles": {
+              "0.0": 467600.1182690422,
+              "50.0": 494580.0741964177,
+              "90.0": 545040.1970754394,
+              "95.0": 546138.1299424272,
+              "99.0": 546138.1299424272,
+              "99.9": 546138.1299424272,
+              "99.99": 546138.1299424272,
+              "99.999": 546138.1299424272,
+              "99.9999": 546138.1299424272,
+              "100.0": 546138.1299424272
+            },
+            "scoreUnit": "ops/s",
+            "rawData": [
+              [
+                482416.42526954,
+                467600.1182690422,
+                523602.40967630385,
+                493541.82553846744,
+                477988.4521330736
+              ],
+              [
+                546138.1299424272,
+                535158.8012725496,
+                495618.32285436796,
+                493457.593328438,
+                507939.77667799394
+              ]
+            ]
+          },
+          "secondaryMetrics": {}
+        }
+      ],
+      "redisGc": [
+        {
+          "jmhVersion": "1.37",
+          "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+          "mode": "thrpt",
+          "threads": 1,
+          "forks": 1,
+          "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+          "jvmArgs": [
+            "-Xms512m",
+            "-Xmx512m",
+            "-XX:+UseZGC"
+          ],
+          "jdkVersion": "27",
+          "vmName": "OpenJDK 64-Bit Server VM",
+          "vmVersion": "27+33-FR",
+          "warmupIterations": 5,
+          "warmupTime": "1 s",
+          "warmupBatchSize": 1,
+          "measurementIterations": 5,
+          "measurementTime": "1 s",
+          "measurementBatchSize": 1,
+          "params": {
+            "payloadBytes": "128"
+          },
+          "primaryMetric": {
+            "score": 1045239.101038163,
+            "scoreError": 106328.39916909374,
+            "scoreConfidence": [
+              938910.7018690692,
+              1151567.5002072568
+            ],
+            "scorePercentiles": {
+              "0.0": 1020369.491203355,
+              "50.0": 1037897.9977233061,
+              "90.0": 1092381.4342812907,
+              "95.0": 1092381.4342812907,
+              "99.0": 1092381.4342812907,
+              "99.9": 1092381.4342812907,
+              "99.99": 1092381.4342812907,
+              "99.999": 1092381.4342812907,
+              "99.9999": 1092381.4342812907,
+              "100.0": 1092381.4342812907
+            },
+            "scoreUnit": "ops/s",
+            "rawData": [
+              [
+                1092381.4342812907,
+                1042446.5215791994,
+                1020369.491203355,
+                1037897.9977233061,
+                1033100.0604036638
+              ]
+            ]
+          },
+          "secondaryMetrics": {
+            "gc.alloc.rate": {
+              "score": 2606.841233630289,
+              "scoreError": 265.0313250573073,
+              "scoreConfidence": [
+                2341.809908572982,
+                2871.872558687596
+              ],
+              "scorePercentiles": {
+                "0.0": 2545.086307807678,
+                "50.0": 2588.1634776972874,
+                "90.0": 2724.3903207197473,
+                "95.0": 2724.3903207197473,
+                "99.0": 2724.3903207197473,
+                "99.9": 2724.3903207197473,
+                "99.99": 2724.3903207197473,
+                "99.999": 2724.3903207197473,
+                "99.9999": 2724.3903207197473,
+                "100.0": 2724.3903207197473
+              },
+              "scoreUnit": "MB/sec",
+              "rawData": [
+                [
+                  2724.3903207197473,
+                  2600.1137016992066,
+                  2545.086307807678,
+                  2588.1634776972874,
+                  2576.4523602275253
+                ]
+              ]
+            },
+            "gc.alloc.rate.norm": {
+              "score": 2616.009419115743,
+              "scoreError": 0.0009658106373011953,
+              "scoreConfidence": [
+                2616.008453305106,
+                2616.0103849263805
+              ],
+              "scorePercentiles": {
+                "0.0": 2616.008982508371,
+                "50.0": 2616.0094855836014,
+                "90.0": 2616.0096223651594,
+                "95.0": 2616.0096223651594,
+                "99.0": 2616.0096223651594,
+                "99.9": 2616.0096223651594,
+                "99.99": 2616.0096223651594,
+                "99.999": 2616.0096223651594,
+                "99.9999": 2616.0096223651594,
+                "100.0": 2616.0096223651594
+              },
+              "scoreUnit": "B/op",
+              "rawData": [
+                [
+                  2616.008982508371,
+                  2616.00947650186,
+                  2616.0096223651594,
+                  2616.0094855836014,
+                  2616.0095286197243
+                ]
+              ]
+            },
+            "gc.count": {
+              "score": 148.0,
+              "scoreError": "NaN",
+              "scoreConfidence": [
+                148.0,
+                148.0
+              ],
+              "scorePercentiles": {
+                "0.0": 26.0,
+                "50.0": 30.0,
+                "90.0": 36.0,
+                "95.0": 36.0,
+                "99.0": 36.0,
+                "99.9": 36.0,
+                "99.99": 36.0,
+                "99.999": 36.0,
+                "99.9999": 36.0,
+                "100.0": 36.0
+              },
+              "scoreUnit": "counts",
+              "rawData": [
+                [
+                  26.0,
+                  36.0,
+                  30.0,
+                  26.0,
+                  30.0
+                ]
+              ]
+            },
+            "gc.time": {
+              "score": 139.0,
+              "scoreError": "NaN",
+              "scoreConfidence": [
+                139.0,
+                139.0
+              ],
+              "scorePercentiles": {
+                "0.0": 24.0,
+                "50.0": 25.0,
+                "90.0": 37.0,
+                "95.0": 37.0,
+                "99.0": 37.0,
+                "99.9": 37.0,
+                "99.99": 37.0,
+                "99.999": 37.0,
+                "99.9999": 37.0,
+                "100.0": 37.0
+              },
+              "scoreUnit": "ms",
+              "rawData": [
+                [
+                  24.0,
+                  37.0,
+                  29.0,
+                  24.0,
+                  25.0
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "jmhVersion": "1.37",
+          "benchmark": "com.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta",
+          "mode": "thrpt",
+          "threads": 1,
+          "forks": 1,
+          "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+          "jvmArgs": [
+            "-Xms512m",
+            "-Xmx512m",
+            "-XX:+UseZGC"
+          ],
+          "jdkVersion": "27",
+          "vmName": "OpenJDK 64-Bit Server VM",
+          "vmVersion": "27+33-FR",
+          "warmupIterations": 5,
+          "warmupTime": "1 s",
+          "warmupBatchSize": 1,
+          "measurementIterations": 5,
+          "measurementTime": "1 s",
+          "measurementBatchSize": 1,
+          "params": {
+            "payloadBytes": "4096"
+          },
+          "primaryMetric": {
+            "score": 508841.0096293182,
+            "scoreError": 26546.38986856017,
+            "scoreConfidence": [
+              482294.619760758,
+              535387.3994978784
+            ],
+            "scorePercentiles": {
+              "0.0": 502969.17085937836,
+              "50.0": 504878.9652982782,
+              "90.0": 517921.4291874401,
+              "95.0": 517921.4291874401,
+              "99.0": 517921.4291874401,
+              "99.9": 517921.4291874401,
+              "99.99": 517921.4291874401,
+              "99.999": 517921.4291874401,
+              "99.9999": 517921.4291874401,
+              "100.0": 517921.4291874401
+            },
+            "scoreUnit": "ops/s",
+            "rawData": [
+              [
+                517921.4291874401,
+                504878.9652982782,
+                503870.0545051555,
+                502969.17085937836,
+                514565.4282963389
+              ]
+            ]
+          },
+          "secondaryMetrics": {
+            "gc.alloc.rate": {
+              "score": 5759.465527736321,
+              "scoreError": 301.3742049437127,
+              "scoreConfidence": [
+                5458.0913227926085,
+                6060.839732680033
+              ],
+              "scorePercentiles": {
+                "0.0": 5692.940109220921,
+                "50.0": 5714.5016045331795,
+                "90.0": 5862.835826620037,
+                "95.0": 5862.835826620037,
+                "99.0": 5862.835826620037,
+                "99.9": 5862.835826620037,
+                "99.99": 5862.835826620037,
+                "99.999": 5862.835826620037,
+                "99.9999": 5862.835826620037,
+                "100.0": 5862.835826620037
+              },
+              "scoreUnit": "MB/sec",
+              "rawData": [
+                [
+                  5862.835826620037,
+                  5714.5016045331795,
+                  5702.959152805692,
+                  5692.940109220921,
+                  5824.090945501773
+                ]
+              ]
+            },
+            "gc.alloc.rate.norm": {
+              "score": 11872.01936966277,
+              "scoreError": 0.0008728379064313605,
+              "scoreConfidence": [
+                11872.018496824863,
+                11872.020242500677
+              ],
+              "scorePercentiles": {
+                "0.0": 11872.01908231952,
+                "50.0": 11872.019498305139,
+                "90.0": 11872.019562804557,
+                "95.0": 11872.019562804557,
+                "99.0": 11872.019562804557,
+                "99.9": 11872.019562804557,
+                "99.99": 11872.019562804557,
+                "99.999": 11872.019562804557,
+                "99.9999": 11872.019562804557,
+                "100.0": 11872.019562804557
+              },
+              "scoreUnit": "B/op",
+              "rawData": [
+                [
+                  11872.01908231952,
+                  11872.019498305139,
+                  11872.01953752497,
+                  11872.019562804557,
+                  11872.019167359662
+                ]
+              ]
+            },
+            "gc.count": {
+              "score": 308.0,
+              "scoreError": "NaN",
+              "scoreConfidence": [
+                308.0,
+                308.0
+              ],
+              "scorePercentiles": {
+                "0.0": 58.0,
+                "50.0": 62.0,
+                "90.0": 66.0,
+                "95.0": 66.0,
+                "99.0": 66.0,
+                "99.9": 66.0,
+                "99.99": 66.0,
+                "99.999": 66.0,
+                "99.9999": 66.0,
+                "100.0": 66.0
+              },
+              "scoreUnit": "counts",
+              "rawData": [
+                [
+                  66.0,
+                  58.0,
+                  60.0,
+                  62.0,
+                  62.0
+                ]
+              ]
+            },
+            "gc.time": {
+              "score": 205.0,
+              "scoreError": "NaN",
+              "scoreConfidence": [
+                205.0,
+                205.0
+              ],
+              "scorePercentiles": {
+                "0.0": 30.0,
+                "50.0": 42.0,
+                "90.0": 47.0,
+                "95.0": 47.0,
+                "99.0": 47.0,
+                "99.9": 47.0,
+                "99.99": 47.0,
+                "99.999": 47.0,
+                "99.9999": 47.0,
+                "100.0": 47.0
+              },
+              "scoreUnit": "ms",
+              "rawData": [
+                [
+                  40.0,
+                  46.0,
+                  30.0,
+                  47.0,
+                  42.0
+                ]
+              ]
+            }
+          }
+        }
+      ],
+      "interpretation": "Sequential diagnosis of current master working changes; no old branch/tag checkout or historical version replay. Kept to explain Formatter finding, not a historical deployment comparison."
+    }
+  },
+  "commands": {
+    "initial": [
+      {
+        "name": "driver-four",
+        "command": [
+          "/usr/bin/java",
+          "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+          "-cp",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/DriverResourceProbe.java",
+          "4",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-four"
+        ],
+        "pid": 62669,
+        "startUtc": "2026-10-08T14:46:18.783623+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:46:32.147612+00:00"
+      },
+      {
+        "name": "driver-one",
+        "command": [
+          "/usr/bin/java",
+          "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+          "-cp",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/DriverResourceProbe.java",
+          "1",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/drivers-one"
+        ],
+        "pid": 62721,
+        "startUtc": "2026-10-08T14:46:32.148657+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:46:45.260556+00:00"
+      },
+      {
+        "name": "realtime-main",
+        "command": [
+          "/usr/bin/java",
+          "-jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "RealtimeAllocationBenchmark",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-f",
+          "2",
+          "-t",
+          "1",
+          "-rf",
+          "json",
+          "-rff",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/realtime-main.json"
+        ],
+        "pid": 62742,
+        "startUtc": "2026-10-08T14:46:45.261516+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:48:49.818050+00:00"
+      },
+      {
+        "name": "realtime-gc",
+        "command": [
+          "/usr/bin/java",
+          "-jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "RealtimeAllocationBenchmark",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-f",
+          "1",
+          "-t",
+          "1",
+          "-prof",
+          "gc",
+          "-rf",
+          "json",
+          "-rff",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/realtime-gc.json"
+        ],
+        "pid": 63078,
+        "startUtc": "2026-10-08T14:48:49.819110+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:49:52.678216+00:00"
+      },
+      {
+        "name": "client-main",
+        "command": [
+          "/usr/bin/java",
+          "-jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "ClientSourceOrderingBenchmark",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-f",
+          "2",
+          "-rf",
+          "json",
+          "-rff",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/client-main.json"
+        ],
+        "pid": 63241,
+        "startUtc": "2026-10-08T14:49:52.679595+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:50:16.189756+00:00"
+      },
+      {
+        "name": "realtime-jfr",
+        "command": [
+          "/usr/bin/java",
+          "-jar",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "RealtimeAllocationBenchmark.redisDelta",
+          "-p",
+          "payloadBytes=128",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-f",
+          "1",
+          "-t",
+          "1",
+          "-jvmArgsAppend",
+          "-XX:StartFlightRecording=name=resourceOpt,settings=profile,maxsize=24m,filename=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/realtime-jfr.jfr"
+        ],
+        "pid": 63315,
+        "startUtc": "2026-10-08T14:50:16.190523+00:00",
+        "exitCode": 0,
+        "endUtc": "2026-10-08T14:50:27.278914+00:00"
+      }
+    ],
+    "integration": [
+      {
+        "name": "integrated-client",
+        "command": [
+          "mvn",
+          "-pl",
+          "surprising-aeron-core/surprising-aeron-client",
+          "-am",
+          "test"
+        ],
+        "startUtc": "2026-10-08T14:51:17.972419+00:00",
+        "endUtc": "2026-10-08T14:51:41.060827+00:00",
+        "pid": 63497,
+        "exitCode": 0
+      },
+      {
+        "name": "integrated-cross",
+        "command": [
+          "mvn",
+          "-pl",
+          "surprising-gateway,surprising-realtime/surprising-realtime-provider,surprising-aeron-core/surprising-aeron-benchmarks",
+          "-am",
+          "-Dgateway.shared-driver.it=true",
+          "-Dtest=*Realtime*,*Valkey*,*GatewayMediaDriver*,*ProductCommandMediaDriver*,*SharedCommandTransportIntegration*,*ProductBusinessConfiguration*,*MultiProductMoney*,*AccountAeronGateway*,*OrderAeronGateway*,*AeronOrderCommandService*,*CorePerpetualEndToEndBenchmark*,*DerivativeRiskBoundaryBenchmark*,*SettlementSolvencyBenchmark*,*ArchiveReplay*,*MarketApplicationContext*",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "test"
+        ],
+        "startUtc": "2026-10-08T14:51:41.062064+00:00",
+        "endUtc": "2026-10-08T14:54:16.856562+00:00",
+        "pid": 63574,
+        "exitCode": 0
+      }
+    ],
+    "final": [
+      {
+        "name": "redis-final-main",
+        "command": [
+          "java",
+          "-cp",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-realtime/surprising-realtime-api/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-protocol/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-client/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "org.openjdk.jmh.Main",
+          "RealtimeAllocationBenchmark.redisDelta",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-t",
+          "1",
+          "-f",
+          "2",
+          "-rf",
+          "json",
+          "-rff",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/redis-final-main.json"
+        ],
+        "startUtc": "2026-10-08T14:58:35.115909+00:00",
+        "endUtc": "2026-10-08T14:59:17.157295+00:00",
+        "pid": 65165,
+        "exitCode": 0
+      },
+      {
+        "name": "redis-final-gc",
+        "command": [
+          "java",
+          "-cp",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-realtime/surprising-realtime-api/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-protocol/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-client/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "org.openjdk.jmh.Main",
+          "RealtimeAllocationBenchmark.redisDelta",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-t",
+          "1",
+          "-f",
+          "1",
+          "-prof",
+          "gc",
+          "-rf",
+          "json",
+          "-rff",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/redis-final-gc.json"
+        ],
+        "startUtc": "2026-10-08T14:59:17.158497+00:00",
+        "endUtc": "2026-10-08T14:59:38.484347+00:00",
+        "pid": 65309,
+        "exitCode": 0
+      },
+      {
+        "name": "redis-final-jfr",
+        "command": [
+          "java",
+          "-cp",
+          "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-realtime/surprising-realtime-api/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-protocol/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/integrated-source/surprising-aeron-core/surprising-aeron-client/target/classes:/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/source/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "org.openjdk.jmh.Main",
+          "RealtimeAllocationBenchmark.redisDelta",
+          "-wi",
+          "5",
+          "-i",
+          "5",
+          "-w",
+          "1s",
+          "-r",
+          "1s",
+          "-t",
+          "1",
+          "-p",
+          "payloadBytes=128",
+          "-f",
+          "1",
+          "-jvmArgsAppend",
+          "-Xms512m -Xmx512m -XX:+UseZGC -XX:StartFlightRecording=name=resourceOptFinal,settings=profile,maxsize=24m,filename=/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/redis-final-jfr.jfr"
+        ],
+        "startUtc": "2026-10-08T14:59:38.485409+00:00",
+        "endUtc": "2026-10-08T14:59:49.636524+00:00",
+        "pid": 65360,
+        "exitCode": 0
+      }
+    ],
+    "ownedRealtime": "mvn -f integrated-source/pom.xml -pl surprising-realtime/surprising-realtime-provider -am -Dtest=*Realtime*,*Valkey*,*ArchiveReplay*,*MarketApplicationContext* -Dsurefire.failIfNoSpecifiedTests=false test"
+  },
+  "jfr": [
+    {
+      "artifact": {
+        "path": "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/realtime-jfr.jfr",
+        "bytes": 1462900,
+        "sha256": "ce8593620cd500788c1904a8c10ff8fcda340e651699901c743ec8ba8fa6e9d8"
+      },
+      "settings": "Initial attribution only; CLI jvmArgsAppend replaced annotation arguments, therefore G1/default heap. Not valid for GC comparison.",
+      "summary": "\n Version: 2.1\n Chunks: 1\n Start: 2026-10-08 14:50:16 (UTC)\n Duration: 10 s\n\n Event Type                              Count  Size (bytes) \n=============================================================\n jdk.GCPhaseParallel                     28398        742234\n jdk.ObjectAllocationSample               3041         47357\n jdk.TenuringDistribution                 1440         14677\n jdk.PromoteObjectInNewPLAB               1324         21417\n jdk.NativeLibrary                        1044         94115\n jdk.ExecutionSample                       860          9457\n jdk.SystemProcess                         772         77198\n jdk.BooleanFlag                           700         21770\n jdk.ModuleExport                          528          5660\n jdk.GCReferenceStatistics                 384          3841\n jdk.MetaspaceChunkFreeListSummary         384          6912\n jdk.ActiveSetting                         381          9831\n jdk.GCPhasePauseLevel1                    288         11734\n jdk.G1HeapSummary                         192          4826\n jdk.GCHeapSummary                         192          7529\n jdk.MetaspaceSummary                      192          9408\n jdk.JavaExceptionThrow                    159          8808\n jdk.ModuleRequire                         157          1570\n jdk.LongFlag                              156          5068\n jdk.UnsignedLongFlag                      150          5447\n jdk.ExecuteVMOperation                    101          1692\n jdk.SafepointBegin                        100          1308\n jdk.EvacuationInformation                  96          2566\n jdk.G1AdaptiveIHOP                         96          4084\n jdk.G1BasicIHOP                            96          2391\n jdk.G1EvacuationOldStatistics              96          2306\n jdk.G1EvacuationYoungStatistics            96          2583\n jdk.G1GarbageCollection                    96          1228\n jdk.G1MMU                                  96          1248\n jdk.GCCPUTime                              96          1176\n jdk.GCPhasePause                           96          2188\n jdk.GarbageCollection                      96          2148\n jdk.YoungGarbageCollection                 96          1228\n jdk.UnsignedIntFlag                        88          3078\n jdk.Checkpoint                             67        190950\n jdk.IntFlag                                60          2124\n jdk.InitialEnvironmentVariable             59          3553\n jdk.InitialSecurityProperty                47          2360\n jdk.StringFlag                             45          1578\n jdk.DoubleFlag                             35          1558\n jdk.ThreadAllocationStatistics             32           302\n jdk.Deoptimization                         30           699\n jdk.PromoteObjectOutsidePLAB               28           433\n jdk.ThreadCPULoad                          19           304\n jdk.InitialSystemProperty                  16          1127\n jdk.ThreadEnd                              13           117\n jdk.OldObjectSample                        11           344\n jdk.ClassLoadingStatistics                 10           100\n jdk.CompilerStatistics                     10           290\n jdk.ExceptionStatistics                    10           100\n jdk.JavaThreadStatistics                   10           110\n jdk.ResidentSetSize                        10           170\n jdk.ThreadPark                             10           360\n jdk.ThreadStart                            10           113\n jdk.CPULoad                                 9           171\n jdk.JavaErrorThrow                          7           374\n jdk.ClassLoaderStatistics                   6           161\n jdk.CodeCacheStatistics                     6           174\n jdk.GCHeapMemoryPoolUsage                   6           227\n jdk.CompilerQueueUtilization                4            82\n jdk.NativeLibraryLoad                       4           365\n jdk.NetworkUtilization                      4            55\n jdk.Compilation                             2            58\n jdk.DeprecatedInvocation                    2            38\n jdk.DirectBufferStatistics                  2            32\n jdk.GCConfiguration                         2            50\n jdk.GCHeapMemoryUsage                       2            41\n jdk.JavaMonitorStatistics                   2            16\n jdk.PhysicalMemory                          2            34\n jdk.SocketRead                              2            86\n jdk.SwapSpace                               2            34\n jdk.ActiveRecording                         1            58\n jdk.CPUInformation                          1          1744\n jdk.CPUTimeStampCounter                     1            19\n jdk.CodeCacheConfiguration                  1            42\n jdk.CompilerConfiguration                   1            11\n jdk.GCHeapConfiguration                     1            25\n jdk.GCSurvivorConfiguration                 1            10\n jdk.GCTLABConfiguration                     1            12\n jdk.JVMInformation                          1           636\n jdk.Metadata                                1        113174\n jdk.NativeMethodSample                      1            10\n jdk.OSInformation                           1           147\n jdk.Shutdown                                1            47\n jdk.StringTableStatistics                   1            36\n jdk.SymbolTableStatistics                   1            36\n jdk.VirtualizationInformation               1            35\n jdk.YoungGenerationConfiguration            1            17\n jdk.AllocationRequiringGC                   0             0\n jdk.BooleanFlagChanged                      0             0\n jdk.CPUTimeSample                           0             0\n jdk.CPUTimeSamplesLost                      0             0\n jdk.ClassDefine                             0             0\n jdk.ClassLoad                               0             0\n jdk.ClassRedefinition                       0             0\n jdk.ClassUnload                             0             0\n jdk.CodeCacheFull                           0             0\n jdk.CompilationFailure                      0             0\n jdk.CompilerInlining                        0             0\n jdk.CompilerPhase                           0             0\n jdk.ConcurrentModeFailure                   0             0\n jdk.ContainerCPUThrottling                  0             0\n jdk.ContainerCPUUsage                       0             0\n jdk.ContainerConfiguration                  0             0\n jdk.ContainerIOUsage                        0             0\n jdk.ContainerMemoryUsage                    0             0\n jdk.ContinuationFreeze                      0             0\n jdk.ContinuationFreezeFast                  0             0\n jdk.ContinuationFreezeSlow                  0             0\n jdk.ContinuationThaw                        0             0\n jdk.ContinuationThawFast                    0             0\n jdk.ContinuationThawSlow                    0             0\n jdk.DataLoss                                0             0\n jdk.Deserialization                         0             0\n jdk.DoubleFlagChanged                       0             0\n jdk.DumpReason                              0             0\n jdk.EvacuationFailed                        0             0\n jdk.FileForce                               0             0\n jdk.FileRead                                0             0\n jdk.FileWrite                               0             0\n jdk.FinalFieldMutation                      0             0\n jdk.FinalizerStatistics                     0             0\n jdk.Flush                                   0             0\n jdk.G1HeapRegionInformation                 0             0\n jdk.G1HeapRegionTypeChange                  0             0\n jdk.GCPhaseConcurrent                       0             0\n jdk.GCPhaseConcurrentLevel1                 0             0\n jdk.GCPhaseConcurrentLevel2                 0             0\n jdk.GCPhasePauseLevel2                      0             0\n jdk.GCPhasePauseLevel3                      0             0\n jdk.GCPhasePauseLevel4                      0             0\n jdk.HeapDump                                0             0\n jdk.IntFlagChanged                          0             0\n jdk.JITRestart                              0             0\n jdk.JavaAgent                               0             0\n jdk.JavaMonitorDeflate                      0             0\n jdk.JavaMonitorEnter                        0             0\n jdk.JavaMonitorInflate                      0             0\n jdk.JavaMonitorNotify                       0             0\n jdk.JavaMonitorWait                         0             0\n jdk.LongFlagChanged                         0             0\n jdk.MetaspaceAllocationFailure              0             0\n jdk.MetaspaceGCThreshold                    0             0\n jdk.MetaspaceOOM                            0             0\n jdk.MethodTiming                            0             0\n jdk.MethodTrace                             0             0\n jdk.NativeAgent                             0             0\n jdk.NativeLibraryUnload                     0             0\n jdk.NativeMemoryUsage                       0             0\n jdk.NativeMemoryUsageTotal                  0             0\n jdk.ObjectAllocationInNewTLAB               0             0\n jdk.ObjectAllocationOutsideTLAB             0             0\n jdk.ObjectCount                             0             0\n jdk.ObjectCountAfterGC                      0             0\n jdk.OldGarbageCollection                    0             0\n jdk.PSHeapSummary                           0             0\n jdk.ParallelOldGarbageCollection            0             0\n jdk.ProcessStart                            0             0\n jdk.PromotionFailed                         0             0\n jdk.RedefineClasses                         0             0\n jdk.ReservedStackActivation                 0             0\n jdk.RetransformClasses                      0             0\n jdk.SafepointEnd                            0             0\n jdk.SafepointLatency                        0             0\n jdk.SafepointStateSynchronization           0             0\n jdk.SecurityPropertyModification            0             0\n jdk.SecurityProviderService                 0             0\n jdk.SerializationMisdeclaration             0             0\n jdk.ShenandoahEvacuationInformation         0             0\n jdk.ShenandoahHeapRegionInformation         0             0\n jdk.ShenandoahHeapRegionStateChange         0             0\n jdk.ShenandoahPromotionInformation          0             0\n jdk.SocketWrite                             0             0\n jdk.StringDeduplication                     0             0\n jdk.StringFlagChanged                       0             0\n jdk.SyncOnValueBasedClass                   0             0\n jdk.SystemGC                                0             0\n jdk.TLSHandshake                            0             0\n jdk.ThreadContextSwitchRate                 0             0\n jdk.ThreadDump                              0             0\n jdk.ThreadSleep                             0             0\n jdk.UnsignedIntFlagChanged                  0             0\n jdk.UnsignedLongFlagChanged                 0             0\n jdk.VirtualThreadEnd                        0             0\n jdk.VirtualThreadPinned                     0             0\n jdk.VirtualThreadStart                      0             0\n jdk.VirtualThreadSubmitFailed               0             0\n jdk.X509Certificate                         0             0\n jdk.X509Validation                          0             0\n jdk.ZAllocationStall                        0             0\n jdk.ZOldGarbageCollection                   0             0\n jdk.ZPageAllocation                         0             0\n jdk.ZRelocationSet                          0             0\n jdk.ZRelocationSetGroup                     0             0\n jdk.ZStatisticsCounter                      0             0\n jdk.ZStatisticsSampler                      0             0\n jdk.ZThreadPhase                            0             0\n jdk.ZUncommit                               0             0\n jdk.ZYoungGarbageCollection                 0             0\n",
+      "allocationSites": "\n                                                   Allocation by Site\n\nMethod                                                                                              Allocation Pressure\n--------------------------------------------------------------------------------------------------- -------------------\njava.lang.String.format(Locale, String, Object[])                                                                26.51%\njava.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                          23.35%\njava.util.Formatter.<init>(Locale)                                                                               18.07%\njava.util.Base64$Encoder.encode(byte[])                                                                           8.02%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                                  8.01%\njava.util.Formatter$FormatSpecifierParser.parse()                                                                 5.11%\njava.util.Formatter.parse(String)                                                                                 2.57%\njava.lang.AbstractStringBuilder.<init>(int)                                                                       2.15%\njava.util.ArrayList.grow(int)                                                                                     1.82%\njava.util.Arrays.copyOfRange(byte[], int, int)                                                                    1.71%\njava.util.Arrays.copyOf(byte[], int)                                                                              1.47%\njdk.internal.misc.Unsafe.allocateUninitializedArray(Class, int)                                                   0.44%\njava.util.Formatter$FormatSpecifier.print(Formatter, long, Locale)                                                0.37%\njava.util.ImmutableCollections$AbstractImmutableList.iterator()                                                   0.17%\njava.lang.String.repeat(int)                                                                                      0.07%\njava.lang.StringBuilder.toString()                                                                                0.07%\njava.lang.StringConcatHelper.doConcat(String, String)                                                             0.07%\njava.lang.ClassValue$ClassValueMap.sizeCache(int)                                                                 0.00%\njava.util.Properties$LineReader.<init>(InputStream)                                                               0.00%\njava.lang.reflect.Method.copy()                                                                                   0.00%\njdk.internal.misc.Unsafe.allocateUninitializedArray0(Class, int)                                                  0.00%\njava.lang.StringConcatHelper.concat0(String, String, String)                                                      0.00%\njava.lang.Class.getDeclaredFields0(boolean)                                                                       0.00%\njava.lang.reflect.Field.copy()                                                                                    0.00%\njdk.internal.classfile.impl.StackMapGenerator.<init>(...)                                                         0.00%\n",
+      "allocationClasses": "\n                                  Allocation by Class\n\nObject Type                                                         Allocation Pressure\n------------------------------------------------------------------- -------------------\nbyte[]                                                                           45.22%\njava.util.Formatter                                                              26.51%\njava.lang.StringBuilder                                                          18.44%\njava.util.Formatter$FormatSpecifier                                               5.11%\njava.util.Formatter$FixedString                                                   2.57%\njava.lang.Object[]                                                                1.82%\njava.util.ImmutableCollections$ListItr                                            0.17%\njava.lang.String                                                                  0.14%\njava.lang.reflect.Field                                                           0.01%\njava.lang.ClassValue$Entry[]                                                      0.00%\nchar[]                                                                            0.00%\njava.lang.reflect.Method                                                          0.00%\njdk.internal.classfile.impl.StackMapGenerator$Frame                               0.00%\njava.util.ImmutableCollections$List12                                             0.00%\njava.util.concurrent.locks.AbstractQueuedSynchronizer$ExclusiveNode               0.00%\nint[]                                                                             0.00%\njava.util.ArrayList$Itr                                                           0.00%\njava.util.Formatter$FormatSpecifierParser                                         0.00%\nlong[]                                                                            0.00%\njava.util.concurrent.ConcurrentHashMap                                            0.00%\njdk.internal.classfile.impl.AbstractPoolEntry$Utf8EntryImpl                       0.00%\njava.lang.Class                                                                   0.00%\nchar[][]                                                                          0.00%\njava.lang.Object[][]                                                              0.00%\n",
+      "gcPauses": "\nGC Pauses\n---------\n\nTotal Pause Time: 116 ms\n\nNumber of Pauses: 96\n\nMinimum Pause Time: 0.522 ms\n\nMedian Pause Time: 1.19 ms\n\nAverage Pause Time: 1.20 ms\n\nP90 Pause Time: 1.42 ms\n\nP95 Pause Time: 1.60 ms\n\nP99 Pause Time: 5.22 ms\n\nP99.9% Pause Time: 5.22 ms\n\nMaximum Pause Time: 5.22 ms\n",
+      "hotMethods": "\n                                           Java Methods that Execute the Most\n\nMethod                                                                                                  Samples Percent\n------------------------------------------------------------------------------------------------------- ------- -------\njava.util.Formatter.format(Locale, String, Object[])                                                        167  19.42%\njdk.internal.util.DecimalDigits.uncheckedGetCharsLatin1(long, int, byte[])                                   58   6.74%\njava.util.Formatter$FormatSpecifierParser.parseFlag()                                                        56   6.51%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.putText(ByteBuffer, String, boolean, int)                  49   5.70%\njava.util.Arrays.fill(byte[], byte)                                                                          48   5.58%\njava.util.Formatter$Conversion.isText(char)                                                                  43   5.00%\njava.lang.String.repeat(int)                                                                                 40   4.65%\ncom.surprising.realtime.api.ValkeyReadViewStore.deltaCommand(List, long)                                     38   4.42%\njava.util.Formatter$FormatSpecifier.print(Formatter, long, Locale)                                           37   4.30%\njava.lang.AbstractStringBuilder.append(char)                                                                 37   4.30%\njava.util.Formatter$Conversion.isValid(char)                                                                 35   4.07%\njava.lang.AbstractStringBuilder.<init>(int)                                                                  35   4.07%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length(String)                                         30   3.49%\ncom.surprising.aeron.protocol.RealtimeFrameCodec.encode(...)                                                 28   3.26%\njava.util.Base64$Encoder.encode0(byte[], int, int, byte[])                                                   23   2.67%\njava.util.Formatter$FormatSpecifier.printInteger(Formatter, Object, Locale)                                  23   2.67%\njava.util.Formatter$FormatSpecifierParser.parseArgument()                                                    18   2.09%\njava.util.Formatter$FormatSpecifierParser.parseWidth()                                                       17   1.98%\njava.util.Base64$Encoder.encode(byte[])                                                                      13   1.51%\njava.util.Formatter.parse(String)                                                                            13   1.51%\njava.lang.String.charAt(int)                                                                                 12   1.40%\njava.util.Formatter$FormatSpecifier.print(Formatter, int, Locale)                                             9   1.05%\njava.util.Formatter$FormatSpecifierParser.parse()                                                             8   0.93%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                              7   0.81%\njava.nio.ByteBuffer.allocate(int)                                                                             4   0.47%\n"
+    },
+    {
+      "artifact": {
+        "path": "/private/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v/redis-final-jfr.jfr",
+        "bytes": 708581,
+        "sha256": "70188d2bc1ce44d24edbc29e0fea7c9cb601bee7162ebb1c90e132183847ac2f"
+      },
+      "settings": "Final profile; -Xms512m -Xmx512m -XX:+UseZGC, maxsize=24m; warmup and measurement included.",
+      "summary": "\n Version: 2.1\n Chunks: 1\n Start: 2026-10-08 14:59:39 (UTC)\n Duration: 10 s\n\n Event Type                              Count  Size (bytes) \n=============================================================\n jdk.ObjectAllocationSample               3045         47642\n jdk.ExecuteVMOperation                   1058         16800\n jdk.NativeLibrary                        1044         94115\n jdk.ExecutionSample                       833          9155\n jdk.SystemProcess                         799         79351\n jdk.BooleanFlag                           700         21770\n jdk.GCPhaseConcurrent                     543         20269\n jdk.ModuleExport                          528          5659\n jdk.MetaspaceChunkFreeListSummary         384          6912\n jdk.ActiveSetting                         381          9831\n jdk.GCPhaseConcurrentLevel1               342         13096\n jdk.ZRelocationSetGroup                   315          6283\n jdk.SafepointBegin                        311          4538\n jdk.GCPhasePause                          306          9342\n jdk.GCHeapSummary                         192          8538\n jdk.MetaspaceSummary                      192          9408\n jdk.JavaExceptionThrow                    189         10437\n jdk.ModuleRequire                         157          1570\n jdk.LongFlag                              156          5068\n jdk.UnsignedLongFlag                      150          5458\n jdk.ZRelocationSet                        105          2350\n jdk.GarbageCollection                      96          2014\n jdk.ZYoungGarbageCollection                96          1440\n jdk.UnsignedIntFlag                        88          3078\n jdk.IntFlag                                60          2125\n jdk.InitialEnvironmentVariable             59          3553\n jdk.InitialSecurityProperty                47          2360\n jdk.StringFlag                             45          1585\n jdk.Checkpoint                             44        180081\n jdk.GCReferenceStatistics                  36           367\n jdk.DoubleFlag                             35          1558\n jdk.ThreadAllocationStatistics             32           302\n jdk.Deoptimization                         29           675\n jdk.GCPhaseConcurrentLevel2                18           514\n jdk.ThreadCPULoad                          16           256\n jdk.InitialSystemProperty                  15          1575\n jdk.ThreadPark                             11           421\n jdk.ClassLoadingStatistics                 10           100\n jdk.CompilerStatistics                     10           290\n jdk.ExceptionStatistics                    10           100\n jdk.JavaThreadStatistics                   10           110\n jdk.ResidentSetSize                        10           170\n jdk.ThreadEnd                              10            90\n jdk.CPULoad                                 9           171\n jdk.ZOldGarbageCollection                   9           126\n jdk.JavaErrorThrow                          7           266\n jdk.ThreadStart                             7            80\n jdk.ClassLoaderStatistics                   6           159\n jdk.CodeCacheStatistics                     6           174\n jdk.CompilerQueueUtilization                4            82\n jdk.GCHeapMemoryPoolUsage                   4           160\n jdk.NativeLibraryLoad                       4           366\n jdk.NetworkUtilization                      4            54\n jdk.NativeMethodSample                      3            30\n jdk.Compilation                             2            58\n jdk.DeprecatedInvocation                    2            39\n jdk.DirectBufferStatistics                  2            32\n jdk.GCConfiguration                         2            50\n jdk.GCHeapMemoryUsage                       2            43\n jdk.JavaMonitorStatistics                   2            16\n jdk.PhysicalMemory                          2            34\n jdk.SocketRead                              2            86\n jdk.SwapSpace                               2            34\n jdk.ActiveRecording                         1            63\n jdk.CPUInformation                          1          1744\n jdk.CPUTimeStampCounter                     1            19\n jdk.CodeCacheConfiguration                  1            42\n jdk.CompilerConfiguration                   1            11\n jdk.GCHeapConfiguration                     1            27\n jdk.GCSurvivorConfiguration                 1            10\n jdk.GCTLABConfiguration                     1            12\n jdk.JVMInformation                          1           673\n jdk.Metadata                                1        113174\n jdk.OSInformation                           1           147\n jdk.Shutdown                                1            47\n jdk.StringTableStatistics                   1            36\n jdk.SymbolTableStatistics                   1            36\n jdk.VirtualizationInformation               1            35\n jdk.YoungGenerationConfiguration            1            21\n jdk.AllocationRequiringGC                   0             0\n jdk.BooleanFlagChanged                      0             0\n jdk.CPUTimeSample                           0             0\n jdk.CPUTimeSamplesLost                      0             0\n jdk.ClassDefine                             0             0\n jdk.ClassLoad                               0             0\n jdk.ClassRedefinition                       0             0\n jdk.ClassUnload                             0             0\n jdk.CodeCacheFull                           0             0\n jdk.CompilationFailure                      0             0\n jdk.CompilerInlining                        0             0\n jdk.CompilerPhase                           0             0\n jdk.ConcurrentModeFailure                   0             0\n jdk.ContainerCPUThrottling                  0             0\n jdk.ContainerCPUUsage                       0             0\n jdk.ContainerConfiguration                  0             0\n jdk.ContainerIOUsage                        0             0\n jdk.ContainerMemoryUsage                    0             0\n jdk.ContinuationFreeze                      0             0\n jdk.ContinuationFreezeFast                  0             0\n jdk.ContinuationFreezeSlow                  0             0\n jdk.ContinuationThaw                        0             0\n jdk.ContinuationThawFast                    0             0\n jdk.ContinuationThawSlow                    0             0\n jdk.DataLoss                                0             0\n jdk.Deserialization                         0             0\n jdk.DoubleFlagChanged                       0             0\n jdk.DumpReason                              0             0\n jdk.EvacuationFailed                        0             0\n jdk.EvacuationInformation                   0             0\n jdk.FileForce                               0             0\n jdk.FileRead                                0             0\n jdk.FileWrite                               0             0\n jdk.FinalFieldMutation                      0             0\n jdk.FinalizerStatistics                     0             0\n jdk.Flush                                   0             0\n jdk.G1AdaptiveIHOP                          0             0\n jdk.G1BasicIHOP                             0             0\n jdk.G1EvacuationOldStatistics               0             0\n jdk.G1EvacuationYoungStatistics             0             0\n jdk.G1GarbageCollection                     0             0\n jdk.G1HeapRegionInformation                 0             0\n jdk.G1HeapRegionTypeChange                  0             0\n jdk.G1HeapSummary                           0             0\n jdk.G1MMU                                   0             0\n jdk.GCCPUTime                               0             0\n jdk.GCPhaseParallel                         0             0\n jdk.GCPhasePauseLevel1                      0             0\n jdk.GCPhasePauseLevel2                      0             0\n jdk.GCPhasePauseLevel3                      0             0\n jdk.GCPhasePauseLevel4                      0             0\n jdk.HeapDump                                0             0\n jdk.IntFlagChanged                          0             0\n jdk.JITRestart                              0             0\n jdk.JavaAgent                               0             0\n jdk.JavaMonitorDeflate                      0             0\n jdk.JavaMonitorEnter                        0             0\n jdk.JavaMonitorInflate                      0             0\n jdk.JavaMonitorNotify                       0             0\n jdk.JavaMonitorWait                         0             0\n jdk.LongFlagChanged                         0             0\n jdk.MetaspaceAllocationFailure              0             0\n jdk.MetaspaceGCThreshold                    0             0\n jdk.MetaspaceOOM                            0             0\n jdk.MethodTiming                            0             0\n jdk.MethodTrace                             0             0\n jdk.NativeAgent                             0             0\n jdk.NativeLibraryUnload                     0             0\n jdk.NativeMemoryUsage                       0             0\n jdk.NativeMemoryUsageTotal                  0             0\n jdk.ObjectAllocationInNewTLAB               0             0\n jdk.ObjectAllocationOutsideTLAB             0             0\n jdk.ObjectCount                             0             0\n jdk.ObjectCountAfterGC                      0             0\n jdk.OldGarbageCollection                    0             0\n jdk.OldObjectSample                         0             0\n jdk.PSHeapSummary                           0             0\n jdk.ParallelOldGarbageCollection            0             0\n jdk.ProcessStart                            0             0\n jdk.PromoteObjectInNewPLAB                  0             0\n jdk.PromoteObjectOutsidePLAB                0             0\n jdk.PromotionFailed                         0             0\n jdk.RedefineClasses                         0             0\n jdk.ReservedStackActivation                 0             0\n jdk.RetransformClasses                      0             0\n jdk.SafepointEnd                            0             0\n jdk.SafepointLatency                        0             0\n jdk.SafepointStateSynchronization           0             0\n jdk.SecurityPropertyModification            0             0\n jdk.SecurityProviderService                 0             0\n jdk.SerializationMisdeclaration             0             0\n jdk.ShenandoahEvacuationInformation         0             0\n jdk.ShenandoahHeapRegionInformation         0             0\n jdk.ShenandoahHeapRegionStateChange         0             0\n jdk.ShenandoahPromotionInformation          0             0\n jdk.SocketWrite                             0             0\n jdk.StringDeduplication                     0             0\n jdk.StringFlagChanged                       0             0\n jdk.SyncOnValueBasedClass                   0             0\n jdk.SystemGC                                0             0\n jdk.TLSHandshake                            0             0\n jdk.TenuringDistribution                    0             0\n jdk.ThreadContextSwitchRate                 0             0\n jdk.ThreadDump                              0             0\n jdk.ThreadSleep                             0             0\n jdk.UnsignedIntFlagChanged                  0             0\n jdk.UnsignedLongFlagChanged                 0             0\n jdk.VirtualThreadEnd                        0             0\n jdk.VirtualThreadPinned                     0             0\n jdk.VirtualThreadStart                      0             0\n jdk.VirtualThreadSubmitFailed               0             0\n jdk.X509Certificate                         0             0\n jdk.X509Validation                          0             0\n jdk.YoungGarbageCollection                  0             0\n jdk.ZAllocationStall                        0             0\n jdk.ZPageAllocation                         0             0\n jdk.ZStatisticsCounter                      0             0\n jdk.ZStatisticsSampler                      0             0\n jdk.ZThreadPhase                            0             0\n jdk.ZUncommit                               0             0\n",
+      "allocationSites": "\n                                                   Allocation by Site\n\nMethod                                                                                              Allocation Pressure\n--------------------------------------------------------------------------------------------------- -------------------\njava.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                          74.02%\njava.util.Base64$Encoder.encode(byte[])                                                                          22.54%\njava.util.List.of(Object, Object)                                                                                 3.24%\ncom.surprising.realtime.api.RealtimeVersion.bytes(long, int)                                                      0.12%\njdk.internal.misc.Unsafe.allocateUninitializedArray(Class, int)                                                   0.05%\njava.util.Arrays.copyOf(byte[], int)                                                                              0.00%\njava.nio.ByteBuffer.allocate(int)                                                                                 0.00%\ncom.surprising.realtime.api.ValkeyReadViewStore.deltaCommand(List, long)                                          0.00%\njava.lang.reflect.Method.copy()                                                                                   0.00%\njava.lang.Class.getDeclaredMethods0(boolean)                                                                      0.00%\njava.lang.Throwable.fillInStackTrace(int)                                                                         0.00%\njava.lang.Class.getDeclaredFields0(boolean)                                                                       0.00%\njava.util.Arrays.copyOfRange(byte[], int, int)                                                                    0.00%\njava.util.concurrent.ConcurrentHashMap.initTable()                                                                0.00%\njava.lang.String.encodeUTF8(byte, byte[], Class)                                                                  0.00%\njava.lang.ClassLoader.defineClass1(ClassLoader, String, byte[], int, int, ProtectionDomain, String)               0.00%\njava.util.concurrent.locks.AbstractQueuedSynchronizer.tryInitializeHead()                                         0.00%\njdk.internal.classfile.impl.SplitConstantPool.<init>()                                                            0.00%\njava.util.Properties$LineReader.<init>(InputStream)                                                               0.00%\njava.util.concurrent.ConcurrentHashMap.putVal(Object, Object, boolean)                                            0.00%\njava.util.ArrayList.grow(int)                                                                                     0.00%\njava.security.Provider$Service.<init>(Provider, String, String, String, List, Map)                                0.00%\njava.util.jar.JarFile.entryFor(String)                                                                            0.00%\njava.io.ObjectInputStream$BlockDataInputStream.<init>(ObjectInputStream, InputStream)                             0.00%\njava.util.ArrayList.iterator()                                                                                    0.00%\n",
+      "allocationClasses": "\n                                  Allocation by Class\n\nObject Type                                                         Allocation Pressure\n------------------------------------------------------------------- -------------------\nbyte[]                                                                           96.74%\njava.util.ImmutableCollections$List12                                             3.24%\njava.lang.reflect.Method                                                          0.00%\njava.nio.HeapByteBuffer                                                           0.00%\njava.lang.Object[]                                                                0.00%\nbyte[][]                                                                          0.00%\njava.util.concurrent.ConcurrentHashMap$Node[]                                     0.00%\njava.lang.reflect.Field                                                           0.00%\njava.lang.Class                                                                   0.00%\njava.util.concurrent.locks.AbstractQueuedSynchronizer$ExclusiveNode               0.00%\njava.lang.classfile.constantpool.PoolEntry[]                                      0.00%\nchar[]                                                                            0.00%\njava.util.concurrent.ConcurrentHashMap$Node                                       0.00%\nlong[]                                                                            0.00%\njava.security.Provider$UString                                                    0.00%\njava.util.jar.JarFile$JarFileEntry                                                0.00%\njava.io.ObjectInputStream$PeekInputStream                                         0.00%\njava.util.ArrayList$Itr                                                           0.00%\njdk.internal.classfile.impl.DirectCodeBuilder                                     0.00%\nshort[]                                                                           0.00%\nint[]                                                                             0.00%\njava.lang.String                                                                  0.00%\njdk.internal.classfile.impl.AbstractPoolEntry$Utf8EntryImpl                       0.00%\njava.lang.StringBuilder                                                           0.00%\njdk.internal.classfile.impl.StackMapGenerator$Type[]                              0.00%\n",
+      "gcPauses": "\nGC Pauses\n---------\n\nTotal Pause Time: 4.08 ms\n\nNumber of Pauses: 306\n\nMinimum Pause Time: 0.00307 ms\n\nMedian Pause Time: 0.00848 ms\n\nAverage Pause Time: 0.0133 ms\n\nP90 Pause Time: 0.0283 ms\n\nP95 Pause Time: 0.0319 ms\n\nP99 Pause Time: 0.0549 ms\n\nP99.9% Pause Time: 0.0680 ms\n\nMaximum Pause Time: 0.0680 ms\n",
+      "hotMethods": "\n                                           Java Methods that Execute the Most\n\nMethod                                                                                                  Samples Percent\n------------------------------------------------------------------------------------------------------- ------- -------\ncom.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length(String)                                        259  31.09%\ncom.surprising.aeron.protocol.RealtimeFrameCodec.encode(...)                                                194  23.29%\njava.util.Base64$Encoder.encode0(byte[], int, int, byte[])                                                  136  16.33%\ncom.surprising.aeron.protocol.CoreStateQueryCodec.putText(ByteBuffer, String, boolean, int)                 102  12.24%\njava.util.Base64$Encoder.encode(byte[])                                                                      46   5.52%\njdk.internal.util.DecimalDigits.uncheckedGetCharsLatin1(long, int, byte[])                                   27   3.24%\ncom.surprising.realtime.api.ValkeyReadViewStore.deltaCommand(List, long)                                     20   2.40%\njava.util.ImmutableCollections$List12.get(int)                                                                9   1.08%\njava.nio.HeapByteBuffer.put(byte)                                                                             9   1.08%\njdk.internal.misc.Unsafe.allocateUninitializedArray(Class, int)                                               7   0.84%\ncom.surprising.realtime.api.jmh_generated.RealtimeAllocationBenchmark_redisDelta_jmhTest.redisDelta_...       3   0.36%\ncom.surprising.realtime.api.RealtimeVersion.bytes(long, int)                                                  3   0.36%\ncom.surprising.realtime.api.RealtimeAllocationBenchmark.redisDelta()                                          3   0.36%\njava.lang.String.getBytes(Charset)                                                                            2   0.24%\njava.util.zip.ZipFile$ZipFileInputStream.initDataOffset()                                                     1   0.12%\njava.util.zip.ZipFile$Source.readFullyAt(byte[], int, int, long)                                              1   0.12%\njava.util.TreeMap.fixAfterInsertion(TreeMap$Entry)                                                            1   0.12%\njava.util.WeakHashMap.get(Object)                                                                             1   0.12%\njava.io.ObjectInputStream.readNonProxyDesc(boolean)                                                           1   0.12%\njava.util.Base64$Encoder.encodeBlock(byte[], int, int, byte[], int, boolean)                                  1   0.12%\njava.lang.String$$StringConcat.0x00000001440d4000.concat(Object, Object)                                      1   0.12%\njdk.internal.reflect.MethodHandleAccessorFactory.newMethodAccessor(Method, boolean)                           1   0.12%\njava.lang.Math.multiplyExact(int, int)                                                                        1   0.12%\njava.util.Arrays.copyOf(Object[], int)                                                                        1   0.12%\njdk.internal.classfile.impl.EntryMap.nextPowerOfTwo(long)                                                     1   0.12%\n"
+    }
+  ],
+  "resolvedValidationFailures": [
+    "Golden UTF-8 vectors initially rejected empty/over-64-byte realtime text; fixed with separately bounded shared writer overload and reran full protocol/client tests.",
+    "Test assertion used unsupported Byte2DArrayAssert.hasSize; fixed test to check length.",
+    "Disposable Core JVM initially lacked --add-opens=java.base/java.util.zip=ALL-UNNAMED for Archive checksum; corrected harness and all six real Core tests passed."
+  ],
+  "limitations": [
+    "No HTTP/Kafka/maker end-to-end load, remote runtime resource measurement, NMT or long-duration leak validation.",
+    "Real six-product shared transport tests cover deposits, duplicate command IDs and queries; cross-product transfer/recovery and trade/risk checks use existing state-machine tests.",
+    "Initial 10 database maintenance tests skipped because MAINTENANCE_TEST_JDBC_URL was absent; SQL/maintenance business logic unchanged. Final selected tests have zero skips.",
+    "No wallet service started. No real user funds changed.",
+    "JFR sampled allocation weights are not exact allocation counts; GC profiler supplies B/op. Initial G1 JFR pause figures must not be compared against final ZGC."
+  ],
+  "cleanup": {
+    "status": "complete",
+    "taskDirectory": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/gateway-resource-opt-amj1o72v",
+    "cleanedUtc": "2026-10-08T15:03:57.436021+00:00",
+    "removed": "two isolated source/build directories, own temporary Core/driver data, benchmark logs/JSON/intermediate reports, two JFR recordings and helper sources; summaries, commands, hashes and source manifest retained in this JSON",
+    "originalUserProcesses": "retained",
+    "server": "not modified",
+    "processCheck": "no task Java/Maven/benchmark/Core process remains"
+  },
+  "codecBenchmarkBytecodeVerification": {
+    "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/RealtimeFrameCodec.class": {
+      "initial": "e74cf4c28a699760b82e838e7322a8bdbe56e6918c3cb49dee42d517084a1a1b",
+      "final": "e74cf4c28a699760b82e838e7322a8bdbe56e6918c3cb49dee42d517084a1a1b",
+      "identical": true
+    },
+    "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreStateQueryCodec.class": {
+      "initial": "f08d45c2a2059816ec829e6e99f39d8a28f646081fb343e1b4a353f6717f6f65",
+      "final": "f08d45c2a2059816ec829e6e99f39d8a28f646081fb343e1b4a353f6717f6f65",
+      "identical": true
+    }
+  }
+}

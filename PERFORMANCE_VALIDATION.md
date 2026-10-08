@@ -4859,3 +4859,20 @@ Kafka 19 个活跃组均有分区，K 线 lag 为 0；五应用 UP、三合约 K
 无资金写入，无额外交易负载；未做 NMT、长稳、资金费/强平或恢复触发测试。
 
 清理：三个 resourceAudit 录制自动结束并复查；36 个原始/中间文件在汇总后删除，校验、summary、热点及指标保留在 JSON。原应用 JVM 全部保留。
+
+
+## 2026-10-08：Gateway 命令驱动共享与行情临时分配
+
+代码 `8a8ce3cb`，仅 master 当前工作代码；没有签出历史版本。先写入本地计划，再运行独立无采样吞吐、GC profiler 和 JFR 归因；后续格式化热点修复后再次验证。
+HotSpot Corretto 27 / Maven 3.9.16，macOS 26.7.2，16 逻辑 CPU、16 GiB RAM，512 MiB ZGC；JMH 5×1s 预热、5×1s 测量，无采样 2 forks，GC/JFR 各 1 fork。
+
+最终 286 项功能测试通过、无失败/跳过：六产品真实 Core 共享四来源连接、幂等及余额核对、产品容器生命周期、真实 Redis Lua/UDP 路由，以及相关交易/风险/快照状态机。每产品 4×100 units 入账，重复命令增量 0，期末 400、冻结 0、无持仓。
+同工厂当前配置的四/单驱动探针工作线程 4→1，目录逻辑大小 197,148,672→49,287,168 bytes；逻辑大小不能当作 RSS 降幅。
+
+最终 Redis command 128/4096 字节 payload 的无采样吞吐为 4,040,485±328,559 / 765,839±150,611 ops/s，独立 GC profiler 为 1,008.00 / 10,264.01 B/op。
+客户端即时 Session 基准 1,362,084±47,345 ops/s，全局 in-flight 256；两个 fork offered=terminal=13,040,256 / 13,326,400，unfinished=0，包含预热的计数不作为稳定吞吐。
+最终 JFR 10s/profile/24MiB 上限，DataLoss=0，最大观察 GC phase pause 0.0680ms。初次 JFR 实际为 G1/default heap，仅用于 Formatter 分配归因；最终重录明确使用 512 MiB ZGC，不能跨 GC 配置比较暂停。
+
+结论：功能通过，资源局部验证。未部署服务器，未做完整 HTTP/Kafka/做市负载、NMT、长稳或业务 p99，不能据此宣称整机收益或容量。最后一轮无 swap-in/out/page-out 增量。
+全部实际命令、逐类结果、JMH 原始样本、JFR summary/分配/GC 聚合、路径及 SHA-256 见 [验证记录](docs/validation/gateway-realtime-resource-optimization-20261008.md) 和同名 JSON。
+清理完成：仅删除本轮独立源码/构建、临时 Core/驱动数据、日志、录制及中间报告，保留已入档汇总；本轮进程已结束，原服务与其他工作区改动保留。
