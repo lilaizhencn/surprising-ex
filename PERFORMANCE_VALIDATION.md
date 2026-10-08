@@ -4920,3 +4920,5 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 做市最新运行优化中的内存诊断有界且不逐周期写库，但公共设置/策略重启恢复 YAML 与后台唯一配置来源要求冲突。保留批量输入和有界诊断，设置/策略恢复数据库持久化，仅在管理员事务提交后失效不可变派生缓存；不在报价周期查询数据库。PG 测试使用本任务独立本地实例及随机唯一测试 schema，覆盖重启、CAS、提交/回滚及冷缓存回滚。
 
 新增 MakerConfigurationReadBenchmark 直接调用实际配置缓存方法，三策略，测量前 JDBC fixture 各加载一次定义/覆盖，teardown 校验测量期间无额外查询；不把 fixture 解释为 PostgreSQL 性能。参数仍为 3×2s 预热、3×2s 测量、两 fork 无 profiler 主轮、单 fork 独立 GC，512MiB ZGC。真实 PostgreSQL 正确性单列，服务器实际进程 JFR 归因单列。最终修复部署完成后重新预热600秒并完整观测7200秒，部署前窗口不计入。
+
+报价槽位补充计划：实际 liquidityReplacements 当前主轮观察 240 报价 464642 B/轮，定位到双层匹配反复拼接 quotePrefix。直接解析现有 clientOrderId 的 canonical 方向/非负整型档位，无新索引/缓存/共享状态；严格保留前缀隔离、前导零拒绝与分隔符要求。修改后只运行当前源码同配置的主轮/独立 GC，覆盖 20/120 档，并以已有对账及新增边界测试验证业务，不重跑历史源码作对照。

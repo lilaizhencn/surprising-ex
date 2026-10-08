@@ -936,11 +936,12 @@ public class MarketMakerService {
         if (old == null || quoting.getLinearLiquidityTargetNotionalUnits() == 0
                 || (strategy.getProductLine() != ProductLine.LINEAR_PERPETUAL
                 && strategy.getProductLine() != ProductLine.LINEAR_DELIVERY)) return null;
+        int level = quoteLevel(old.clientOrderId(), prefix, old.side());
+        if (level < 0) return null;
         long best = old.side() == OrderSide.BUY ? bid : ask;
         long tolerance = ppmFloor(best, quoting.getLiquiditySlippagePpm());
         for (var quote : plan.quotes()) {
-            if (quote.side() != old.side()
-                    || !old.clientOrderId().startsWith(quotePrefix(prefix, quote.side(), quote.level()))) continue;
+            if (quote.side() != old.side() || quote.level() != level) continue;
             if (Math.abs(quote.priceTicks() - best) <= tolerance) return quote;
         }
         return null;
@@ -1118,19 +1119,35 @@ public class MarketMakerService {
     }
 
     private boolean hasOwnedQuoteSlot(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
-        String prefix = quotePrefix(accountPrefix, quote.side(), quote.level());
-        return orders.stream().anyMatch(order -> order != null && order.clientOrderId() != null
-                && order.clientOrderId().startsWith(prefix));
+        return orders.stream().anyMatch(order -> order != null
+                && quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level());
     }
 
     private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {
-        String expectedPrefix = quotePrefix(accountPrefix, quote.side(), quote.level());
-        return order.clientOrderId() != null
-                && order.clientOrderId().startsWith(expectedPrefix)
-                && order.side() == quote.side()
+        return order.side() == quote.side()
+                && quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level()
                 && Math.abs(order.priceTicks() - quote.priceTicks())
                 <= Math.max(quoting.getRefreshThresholdTicks(), ppmFloor(quote.priceTicks(), quoting.getRefreshTolerancePpm()))
                 && quantityWithinRefreshTolerance(order.remainingQuantitySteps(), quote.quantitySteps(), quoting);
+    }
+
+    /** Read the canonical side/level slot without constructing prefixes during every quote comparison. */
+    static int quoteLevel(String clientOrderId, String accountPrefix, OrderSide side) {
+        if (clientOrderId == null || side == null || !clientOrderId.startsWith(accountPrefix)) return -1;
+        int offset = accountPrefix.length();
+        if (offset + 2 >= clientOrderId.length()
+                || clientOrderId.charAt(offset++) != (side == OrderSide.BUY ? 'b' : 's')) return -1;
+        if (clientOrderId.charAt(offset) == '0' && clientOrderId.charAt(offset + 1) != '-') return -1;
+        int level = 0;
+        boolean digitSeen = false;
+        for (; offset < clientOrderId.length(); offset++) {
+            char digit = clientOrderId.charAt(offset);
+            if (digit == '-') return digitSeen ? level : -1;
+            if (digit < '0' || digit > '9' || level > (Integer.MAX_VALUE - (digit - '0')) / 10) return -1;
+            level = level * 10 + (digit - '0');
+            digitSeen = true;
+        }
+        return -1;
     }
 
     private boolean quantityWithinRefreshTolerance(long resting, long desired, MarketMakerProperties.Quoting quoting) {
