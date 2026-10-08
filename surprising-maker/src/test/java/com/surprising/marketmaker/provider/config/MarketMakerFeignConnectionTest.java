@@ -45,22 +45,33 @@ class MarketMakerFeignConnectionTest {
     void responseBodyReadsKeepTheirTimeoutAfterHeadersArrive() throws Exception {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var release = new java.util.concurrent.CountDownLatch(1);
+        server.createContext("/warmup", exchange -> {
+            exchange.sendResponseHeaders(200, 1);
+            try (var output = exchange.getResponseBody()) { output.write('a'); }
+        });
         server.createContext("/slow", exchange -> {
             exchange.sendResponseHeaders(200, 100);
             try (var output = exchange.getResponseBody()) {
                 output.write('a'); output.flush();
-                try { release.await(3, java.util.concurrent.TimeUnit.SECONDS); }
+                try { release.await(10, java.util.concurrent.TimeUnit.SECONDS); }
                 catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             }
         });
         server.start();
         var config = new MarketMakerFeignConfiguration();
         try (var http = config.marketMakerHttpClient()) {
+            var client = config.marketMakerFeignClient(http);
+            var warmup = Request.create(Request.HttpMethod.GET,
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/warmup", Map.of(), null,
+                    StandardCharsets.UTF_8, null);
+            try (var response = client.execute(warmup, config.marketMakerRequestOptions())) {
+                assertThat(response.body().asInputStream().readAllBytes()).containsExactly((byte) 'a');
+            }
             var request = Request.create(Request.HttpMethod.GET,
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/slow", Map.of(), null,
                     StandardCharsets.UTF_8, null);
-            var options = new Request.Options(java.time.Duration.ofSeconds(1), java.time.Duration.ofMillis(150), true);
-            try (var response = config.marketMakerFeignClient(http).execute(request, options)) {
+            var options = new Request.Options(java.time.Duration.ofSeconds(1), java.time.Duration.ofMillis(500), true);
+            try (var response = client.execute(request, options)) {
                 org.assertj.core.api.Assertions.assertThatThrownBy(() -> response.body().asInputStream().readAllBytes())
                         .isInstanceOf(java.net.SocketTimeoutException.class);
             }
