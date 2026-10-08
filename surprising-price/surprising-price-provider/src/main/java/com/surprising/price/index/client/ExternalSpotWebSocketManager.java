@@ -23,7 +23,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -99,12 +98,13 @@ public class ExternalSpotWebSocketManager {
     public void stop() {
         running = false;
         sessions.values().forEach(session -> {
-            WebSocket webSocket = session.webSocket.get();
-            if (webSocket != null) {
-                webSocket.abort();
-            }
+            session.listener = null;
+            WebSocket webSocket = session.webSocket.getAndSet(null);
+            if (webSocket != null) webSocket.abort();
         });
+        sessions.clear();
         scheduler.shutdownNow();
+        httpClient.shutdownNow();
     }
 
     private Map<String, List<TrackedSource>> groupedSources() {
@@ -132,6 +132,16 @@ public class ExternalSpotWebSocketManager {
         grouped.forEach((url, sources) -> {
             WsSession session = sessions.computeIfAbsent(url, ignored -> new WsSession(url, sources));
             session.updateSources(sources);
+            var desiredMessages = new java.util.HashSet<String>();
+            for (var source : sources) {
+                String message = source.source().getWebsocketSubscribeMessage();
+                if (hasText(message)) desiredMessages.add(message);
+            }
+            if (session.sentSubscribeMessages.stream().anyMatch(message -> !desiredMessages.contains(message))) {
+                // Reconnect with only current subscriptions; retired symbols must stop upstream work.
+                scheduleReconnect(session, "subscriptions removed or changed");
+                return;
+            }
             WebSocket webSocket = session.webSocket.get();
             if (webSocket == null) {
                 connect(session);
@@ -142,45 +152,60 @@ public class ExternalSpotWebSocketManager {
     }
 
     private void connect(WsSession session) {
-        if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session || !session.connecting.compareAndSet(false, true)) {
-            return;
+        synchronized (session) {
+            if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session
+                    || !session.connecting.compareAndSet(false, true)) return;
+            SourceWebSocketListener listener = new SourceWebSocketListener(session);
+            session.listener = listener;
+            httpClient.newWebSocketBuilder()
+                    .connectTimeout(properties.getHttp().getConnectTimeout())
+                    .buildAsync(URI.create(session.url), listener)
+                    .whenComplete((webSocket, ex) -> {
+                        synchronized (session) {
+                            if (session.listener != listener) {
+                                if (webSocket != null) webSocket.abort();
+                                return;
+                            }
+                            session.connecting.set(false);
+                            if (ex != null) {
+                                scheduleReconnect(session, "connect failed: " + ex.getMessage(), listener);
+                                return;
+                            }
+                            if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session) {
+                                webSocket.abort(); return;
+                            }
+                            session.reconnectScheduled.set(false);
+                            log.info("Connected external spot WebSocket url={} subscriptions={}", session.url, session.sources.size());
+                        }
+                    });
         }
-        httpClient.newWebSocketBuilder()
-                .connectTimeout(properties.getHttp().getConnectTimeout())
-                .buildAsync(URI.create(session.url), new SourceWebSocketListener(session))
-                .whenComplete((webSocket, ex) -> {
-                    session.connecting.set(false);
-                    if (ex != null) {
-                        scheduleReconnect(session, "connect failed: " + ex.getMessage());
-                        return;
-                    }
-                    if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session) {
-                        webSocket.abort(); return;
-                    }
-                    session.webSocket.set(webSocket);
-                    session.reconnectScheduled.set(false);
-                    log.info("Connected external spot WebSocket url={} subscriptions={}", session.url, session.sources.size());
-                });
     }
 
     private void scheduleReconnect(WsSession session, String reason) {
-        if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session || !session.reconnectScheduled.compareAndSet(false, true)) {
-            return;
-        }
-        WebSocket webSocket = session.webSocket.getAndSet(null);
-        if (webSocket != null) {
-            webSocket.abort();
-        }
-        session.connecting.set(false);
+        scheduleReconnect(session, reason, null);
+    }
 
-        int attempt = session.reconnectAttempts.incrementAndGet();
-        long delayMs = reconnectDelayMillis(attempt);
-        log.warn("Scheduling external spot WebSocket reconnect url={} attempt={} delayMs={} reason={}",
-                session.url, attempt, delayMs, reason);
-        scheduler.schedule(() -> {
-            session.reconnectScheduled.set(false);
-            connect(session);
-        }, delayMs, TimeUnit.MILLISECONDS);
+    private void scheduleReconnect(WsSession session, String reason, SourceWebSocketListener expected) {
+        // Lifecycle transitions are infrequent. The check and retirement must be atomic with
+        // installing a successor; normal quote parsing needs no lifecycle lock.
+        synchronized (session) {
+            if (expected != null && session.listener != expected) return;
+            if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session
+                    || !session.reconnectScheduled.compareAndSet(false, true)) return;
+            session.listener = null;
+            session.sentSubscribeMessages.clear();
+            WebSocket webSocket = session.webSocket.getAndSet(null);
+            if (webSocket != null) webSocket.abort();
+            session.connecting.set(false);
+            int attempt = session.reconnectAttempts.incrementAndGet();
+            long delayMs = reconnectDelayMillis(attempt);
+            log.warn("Scheduling external spot WebSocket reconnect url={} attempt={} delayMs={} reason={}",
+                    session.url, attempt, delayMs, reason);
+            scheduler.schedule(() -> {
+                session.reconnectScheduled.set(false);
+                connect(session);
+            }, delayMs, TimeUnit.MILLISECONDS);
+        }
     }
 
     private long reconnectDelayMillis(int attempt) {
@@ -267,23 +292,30 @@ public class ExternalSpotWebSocketManager {
 
         @Override
         public void onOpen(WebSocket webSocket) {
-            session.lastFrameEpochMillis.set(System.currentTimeMillis());
-            Set<String> subscribeMessages = new LinkedHashSet<>();
-            for (TrackedSource trackedSource : session.sources()) {
-                String message = trackedSource.source().getWebsocketSubscribeMessage();
-                if (hasText(message)) {
-                    subscribeMessages.add(message);
+            synchronized (session) {
+                if (!running || session.listener != this || sessions.get(session.url) != session) {
+                    webSocket.abort(); return;
                 }
+                session.webSocket.set(webSocket);
+                session.lastFrameEpochMillis.set(System.currentTimeMillis());
+                Set<String> subscribeMessages = new LinkedHashSet<>();
+                for (TrackedSource trackedSource : session.sources()) {
+                    String message = trackedSource.source().getWebsocketSubscribeMessage();
+                    if (hasText(message)) {
+                        subscribeMessages.add(message);
+                    }
+                }
+                subscribeMessages.forEach(message -> {
+                    session.sentSubscribeMessages.add(message);
+                    webSocket.sendText(message, true);
+                });
+                webSocket.request(1);
             }
-            subscribeMessages.forEach(message -> {
-                session.sentSubscribeMessages.add(message);
-                webSocket.sendText(message, true);
-            });
-            webSocket.request(1);
         }
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            if (session.listener != this) return CompletableFuture.completedFuture(null);
             session.lastFrameEpochMillis.set(System.currentTimeMillis());
             buffer.append(data);
             if (last) {
@@ -297,6 +329,7 @@ public class ExternalSpotWebSocketManager {
 
         @Override
         public CompletionStage<?> onPing(WebSocket webSocket, ByteBuffer message) {
+            if (session.listener != this) return CompletableFuture.completedFuture(null);
             session.lastFrameEpochMillis.set(System.currentTimeMillis());
             webSocket.request(1);
             return webSocket.sendPong(message);
@@ -304,6 +337,7 @@ public class ExternalSpotWebSocketManager {
 
         @Override
         public CompletionStage<?> onPong(WebSocket webSocket, ByteBuffer message) {
+            if (session.listener != this) return CompletableFuture.completedFuture(null);
             session.lastFrameEpochMillis.set(System.currentTimeMillis());
             webSocket.request(1);
             return CompletableFuture.completedFuture(null);
@@ -311,19 +345,21 @@ public class ExternalSpotWebSocketManager {
 
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-            scheduleReconnect(session, "closed status=" + statusCode + " reason=" + reason);
+            scheduleReconnect(session, "closed status=" + statusCode + " reason=" + reason, this);
             return CompletableFuture.completedFuture(null);
         }
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
-            scheduleReconnect(session, "error: " + error.getMessage());
+            scheduleReconnect(session, "error: " + error.getMessage(), this);
         }
     }
 
     private static class WsSession {
         private final String url;
-        private final CopyOnWriteArrayList<TrackedSource> sources = new CopyOnWriteArrayList<>();
+        private volatile List<TrackedSource> sources = List.of();
+        // Identifies the current connection attempt so late callbacks cannot retire its successor.
+        private volatile SourceWebSocketListener listener;
         private final Set<String> sentSubscribeMessages = ConcurrentHashMap.newKeySet();
         private final AtomicReference<WebSocket> webSocket = new AtomicReference<>();
         private final AtomicBoolean connecting = new AtomicBoolean();
@@ -337,12 +373,11 @@ public class ExternalSpotWebSocketManager {
         }
 
         private void updateSources(List<TrackedSource> latestSources) {
-            sources.clear();
-            sources.addAll(latestSources);
+            sources = List.copyOf(latestSources);
         }
 
         private List<TrackedSource> sources() {
-            return List.copyOf(sources);
+            return sources;
         }
     }
 

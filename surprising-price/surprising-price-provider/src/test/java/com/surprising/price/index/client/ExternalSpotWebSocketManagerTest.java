@@ -101,6 +101,54 @@ class ExternalSpotWebSocketManagerTest {
         } finally { manager.stop(); client.close(); }
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void lateCallbacksFromRetiredConnectionCannotAbortItsSuccessor() throws Exception {
+        var manager = new ExternalSpotWebSocketManager(new IndexPriceProperties(),
+                mock(IndexInstrumentConfigService.class), mock(ExternalSpotPriceClient.class), new LatestSourceQuoteStore());
+        Class<?> sessionType = Class.forName(ExternalSpotWebSocketManager.class.getName() + "$WsSession");
+        var constructor = sessionType.getDeclaredConstructor(String.class, List.class); constructor.setAccessible(true);
+        Object session = constructor.newInstance("ws://127.0.0.1:1", List.of());
+        ((Map<String, Object>) ReflectionTestUtils.getField(manager, "sessions")).put("ws://127.0.0.1:1", session);
+        ReflectionTestUtils.setField(manager, "running", true);
+        Class<?> listenerType = Class.forName(ExternalSpotWebSocketManager.class.getName() + "$SourceWebSocketListener");
+        var listenerConstructor = listenerType.getDeclaredConstructor(ExternalSpotWebSocketManager.class, sessionType);
+        listenerConstructor.setAccessible(true);
+        WebSocket.Listener old = (WebSocket.Listener) listenerConstructor.newInstance(manager, session);
+        WebSocket.Listener current = (WebSocket.Listener) listenerConstructor.newInstance(manager, session);
+        WebSocket socket = mock(WebSocket.class);
+        ReflectionTestUtils.setField(session, "listener", current);
+        current.onOpen(socket);
+        try {
+            old.onError(mock(WebSocket.class), new IllegalStateException("retired socket"));
+            old.onClose(mock(WebSocket.class), 1006, "retired socket");
+            old.onText(mock(WebSocket.class), "{}", true);
+            verify(socket, never()).abort();
+            org.assertj.core.api.Assertions.assertThat(((AtomicReference<?>) ReflectionTestUtils.getField(session, "webSocket")).get()).isSameAs(socket);
+            org.assertj.core.api.Assertions.assertThat(manager.health().getFirst().reconnectAttempts()).isZero();
+        } finally { manager.stop(); }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void removingSharedSocketSubscriptionRetiresTheOldConnection() throws Exception {
+        var manager = new ExternalSpotWebSocketManager(new IndexPriceProperties(),
+                mock(IndexInstrumentConfigService.class), mock(ExternalSpotPriceClient.class), new LatestSourceQuoteStore());
+        Class<?> sessionType = Class.forName(ExternalSpotWebSocketManager.class.getName() + "$WsSession");
+        var constructor = sessionType.getDeclaredConstructor(String.class, List.class); constructor.setAccessible(true);
+        Object session = constructor.newInstance("ws://127.0.0.1:1", List.of());
+        ((Map<String, Object>) ReflectionTestUtils.getField(manager, "sessions")).put("ws://127.0.0.1:1", session);
+        ((java.util.Set<String>) ReflectionTestUtils.getField(session, "sentSubscribeMessages")).add("retired-subscription");
+        WebSocket socket = mock(WebSocket.class);
+        ((AtomicReference<WebSocket>) ReflectionTestUtils.getField(session, "webSocket")).set(socket);
+        ReflectionTestUtils.setField(manager, "running", true);
+        try {
+            ReflectionTestUtils.invokeMethod(manager, "refreshConnections", Map.of("ws://127.0.0.1:1", List.of()));
+            verify(socket).abort();
+            org.assertj.core.api.Assertions.assertThat((java.util.Set<?>) ReflectionTestUtils.getField(session, "sentSubscribeMessages")).isEmpty();
+        } finally { manager.stop(); }
+    }
+
     private SourceQuote quote(Instant sourceTime, Instant receivedAt) {
         return new SourceQuote("BINANCE", "BTCUSDT", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, SourceStatus.HEALTHY, null, sourceTime, receivedAt, null, QuoteTransport.PUBLIC_WEBSOCKET);
