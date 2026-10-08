@@ -396,3 +396,29 @@ Router 的控制及转发 Aeron 客户端也沿用默认 10 秒驱动超时（�
 Streams changelog 和内部 Topic 来节省分区，否则会破坏消费进度和恢复状态。
 `CandlestickStreamConfigurationTest` 使用真实嵌入式 Kafka，覆盖六产品新建 Topic 为 1 分区，
 已有 4 分区成交 Topic 在服务再次初始化后仍为 4，不被强制改成 32。
+
+
+## 成交导出 Archive 元数据优化（2026-10-08）
+
+`CommittedTradeExporter` 仍在每个回放批次重新加载 RecordingLog，以识别领导任期变化和重叠尾部；选择当前 term 和下一 term 边界改为单次遍历，删除排序及中间列表。不会跨批缓存任期映射。
+
+已有 `ArchiveReplay` 由单一导出线程持有录制起止位置，最长缓存 100ms；切换 recording/term 或到达已停止的录制末端立即重新查询。元数据缺失、截断或缺口继续失败，不能跳过历史；缓存期间的变化最迟在下次刷新时检查。每轮检查 Archive 异步错误。回放仍受已提交位置及 term 边界限制，完整命令、数据库事务、Kafka 确认和 checkpoint 的顺序不变。
+
+确定性测试让提交位置每毫秒增长一次，1000 次边界检查的 Archive 起止位置 RPC 从 2000 次降为 20 次。额外覆盖 term 改变立即刷新、已停止录制扩展、周期检查发现截断和缺失历史；真实 Driver/Archive 的分片续读、回放 Image 复用及真实 Kafka 的成交导出、崩溃窗口和跨产品失败测试通过。以上不等于已证明整条导出链路 CPU 降幅。
+
+### 后续性能分析
+
+2026-10-08 对测试服务器做了 2 秒 `/proc` 只读采样：realtime 的 `committed-trade-export` 约使用 49.3% 单核 CPU。这个短窗口只用于确定排查优先级，不能归因到某一条 SQL 或证明宿主机超分。本轮没有部署或重启服务。
+
+1. `CommittedOrderProjectionRepository.persist` 每批先查询做市账户目录，即使该批没有 ORDER/EXECUTION，也进入查询水位事务；导出器每次提交位置推进后可能形成很小的批次，`ReliableTradeKafkaSink.publish` 则为非空成交批次提交 Kafka 事务。下一步先统计批次大小、SQL 次数、事务耗时和提交频率，再减少无订单批的目录查询或采用有明确时延上限的合批。空批也可能需要推进可见性水位，不能直接跳过 persist、提前保存 checkpoint 或跨产品合并。
+2. `ValkeyReadViewStore.applyCommits` 已做流水线，但每个用户提交仍通过 EVAL 发送完整 DELTA Lua。可评估 SCRIPT LOAD / EVALSHA 减少网络负载；必须处理 NOSCRIPT、保证逐用户原子性与版本屏障，不能简单重放整条 pipeline。
+3. `AeronRealtimeReceiver` 复制完整消息后，`RealtimeFrameCodec.decode` 再复制 payload，`RealtimeFrame` 构造和访问仍有保护性复制。可评估直接缓冲区解码或协议边界转移所有权，先测分配量；不能直接移除公共 payload 的防御性复制，或保留 FragmentAssembler 下轮会覆盖的缓冲区。
+4. 网关 `SubscriptionRegistry.publishDepth` 在同步方法内为每条连接计算盘口差量并序列化；订阅者基线相同时存在重复工作。可按本次推送的相同基线复用编码，保留首次快照、每连接版本、发送成功才更新基线和慢连接移除规则。其他普通公共 fanout 已复用编码，不应重复优化。
+
+这些是源码确认的成本点，尚未证明各自在实际负载中的收益；未在本轮额外改动。Core 撮合、结算和 Driver 的等待策略需要带真实交易延迟与资金守恒验证再调整。
+
+### 本轮验证与清理
+
+HotSpot JDK 27 定向执行客户端、价格、生命周期、realtime、gateway WebSocket 和 maker 及其直接依赖测试；按测试类最新结果去重，共 509 项，503 通过、6 跳过、0 失败。跳过项为 price/lifecycle 的 PostgreSQL 配置集成各 1 项、gateway 本地真实交易环境 2 项、maker PostgreSQL 配置集成 2 项。真实 Archive/Kafka 导出集成已执行，未部署本轮代码、未运行服务器端全链路交易或长稳测试。
+
+JFR 限制单文件最大 32MiB，已将采样条件和结果记录在各模块 README；分析完成后清理本轮临时程序、录制、日志和对应测试报告，保留此前已有数据与构建产物。

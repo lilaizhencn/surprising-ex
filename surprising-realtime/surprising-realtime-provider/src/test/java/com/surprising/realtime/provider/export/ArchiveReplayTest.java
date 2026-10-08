@@ -11,6 +11,58 @@ import static org.mockito.Mockito.*;
 
 class ArchiveReplayTest {
     @Test
+    void oneThousandCommitIncrementsRequireOnlyTenBoundsRefreshes() {
+        var aeron = mock(Aeron.class);
+        var archive = mock(AeronArchive.class);
+        when(aeron.addCounter(eq(0), anyString())).thenReturn(mock(Counter.class));
+        when(archive.getStartPosition(11)).thenReturn(0L);
+        when(archive.getStopPosition(11)).thenReturn(-1L);
+        try (var replay = new CommittedTradeExporter.ArchiveReplay(aeron, archive, ProductLine.SPOT)) {
+            for (int i = 0; i < 1000; i++)
+                assertThat(replay.committedEnd(11, 1, i * 64L, (i + 1) * 64L, i * 1_000_000L))
+                        .isEqualTo((i + 1) * 64L);
+            verify(archive, times(10)).getStartPosition(11);
+            verify(archive, times(10)).getStopPosition(11);
+        }
+    }
+
+    @Test
+    void cachesBoundsButImmediatelyRevalidatesTermChangesAndStoppedBoundaries() {
+        var aeron = mock(Aeron.class);
+        var archive = mock(AeronArchive.class);
+        when(aeron.addCounter(eq(0), anyString())).thenReturn(mock(Counter.class));
+        when(archive.getStartPosition(11)).thenReturn(0L);
+        when(archive.getStopPosition(11)).thenReturn(-1L, 128L, 256L);
+        try (var replay = new CommittedTradeExporter.ArchiveReplay(aeron, archive, ProductLine.SPOT)) {
+            assertThat(replay.committedEnd(11, 1, 0, 64, 0)).isEqualTo(64);
+            assertThat(replay.committedEnd(11, 1, 64, 256, 1)).isEqualTo(256);
+            verify(archive, times(1)).getStartPosition(11);
+            verify(archive, times(1)).getStopPosition(11);
+            assertThat(replay.committedEnd(11, 2, 64, 256, 2)).isEqualTo(128);
+            // The same recording can be extended; reaching a cached stop must refresh.
+            assertThat(replay.committedEnd(11, 2, 128, 256, 3)).isEqualTo(256);
+            verify(archive, times(3)).getStopPosition(11);
+        }
+    }
+
+    @Test
+    void periodicRevalidationRejectsTruncatedOrMissingHistory() {
+        var aeron = mock(Aeron.class);
+        var archive = mock(AeronArchive.class);
+        when(aeron.addCounter(eq(0), anyString())).thenReturn(mock(Counter.class));
+        when(archive.getStartPosition(11)).thenReturn(0L, 256L);
+        when(archive.getStopPosition(11)).thenReturn(-1L);
+        when(archive.getStartPosition(12)).thenReturn(-1L);
+        try (var replay = new CommittedTradeExporter.ArchiveReplay(aeron, archive, ProductLine.SPOT)) {
+            assertThat(replay.committedEnd(11, 1, 0, 64, 0)).isEqualTo(64);
+            assertThatThrownBy(() -> replay.committedEnd(11, 1, 64, 128, 100_000_000L))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("archive gap");
+            assertThatThrownBy(() -> replay.committedEnd(12, 3, 256, 512, 100_000_001L))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("archive gap");
+        }
+    }
+
+    @Test
     void reusesReplayAcrossCommitIncrementsAndClosesItAtRecordingChange() {
         var aeron = mock(Aeron.class);
         var archive = mock(AeronArchive.class);

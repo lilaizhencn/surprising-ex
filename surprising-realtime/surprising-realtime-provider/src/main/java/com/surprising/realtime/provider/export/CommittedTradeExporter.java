@@ -155,6 +155,7 @@ final class CommittedTradeExporter {
                         continue;
                     }
                     connected.accept(true);
+                    archive.checkForErrorResponse();
                     long committed = Math.min(aeron.countersReader().getCounterValue(counter), stopAfter);
                     // The image may hold part of a fragmented command. Its position controls
                     // polling; cursor remains the last complete, durable command boundary.
@@ -169,22 +170,24 @@ final class CommittedTradeExporter {
                         continue;
                     }
                     recordingLog.reload();
-                    var terms = recordingLog.entries().stream()
-                            .filter(e -> e.isValid && e.type == RecordingLog.ENTRY_TYPE_TERM)
-                            .sorted(Comparator.comparingLong((RecordingLog.Entry e) -> e.termBaseLogPosition)
-                                    .thenComparingLong(e -> e.leadershipTermId))
-                            .toList();
-                    var term = terms.stream().filter(e -> e.termBaseLogPosition <= position)
-                            .reduce((a, b) -> b)
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "archive history before the export checkpoint is unavailable"));
-                    long safeEnd = Math.min(committed, terms.stream()
-                            .mapToLong(e -> e.termBaseLogPosition).filter(p -> p > position)
-                            .min().orElse(committed));
-                    long stopped = archive.getStopPosition(term.recordingId);
-                    if (stopped >= 0) safeEnd = Math.min(safeEnd, stopped);
-                    if (archive.getStartPosition(term.recordingId) > position || safeEnd <= position)
-                        throw new IllegalStateException("archive gap at trade export checkpoint " + cursor);
+                    RecordingLog.Entry term = null;
+                    long safeEnd = committed;
+                    // Keep the term mapping fresh on every batch: a new leader may replace
+                    // an overlapping tail. Select in one pass without sorting/copying history.
+                    for (var entry : recordingLog.entries()) {
+                        if (!entry.isValid || entry.type != RecordingLog.ENTRY_TYPE_TERM) continue;
+                        if (entry.termBaseLogPosition > position) {
+                            safeEnd = Math.min(safeEnd, entry.termBaseLogPosition);
+                        } else if (term == null || entry.termBaseLogPosition > term.termBaseLogPosition
+                                || (entry.termBaseLogPosition == term.termBaseLogPosition
+                                    && entry.leadershipTermId > term.leadershipTermId)) {
+                            term = entry;
+                        }
+                    }
+                    if (term == null) throw new IllegalStateException(
+                            "archive history before the export checkpoint is unavailable");
+                    safeEnd = archiveReplay.committedEnd(term.recordingId, term.leadershipTermId,
+                            position, safeEnd, System.nanoTime());
                     if (archiveReplay.recordingId != term.recordingId) {
                         if (partialMessage[0])
                             throw new IllegalStateException("fragmented command crosses archive recordings");
@@ -248,12 +251,35 @@ final class CommittedTradeExporter {
     /** Owns one bounded replay and its limit counter for the lifetime of this export worker. */
     static final class ArchiveReplay implements AutoCloseable {
         private static final int STREAM_ID = 22001;
+        private static final long BOUNDS_REFRESH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
         private final Aeron aeron;
         private final AeronArchive archive;
         private final Counter limit;
         private long recordingId = Aeron.NULL_VALUE;
         private long sessionId = Aeron.NULL_VALUE;
         private Subscription subscription;
+        // Export-worker-owned Archive metadata, revalidated on a new term/recording,
+        // every 100ms, and whenever the cached stopped boundary is reached.
+        private long boundsRecordingId = Aeron.NULL_VALUE, boundsTermId = Aeron.NULL_VALUE;
+        private long recordingStart, recordingStop, boundsCheckedAt;
+
+        long committedEnd(long recordingId, long termId, long position, long committed, long now) {
+            if (boundsRecordingId != recordingId || boundsTermId != termId
+                    || now - boundsCheckedAt >= BOUNDS_REFRESH_NANOS
+                    || (recordingStop >= 0 && position >= recordingStop)) {
+                long start = archive.getStartPosition(recordingId);
+                long stop = archive.getStopPosition(recordingId);
+                recordingStart = start;
+                recordingStop = stop;
+                boundsRecordingId = recordingId;
+                boundsTermId = termId;
+                boundsCheckedAt = now;
+            }
+            long end = recordingStop >= 0 ? Math.min(committed, recordingStop) : committed;
+            if (recordingStart < 0 || recordingStart > position || end <= position)
+                throw new IllegalStateException("archive gap at trade export checkpoint " + position);
+            return end;
+        }
 
         ArchiveReplay(Aeron aeron, AeronArchive archive, ProductLine product) {
             this.aeron = aeron;
