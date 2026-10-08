@@ -100,6 +100,9 @@ class ValkeyReadViewIntegrationTest {
                         CoreStateQueryCodec.encodeUserState(zero))), 7);
         assertThat(queries.balance(product, 42, "USDT", 7L).orElseThrow().availableUnits()).isZero();
         assertThat(queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, 7L)).isEmpty();
+        store.install(snapshot, now); // late baseline cannot resurrect a newer zero balance or closed position
+        assertThat(queries.balance(product, 42, "USDT", 7L).orElseThrow().availableUnits()).isZero();
+        assertThat(queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, 7L)).isEmpty();
         assertThatThrownBy(() -> queries.balance(product, 42, "USDT", 8L))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("READ_VIEW_BEHIND");
