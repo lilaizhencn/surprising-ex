@@ -27,8 +27,12 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
                             if (length > RealtimeFrameCodec.MAX_FRAME_BYTES) {
                                 throw new IllegalArgumentException("oversized realtime message");
                             }
-                            byte[] bytes = new byte[length];
-                            buffer.getBytes(offset, bytes);
+                            // Aeron term buffers and assembler buffers expose their owning ByteBuffer.
+                            // The decoder copies owned payload bytes before the poll callback returns.
+                            java.nio.ByteBuffer bytes = buffer.byteBuffer() != null
+                                    ? buffer.byteBuffer().duplicate() : java.nio.ByteBuffer.wrap(buffer.byteArray());
+                            int start = Math.addExact(buffer.wrapAdjustment(), offset);
+                            bytes.position(start).limit(Math.addExact(start, length));
                             handler.accept(RealtimeFrameCodec.decode(bytes));
                         } catch (RuntimeException failure) {
                             failures.increment();

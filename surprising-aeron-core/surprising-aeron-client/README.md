@@ -66,3 +66,10 @@ HotSpot JDK 27 本地对比基线 `292e4e04`：10 个双 lane 客户端池，加
 目标空闲线程 CPU 时间约减少 82%，代价是本组 IPC P99 增加约 0.124ms；这是组件采样，不是整台服务器 CPU 或真实交易吞吐结果。接收退避上限曾试验 1ms，因 P99 达约 1.50ms，最终收紧为 250µs。
 
 客户端模块及依赖测试通过；新增覆盖提交唤醒、未提交不可见、跨线程顺序，相关池、超时、真实 Driver 重连和分片测试通过。原始 JFR、临时编译程序及日志仅用于本轮验证，汇总后清理。
+
+
+## 实时接收缓冲区解码（2026-10-08）
+
+`AeronRealtimeReceiver` 在 FragmentAssembler 回调内取得有界 ByteBuffer 视图，按 Agrona wrapAdjustment 和本次 offset/length 确定帧边界，交给 `RealtimeFrameCodec.decode(ByteBuffer)`。不再分配并复制完整消息数组；解码仍生成独立 payload，回调返回后不会保留 Aeron term 或分片重组缓冲区。
+
+真实 Driver 测试覆盖普通帧、100KB 分片、stream 隔离、传输错误重连和 Driver 重启；protocol 测试覆盖借用缓冲区被修改后已交付 payload 不变。组件分配采样及限制见 [协议说明](../surprising-aeron-protocol/README.md)。本轮未部署服务器。
