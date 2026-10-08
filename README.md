@@ -99,6 +99,8 @@ Run these steps on the target Linux host. The deployment uses existing PostgreSQ
 
 The unit and example configuration are in [`deployment/test-single-node`](deployment/test-single-node/). This deployment has one Aeron member and therefore no failover quorum.
 
+小时快照任务由 `scripts/linear-perpetual-snapshot.sh` 执行，直接使用已部署的 Core executable JAR 中的 Aeron ClusterTool，无需另行构建诊断工具模块。只有确认健康非主节点或整个栈已停止才跳过；JAR 缺失、工具/超时错误、读取 recording-log 或请求快照失败均以非零状态报告，不能显示成成功跳过。完成要求 recording-log 新增两条有效快照记录。脚本边界回归：`python3 -m unittest scripts/tests/test_linear_perpetual_snapshot.py -v`。
+
 ## 后台合约维护与热上线
 
 合约配置从 `InstrumentLocalRoutes` 进入 `InstrumentService.edit/editStatus`：校验管理员原因、期望变更版本及参数后，在数据库锁内保存并发布快照事件。并发旧版本返回 409，不能覆盖另一管理员的修改。创建后的价格单位、数量单位、结算资产和到期条款不能修改；停用后不能退回草稿或重新打开已关闭合约。
