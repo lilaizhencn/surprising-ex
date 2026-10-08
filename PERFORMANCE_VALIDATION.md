@@ -4900,3 +4900,14 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 完整计划、命令、方法和正确性边界见 [工作与分配观察](docs/validation/server-work-allocation-observation-20261008.md)，
 系统窗口、指标增量、JFR summary/view、热点与异常、PID/JAR/文件校验及清理见同名 JSON。
 七份录制自动结束并 JFR.check 确认，汇总校验后仅清理本轮原始/中间文件；准确清理数量记录在 JSON。原应用、Core Archive、业务 checkpoint、Kafka 均保留。
+
+
+## 2026-10-08：运行开销修复与测试服务器长稳（采集前计划）
+
+当前 master（起点 83faf744，其后已有并行提交）上修复 price 共享 WebSocket 重复解析/正常过滤异常、Aeron 空队列分配、CommittedTradeReplay 无进展自旋、maker 重复大整数计算及逐项缓存复制、默认 HTTP 连接探测异常，并修复实时节点首次连接时丢消息。保留并行会话的独立改动，不把未提交工作作为发布输入。对照 commit 不适用，仅验证当前 master。
+
+业务顺序：外部行情先解析一次并校验源/币对，再更新对应报价；做市仍逐项确认交易终态，只有确认的批次更新派生缓存，结果不确定则删除缓存并查询 Core；可靠重放仍等匹配结算完成后推进 checkpoint，无进展时有界等待；实时路由由单一 router 线程按节点 FIFO 重试，最多 8192 帧/16MiB，单节点每轮 32 次、5 秒超时，失败释放内存并触发数据源恢复，正常快路不保留消息。
+
+验证：HotSpot JDK27；受影响模块回归，六产品线资金/快照恢复检查；新 JMH 直接覆盖共享行情解析、maker 实际私有报价匹配及批次缓存更新、CommittedTradeReplay.apply，并复用客户端 global in-flight256 基准。各主轮 warmup3×2s、measurement3×2s、fork2、线程按基准定义、512MiB ZGC；独立 -prof gc 为 fork1。重放采用1 matcher、窗口上限256，微基准同步消费 Archive 顺序不伪称256并发容量。真实单成员网络/Archive验收仍单列，主链路 global in-flight256。
+
+服务器只启动 LINEAR_PERPETUAL，保留三个做市合约、Kafka57个单分区topic、原Core进程/Archive和业务checkpoint，服务器拉取固定提交自行构建。先验证五应用健康、盘口/成交/K线/WS与恢复进度，再预热600秒、稳态观察7200秒。系统 /proc 每30秒采样，业务/队列/lag/错误每300秒；开始与结束每JVM独立30秒profile JFR、16MiB上限，NMT支持时记录baseline/diff，汇总后清理本轮原始文件。artifact总预算3GiB。持续存活/无意外重启、无OOM/死锁/持续消费积压、队列有界/排空及业务数据持续推进为正确性要求；以预热后内存/FD/线程/队列趋势和GC后状态辨认增长，不以短时RSS或一次GC推断泄漏。未达到容量/业务尾延迟正式门槛时只报告本轮运行负载下的结果。

@@ -34,10 +34,17 @@ public final class CommittedTradeReplay implements AutoCloseable {
             state.assertClusterCallbackComplete();
             state.apply(command, timestamp, logPosition);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            // Only the separate replay waits here. Live owner scheduling is unchanged.
+            // No-progress retries are bounded; Matcher/Account Lane still own settlement.
+            long idleNanos = 1_000L;
             while (state.firstPendingMatchingSequence() != 0) {
+                if (Thread.currentThread().isInterrupted())
+                    throw new IllegalStateException("committed replay interrupted; checkpoint must not advance");
                 if (state.commits.commitReadyMatching(
-                                64, timestamp, logPosition, false, (sequence, response) -> {})
-                        == 0) Thread.onSpinWait();
+                                64, timestamp, logPosition, false, (sequence, response) -> {}) == 0) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(idleNanos);
+                    idleNanos = Math.min(idleNanos * 2, 100_000L);
+                } else idleNanos = 1_000L;
                 if (System.nanoTime() > deadline)
                     throw new IllegalStateException("committed replay matching timed out");
             }

@@ -22,6 +22,16 @@
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-maker</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-price-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-realtime-api</artifactId>
             <version>${project.version}</version>
         </dependency>

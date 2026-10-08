@@ -1030,6 +1030,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void expireQueued(AgentLane lane) {
+            if (lane.mailbox.isEmpty()) return;
             long now = System.nanoTime();
             long rejection = lane.session == null || !lane.session.connected()
                     ? Publication.NOT_CONNECTED
@@ -1044,6 +1045,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void dispatchResponses(Session session, Map<Long, Request> pending) {
+            if (pending.isEmpty()) return;
             var iterator = pending.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<Long, Request> entry = iterator.next();
