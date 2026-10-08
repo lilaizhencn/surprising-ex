@@ -4911,3 +4911,12 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 验证：HotSpot JDK27；受影响模块回归，六产品线资金/快照恢复检查；新 JMH 直接覆盖共享行情解析、maker 实际私有报价匹配及批次缓存更新、CommittedTradeReplay.apply，并复用客户端 global in-flight256 基准。各主轮 warmup3×2s、measurement3×2s、fork2、线程按基准定义、512MiB ZGC；独立 -prof gc 为 fork1。重放采用1 matcher、窗口上限256，微基准同步消费 Archive 顺序不伪称256并发容量。真实单成员网络/Archive验收仍单列，主链路 global in-flight256。
 
 服务器只启动 LINEAR_PERPETUAL，保留三个做市合约、Kafka57个单分区topic、原Core进程/Archive和业务checkpoint，服务器拉取固定提交自行构建。先验证五应用健康、盘口/成交/K线/WS与恢复进度，再预热600秒、稳态观察7200秒。系统 /proc 每30秒采样，业务/队列/lag/错误每300秒；开始与结束每JVM独立30秒profile JFR、16MiB上限，NMT支持时记录baseline/diff，汇总后清理本轮原始文件。artifact总预算3GiB。持续存活/无意外重启、无OOM/死锁/持续消费积压、队列有界/排空及业务数据持续推进为正确性要求；以预热后内存/FD/线程/队列趋势和GC后状态辨认增长，不以短时RSS或一次GC推断泄漏。未达到容量/业务尾延迟正式门槛时只报告本轮运行负载下的结果。
+
+
+### 2026-10-09 补充计划：盘口顺序及后台配置持久化
+
+正式长稳开始前，真实 REST 查询发现 Core 的 canonical 买盘升序被直接暴露给依赖首档买一的做市端；只在 Gateway 查询边界排序买盘降序/卖盘升序，不改撮合状态或共享协议。实际页面日统计使用 1441 条分钟 K 线窗口，未使用 ticker 声明的 404 不作为页面失败。前两次预热使用了错误/未使用的观测接口，保留并标为采样偏差，修正后重新计时。
+
+做市最新运行优化中的内存诊断有界且不逐周期写库，但公共设置/策略重启恢复 YAML 与后台唯一配置来源要求冲突。保留批量输入和有界诊断，设置/策略恢复数据库持久化，仅在管理员事务提交后失效不可变派生缓存；不在报价周期查询数据库。PG 测试使用本任务独立本地实例及随机唯一测试 schema，覆盖重启、CAS、提交/回滚及冷缓存回滚。
+
+新增 MakerConfigurationReadBenchmark 直接调用实际配置缓存方法，三策略，测量前 JDBC fixture 各加载一次定义/覆盖，teardown 校验测量期间无额外查询；不把 fixture 解释为 PostgreSQL 性能。参数仍为 3×2s 预热、3×2s 测量、两 fork 无 profiler 主轮、单 fork 独立 GC，512MiB ZGC。真实 PostgreSQL 正确性单列，服务器实际进程 JFR 归因单列。最终修复部署完成后重新预热600秒并完整观测7200秒，部署前窗口不计入。
