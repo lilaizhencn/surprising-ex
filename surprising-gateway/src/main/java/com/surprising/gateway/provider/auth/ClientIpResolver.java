@@ -8,6 +8,16 @@ import java.util.List;
 
 public final class ClientIpResolver {
 
+    private static final List<String> CLIENT_IP_HEADERS = List.of(
+            "CF-Connecting-IP",       // Cloudflare
+            "True-Client-IP",         // Akamai / Cloudflare Enterprise
+            "Fastly-Client-IP",        // Fastly
+            "X-Azure-ClientIP",        // Azure Front Door / Application Gateway integrations
+            "CloudFront-Viewer-Address", // AWS CloudFront (address may include a port)
+            "X-Real-IP",               // Common reverse-proxy convention
+            "X-Client-IP"              // Common load-balancer convention
+    );
+
     private final GatewayProperties properties;
 
     public ClientIpResolver(GatewayProperties properties) {
@@ -26,6 +36,14 @@ public final class ClientIpResolver {
         if (!isAllowed(remoteAddress, trustedProxies)) {
             return remoteAddress;
         }
+        // These headers are only meaningful when the trusted ingress overwrites them and the
+        // application cannot be reached directly around that ingress.
+        for (String header : CLIENT_IP_HEADERS) {
+            String candidate = directHeaderIp(request.getHeader(header), header);
+            if (candidate != null) {
+                return candidate;
+            }
+        }
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded == null || forwarded.isBlank()) {
             return remoteAddress;
@@ -36,13 +54,34 @@ public final class ClientIpResolver {
             if (!isAllowed(current, trustedProxies)) {
                 return current;
             }
-            String candidate = chain[index].trim();
-            if (literalValue(candidate) == null) {
-                return candidate;
+            String candidate = literalValue(chain[index]);
+            if (candidate == null) {
+                return current;
             }
             current = candidate;
         }
         return current;
+    }
+
+    private String directHeaderIp(String value, String header) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String candidate = value.trim();
+        if ("CloudFront-Viewer-Address".equalsIgnoreCase(header)) {
+            if (candidate.startsWith("[")) {
+                int closingBracket = candidate.indexOf(']');
+                if (closingBracket > 0) {
+                    candidate = candidate.substring(1, closingBracket);
+                }
+            } else {
+                int colon = candidate.lastIndexOf(':');
+                if (colon > 0 && candidate.indexOf(':') == colon) {
+                    candidate = candidate.substring(0, colon);
+                }
+            }
+        }
+        return literalValue(candidate);
     }
 
     public boolean isAllowed(String clientIp, List<String> allowlist) {
