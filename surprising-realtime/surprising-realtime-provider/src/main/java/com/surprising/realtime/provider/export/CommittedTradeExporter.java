@@ -94,33 +94,74 @@ final class CommittedTradeExporter {
                                             .ownsAeronClient(false)
                                             .controlRequestChannel(config.archiveControlChannel())
                                             .controlResponseChannel("aeron:ipc"));
-                    var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false)) {
+                    var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false);
+                    var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
-                long lastPartialCommit = -1;
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
+                var trades = new ArrayList<RealtimeFrame>();
+                var orderChanges = new ArrayList<RealtimeFrame>();
+                int[] messages = {0};
+                long[] delivered = {checkpoint.logPosition()};
+                boolean[] partialMessage = {false};
+                var messageHeader = new MessageHeaderDecoder();
+                var sessionHeader = new SessionMessageHeaderDecoder();
+                var assembler = new FragmentAssembler((buffer, offset, length, header) -> {
+                    messageHeader.wrap(buffer, offset);
+                    if (messageHeader.templateId() == SessionMessageHeaderDecoder.TEMPLATE_ID) {
+                        sessionHeader.wrap(buffer, offset + MessageHeaderDecoder.ENCODED_LENGTH,
+                                messageHeader.blockLength(), messageHeader.version());
+                        int bodyOffset = offset + MessageHeaderDecoder.ENCODED_LENGTH + messageHeader.blockLength();
+                        int bodyLength = length - (bodyOffset - offset);
+                        if (bodyLength <= 0) throw new IllegalArgumentException("empty archived Core command");
+                        byte[] bytes = new byte[bodyLength];
+                        buffer.getBytes(bodyOffset, bytes);
+                        for (var change : replay.apply(bytes, sessionHeader.timestamp(), header.position())) {
+                            if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
+                            else orderChanges.add(change);
+                        }
+                        messages[0]++;
+                        if (messages[0] >= 256 || trades.size() + orderChanges.size() >= 4096) {
+                            orders.persist(product, orderChanges, replay.exportSequence());
+                            sink.publish(trades);
+                            orderChanges.clear();
+                            trades.clear();
+                            messages[0] = 0;
+                        }
+                    }
+                    delivered[0] = header.position();
+                    if (System.nanoTime() >= nextCheckpoint[0]) {
+                        orders.persist(product, orderChanges, replay.exportSequence());
+                        sink.publish(trades);
+                        orderChanges.clear();
+                        trades.clear();
+                        messages[0] = 0;
+                        try {
+                            new TradeExportCheckpoint(product, delivered[0], sink.tradeSequence(), replay.snapshot())
+                                    .write(checkpointPath);
+                        } catch (java.io.IOException failure) {
+                            throw new java.io.UncheckedIOException(failure);
+                        }
+                        nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
+                    }
+                });
                 exportLoop: while (running.get()
                         && !Thread.currentThread().isInterrupted()
                         && cursor < stopAfter) {
-                    int counter =
-                            ClusterCounters.find(
-                                    aeron.countersReader(),
-                                    AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID,
-                                    clusterId);
+                    int counter = ClusterCounters.find(aeron.countersReader(),
+                            AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID, clusterId);
                     if (counter < 0) {
                         connected.accept(false);
                         LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(100));
                         continue;
                     }
                     connected.accept(true);
-                    long committed =
-                            Math.min(aeron.countersReader().getCounterValue(counter), stopAfter);
-                    if (committed <= cursor || committed == lastPartialCommit) {
+                    long committed = Math.min(aeron.countersReader().getCounterValue(counter), stopAfter);
+                    // The image may hold part of a fragmented command. Its position controls
+                    // polling; cursor remains the last complete, durable command boundary.
+                    long position = archiveReplay.position(cursor);
+                    if (committed <= position) {
                         if (System.nanoTime() >= nextCheckpoint[0]) {
-                            new TradeExportCheckpoint(
-                                            product,
-                                            cursor,
-                                            sink.tradeSequence(),
-                                            replay.snapshot())
+                            new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                                     .write(checkpointPath);
                             nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                         }
@@ -128,164 +169,70 @@ final class CommittedTradeExporter {
                         continue;
                     }
                     recordingLog.reload();
-                    long start = cursor;
-                    var terms =
-                            recordingLog.entries().stream()
-                                    .filter(
-                                            e ->
-                                                    e.isValid
-                                                            && e.type
-                                                                    == RecordingLog.ENTRY_TYPE_TERM)
-                                    .sorted(
-                                            Comparator.comparingLong(
-                                                            (RecordingLog.Entry e) ->
-                                                                    e.termBaseLogPosition)
-                                                    .thenComparingLong(e -> e.leadershipTermId))
-                                    .toList();
-                    var term =
-                            terms.stream()
-                                    .filter(e -> e.termBaseLogPosition <= start)
-                                    .reduce((a, b) -> b)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "archive history before the export"
-                                                                + " checkpoint is unavailable"));
-                    long end =
-                            terms.stream()
-                                    .mapToLong(e -> e.termBaseLogPosition)
-                                    .filter(p -> p > start)
-                                    .min()
-                                    .orElse(committed);
-                    end = Math.min(end, committed);
+                    var terms = recordingLog.entries().stream()
+                            .filter(e -> e.isValid && e.type == RecordingLog.ENTRY_TYPE_TERM)
+                            .sorted(Comparator.comparingLong((RecordingLog.Entry e) -> e.termBaseLogPosition)
+                                    .thenComparingLong(e -> e.leadershipTermId))
+                            .toList();
+                    var term = terms.stream().filter(e -> e.termBaseLogPosition <= position)
+                            .reduce((a, b) -> b)
+                            .orElseThrow(() -> new IllegalStateException(
+                                    "archive history before the export checkpoint is unavailable"));
+                    long safeEnd = Math.min(committed, terms.stream()
+                            .mapToLong(e -> e.termBaseLogPosition).filter(p -> p > position)
+                            .min().orElse(committed));
                     long stopped = archive.getStopPosition(term.recordingId);
-                    if (stopped >= 0) end = Math.min(end, stopped);
-                    if (archive.getStartPosition(term.recordingId) > cursor || end <= cursor)
-                        throw new IllegalStateException(
-                                "archive gap at trade export checkpoint " + cursor);
-                    long safeEnd = end;
-                    var trades = new ArrayList<RealtimeFrame>();
-                    var orderChanges = new ArrayList<RealtimeFrame>();
-                    int[] messages = {0};
-                    long[] delivered = {cursor};
-                    boolean[] partialMessage = {false};
-                    var messageHeader = new MessageHeaderDecoder();
-                    var sessionHeader = new SessionMessageHeaderDecoder();
-                    var assembler =
-                            new FragmentAssembler(
-                                    (buffer, offset, length, header) -> {
-                                        messageHeader.wrap(buffer, offset);
-                                        if (messageHeader.templateId()
-                                                == SessionMessageHeaderDecoder.TEMPLATE_ID) {
-                                            sessionHeader.wrap(
-                                                    buffer,
-                                                    offset + MessageHeaderDecoder.ENCODED_LENGTH,
-                                                    messageHeader.blockLength(),
-                                                    messageHeader.version());
-                                            int bodyOffset =
-                                                    offset
-                                                            + MessageHeaderDecoder.ENCODED_LENGTH
-                                                            + messageHeader.blockLength();
-                                            int bodyLength = length - (bodyOffset - offset);
-                                            if (bodyLength <= 0)
-                                                throw new IllegalArgumentException(
-                                                        "empty archived Core command");
-                                            byte[] bytes = new byte[bodyLength];
-                                            buffer.getBytes(bodyOffset, bytes);
-                                            for (var change : replay.apply(bytes, sessionHeader.timestamp(), header.position())) {
-                                                if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
-                                                else orderChanges.add(change);
-                                            }
-                                            messages[0]++;
-                                            if (messages[0] >= 256 || trades.size() + orderChanges.size() >= 4096) {
-                                                orders.persist(product, orderChanges, replay.exportSequence());
-                        sink.publish(trades);
-                        orderChanges.clear();
-                                                trades.clear();
-                                                messages[0] = 0;
-                                            }
-                                        }
-                                        delivered[0] = header.position();
-                                        if (System.nanoTime() >= nextCheckpoint[0]) {
-                                            orders.persist(product, orderChanges, replay.exportSequence());
-                                            sink.publish(trades);
-                                            orderChanges.clear();
-                                            trades.clear();
-                                            messages[0] = 0;
-                                            try {
-                                                new TradeExportCheckpoint(
-                                                                product,
-                                                                delivered[0],
-                                                                sink.tradeSequence(),
-                                                                replay.snapshot())
-                                                        .write(checkpointPath);
-                                            } catch (java.io.IOException failure) {
-                                                throw new java.io.UncheckedIOException(failure);
-                                            }
-                                            nextCheckpoint[0] =
-                                                    System.nanoTime() + checkpointInterval;
-                                        }
-                                    });
-                    try (var subscription =
-                            archive.replay(
-                                    term.recordingId,
-                                    cursor,
-                                    safeEnd - cursor,
-                                    "aeron:ipc",
-                                    22001)) {
-                        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-                        while (subscription.imageCount() == 0) {
-                            if (!running.get()) break exportLoop;
-                            if (System.nanoTime() > deadline)
-                                throw new IllegalStateException("archive replay image unavailable");
-                            LockSupport.parkNanos(100_000);
-                        }
-                        Image image = subscription.imageAtIndex(0);
-                        // Image.poll reports callback exceptions to Aeron's error handler and may
-                        // advance its position. Preserve the failure on this replay thread and
-                        // stop before publishing or checkpointing any subsequent message.
-                        RuntimeException[] replayFailure = {null};
-                        while (running.get() && image.position() < safeEnd && !image.isClosed()) {
-                            int work =
-                                    image.poll(
-                                            (buffer, offset, length, header) -> {
-                                                if (replayFailure[0] != null) return;
-                                                try {
-                                                    assembler.onFragment(buffer, offset, length, header);
-                                                } catch (RuntimeException failure) {
-                                                    replayFailure[0] = failure;
-                                                    return;
-                                                }
-                                                partialMessage[0] =
-                                                        (header.flags()
-                                                                        & io.aeron.protocol
-                                                                                .DataHeaderFlyweight
-                                                                                .END_FLAG)
-                                                                == 0;
-                                            },
-                                            16);
-                            if (replayFailure[0] != null) throw replayFailure[0];
-                            if (work == 0) {
-                                if (System.nanoTime() > deadline)
-                                    throw new IllegalStateException("archive replay stalled");
-                                LockSupport.parkNanos(100_000);
-                            } else deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-                        }
-                        if (running.get() && image.position() != safeEnd)
-                            throw new IllegalStateException("incomplete committed archive replay");
-                        orders.persist(product, orderChanges, replay.exportSequence());
-                        sink.publish(trades);
-                        orderChanges.clear();
-                        // A commit counter can stop at a fragment boundary. Resume from the last
-                        // complete Cluster message, never from the middle of a fragmented command.
-                        cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
-                        lastPartialCommit = partialMessage[0] ? committed : -1;
+                    if (stopped >= 0) safeEnd = Math.min(safeEnd, stopped);
+                    if (archive.getStartPosition(term.recordingId) > position || safeEnd <= position)
+                        throw new IllegalStateException("archive gap at trade export checkpoint " + cursor);
+                    if (archiveReplay.recordingId != term.recordingId) {
                         if (partialMessage[0])
-                            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+                            throw new IllegalStateException("fragmented command crosses archive recordings");
+                        assembler.clear();
                     }
+                    archiveReplay.follow(term.recordingId, position, safeEnd);
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    while (archiveReplay.subscription.imageCount() == 0) {
+                        if (!running.get() || Thread.currentThread().isInterrupted()) break exportLoop;
+                        if (System.nanoTime() > deadline)
+                            throw new IllegalStateException("archive replay image unavailable");
+                        LockSupport.parkNanos(100_000);
+                    }
+                    Image image = archiveReplay.subscription.imageAtIndex(0);
+                    // Aeron catches callback exceptions and can advance the image. Stop on the
+                    // export thread before applying or checkpointing any subsequent message.
+                    RuntimeException[] replayFailure = {null};
+                    while (running.get() && !Thread.currentThread().isInterrupted()
+                            && image.position() < safeEnd && !image.isClosed()) {
+                        int work = image.boundedPoll((buffer, offset, length, header) -> {
+                            if (replayFailure[0] != null) return;
+                            try {
+                                assembler.onFragment(buffer, offset, length, header);
+                            } catch (RuntimeException failure) {
+                                replayFailure[0] = failure;
+                                return;
+                            }
+                            partialMessage[0] = (header.flags()
+                                    & io.aeron.protocol.DataHeaderFlyweight.END_FLAG) == 0;
+                        }, safeEnd, 16);
+                        if (replayFailure[0] != null) throw replayFailure[0];
+                        if (work == 0) {
+                            if (System.nanoTime() > deadline)
+                                throw new IllegalStateException("archive replay stalled");
+                            LockSupport.parkNanos(100_000);
+                        } else deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    }
+                    if (running.get() && !Thread.currentThread().isInterrupted()
+                            && image.position() != safeEnd)
+                        throw new IllegalStateException("incomplete committed archive replay");
+                    orders.persist(product, orderChanges, replay.exportSequence());
+                    sink.publish(trades);
+                    orderChanges.clear();
+                    trades.clear();
+                    messages[0] = 0;
+                    cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
                     if (System.nanoTime() >= nextCheckpoint[0]) {
-                        new TradeExportCheckpoint(
-                                        product, cursor, sink.tradeSequence(), replay.snapshot())
+                        new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                                 .write(checkpointPath);
                         log.info("trade-export product={} committedPosition={} exportedPosition={} trades={}",
                                 product, committed, cursor, sink.tradeSequence());
@@ -294,6 +241,71 @@ final class CommittedTradeExporter {
                 }
                 new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
                         .write(checkpointPath);
+            }
+        }
+    }
+
+    /** Owns one bounded replay and its limit counter for the lifetime of this export worker. */
+    static final class ArchiveReplay implements AutoCloseable {
+        private static final int STREAM_ID = 22001;
+        private final Aeron aeron;
+        private final AeronArchive archive;
+        private final Counter limit;
+        private long recordingId = Aeron.NULL_VALUE;
+        private long sessionId = Aeron.NULL_VALUE;
+        private Subscription subscription;
+
+        ArchiveReplay(Aeron aeron, AeronArchive archive, ProductLine product) {
+            this.aeron = aeron;
+            this.archive = archive;
+            this.limit = aeron.addCounter(0, "trade-export replay limit " + product);
+        }
+
+        long position(long initialPosition) {
+            return subscription == null || subscription.imageCount() == 0
+                    ? initialPosition : subscription.imageAtIndex(0).position();
+        }
+
+        void follow(long recordingId, long position, long committed) {
+            if (this.recordingId == recordingId) {
+                limit.set(committed);
+                return;
+            }
+            closeReplay();
+            limit.set(committed);
+            sessionId = archive.startBoundedReplay(recordingId, position, AeronArchive.NULL_LENGTH,
+                    limit.id(), "aeron:ipc", STREAM_ID);
+            subscription = aeron.addSubscription("aeron:ipc?session-id=" + (int) sessionId, STREAM_ID);
+            this.recordingId = recordingId;
+        }
+
+        private void closeReplay() {
+            try {
+                if (sessionId != Aeron.NULL_VALUE) {
+                    try {
+                        archive.stopReplay(sessionId);
+                    } catch (io.aeron.archive.client.ArchiveException failure) {
+                        // A stopped recording can finish its replay before we switch recordings.
+                        if (failure.errorCode() != io.aeron.archive.client.ArchiveException.UNKNOWN_REPLAY)
+                            throw failure;
+                    }
+                }
+            } finally {
+                sessionId = Aeron.NULL_VALUE;
+                recordingId = Aeron.NULL_VALUE;
+                if (subscription != null) {
+                    subscription.close();
+                    subscription = null;
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            try {
+                closeReplay();
+            } finally {
+                limit.close();
             }
         }
     }

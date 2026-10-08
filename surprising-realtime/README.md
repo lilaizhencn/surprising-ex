@@ -175,6 +175,18 @@ Aeron Sender/Outbox 同时提供 sent/dropped/failures/droppedBatches 计数。�
 恢复确定性成交，写入原有各产品线 `match.trades.v1` topic。原 tools 中的独立 Main 已删除。
 它不消费可丢失的 realtime outbox，不在 live Core 或 Router 线程内等待 Kafka。
 
+同一 Archive recording 内复用一个持续的 bounded replay。导出线程把本轮已提交位置
+（同时受下一 term 边界和停止位置限制）写入独立 Aeron limit counter，Archive 只回放到此处；
+消费端再用 `Image.boundedPoll` 限制应用位置。提交位置增长只更新上限，不反复建销 replay。
+分片消息的 assembler 跨提交批次保留，checkpoint 只推进到完整消息边界；切换 recording 时
+停止旧 replay、关闭订阅并清空重组缓冲，禁止半条命令跨 recording。停止或失败时释放 replay 和 counter。
+
+`ArchiveReplayIntegrationTest` 在真实 Driver/Archive 上分次推进提交上限，
+验证分片命令不会提前交付、同一 image 持续复用，并验证即使消费端普通 poll 也无法越过 Archive 上限。
+`ArchiveReplayTest` 覆盖 recording 切换和关闭失败时的资源释放；
+`CommittedTradeExportIntegrationTest` 使用真实 Kafka 验证半条消息检查点、恢复后的成交身份、
+投影失败和跨产品线命令拒绝。测试没有运行远端服务器或六产品线在线负载，吞吐及 P99 延迟仍需部署后实测。
+
 统一启动脚本自动传入下列环境变量；直接启动行情 JAR 时也需要配置：
 
 | 配置 | 含义 |
