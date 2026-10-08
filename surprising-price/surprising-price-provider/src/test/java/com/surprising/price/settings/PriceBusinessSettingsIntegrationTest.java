@@ -25,7 +25,7 @@ class PriceBusinessSettingsIntegrationTest {
         var infrastructure = new PriceInfrastructureConfiguration();
         var index = infrastructure.indexPriceProperties(env); var mark = infrastructure.markPriceProperties(env);
         assertThat(index.getHttp().getProxyPort()).isEqualTo(12345);
-        var service = new PriceBusinessSettingsService(jdbc, JsonMapper.builder().findAndAddModules().build(), index, mark);
+        var service = new PriceBusinessSettingsService(jdbc, JsonMapper.builder().findAndAddModules().build(), index, mark, event -> {});
         service.initialize(); return new Instance(service, index, mark);
     }
     @ParameterizedTest @EnumSource(ProductLine.class)

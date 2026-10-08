@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -26,8 +27,11 @@ public class PriceBusinessSettingsService {
     private final String line;
     private final Map<String, Field> fields;
     private volatile Snapshot current;
+    private final ApplicationEventPublisher events;
 
-    public PriceBusinessSettingsService(JdbcTemplate jdbc, ObjectMapper json, IndexPriceProperties index, MarkPriceProperties mark) {
+    public PriceBusinessSettingsService(JdbcTemplate jdbc, ObjectMapper json, IndexPriceProperties index,
+            MarkPriceProperties mark, ApplicationEventPublisher events) {
+        this.events = events;
         this.jdbc = jdbc; this.json = json; this.index = index; this.mark = mark;
         this.line = index.getKafka().getProductLine().name();
         var specs = new LinkedHashMap<String, Field>();
@@ -190,5 +194,6 @@ public class PriceBusinessSettingsService {
         fiat.setStableCoin(stable);
         index.setCalculation(ic); index.setWebSocket(ws); index.setFiat(fiat); index.setCoordination(ix);
         mark.setCalculation(mc); mark.setCoordination(mx); current = snapshot;
+        events.publishEvent(snapshot);
     }
 }
