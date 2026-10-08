@@ -18,6 +18,6 @@ class SurprisingMarketMakerApplicationTest {
 
         new SurprisingMarketMakerApplication(properties).logEffectiveMarketMatrixConfiguration();
 
-        assertThat(output).contains("administrator-managed database", "productLine=LINEAR_PERPETUAL");
+        assertThat(output).contains("YAML startup configuration", "productLine=LINEAR_PERPETUAL");
     }
 }

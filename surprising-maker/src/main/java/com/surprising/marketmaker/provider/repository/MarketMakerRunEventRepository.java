@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 仅负责 market_maker_strategy_run_events 表。
+ * 当前进程的有界运行诊断记录，不持久化。
  */
 public interface MarketMakerRunEventRepository {
 

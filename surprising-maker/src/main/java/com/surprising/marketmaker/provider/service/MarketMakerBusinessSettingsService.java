@@ -4,7 +4,6 @@ import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore;
 import jakarta.validation.Validator;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -12,12 +11,11 @@ public class MarketMakerBusinessSettingsService {
     private final MarketMakerProperties properties;
     private final MarketMakerBusinessSettingsStore store;
     private final Validator validator;
-    private volatile long appliedVersion;
     public MarketMakerBusinessSettingsService(MarketMakerProperties properties, MarketMakerBusinessSettingsStore store, Validator validator) {
         this.properties = properties; this.store = store; this.validator = validator;
     }
     public MarketMakerBusinessSettingsStore.Settings current() { return store.load(properties.getProductLine()); }
-    public MarketMakerBusinessSettingsStore.Settings save(MarketMakerBusinessSettings settings, long version, String admin, String reason) {
+    public synchronized MarketMakerBusinessSettingsStore.Settings save(MarketMakerBusinessSettings settings, long version, String admin, String reason) {
         if (settings == null || version <= 0 || admin == null || admin.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
             throw new IllegalArgumentException("settings, version, administrator and reason are required");
         var violations = validator.validate(settings);
@@ -54,7 +52,7 @@ public class MarketMakerBusinessSettingsService {
             }
         }
         var saved = store.save(properties.getProductLine(), settings, version, admin, reason);
-        refresh();
+        properties.install(saved.settings());
         return saved;
     }
     private static void requireDuration(java.time.Duration value, String name, boolean zeroAllowed) {
@@ -68,12 +66,5 @@ public class MarketMakerBusinessSettingsService {
             if (uri.getScheme() == null || !schemes.contains(uri.getScheme()) || uri.getHost() == null
                     || uri.getUserInfo() != null || uri.getFragment() != null) throw new IllegalArgumentException();
         } catch (RuntimeException error) { throw new IllegalArgumentException("invalid reference URL"); }
-    }
-    @Scheduled(fixedDelay = 1000)
-    public synchronized void refresh() {
-        var current = current();
-        if (current.version() <= appliedVersion) return;
-        properties.install(current.settings());
-        appliedVersion = current.version();
     }
 }

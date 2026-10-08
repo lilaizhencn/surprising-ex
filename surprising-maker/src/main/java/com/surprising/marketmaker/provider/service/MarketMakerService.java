@@ -13,13 +13,14 @@ import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.client.MakerQuoteInputsClient;
+import com.surprising.marketmaker.provider.client.MakerTradingFeeClient;
+import com.surprising.trading.api.model.MakerQuoteInputs;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.marketmaker.provider.model.StrategyRuntimeState;
-import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository;
-import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository.MarketMakerReferenceSampleWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
@@ -90,19 +91,15 @@ public class MarketMakerService {
     private final OrderRpcApi orderRpcApi;
     private final AccountRpcApi accountRpcApi;
     private final QuotePlanner quotePlanner;
-    private final com.surprising.marketmaker.provider.client.MakerTradingFeeClient tradingFeeClient;
+    private final MakerQuoteInputsClient quoteInputsClient;
+    private final MakerTradingFeeClient tradingFeeClient;
     private final ReferenceMarketProvider referenceMarketProvider;
-    private final MarketMakerLeaseCoordinator leaseCoordinator;
     private final MarketMakerStrategyOverrideStore overrideStore;
     private final MarketMakerRunEventRepository runEventRepository;
-    private final MarketMakerReferenceSampleRepository referenceSampleRepository;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> cycleLocks = new ConcurrentHashMap<>();
     private final Map<String, CachedOpenOrders> openOrderSnapshots = new ConcurrentHashMap<>();
     private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
-    private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
-    private volatile List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions = List.of();
-    private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
     private final String nodeId;
     private final String orderNonce;
     // A confirmed rejection can be retried after freeing budget in the same cycle; that is a new order.
@@ -116,12 +113,12 @@ public class MarketMakerService {
                               AccountRpcApi accountRpcApi,
                               QuotePlanner quotePlanner,
                               ReferenceMarketProvider referenceMarketProvider,
-                              MarketMakerLeaseCoordinator leaseCoordinator,
                               MarketMakerStrategyOverrideStore overrideStore,
                               MarketMakerRunEventRepository runEventRepository,
-                              MarketMakerReferenceSampleRepository referenceSampleRepository,
                               InstrumentSnapshotCache instrumentSnapshotCache,
-                              com.surprising.marketmaker.provider.client.MakerTradingFeeClient tradingFeeClient) {
+                              MakerTradingFeeClient tradingFeeClient,
+                              MakerQuoteInputsClient quoteInputsClient) {
+        this.quoteInputsClient = quoteInputsClient;
         this.tradingFeeClient = tradingFeeClient;
         this.properties = properties;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
@@ -131,10 +128,8 @@ public class MarketMakerService {
         this.accountRpcApi = accountRpcApi;
         this.quotePlanner = quotePlanner;
         this.referenceMarketProvider = referenceMarketProvider;
-        this.leaseCoordinator = leaseCoordinator;
         this.overrideStore = overrideStore;
         this.runEventRepository = runEventRepository;
-        this.referenceSampleRepository = referenceSampleRepository;
         this.nodeId = resolveNodeId(properties.getEngine().getNodeId());
         this.orderNonce = Long.toUnsignedString(System.currentTimeMillis(), 36)
                 + "-" + UUID.randomUUID().toString().substring(0, 8);
@@ -175,9 +170,6 @@ public class MarketMakerService {
         ProductLine previous = MarketMakerProductLineContext.current();
         MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
-            if (properties.getCoordination().isEnabled()
-                    && !leaseCoordinator.tryAcquire(strategy.getProductLine(), strategy.getStrategyId() + ":trade", instrumentId,
-                    nodeId, properties.getCoordination().getLeaseDuration())) return false;
             InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
             requireTradable(instrument, strategy.getProductLine());
             MarkPriceResponse mark = currentMarkPrice(strategy.getProductLine(), instrumentId, instrument.changeId());
@@ -257,7 +249,7 @@ public class MarketMakerService {
 
     public MarketMakerStrategyConfigResponse strategyConfig(String strategyId, ProductLine productLine) {
         MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId, productLine);
-        StrategyConfigOverride override = strategyOverrides().get(strategyKey(configured));
+        StrategyConfigOverride override = overrideStore.find(configured.getProductLine(), configured.getStrategyId()).orElse(null);
         return configResponse(configured, override);
     }
 
@@ -294,10 +286,8 @@ public class MarketMakerService {
         StrategyConfigOverride saved = null;
         if (override.hasParameterOverride()) {
             saved = overrideStore.save(override);
-            putCachedOverride(saved);
         } else {
             overrideStore.delete(configured.getProductLine(), configured.getStrategyId());
-            removeCachedOverride(configured);
         }
         return configResponse(configured, saved);
     }
@@ -691,39 +681,6 @@ public class MarketMakerService {
         }
     }
 
-    private void recordReferenceSample(MarketMakerProperties.Strategy strategy,
-                                       String instrumentId,
-                                       long cycleSequence,
-                                       ReferenceOrderBookSnapshot snapshot,
-                                       String traceId,
-                                       Instant sampledAt) {
-        if (snapshot == null || !snapshot.hasTwoSidedDepth()) {
-            return;
-        }
-        try {
-            referenceSampleRepository.record(new MarketMakerReferenceSampleWrite(
-                    strategy.getStrategyId(),
-                    strategy.getProductLine(),
-                    instrumentId,
-                    nodeId,
-                    cycleSequence,
-                    snapshot.source(),
-                    snapshot.transport(),
-                    snapshot.bids().size(),
-                    snapshot.asks().size(),
-                    snapshot.bestBidTicks(),
-                    snapshot.bestAskTicks(),
-                    snapshot.midPriceTicks(),
-                    snapshot.spreadTicks(),
-                    snapshot.receivedAt(),
-                    traceId,
-                    sampledAt));
-        } catch (RuntimeException ex) {
-            log.warn("Failed to record market-maker reference sample strategyId={} instrumentId={} error={}",
-                    strategy.getStrategyId(), instrumentId, ex.getMessage());
-        }
-    }
-
     private boolean runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, String traceId, boolean tradeAfterQuote) {
         StrategyRuntimeState state = state(strategy);
         boolean completed = false;
@@ -755,14 +712,6 @@ public class MarketMakerService {
         ProductLine previousProductLine = MarketMakerProductLineContext.current();
         MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
-            if (properties.getCoordination().isEnabled()
-                    && !leaseCoordinator.tryAcquire(strategy.getProductLine(), strategy.getStrategyId(), instrumentId, nodeId,
-                    properties.getCoordination().getLeaseDuration())) {
-                state.addSkipped(1L);
-                recordRunEvent(strategy, instrumentId, null, cycleSequence, "SKIPPED",
-                        0, 0, 0, "LEASE_NOT_ACQUIRED", null, traceId, Instant.now());
-                return false;
-            }
             Instant now = Instant.now();
             try {
                 if (!strategy.isEnabled() || state.paused()) {
@@ -786,12 +735,17 @@ public class MarketMakerService {
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId,
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
-                recordReferenceSample(strategy, instrumentId, cycleSequence, referenceOrderBook, traceId, now);
+                var inputs = quoteInputsClient.query(new MakerQuoteInputs.Request(
+                        strategy.getProductLine(), instrumentId, instrument.changeId(), strategy.getMarginMode(),
+                        strategy.getAccountIds()));
+                validateQuoteInputs(inputs, strategy, instrumentId, instrument.changeId());
                 long rejectedQuotes = 0;
                 String quoteRejection = null;
-                for (long accountId : strategy.getAccountIds()) {
+                for (var input : inputs.accounts()) {
+                    long accountId = input.userId();
                     ReconcileResult result = quoteAccount(strategy, state, cycleSequence, instrumentId, instrument,
-                            orderBook, markPrice, referenceOrderBook, volatilityTicks, accountId, now, traceId);
+                            orderBook, markPrice, referenceOrderBook, volatilityTicks, accountId,
+                            input.signedInventorySteps(), input.makerFeeRatePpm(), now, traceId);
                     rejectedQuotes += result.rejected();
                     if (result.rejected() > 0 && quoteRejection == null)
                         quoteRejection = result.rejectionReason();
@@ -824,6 +778,17 @@ public class MarketMakerService {
         }
     }
 
+    private static void validateQuoteInputs(MakerQuoteInputs.Response inputs,
+            MarketMakerProperties.Strategy strategy, String instrumentId, long changeId) {
+        if (inputs == null || inputs.productLine() != strategy.getProductLine()
+                || !instrumentId.equals(inputs.instrumentId()) || inputs.instrumentChangeId() != changeId
+                || inputs.accounts().size() != strategy.getAccountIds().size())
+            throw new IllegalStateException("做市批量账户数据与产品线、合约版本或账户数量不匹配");
+        for (int i = 0; i < inputs.accounts().size(); i++)
+            if (inputs.accounts().get(i).userId() != strategy.getAccountIds().get(i))
+                throw new IllegalStateException("做市批量账户数据的账户顺序不匹配");
+    }
+
     private ReconcileResult quoteAccount(MarketMakerProperties.Strategy strategy,
                               StrategyRuntimeState state,
                               long cycleSequence,
@@ -834,16 +799,17 @@ public class MarketMakerService {
                               ReferenceOrderBookSnapshot referenceOrderBook,
                               long volatilityTicks,
                               long accountId,
+                              long inventorySteps,
+                              long makerFeeRatePpm,
                               Instant now,
                               String traceId) {
-        PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, instrumentId, now);
         OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
         QuotePlan plan = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
-                ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
+                ? new QuotePlan(0L, inventorySteps, List.of(), 0)
                 : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                        otherLiquidity, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook,
-                        effectiveMakerFee(accountId, strategy.getProductLine(), instrument));
+                        otherLiquidity, markPrice, inventorySteps, volatilityTicks, referenceOrderBook,
+                        makerFeeRatePpm);
         ReconcileResult result = reconcile(strategy, accountId, instrumentId, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());
@@ -855,19 +821,21 @@ public class MarketMakerService {
 
     /** 报价只避让其他参与者的盘口；自己的旧报价交由分批撤补处理，不能反向锁住参考价。 */
     private OrderBookSnapshotResponse excludeOwnQuotes(OrderBookSnapshotResponse book, List<OrderResponse> orders) {
+        // Derived only for this call from the authoritative order snapshot; never shared between cycles.
+        var bids = new HashMap<Long, Long>();
+        var asks = new HashMap<Long, Long>();
+        for (var order : orders) {
+            if (!isLive(order) || order.side() == null) continue;
+            var quantities = order.side() == OrderSide.BUY ? bids : asks;
+            quantities.merge(order.priceTicks(), order.remainingQuantitySteps(), Long::sum);
+        }
         return new OrderBookSnapshotResponse(book.instrumentId(), book.sequence(), book.depth(),
-                excludeOwnSide(book.bids(), orders, OrderSide.BUY),
-                excludeOwnSide(book.asks(), orders, OrderSide.SELL), book.eventTime());
+                excludeOwnSide(book.bids(), bids), excludeOwnSide(book.asks(), asks), book.eventTime());
     }
 
-    private List<OrderBookLevel> excludeOwnSide(List<OrderBookLevel> levels, List<OrderResponse> orders,
-                                               OrderSide side) {
-        return levels.stream().filter(level -> {
-            long ownQuantity = orders.stream().filter(this::isLive)
-                    .filter(order -> order.side() == side && order.priceTicks() == level.priceTicks())
-                    .mapToLong(OrderResponse::remainingQuantitySteps).sum();
-            return level.quantitySteps() > ownQuantity;
-        }).toList();
+    private List<OrderBookLevel> excludeOwnSide(List<OrderBookLevel> levels, Map<Long, Long> ownQuantities) {
+        return levels.stream().filter(level -> level.quantitySteps()
+                > ownQuantities.getOrDefault(level.priceTicks(), 0L)).toList();
     }
 
     private ReconcileResult reconcile(MarketMakerProperties.Strategy strategy,
@@ -1621,10 +1589,9 @@ public class MarketMakerService {
         return Long.toUnsignedString(crc32.getValue(), 36);
     }
 
-    /** The database is authoritative. YAML strategy lists never participate in runtime selection. */
+    /** Strategies start from YAML; administrator changes live only in this process. */
     public List<MarketMakerProperties.Strategy> configuredStrategies() {
-        strategyOverrides();
-        return definitions.stream().filter(d -> d.productLine() == properties.getProductLine()).map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
+        return overrideStore.definitions().stream().filter(d -> d.productLine() == properties.getProductLine()).map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
     }
 
     public List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> strategyDefinitions(ProductLine line) {
@@ -1651,7 +1618,6 @@ public class MarketMakerService {
                 || !old.get().instrumentIds().equals(definition.instrumentIds())))
             throw new IllegalArgumentException("existing strategy account and instrument bindings cannot change; create a new strategy");
         var saved = overrideStore.saveDefinition(definition, adminUserId, reason);
-        strategyOverridesLoadedAt = Instant.EPOCH;
         return saved;
     }
 
@@ -1660,51 +1626,10 @@ public class MarketMakerService {
     }
 
     private List<MarketMakerProperties.Strategy> strategiesSnapshot(ProductLine productLine) {
-        Map<String, StrategyConfigOverride> overrides = strategyOverrides();
         return configuredStrategies().stream()
                 .filter(strategy -> productLine == null || strategy.getProductLine() == productLine)
-                .map(strategy -> applyOverride(strategy, overrides.get(strategyKey(strategy))))
+                .map(strategy -> applyOverride(strategy, overrideStore.find(strategy.getProductLine(), strategy.getStrategyId()).orElse(null)))
                 .toList();
-    }
-
-    private Map<String, StrategyConfigOverride> strategyOverrides() {
-        Instant now = Instant.now();
-        if (strategyOverridesLoadedAt.plus(Duration.ofSeconds(1)).isAfter(now)) {
-            return strategyOverrides;
-        }
-        synchronized (this) {
-            if (strategyOverridesLoadedAt.plus(Duration.ofSeconds(1)).isAfter(now)) {
-                return strategyOverrides;
-            }
-            try {
-                var nextDefinitions = List.copyOf(overrideStore.definitions());
-                Map<String, StrategyConfigOverride> next = new HashMap<>();
-                for (StrategyConfigOverride override : overrideStore.findAll()) {
-                    next.put(strategyKey(override.productLine(), override.strategyId()), override);
-                }
-                definitions = nextDefinitions;
-                strategyOverrides = Map.copyOf(next);
-            } catch (RuntimeException ex) {
-                log.warn("Failed to load market-maker strategy overrides: {}", ex.getMessage());
-            } finally {
-                strategyOverridesLoadedAt = now;
-            }
-            return strategyOverrides;
-        }
-    }
-
-    private void putCachedOverride(StrategyConfigOverride override) {
-        Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
-        next.put(strategyKey(override.productLine(), override.strategyId()), override);
-        strategyOverrides = Map.copyOf(next);
-        strategyOverridesLoadedAt = Instant.now();
-    }
-
-    private void removeCachedOverride(MarketMakerProperties.Strategy strategy) {
-        Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
-        next.remove(strategyKey(strategy));
-        strategyOverrides = Map.copyOf(next);
-        strategyOverridesLoadedAt = Instant.now();
     }
 
     private MarketMakerProperties.Strategy applyOverride(MarketMakerProperties.Strategy configured,
@@ -1715,7 +1640,7 @@ public class MarketMakerService {
         effective.setEnabled(override != null && override.enabled() != null ? override.enabled() : configured.isEnabled());
         effective.setAccountIds(new ArrayList<>(configured.getAccountIds()));
         effective.setInstrumentIds(new ArrayList<>(configured.getInstrumentIds()));
-        // 复制只读配置中的启动锚定价，避免数据库覆盖对象重建策略时丢失现货初始化参数。
+        // 复制只读配置中的启动锚定价，避免内存覆盖对象重建策略时丢失现货初始化参数。
         effective.setInitialAnchorPriceTicks(configured.getInitialAnchorPriceTicks());
         effective.setBaseQuantitySteps(override != null && override.baseQuantitySteps() != null
                 ? override.baseQuantitySteps()
@@ -2062,38 +1987,4 @@ public class MarketMakerService {
         }
     }
 
-    private static final class NoopMarketMakerRunEventRepository implements MarketMakerRunEventRepository {
-        @Override
-        public void record(MarketMakerRunEventWrite event) {
-        }
-
-        @Override
-        public List<MarketMakerRunEventRecord> find(ProductLine productLine,
-                                                    String strategyId,
-                                                    String instrumentId,
-                                                    Long accountId,
-                                                    String eventType,
-                                                    int limit) {
-            return List.of();
-        }
-
-        @Override
-        public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
-                                                              String strategyId,
-                                                              String instrumentId,
-                                                              Long accountId,
-                                                              String eventType,
-                                                              int limit,
-                                                              String cursor,
-                                                              String sort) {
-            return new CursorPage<>(List.of(), null, false, sort, Math.max(1, limit));
-        }
-    }
-
-    private static final class NoopMarketMakerReferenceSampleRepository
-            implements MarketMakerReferenceSampleRepository {
-        @Override
-        public void record(MarketMakerReferenceSampleWrite sample) {
-        }
-    }
 }

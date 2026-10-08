@@ -16,5 +16,4 @@ public class MarketMakerInfrastructureProperties {
     @NotNull private ProductLine productLine;
     private String nodeId;
     @Valid private MarketMakerProperties.Kafka kafka = new MarketMakerProperties.Kafka();
-    @Valid private MarketMakerProperties.Coordination coordination = new MarketMakerProperties.Coordination();
 }

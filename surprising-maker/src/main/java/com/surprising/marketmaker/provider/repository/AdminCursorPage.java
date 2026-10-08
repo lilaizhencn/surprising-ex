@@ -1,7 +1,6 @@
 package com.surprising.marketmaker.provider.repository;
 
 import java.nio.charset.StandardCharsets;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -46,26 +45,6 @@ final class AdminCursorPage {
         }
     }
 
-    static String seekCondition(SortSpec sort) {
-        String operator = sort.descending() ? "<" : ">";
-        return " AND (" + sort.column() + " " + operator + " ? OR ("
-                + sort.column() + " = ? AND " + sort.idColumn() + " " + operator + " ?))";
-    }
-
-    static String seekCondition(SortSpec sort, Cursor cursor) {
-        return cursor == null ? "" : seekCondition(sort);
-    }
-
-    static void addCursorArgs(List<Object> args, Cursor cursor) {
-        if (cursor == null) {
-            return;
-        }
-        Timestamp time = Timestamp.from(cursor.timestamp());
-        args.add(time);
-        args.add(time);
-        args.add(cursor.id());
-    }
-
     static <T> CursorPage<T> page(List<T> fetchedRows,
                                   int limit,
                                   SortSpec sort,
@@ -89,14 +68,11 @@ final class AdminCursorPage {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    record SortSpec(String field, String column, String idColumn, boolean descending) {
+    record SortSpec(String field, boolean descending) {
         String token() {
             return field + "." + (descending ? "desc" : "asc");
         }
 
-        String directionSql() {
-            return descending ? "DESC" : "ASC";
-        }
     }
 
     record Cursor(Instant timestamp, long id) {

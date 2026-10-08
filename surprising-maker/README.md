@@ -17,7 +17,7 @@
 - 所有报价单都是 `LIMIT + GTX + postOnly=true`。
 - 默认只做被动报价，不主动发起 IOC 扫单；主动交易模式仅可在测试配置中显式开启。
 - 每个策略完成一轮后立即继续，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
-- 应用就绪后 `MarketMakerTask.start` 为每个配置策略启动独立报价虚拟线程，显式启用模拟交易时另启动一个吃单虚拟线程，分别调用 `MarketMakerService.runScheduledStrategy` / `runScheduledTrades` 连续执行，完成本轮立即开始下一轮，不设置 cycle-delay，也不等待其他策略完成。暂停、租约失败或本轮异常时退让 100ms，避免空转重试；关闭时中断本服务工作线程。报价和模拟吃单各自保留策略合约周期锁与租约，手动执行也受相应锁保护。模拟吃单每次读取真实盘口、持仓和标记价后经普通订单入口提交 IOC；不会把无成交撤单算作成交。实际频率仍取决于网络和交易核心耗时。
+- 应用就绪后 `MarketMakerTask.start` 为每个配置策略启动独立报价虚拟线程，显式启用模拟交易时另启动一个吃单虚拟线程，分别调用 `MarketMakerService.runScheduledStrategy` / `runScheduledTrades` 连续执行，完成本轮立即开始下一轮，不设置 cycle-delay，也不等待其他策略完成。暂停或本轮异常时退让 100ms，避免空转重试；关闭时中断本服务工作线程。报价和模拟吃单各自保留进程内策略合约周期锁，手动执行也受相应锁保护。模拟吃单每次读取真实盘口、持仓和标记价后经普通订单入口提交 IOC；不会把无成交撤单算作成交。实际频率仍取决于网络和交易核心耗时。
 - 报价价差会根据 mark/order-book 锚点的 EWMA 绝对变动自动扩大，并受最大波动价差限制；没有复杂的策略版本传播或跨服务状态编排。
 - `MarketMakerService.reconcile` 每轮按目标盘口撤销过期挂单并补齐报价，不设置订单操作总量上限；`placeBatch` 按接口每批 20 单、换单按当前挂单数的 10%（至少 1 单、最多 20 单）逐批撤销，确认后立即补齐再处理下一批，不会先撤完整个梯子。撤单结果不确定或补单拒绝时停止后续撤单，保留剩余挂单；风控主动缩减目标报价仍可撤掉不再允许的方向。状态不确定时保留原订单槽位，不重复补单。
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
@@ -69,12 +69,15 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limi
 做市 PnL 归因接口已从交易主库移除。订单、成交、手续费流水和持仓的关联属于财务运营查询；后续应由
 独立财务运营模块消费领域事件，在独立数据库建立投影并提供归因、对账和运营报表。
 
-`/strategy-logs` 读取 `market_maker_strategy_run_events`，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
+`/strategy-logs` 读取当前进程最多 2,048 条内存诊断记录，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
-策略运行事件与参考行情样本分别由独立 Repository 访问各自物理表，`MarketMakerService` 负责业务聚合。
-`MarketMakerLeaseRepository` 只负责 `market_maker_strategy_leases`，租约协调接口保留在 Service 层。
+`InMemoryMarketMakerRunEventRepository` 保留有界诊断记录，重启即清空；参考行情样本不落库、不另建队列。
+做市模块不依赖 PostgreSQL、JDBC、Redis 或其他外部存储，也不创建数据库连接池。
 
-`/strategies/{strategyId}/config` 读取和写入 `market_maker_strategy_overrides`。只支持热更新 enabled、基础报价数量、保证金模式、价差、层间距、库存上限/偏斜阈值和报价层数；账号和交易对仍由部署配置管理。请求体里为 `null` 的字段会回退到 `application.yml` 基线配置，全部可编辑字段为 `null` 会清除覆盖。
+`/strategies/{strategyId}/config` 在 `InMemoryMarketMakerStrategyOverrideStore` 更新当前进程配置。
+后台公共设置和策略定义仍支持版本冲突检查；所有热更新在重启后丢弃，启动时重新加载 YAML。
+参数为空时恢复该进程的策略基线，全部可编辑字段为空时清除内存覆盖。
+报价、订单与账户事实仍分别由原交易服务和 Core 管理，内存诊断记录不作为交易或资金账本。
 
 ## 配置
 
@@ -92,12 +95,11 @@ surprising:
     trading:
       base-url: http://localhost:9084
   market-maker:
+    infrastructure:
+      product-line: LINEAR_PERPETUAL
+      node-id: mm-node-a
     engine:
       enabled: false
-      node-id: mm-node-a
-    coordination:
-      enabled: true
-      lease-duration: 5s
     quoting:
       order-book-depth: 20
       order-levels: 3
@@ -127,6 +129,7 @@ surprising:
       max-quantity-steps: 1000
       sources:
         - name: BINANCE_USDM
+          product-line: LINEAR_PERPETUAL
           enabled: true
           instrument-id: "604"
           external-symbol: BTCUSDT
@@ -135,6 +138,7 @@ surprising:
           websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
+          product-line: LINEAR_PERPETUAL
           enabled: true
           instrument-id: "604"
           external-symbol: BTC-USDT-SWAP
@@ -144,6 +148,7 @@ surprising:
           websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
           websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
+          product-line: LINEAR_PERPETUAL
           enabled: true
           instrument-id: "604"
           external-symbol: BTCUSDT
@@ -154,6 +159,7 @@ surprising:
           websocket-parser: BYBIT_ORDERBOOK_WS
     strategies:
       - strategy-id: btc-usdt-mm-a
+        product-line: LINEAR_PERPETUAL
         enabled: true
         account-ids: [900001, 900002]
         instrument-ids: ["604"]
@@ -165,8 +171,10 @@ surprising:
 
 每个 `strategyId + instrumentId` 的流程：
 
-1. 如果开启多节点协调，先在 PostgreSQL 的 `market_maker_strategy_leases` 获取租约。
-2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
+1. 取得当前进程的策略合约周期锁；每条产品线只部署一个做市实例。
+2. 读取合约配置、最新盘口、最新标记价格；通过 `POST /internal/v1/trading/maker/quote-inputs`
+   一次取得该周期所有做市账户的库存和有效 maker 费率，校验产品、合约版本、账户数量与顺序后才执行报价。
+   现货库存由基础资产权益按数量步长换算，衍生品库存使用 NET 持仓；数据不可用时整轮停止报价。
 3. 优先使用 mark price 作为报价锚点；mark 不可用时回退盘口中价。
 4. 根据锚点的绝对价格变动维护进程内 EWMA 波动值，用它扩大报价半价差；波动价差始终受配置上限和本地价格偏离限制。
 5. 默认要求新鲜参考盘口。`RestReferenceMarketProvider` 先按行情源的 `quantity-scale-ppm` 将外部数量换算为基础币，再按 U 本位合约的 `contractMultiplierPpm` 换算为本地张数；BTC-USDT-SWAP 的 OKX 合约每张为 0.01 BTC，行情源使用 10000 ppm。`QuotePlanner` 按参考盘口相邻档距和每档张数报价，继续受本地价格偏离、post-only、数量和库存上限保护。
@@ -178,9 +186,14 @@ surprising:
 
 参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 
-## 多节点部署
+## 单实例部署与配置迁移
 
-可以多节点部署同一份配置。租约 key 是 `strategyId + instrumentId`，同一个策略的同一个合约同一时间只会由一个节点报价。生产环境建议配置稳定的 `node-id`，方便排查日志和租约。
+每条产品线只部署一个做市实例，不保留跨节点租约。同一产品线更新部署时先停止旧实例再启动新实例，
+禁止同时运行使用相同账户/合约的副本。后台修改只作用于当前进程，重启恢复 YAML。
+升级前把要保留的公共设置、策略及参考行情源写入 YAML，并移除旧的 `infrastructure.coordination`
+配置；旧的做市配置表和运行记录表不会再被读取。
+默认 YAML 的 `engine.enabled=false`、`strategies=[]`，未显式配置策略时不会自动报价。
+Gateway、Kafka、外部行情和交易 Core 仍是做市业务依赖；“无外部存储”仅指做市自身的配置、租约和诊断状态。
 
 如果要跑多个做市商账号，可以使用同一个策略的多个 `account-ids`，也可以拆成多个策略。不要让多个策略同时控制同一个账号和合约，除非库存上限已经按合并风险设计。
 
@@ -280,7 +293,7 @@ JDK 27 maker 61 项测试通过，新增固定随机种子的逐单变化、单�
 本机运维接口 `GET /internal/v1/operations/liquidity/leverage` 读取实际杠杆，
 和写接口采用相同的本机密钥与产品线校验。管理后台提供对应的补保证金选项。
 
-`market_maker_strategy_overrides.order_levels` 的 1～50 约束只限制单个做市策略每侧主动维护的报价档数，
+策略 `orderLevels` 的 1～50 约束只限制单个做市策略每侧主动维护的报价档数，
 不是交易所整个盘口的价格档数上限，也不限制用户订单可以占据多少个价格档位。
 行情接口查询的前 50/100 档同样只是返回窗口；窗口以外的有效挂单仍保留在撮合簿内，
 价格变化或前方订单成交后可以进入可见窗口并成交，不能因为超出展示深度而删除或取消。
@@ -440,3 +453,32 @@ inventory-price-skew-ppm 倾斜。两项默认 0，明确启用后仅作用于�
 `application.yml` 和 `scripts/start-product-line-providers.sh` 的 `PRICE_CONSUMER_CONCURRENCY` 默认从 8 调整为 1；仍允许环境显式设为更高并发，生产环境按 Topic 分区及实际负载配置。单分区不会因为启动八个消费者而获得八倍处理能力。
 
 测试覆盖 YAML 未指定环境时绑定为 1、显式设置 4 时保留 4；相关 maker 报价和配置回归通过，启动脚本通过 `bash -n`。服务器只读采样发现各应用环境已设并发 1，故此变更主要防止新实例或启动器漏配时恢复为 8，不宣称当前服务器立即减少消费者线程。本轮没有部署或重启服务器。
+
+
+## 本轮性能验证（2026-10-08，HotSpot JDK 27）
+
+`MarketMakerService.excludeOwnQuotes` 从当前订单快照一次汇总买卖方向/价格对应的自有量，
+然后逐档查询，避免每个盘口档位重新扫描所有订单。汇总 Map 仅归本次调用所有，不共享、不跨轮缓存。
+保留原语义：完全由自身占据的档位被过滤；仍含其他参与者流动性的档位保留原数量。
+
+同一进程对比原嵌套 Stream 与当前方法，预热各 300 次、测量各 1,000 次，结果逐项一致。
+20 档/40 单：调用线程分配 14.836 → 3.288 MB，CPU 26.199 → 7.088 ms；
+200 档/1,000 单：分配 146.712 → 34.144 MB，CPU 3,782.296 → 26.972 ms。
+两条路径同一份输入，JFR 上限 16 MiB、堆上限 256 MiB；这是局部函数成本，不能换算为整机 CPU 降幅。
+批量报价输入测试验证多账户每币对周期只发起一次库存/费率请求，失效或错配响应不下单、不撤单。
+
+
+本轮验证覆盖做市模块、共享批量请求契约、Gateway 账户查询/订单查询/条件单身份/有效费率及深度订阅、
+真实 Redis 读视图与 Lua 路径。最终选定 24 个测试类，232 项测试、0 失败、0 错误、0 跳过。
+做市原有拒单、撤补单、丢失回执和六产品线报价测试继续通过；新增批量输入缺失、产品/版本/账户错配
+不下单不撤单、同价自有量汇总、YAML 启动、版本冲突、热更新立即生效、重启重置、记录容量和分页测试。
+完整 Spring 上下文单独验证无 DataSource：合约快照使用本轮本地 HTTP 桩，Kafka listeners 停止；
+测试/runtime classpath 不含 PostgreSQL、spring-jdbc、Redis 或 Lettuce。Maven 模块打包通过。
+未连接部署服务器，未做真实 Gateway→Core→撮合/资金结算的端到端或长时间多进程压测，未启动 wallet；
+不能把只读接口测试解释为新增的实盘资金守恒证据。
+
+JFR、局部基准源码/日志、上下文启动桩及测试报告仅用于本轮验证；结果已入档，最终清理状态见下文。
+
+清理完成：本轮临时 Redis、HTTP 桩和 Java 采样进程均已停止；本轮 `/tmp/surprising-round4`
+内的 JFR、基准源码/日志、启动桩及所选 24 个测试类的 XML/TXT 报告已删除。
+上面的临时路径仅作历史定位；保留 Maven 构建产物及其他任务的数据和报告。

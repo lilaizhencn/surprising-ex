@@ -23,17 +23,53 @@ class MarketMakerApplicationYamlTest {
     }
 
     @Test
-    void yamlContainsInfrastructureOnlyAndCannotEnableBusinessStrategies() throws Exception {
-        var sources = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"));
-        for (var source : sources) {
-            assertThat(source.getProperty("surprising.market-maker.strategies[0].enabled")).isNull();
-            assertThat(source.getProperty("surprising.market-maker.quoting.order-levels")).isNull();
-            assertThat(source.getProperty("surprising.market-maker.reference-market.sources[0].url")).isNull();
-            assertThat(source.getProperty("surprising.market-maker.engine.enabled")).isNull();
-        }
-        assertThat(sources).extracting(source -> source.getProperty("surprising.market-maker.infrastructure.product-line"))
-                .contains("${PRODUCT_LINE}");
-        assertThat(MarketMakerBusinessSettings.initialDisabled().engine().isEnabled()).isFalse();
-        assertThat(MarketMakerBusinessSettings.initialDisabled().referenceMarket().getSources()).isEmpty();
+    void yamlBindsBusinessSettingsAndStrategiesWithoutAnyDataSource() throws Exception {
+        var env = new org.springframework.core.env.StandardEnvironment();
+        env.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("test", java.util.Map.of(
+                "PRODUCT_LINE", "LINEAR_PERPETUAL", "surprising.market-maker.engine.enabled", "true",
+                "surprising.market-maker.strategies[0].strategy-id", "test-maker",
+                "surprising.market-maker.strategies[0].product-line", "LINEAR_PERPETUAL",
+                "surprising.market-maker.strategies[0].account-ids[0]", "2",
+                "surprising.market-maker.strategies[0].instrument-ids[0]", "604")));
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))
+                .forEach(env.getPropertySources()::addLast);
+        var binder = org.springframework.boot.context.properties.bind.Binder.get(env);
+        var infrastructure = binder.bind("surprising.market-maker.infrastructure",
+                org.springframework.boot.context.properties.bind.Bindable.of(MarketMakerInfrastructureProperties.class)).get();
+        var properties = new MarketMakerConfiguration().marketMakerProperties(infrastructure);
+        binder.bind("surprising.market-maker", org.springframework.boot.context.properties.bind.Bindable.ofInstance(properties));
+        properties.validateBusinessSettings();
+        assertThat(properties.getEngine().isEnabled()).isTrue();
+        assertThat(properties.getStrategies()).singleElement().satisfies(s -> assertThat(s.getStrategyId()).isEqualTo("test-maker"));
+        assertThat(env.getProperty("spring.datasource.url")).isNull();
     }
+
+    @Test
+    void processSettingsStartWithoutDatabaseOrRedisBeans() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(MemoryConfiguration.class)
+                .withBean(tools.jackson.databind.ObjectMapper.class,
+                        () -> tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build())
+                .withPropertyValues("surprising.market-maker.infrastructure.product-line=SPOT",
+                        "surprising.market-maker.engine.enabled=false",
+                        "surprising.market-maker.strategies[0].strategy-id=yaml-maker",
+                        "surprising.market-maker.strategies[0].product-line=SPOT",
+                        "surprising.market-maker.strategies[0].account-ids[0]=2",
+                        "surprising.market-maker.strategies[0].instrument-ids[0]=1")
+                .run(context -> {
+                    assertThat(context).hasNotFailed().doesNotHaveBean(javax.sql.DataSource.class);
+                    assertThat(context.getBean(com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore.class)
+                            .definitions()).singleElement().satisfies(d -> assertThat(d.strategyId()).isEqualTo("yaml-maker"));
+                    assertThat(context.getBean(com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore.class)
+                            .load(com.surprising.product.api.ProductLine.SPOT).settings().engine().isEnabled()).isFalse();
+                });
+    }
+
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    @org.springframework.boot.context.properties.EnableConfigurationProperties(MarketMakerInfrastructureProperties.class)
+    @org.springframework.context.annotation.Import({MarketMakerConfiguration.class,
+            com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore.class,
+            com.surprising.marketmaker.provider.repository.InMemoryMarketMakerStrategyOverrideStore.class,
+            com.surprising.marketmaker.provider.repository.InMemoryMarketMakerRunEventRepository.class})
+    static class MemoryConfiguration {}
 }

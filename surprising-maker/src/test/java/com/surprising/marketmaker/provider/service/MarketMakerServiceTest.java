@@ -32,8 +32,6 @@ import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
-import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository;
-import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository.MarketMakerReferenceSampleWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
@@ -105,6 +103,53 @@ class MarketMakerServiceTest {
     @AfterEach
     void clearProductLineContext() {
         MarketMakerProductLineContext.clear();
+    }
+
+    @Test
+    void excludingOwnQuotesAggregatesSamePriceAndKeepsMixedExternalLiquidity() {
+        var fixtures = new Fixtures(List.of());
+        var service = fixtures.service();
+        var book = new OrderBookSnapshotResponse("1", 1, 3,
+                List.of(new OrderBookLevel(100, 10, 3), new OrderBookLevel(99, 11, 3), new OrderBookLevel(98, 10, 1)),
+                List.of(new OrderBookLevel(100, 11, 3)), Instant.now());
+        var orders = List.of(
+                order(1, 900001, "a", OrderSide.BUY, 100, 4, OrderStatus.ACCEPTED),
+                order(2, 900001, "b", OrderSide.BUY, 100, 6, OrderStatus.PENDING_RESERVE),
+                order(3, 900001, "c", OrderSide.BUY, 99, 10, OrderStatus.PARTIALLY_FILLED),
+                order(4, 900001, "d", OrderSide.BUY, 98, 10, OrderStatus.CANCELED),
+                order(5, 900001, "e", OrderSide.SELL, 100, 10, OrderStatus.ACCEPTED));
+        OrderBookSnapshotResponse external = org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                service, "excludeOwnQuotes", book, orders);
+        assertThat(external.bids()).containsExactly(book.bids().get(1), book.bids().get(2));
+        assertThat(external.asks()).containsExactlyElementsOf(book.asks());
+        assertThat(external.bids().getFirst().quantitySteps()).isEqualTo(11); // retain the existing mixed-level semantics
+    }
+
+    @Test
+    void multipleAccountsShareOneQuoteInputRequestPerInstrumentCycle() {
+        var fixtures = new Fixtures(List.of());
+        fixtures.accountIds = List.of(900001L, 900002L, 900003L);
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.quoteInputCalls).isEqualTo(1);
+        assertThat(fixtures.orderRpc.placeRequests).extracting(PlaceOrderRequest::userId)
+                .contains(900001L, 900002L, 900003L);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"product", "version", "missing", "account", "unavailable"})
+    void invalidBatchInputsNeverPlaceOrCancelQuotes(String failure) {
+        var fixtures = new Fixtures(List.of());
+        fixtures.quoteInputOverride = r -> {
+            if (failure.equals("unavailable")) throw new IllegalStateException("unavailable");
+            return new com.surprising.trading.api.model.MakerQuoteInputs.Response(
+                    failure.equals("product") ? ProductLine.SPOT : r.productLine(), r.instrumentId(),
+                    failure.equals("version") ? r.instrumentChangeId() + 1 : r.instrumentChangeId(),
+                    failure.equals("missing") ? List.of() : List.of(new com.surprising.trading.api.model.MakerQuoteInputs.Account(
+                            failure.equals("account") ? 99 : r.accountIds().getFirst(), 0, -100)));
+        };
+        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+        assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
     }
 
     @Test
@@ -351,32 +396,6 @@ class MarketMakerServiceTest {
 
         assertThat(fixtures.orderRpc.placeRequests).isEmpty();
         assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
-    }
-
-    @Test
-    void runOnceRecordsReferenceMarketSampleWhenSnapshotIsAvailable() {
-        Fixtures fixtures = new Fixtures(List.of());
-        FakeReferenceSampleRepository sampleRepository = new FakeReferenceSampleRepository();
-        ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "1",
-                List.of(new ReferenceOrderBookLevel(49_990L, 3L)),
-                List.of(new ReferenceOrderBookLevel(50_020L, 7L)),
-                Instant.parse("2026-01-01T00:00:01Z"));
-        MarketMakerService service = fixtures.service(
-                fixtures.runEventRepository, sampleRepository, (instrumentId, productLine, instrument) -> snapshot);
-
-        service.runOnce(new MarketMakerRunRequest("47", "1"));
-
-        assertThat(sampleRepository.referenceSamples).singleElement()
-                .satisfies(sample -> {
-                    assertThat(sample.strategyId()).isEqualTo("47");
-                    assertThat(sample.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(sample.instrumentId()).isEqualTo("1");
-                    assertThat(sample.sourceName()).isEqualTo("BINANCE_USDM");
-                    assertThat(sample.transport()).isEqualTo("WEBSOCKET");
-                    assertThat(sample.bidLevels()).isEqualTo(1);
-                    assertThat(sample.askLevels()).isEqualTo(1);
-                    assertThat(sample.spreadTicks()).isEqualTo(30L);
-                });
     }
 
     @Test
@@ -953,8 +972,10 @@ class MarketMakerServiceTest {
     private static final class Fixtures {
         private final FakeOrderRpc orderRpc;
         private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
-        private final FakeReferenceSampleRepository referenceSampleRepository =
-                new FakeReferenceSampleRepository();
+        private List<Long> accountIds = List.of(900001L);
+        private int quoteInputCalls;
+        private java.util.function.Function<com.surprising.trading.api.model.MakerQuoteInputs.Request,
+                com.surprising.trading.api.model.MakerQuoteInputs.Response> quoteInputOverride;
         private boolean tradeEnabled;
         private boolean referenceMarketEnabled;
         private long quantityRefreshTolerancePpm;
@@ -978,15 +999,14 @@ class MarketMakerServiceTest {
         }
 
         private MarketMakerService service() {
-            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
+            return service(runEventRepository, ReferenceMarketProvider.disabled());
         }
 
         private MarketMakerService service(MarketMakerRunEventRepository runEventRepository) {
-            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
+            return service(runEventRepository, ReferenceMarketProvider.disabled());
         }
 
         private MarketMakerService service(MarketMakerRunEventRepository runEventRepository,
-                                           MarketMakerReferenceSampleRepository referenceSampleRepository,
                                            ReferenceMarketProvider referenceMarketProvider) {
             MarketMakerProperties properties = properties();
             InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
@@ -994,10 +1014,18 @@ class MarketMakerServiceTest {
                     List.of(new FakeInstrumentRpc(priceTickUnits, quantityStepUnits).latest(Integer.parseInt(instrumentId), productLine)));
             return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
-                    referenceMarketProvider, (productLine, strategyId, instrumentId, ownerId, leaseDuration) -> true,
-                    new FakeOverrideStore(properties), runEventRepository, referenceSampleRepository, snapshotCache,
+                    referenceMarketProvider, new FakeOverrideStore(properties), runEventRepository, snapshotCache,
                     (user, symbol, version, line) -> new com.surprising.marketmaker.provider.client.MakerTradingFeeClient.EffectiveFee(
-                            user, line, symbol, version, snapshotCache.current(line, Integer.parseInt(symbol), version).orElseThrow().makerFeeRatePpm()));
+                            user, line, symbol, version, snapshotCache.current(line, Integer.parseInt(symbol), version).orElseThrow().makerFeeRatePpm()),
+                    request -> {
+                        quoteInputCalls++;
+                        if (quoteInputOverride != null) return quoteInputOverride.apply(request);
+                        return new com.surprising.trading.api.model.MakerQuoteInputs.Response(request.productLine(),
+                                request.instrumentId(), request.instrumentChangeId(), request.accountIds().stream().map(user ->
+                                new com.surprising.trading.api.model.MakerQuoteInputs.Account(user, 0,
+                                        snapshotCache.current(request.productLine(), Integer.parseInt(request.instrumentId()),
+                                                request.instrumentChangeId()).orElseThrow().makerFeeRatePpm())).toList());
+                    });
         }
 
         private LatestMarkPriceCache markPriceCache() {
@@ -1024,7 +1052,6 @@ class MarketMakerServiceTest {
             properties.getTrade().setOrdersPerBatch(tradeBatchSize);
             properties.getTrade().setAccountIds(List.of(900002L));
             properties.getEngine().setNodeId("mm-test");
-            properties.getCoordination().setEnabled(false);
             properties.getQuoting().setOrderLevels(orderLevels);
             properties.getQuoting().setMinSpreadTicks(10L);
             properties.getQuoting().setLevelSpacingTicks(levelSpacingTicks);
@@ -1037,7 +1064,7 @@ class MarketMakerServiceTest {
             strategy.setStrategyId("47");
             strategy.setProductLine(productLine);
             strategy.setEnabled(true);
-            strategy.setAccountIds(List.of(900001L));
+            strategy.setAccountIds(accountIds);
             strategy.setInstrumentIds(List.of(instrumentId));
             strategy.setBaseQuantitySteps(10L);
             strategy.setMarginMode(MarginMode.CROSS);
@@ -1147,15 +1174,6 @@ class MarketMakerServiceTest {
             lastRunEventsPageCursor = cursor;
             lastRunEventsPageSort = sort;
             return runEventPage;
-        }
-    }
-
-    private static final class FakeReferenceSampleRepository implements MarketMakerReferenceSampleRepository {
-        private final List<MarketMakerReferenceSampleWrite> referenceSamples = new ArrayList<>();
-
-        @Override
-        public void record(MarketMakerReferenceSampleWrite sample) {
-            referenceSamples.add(sample);
         }
     }
 

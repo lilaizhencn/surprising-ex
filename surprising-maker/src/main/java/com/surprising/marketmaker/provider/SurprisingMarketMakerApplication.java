@@ -23,7 +23,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         InstrumentRpcApi.class,
         MarketDataRpcApi.class,
         OrderRpcApi.class,
-        com.surprising.marketmaker.provider.client.MakerTradingFeeClient.class
+        com.surprising.marketmaker.provider.client.MakerTradingFeeClient.class,
+        com.surprising.marketmaker.provider.client.MakerQuoteInputsClient.class
 })
 @EnableConfigurationProperties(com.surprising.marketmaker.provider.config.MarketMakerInfrastructureProperties.class)
 @Slf4j
@@ -38,7 +39,8 @@ public class SurprisingMarketMakerApplication {
 
     @PostConstruct
     void logEffectiveMarketMatrixConfiguration() {
-        log.info("Maker strategies are loaded from the administrator-managed database; productLine={}",
+        properties.validateBusinessSettings();
+        log.info("Single-instance maker: YAML startup configuration, in-memory administrator changes; productLine={}",
                 properties.getProductLine());
     }
 

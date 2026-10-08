@@ -12,22 +12,23 @@ import tools.jackson.databind.json.JsonMapper;
 
 class MarketMakerBusinessSettingsServiceTest {
     @Test
-    void refreshPublishesNewDatabaseVersionOnlyOnce() {
+    void savedMemorySettingsApplyImmediatelyAndStaleUpdatesCannotChangeRunningSettings() {
         var properties = new MarketMakerProperties();
         properties.setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getEngine().setNodeId("process-local-node");
-        var store = mock(MarketMakerBusinessSettingsStore.class);
+        var store = new MarketMakerBusinessSettingsStore(properties, JsonMapper.builder().findAndAddModules().build());
         var settings = MarketMakerBusinessSettings.initialDisabled();
         settings.quoting().setOrderLevels(7);
-        when(store.load(ProductLine.LINEAR_PERPETUAL)).thenReturn(new MarketMakerBusinessSettingsStore.Settings(settings, 2, "1", "change", Instant.now()));
         try (var validation = Validation.buildDefaultValidatorFactory()) {
             var service = new MarketMakerBusinessSettingsService(properties, store, validation.getValidator());
-            service.refresh();
-            var installed = properties.getBusinessSettings();
-            service.refresh();
-            assertThat(properties.getBusinessSettings()).isSameAs(installed);
+            service.save(settings, 1, "1", "change");
             assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(7);
             assertThat(properties.getEngine().getNodeId()).isEqualTo("process-local-node");
+            settings.quoting().setOrderLevels(8);
+            assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(7);
+            assertThatThrownBy(() -> service.save(settings, 1, "1", "stale"))
+                    .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(7);
         }
     }
 
@@ -46,7 +47,7 @@ class MarketMakerBusinessSettingsServiceTest {
     }
 
     @Test
-    void persistenceRoundTripKeepsDurationsAndDoesNotStoreNodeIdentity() {
+    void settingsCopyKeepsDurationsAndDoesNotStoreNodeIdentity() {
         var settings = MarketMakerBusinessSettings.initialDisabled();
         settings.engine().setNodeId("must-stay-in-environment");
         var json = JsonMapper.builder().findAndAddModules().build();

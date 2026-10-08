@@ -16,8 +16,6 @@ import jakarta.validation.constraints.Size;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import jakarta.annotation.PostConstruct;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Getter
@@ -50,10 +48,6 @@ public class MarketMakerProperties {
 
     @Setter
     @Valid
-    private Coordination coordination = new Coordination();
-
-    @Setter
-    @Valid
     private Quoting quoting = new Quoting();
 
     @Setter
@@ -73,8 +67,12 @@ public class MarketMakerProperties {
                         "market-maker.source." + source.name);
             }
         }
-        if (!strategies.isEmpty())
-            throw new IllegalStateException("做市策略只允许通过后台维护，请移除 YAML/环境变量中的 strategies 配置");
+        var identities = new java.util.HashSet<String>();
+        for (Strategy strategy : strategies) {
+            ProductLineConfiguration.requireSame(productLine, strategy.getProductLine(), "market-maker.strategy");
+            if (!identities.add(strategy.getStrategyId().toLowerCase(java.util.Locale.ROOT)))
+                throw new IllegalArgumentException("duplicate maker strategy ID");
+        }
     }
 
     @Setter
@@ -118,15 +116,6 @@ public class MarketMakerProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private String instrumentSnapshotGroupId = "surprising-market-maker-instrument-snapshot-v1";
-
-    }
-
-    @Getter
-    @Setter
-    public static class Coordination {
-        private boolean enabled = true;
-        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-        private Duration leaseDuration = Duration.ofSeconds(5);
 
     }
 
