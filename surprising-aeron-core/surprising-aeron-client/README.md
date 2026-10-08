@@ -1,5 +1,11 @@
 # Aeron 客户端与实时传输
 
+应用侧 `SurprisingAeronClient` / `AeronClientPool` 内嵌 MediaDriver 默认使用 `SHARED`，
+将 conductor、sender、receiver 合并到共享驱动线程，减少小型主机上的平台线程和调度竞争。
+需要独立线程时可设置 JVM 属性 `surprising.aeron.client.threading-mode=DEDICATED` 或环境变量
+`AERON_CLIENT_THREADING_MODE=DEDICATED`，JVM 属性优先；非法模式启动失败。
+各产品线和各命令池仍独立，此默认值不修改 Core/Archive 的 Driver 模式，也不合并命令执行通道。
+
 `AeronRealtimeSender`、`AeronRealtimeReceiver` 是独立于 Cluster 命令客户端的实时传输组件。
 发送线程独占 Publication；接收线程使用 FragmentAssembler 重组消息并在回调内复制数据。
 业务线程只写 `RealtimeOutbox`，不调用 Aeron、Kafka、Valkey 或 socket。

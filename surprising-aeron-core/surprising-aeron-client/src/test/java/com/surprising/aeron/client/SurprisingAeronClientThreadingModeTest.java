@@ -17,6 +17,20 @@ class SurprisingAeronClientThreadingModeTest {
     }
 
     @Test
+    void defaultsToSharedDriverUnlessEnvironmentOverridesIt() {
+        String configured = System.getenv("AERON_CLIENT_THREADING_MODE");
+        assertThat(SurprisingAeronClient.clientThreadingMode()).isEqualTo(configured == null
+                ? ThreadingMode.SHARED
+                : ThreadingMode.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT)));
+    }
+
+    @Test
+    void acceptsSharedThreadingMode() {
+        System.setProperty(PROPERTY, "shared");
+        assertThat(SurprisingAeronClient.clientThreadingMode()).isEqualTo(ThreadingMode.SHARED);
+    }
+
+    @Test
     void acceptsConfiguredThreadingMode() {
         System.setProperty(PROPERTY, "DEDICATED");
 
