@@ -66,9 +66,21 @@ public class ExternalSpotPriceClient {
     public Optional<SourceQuote> parseWebSocketPayload(IndexPriceProperties.SourceConfig source, String payload,
                                                        Instant receivedAt) {
         try {
-            return Optional.of(toSourceQuote(source, payload, receivedAt, null, true));
-        } catch (IgnoredPayloadException ex) {
+            return parseWebSocketPayload(source, parseWebSocketMessage(payload), receivedAt);
+        } catch (Exception ex) {
             return Optional.empty();
+        }
+    }
+
+    /** One socket message is parsed once before matching its configured sources. */
+    JsonNode parseWebSocketMessage(String payload) {
+        return objectMapper.readTree(payload);
+    }
+
+    Optional<SourceQuote> parseWebSocketPayload(IndexPriceProperties.SourceConfig source, JsonNode root,
+                                               Instant receivedAt) {
+        try {
+            return Optional.ofNullable(toSourceQuote(source, root, receivedAt, null, true));
         } catch (Exception ex) {
             return Optional.empty();
         }
@@ -142,11 +154,13 @@ public class ExternalSpotPriceClient {
 
     private SourceQuote toSourceQuote(IndexPriceProperties.SourceConfig source, String payload, Instant receivedAt,
                                       Long latencyMillis, boolean websocket) throws Exception {
-        JsonNode root = objectMapper.readTree(payload);
+        return toSourceQuote(source, objectMapper.readTree(payload), receivedAt, latencyMillis, websocket);
+    }
+
+    private SourceQuote toSourceQuote(IndexPriceProperties.SourceConfig source, JsonNode root, Instant receivedAt,
+                                      Long latencyMillis, boolean websocket) throws Exception {
         String parser = parser(source, websocket);
-        if (websocket) {
-            validateWebSocketAncestry(source, parser, root);
-        }
+        if (websocket && !matchesWebSocketAncestry(source, parser, root)) return null;
         if ("OPTION_RISK_TICKER".equalsIgnoreCase(parser)) {
             if (!source.getSourceSymbol().equals(root.path("symbol").asString())
                     || !normalizedCurrency(source.getQuoteCurrency()).equals(normalizedCurrency(source.getTargetQuoteCurrency())))
@@ -166,7 +180,7 @@ public class ExternalSpotPriceClient {
         }
         ParsedTicker ticker = parseTicker(parser, root);
         if (websocket && ticker.instrument() != null && !sameInstrument(ticker.instrument(), source.getSourceSymbol())) {
-            throw new IgnoredPayloadException();
+            return null;
         }
         ConvertedTicker converted = convertToTargetQuote(source, ticker);
         BigDecimal configuredWeight = source.getWeight().multiply(converted.weightMultiplier());
@@ -183,37 +197,33 @@ public class ExternalSpotPriceClient {
         return source.getParser();
     }
 
-    private void validateWebSocketAncestry(IndexPriceProperties.SourceConfig source, String parser, JsonNode root) {
-        switch (parser.toUpperCase(Locale.ROOT)) {
-            case "OKX_INDEX_TICKER" -> {
-                if (!"index-tickers".equals(root.path("arg").path("channel").asString())) {
-                    throw new IgnoredPayloadException();
-                }
-                String sourceSymbol = source.getSourceSymbol();
-                String subscribedInstrument = root.path("arg").path("instId").asString(null);
-                String payloadInstrument = root.path("data").path(0).path("instId").asString(null);
-                if (!sameProtocolInstrument(subscribedInstrument, sourceSymbol)
-                        || !sameProtocolInstrument(payloadInstrument, sourceSymbol)
-                        || !sameProtocolInstrument(payloadInstrument, subscribedInstrument)) {
-                    throw new IgnoredPayloadException();
-                }
+    private boolean matchesWebSocketAncestry(IndexPriceProperties.SourceConfig source, String parser, JsonNode root) {
+        String expected = source.getSourceSymbol();
+        return switch (parser.toUpperCase(Locale.ROOT)) {
+            case "OKX_INDEX_TICKER" -> "index-tickers".equals(root.path("arg").path("channel").asString())
+                    && sameProtocolInstrument(root.path("arg").path("instId").asString(null), expected)
+                    && sameProtocolInstrument(root.path("data").path(0).path("instId").asString(null), expected)
+                    && sameProtocolInstrument(root.path("data").path(0).path("instId").asString(null),
+                            root.path("arg").path("instId").asString(null));
+            case "OKX_TICKER" -> matchesOptionalInstrument(root.path("data").path(0), "instId", expected);
+            case "BINANCE_BOOK_TICKER" -> {
+                JsonNode ticker = root.has("data") ? root.path("data") : root;
+                String actual = firstText(ticker, "symbol", "s");
+                yield actual == null || sameInstrument(actual, expected);
             }
-            case "COINBASE_TICKER" -> {
-                if (!"ticker".equals(root.path("type").asString())) throw new IgnoredPayloadException();
-            }
-            case "KRAKEN_TICKER" -> {
-                if (!"ticker".equals(root.path("channel").asString())) throw new IgnoredPayloadException();
-            }
-            case "BYBIT_TICKER" -> {
-                String sourceSymbol = source.getSourceSymbol();
-                if (sourceSymbol == null || sourceSymbol.isBlank()
-                        || !("tickers." + sourceSymbol).equals(root.path("topic").asString())) {
-                    throw new IgnoredPayloadException();
-                }
-            }
-            default -> {
-            }
-        }
+            case "COINBASE_TICKER" -> "ticker".equals(root.path("type").asString())
+                    && matchesOptionalInstrument(root, "product_id", expected);
+            case "KRAKEN_TICKER" -> "ticker".equals(root.path("channel").asString())
+                    && matchesOptionalInstrument(root.path("data").path(0), "symbol", expected);
+            case "BYBIT_TICKER" -> expected != null && !expected.isBlank()
+                    && ("tickers." + expected).equals(root.path("topic").asString());
+            default -> true;
+        };
+    }
+
+    private boolean matchesOptionalInstrument(JsonNode ticker, String field, String expected) {
+        String actual = firstText(ticker, field);
+        return actual == null || sameInstrument(actual, expected);
     }
 
     private ParsedTicker parseTicker(String parser, JsonNode root) {
@@ -469,7 +479,18 @@ public class ExternalSpotPriceClient {
         if (instrument == null) {
             return "";
         }
-        String normalized = instrument.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+        String upper = instrument.toUpperCase(Locale.ROOT);
+        StringBuilder filtered = null;
+        for (int i = 0; i < upper.length(); i++) {
+            char c = upper.charAt(i);
+            if (c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+                if (filtered != null) filtered.append(c);
+            } else if (filtered == null) {
+                filtered = new StringBuilder(upper.length());
+                filtered.append(upper, 0, i);
+            }
+        }
+        String normalized = filtered == null ? upper : filtered.toString();
         if (normalized.startsWith("XBT")) {
             return "BTC" + normalized.substring(3);
         }
@@ -501,6 +522,4 @@ public class ExternalSpotPriceClient {
     private record CachedConversionRate(BigDecimal rate, Instant updatedAt) {
     }
 
-    private static class IgnoredPayloadException extends RuntimeException {
-    }
 }

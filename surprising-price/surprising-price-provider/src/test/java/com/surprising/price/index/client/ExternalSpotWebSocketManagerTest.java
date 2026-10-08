@@ -65,6 +65,42 @@ class ExternalSpotWebSocketManagerTest {
         } finally { manager.stop(); }
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void sharedSocketParsesOneMessageOnceAndRoutesOnlyMatchingSymbol() throws Exception {
+        var properties = new IndexPriceProperties();
+        var mapper = spy(new tools.jackson.databind.ObjectMapper());
+        var client = new ExternalSpotPriceClient(properties, mapper);
+        var store = new LatestSourceQuoteStore();
+        var manager = new ExternalSpotWebSocketManager(properties,
+                mock(IndexInstrumentConfigService.class), client, store);
+        Class<?> tracked = Class.forName(ExternalSpotWebSocketManager.class.getName() + "$TrackedSource");
+        var tc = tracked.getDeclaredConstructors()[0]; tc.setAccessible(true);
+        var sources = new java.util.ArrayList<Object>();
+        var configs = new java.util.ArrayList<IndexPriceProperties.SourceConfig>();
+        for (String symbol : List.of("BTCUSDT", "ETHUSDT", "SOLUSDT")) {
+            var config = new IndexPriceProperties.SourceConfig();
+            config.setName("BINANCE"); config.setSourceSymbol(symbol); config.setParser("BINANCE_BOOK_TICKER");
+            configs.add(config); sources.add(tc.newInstance(symbol, config));
+        }
+        Class<?> st = Class.forName(ExternalSpotWebSocketManager.class.getName() + "$WsSession");
+        var ctor = st.getDeclaredConstructor(String.class, List.class); ctor.setAccessible(true);
+        Object session = ctor.newInstance("ws://127.0.0.1:1", sources);
+        ((Map<String, Object>) ReflectionTestUtils.getField(manager, "sessions")).put("ws://127.0.0.1:1", session);
+        ReflectionTestUtils.setField(manager, "running", true);
+        String payload = "{\"s\":\"ETHUSDT\",\"b\":\"99\",\"a\":\"101\"}";
+        try {
+            ReflectionTestUtils.invokeMethod(manager, "handlePayload", session, payload);
+            verify(mapper, times(1)).readTree(payload);
+            org.assertj.core.api.Assertions.assertThat(store.latest("BTCUSDT", configs.get(0))).isEmpty();
+            org.assertj.core.api.Assertions.assertThat(store.latest("SOLUSDT", configs.get(2))).isEmpty();
+            org.assertj.core.api.Assertions.assertThat(store.latest("ETHUSDT", configs.get(1))).isPresent()
+                    .get().satisfies(q -> org.assertj.core.api.Assertions.assertThat(q.price()).isEqualByComparingTo("100"));
+            ReflectionTestUtils.invokeMethod(manager, "handlePayload", session, "{");
+            org.assertj.core.api.Assertions.assertThat(store.latest("ETHUSDT", configs.get(1))).isPresent();
+        } finally { manager.stop(); client.close(); }
+    }
+
     private SourceQuote quote(Instant sourceTime, Instant receivedAt) {
         return new SourceQuote("BINANCE", "BTCUSDT", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, SourceStatus.HEALTHY, null, sourceTime, receivedAt, null, QuoteTransport.PUBLIC_WEBSOCKET);

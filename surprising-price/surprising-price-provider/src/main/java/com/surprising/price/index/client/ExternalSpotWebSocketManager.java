@@ -216,10 +216,16 @@ public class ExternalSpotWebSocketManager {
     private void handlePayload(WsSession session, String payload) {
         if (!running || !properties.getWebSocket().isEnabled() || sessions.get(session.url) != session) return;
         Instant receivedAt = Instant.now();
+        tools.jackson.databind.JsonNode message;
+        try {
+            message = externalSpotPriceClient.parseWebSocketMessage(payload);
+        } catch (RuntimeException invalidMessage) {
+            return;
+        }
         boolean matched = false;
         for (TrackedSource trackedSource : session.sources()) {
             Optional<SourceQuote> quote = externalSpotPriceClient.parseWebSocketPayload(
-                    trackedSource.source(), payload, receivedAt);
+                    trackedSource.source(), message, receivedAt);
             if (quote.isPresent() && quote.get().healthy()) {
                 latestSourceQuoteStore.put(trackedSource.instrumentId(), trackedSource.source(), quote.get());
                 matched |= freshQuote(quote.get(), receivedAt);
