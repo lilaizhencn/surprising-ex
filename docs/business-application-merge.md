@@ -35,7 +35,7 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
    这些类只承担网关协议转换，没有另建服务发现、RPC 框架或反射执行器。
 4. Controller 调用原业务 Service；命令通过 Aeron 进入独立 Core，查询使用原有权威查询/投影边界。
 5. Gateway 保留审计和响应脱敏。命令收据的 `commandResultUrl` 指向
-   `/api/v1/gateway/trading/commands/{commandId}`，不能引导客户端访问已受保护的原始 URL。
+   `/api/v1/gateway/trading/commands/{commandId}?productLine={productLine}`，不能引导客户端访问已受保护的原始 URL。
 
 订单、账户启动时通过 `InstrumentService.snapshot` 本地加载合约，不再使用 Instrument Feign。
 本产品的余额调整及划转也直接调用 `AccountCommandGateway`；明确拒绝与结果未知仍分别处理，
@@ -49,17 +49,13 @@ Aeron Core 仍是独立 JVM，业务应用只依赖 `surprising-aeron-client` �
 maker 等独立进程通过 InternalController 使用 HTTP 契约，默认地址为 `9094`。
 公共 gateway 入口继续执行用户/管理员身份、权限和审批校验；账户请求仍执行参数、产品线与业务校验。
 
-## 首期产品及托管资金
+## 多产品及托管资金
 
-默认 `PRODUCT_LINE=LINEAR_PERPETUAL`。一个业务实例的订单、账户使用同一产品线；
-不接受用户通过 header、query、嵌套 body 或 Binance 路径切换到其他产品。
-其他五条产品的代码和协议保留，需要时另启独立产品实例，不能在同一账户状态里混用。
-
-首期跨产品划转默认关闭：`GATEWAY_PRODUCT_TRANSFER_ENABLED=false`。
-托管钱包仍默认关闭。本次没有把原本入现货/FUNDING 的充值改为直接入永续保证金。
-启用托管时，现货业务实例可在本地完成调整；永续实例必须显式配置独立现货业务实例的
-`GATEWAY_SPOT_ACCOUNT_BASE_URL`，无需额外的内部签名或 token 配置。
-跨产品划转的目标 URL 也必须显式配置；缺配置时拒绝执行，不能回退到当前产品。
+当前统一业务应用由 `GATEWAY_PRODUCT_LINES` 显式选择一条或多条产品线。
+各产品拥有独立业务容器和 Aeron Core；身份、数据源与公共 WebSocket 共享。
+托管入账和扣款直接调用本进程的 SPOT 账户方法；跨产品划转也直接调用两个产品的账户方法，
+仍保留 Core pending transfer、幂等和结果未知恢复边界。不再配置独立 SPOT Gateway URL。
+完整拓扑、部署变量和验证方式见 [单 Gateway 多产品线](multi-product-gateway.md)。
 
 ## 构建及启动
 
@@ -68,7 +64,8 @@ maker 等独立进程通过 InternalController 使用 HTTP 契约，默认地址
 ```bash
 mvn -pl surprising-gateway -am package -DskipTests
 # 先启动 PostgreSQL、Kafka、Redis 和独立 Aeron Core。
-# 为所有相关进程配置 PRODUCT_LINE、数据库和 Kafka 地址。
+# Gateway 配置 GATEWAY_PRODUCT_LINES；其他产品进程仍各自配置 PRODUCT_LINE。
+export GATEWAY_PRODUCT_LINES=LINEAR_PERPETUAL,SPOT
 java --enable-native-access=ALL-UNNAMED \
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \

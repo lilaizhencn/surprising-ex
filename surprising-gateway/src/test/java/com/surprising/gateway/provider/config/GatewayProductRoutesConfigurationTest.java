@@ -25,7 +25,7 @@ class GatewayProductRoutesConfigurationTest {
         assertThat(properties.getRoutes().get("trading-fees").getTargetPrefix()).isEqualTo("/api/v1/trading/fees");
         assertThat(properties.getRoutes().get("trading-market").getBaseUrl()).isEqualTo("local:");
         assertLocalRoute(properties.getRoutes().get("trading-trigger"));
-        assertProductRouteMatrix(properties.getRoutes().get("account"));
+        assertLocalRoute(properties.getRoutes().get("account"));
         assertProductRouteMatrix(properties.getRoutes().get("risk"));
         assertProductRouteMatrix(properties.getRoutes().get("price-mark"));
         assertProductRouteMatrix(properties.getRoutes().get("candlestick"));
@@ -47,7 +47,7 @@ class GatewayProductRoutesConfigurationTest {
     }
 
     @Test
-    void onlyCrossProductAccountTransferTargetsUseRemoteOverrides() throws IOException {
+    void tradingAndAccountsStayLocalEvenWhenObsoleteRemoteOverridesArePresent() throws IOException {
         GatewayProperties properties = bindApplicationProperties(Map.of(
                 "GATEWAY_ROUTE_TRADING_OPTION_BASE_URL", "http://order-option:9284",
                 "GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL", "http://account-linear-delivery:9286"));
@@ -59,12 +59,12 @@ class GatewayProductRoutesConfigurationTest {
 
         GatewayProperties.BackendRoute deliveryAccount = properties.getRoutes().get("account")
                 .resolve(ProductLine.LINEAR_DELIVERY);
-        assertThat(deliveryAccount.getBaseUrl()).isEqualTo("http://account-linear-delivery:9286");
+        assertThat(deliveryAccount.getBaseUrl()).isEqualTo("local:");
         assertThat(deliveryAccount.getTargetPrefix()).isEqualTo("/api/v1/accounts");
     }
 
     @Test
-    void accountProductRoutesResolveInheritedTargetPrefixForEveryProductLine() throws IOException {
+    void allProductAccountsUseTheSameLocalRoute() throws IOException {
         GatewayProperties properties = bindApplicationProperties(Map.of(
                 "GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL", "http://account-spot:9186",
                 "GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL", "http://account-linear:9186",
@@ -77,7 +77,7 @@ class GatewayProductRoutesConfigurationTest {
         for (ProductLine productLine : ProductLine.values()) {
             GatewayProperties.BackendRoute resolved = account.resolve(productLine);
             assertThat(resolved).isNotNull();
-            assertThat(resolved.getBaseUrl()).isNotBlank();
+            assertLocalRoute(resolved);
             assertThat(resolved.getTargetPrefix()).isEqualTo("/api/v1/accounts");
         }
     }

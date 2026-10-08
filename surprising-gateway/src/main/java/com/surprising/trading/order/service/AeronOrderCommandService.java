@@ -333,24 +333,28 @@ public class AeronOrderCommandService {
                         commandId, prospectiveIds, outcome, CommandKind.CANCEL_BATCH));
     }
 
+    private String commandResultUrl(UUID commandId) {
+        return OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + configuredProductLine().name();
+    }
+
     public OrderCommandReceipt receipt(CommandExecution execution) {
         if (execution.outcome() instanceof CoreCommandOutcome.Terminal terminal) {
             com.surprising.aeron.protocol.CoreResponse response = terminal.response();
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
                 return new OrderCommandReceipt(execution.commandId(), "MATCHING_PENDING",
                         CoreResultCode.MATCHING_PENDING.name(), "matching pending",
-                        OrderCommandReceipt.commandResultUrl(execution.commandId()),
+                        commandResultUrl(execution.commandId()),
                         execution.prospectiveOrderIds(), null, null);
             }
             OrderCommandResult result = decodeResult(execution.kind(), execution.prospectiveOrderIds(), response.data());
             return new OrderCommandReceipt(execution.commandId(), "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
-                    OrderCommandReceipt.commandResultUrl(execution.commandId()), execution.prospectiveOrderIds(),
+                    commandResultUrl(execution.commandId()), execution.prospectiveOrderIds(),
                     result, null);
         }
         if (execution.outcome() instanceof CoreCommandOutcome.ResultUnknown) {
             return new OrderCommandReceipt(execution.commandId(), "RESULT_UNKNOWN", "RESULT_UNKNOWN",
-                    "command result is unknown", OrderCommandReceipt.commandResultUrl(execution.commandId()),
+                    "command result is unknown", commandResultUrl(execution.commandId()),
                     execution.prospectiveOrderIds(), null, null);
         }
         CoreCommandOutcome.NotAccepted rejection = (CoreCommandOutcome.NotAccepted) execution.outcome();
@@ -372,15 +376,15 @@ public class AeronOrderCommandService {
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
                 return new OrderCommandReceipt(commandId, "MATCHING_PENDING",
                         CoreResultCode.MATCHING_PENDING.name(), "matching pending",
-                        OrderCommandReceipt.commandResultUrl(commandId), List.of(),
+                        commandResultUrl(commandId), List.of(),
                         null, null);
             }
             return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
-                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, null);
+                    commandResultUrl(commandId), List.of(), null, null);
         } catch (com.surprising.aeron.client.ResultUnknownException exception) {
             return new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
-                    "command result is unknown", OrderCommandReceipt.commandResultUrl(commandId), List.of(),
+                    "command result is unknown", commandResultUrl(commandId), List.of(),
                     null, null);
         } catch (CoreCommandOutcome.NotAcceptedException exception) {
             CoreCommandOutcome.NotAccepted rejection = exception.rejection();

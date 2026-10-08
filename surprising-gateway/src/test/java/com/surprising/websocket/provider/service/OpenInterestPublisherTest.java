@@ -22,7 +22,10 @@ class OpenInterestPublisherTest {
     }
     private OpenInterestPublisher publisher() {
         properties.getKafka().setProductLine(product);
-        return new OpenInterestPublisher(registry, snapshots, properties);
+        var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        when(products.enabled()).thenReturn(List.of(product));
+        when(products.service(product, AccountOpenInterestSnapshotService.class)).thenReturn(snapshots);
+        return new OpenInterestPublisher(registry, products);
     }
     @Test void noSubscribersDoesNotQueryCore() {
         when(registry.topics(WsChannel.OPEN_INTEREST)).thenReturn(List.of());
@@ -43,6 +46,25 @@ class OpenInterestPublisherTest {
         verify(registry).publish(btc, Map.of("instrumentId", btc.instrumentId(), "status", "READY", "openInterestSteps", "8", "sequence", "7"), now);
         verify(registry).publish(eth, Map.of("instrumentId", eth.instrumentId(), "status", "READY", "openInterestSteps", "0", "sequence", "7"), now);
         verify(registry, never()).publish(eq(other), any(), any());
+    }
+    @Test void failureInOneProductDoesNotHideTheOtherProduct() {
+        var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        var inverse = mock(AccountOpenInterestSnapshotService.class);
+        var other = ProductLine.INVERSE_PERPETUAL;
+        when(products.enabled()).thenReturn(List.of(product, other));
+        when(products.service(product, AccountOpenInterestSnapshotService.class)).thenReturn(snapshots);
+        when(products.service(other, AccountOpenInterestSnapshotService.class)).thenReturn(inverse);
+        var first = topic("49", product);
+        var second = topic("49", other);
+        when(registry.topics(WsChannel.OPEN_INTEREST)).thenReturn(List.of(first, second));
+        when(snapshots.snapshot(product)).thenThrow(new IllegalStateException("Core unavailable"));
+        Instant now = Instant.now();
+        when(inverse.snapshot(other)).thenReturn(new OpenInterestSnapshotResponse(other, 9, now,
+                List.of(new OpenInterestShardSnapshot(other, "49", 0, 3, 3, 9, now))));
+        new OpenInterestPublisher(registry, products).publish();
+        verify(registry).publish(eq(first), eq(Map.of("instrumentId", "49", "status", "UNAVAILABLE")), any());
+        verify(registry).publish(second, Map.of("instrumentId", "49", "status", "READY",
+                "openInterestSteps", "3", "sequence", "9"), now);
     }
     @Test void unavailableIsNotZero() {
         var btc = topic("49", product);

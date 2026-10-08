@@ -1,155 +1,45 @@
 package com.surprising.gateway.provider.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-import com.surprising.account.api.AccountApiPaths;
-import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.ProductTransferOperationRequest;
-import com.surprising.gateway.provider.config.GatewayProperties;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import com.surprising.account.api.model.*;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
-import java.net.URI;
-import java.util.EnumMap;
-import java.util.Map;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.client.HttpClientErrorException;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ProductAccountAccessTest {
-
-    private com.surprising.account.provider.config.AccountProperties remoteAccountProperties() {
-        var properties = new com.surprising.account.provider.config.AccountProperties();
-        properties.getKafka().setProductLine(com.surprising.product.api.ProductLine.OPTION);
-        return properties;
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void everyProductUsesItsOwnAccountMethods(ProductLine line) {
+        var products = mock(GatewayProductServices.class);
+        var source = mock(AccountCommandGateway.class);
+        when(products.service(line, AccountCommandGateway.class)).thenReturn(source);
+        var request = new ProductTransferOperationRequest(1,42,line,line,AccountType.valueOf(line.accountTypeCode()),
+                AccountType.valueOf(line.accountTypeCode()),"USDT",100,"allocation:1","test");
+        var access = new ProductAccountAccess(products);
+        assertThat(access.transferOut(line.accountTypeCode(),request).status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
+        assertThat(access.transferIn(line.accountTypeCode(),request).status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
+        assertThat(access.completeTransfer(line.accountTypeCode(),request).status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
+        verify(source).transferOut(request);
+        verify(source).transferIn(request);
+        verify(source).completeTransfer(request);
     }
-
-    @Test
-    void resolvesSourceRuntimeAndSignsDedicatedTransferOutPayload() {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
-                "http://account-default:9086", "/api/v1/accounts", true);
-        EnumMap<ProductLine, GatewayProperties.ProductRoute> productRoutes = new EnumMap<>(ProductLine.class);
-        productRoutes.put(ProductLine.LINEAR_PERPETUAL,
-                new GatewayProperties.ProductRoute("http://account-linear:9186", "/api/v1/accounts"));
-        account.setProductRoutes(productRoutes);
-        properties.setRoutes(Map.of("account", account));
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{}"));
-        ProductAccountAccess client = new ProductAccountAccess(properties, restTemplate, org.mockito.Mockito.mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties());
-
-        ProductTransferOperationRequest operation = operation();
-        ProductAccountAdjustment result = client.transferOut("USDT_PERPETUAL", operation);
-
-        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
-        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
-        ArgumentCaptor<HttpEntity> request = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.POST), request.capture(), eq(String.class));
-        assertThat(uri.getValue()).isEqualTo(URI.create(
-                "http://account-linear:9186" + AccountApiPaths.TRANSFER_OUT_PATH));
-        assertThat(request.getValue().getBody()).isEqualTo(operation);
-        assertThat(request.getValue().getHeaders().toSingleValueMap()).doesNotContainKeys("X-Business-Internal-Token", "X-Internal-Service", "X-Internal-Timestamp", "X-Internal-Audience", "X-Internal-Signature");
+    @Test void disabledTargetIsRejectedBeforeDebitingSource() {
+        var products = mock(GatewayProductServices.class);
+        doThrow(new IllegalArgumentException("target disabled")).when(products).requireEnabled(ProductLine.OPTION);
+        var access = new ProductAccountAccess(products);
+        var request = new ProductTransferOperationRequest(1,42,ProductLine.SPOT,ProductLine.OPTION,AccountType.SPOT,
+                AccountType.OPTION,"USDT",100,"allocation:1","test");
+        assertThatThrownBy(() -> access.transferOut("SPOT",request)).hasMessage("target disabled");
+        verify(products,never()).service(any(),any());
     }
-
-    @Test
-    void inheritsAccountTargetPrefixWhenProductRouteOnlyOverridesBaseUrl() {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
-                "http://account-default:9086", "/api/v1/accounts", true);
-        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
-                new GatewayProperties.ProductRoute("http://account-linear:9186", "")));
-        properties.setRoutes(Map.of("account", account));
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{}"));
-
-        new ProductAccountAccess(properties, restTemplate, org.mockito.Mockito.mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
-                .transferOut("USDT_PERPETUAL", operation());
-
-        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
-        verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
-        assertThat(uri.getValue()).isEqualTo(URI.create(
-                "http://account-linear:9186" + AccountApiPaths.TRANSFER_OUT_PATH));
-    }
-
-    @Test
-    void mapsProviderClientErrorsToPermanentRejection() {
-        GatewayProperties properties = propertiesWithLinearRoute();
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-                .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.CONFLICT,
-                        "conflict", org.springframework.http.HttpHeaders.EMPTY, new byte[0], null));
-
-        ProductAccountAdjustment result = new ProductAccountAccess(properties, restTemplate, org.mockito.Mockito.mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
-                .transferIn("USDT_PERPETUAL", operation());
-
-        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.REJECTED);
-    }
-
-    @Test
-    void keepsAuthenticationAndRateLimitErrorsRecoverable() {
-        GatewayProperties properties = propertiesWithLinearRoute();
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-                .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
-                        "rate limited", org.springframework.http.HttpHeaders.EMPTY, new byte[0], null));
-
-        ProductAccountAdjustment result = new ProductAccountAccess(properties, restTemplate, org.mockito.Mockito.mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
-                .transferIn("USDT_PERPETUAL", operation());
-
-        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.UNKNOWN);
-    }
-
-    @Test
-    void refusesToFallbackToAnUnscopedAccountRoute() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
-                "http://account:9086", "/api/v1/accounts", true)));
-
-        assertThatThrownBy(() -> new ProductAccountAccess(properties, mock(RestTemplate.class), mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
-                .transferOut("USDT_PERPETUAL", operation()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("route is not configured");
-    }
-
-    @Test
-    void refusesWhenTheSelectedProductRouteHasNoBaseUrl() {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
-                "http://account:9086", "/api/v1/accounts", true);
-        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
-                new GatewayProperties.ProductRoute("", "/api/v1/accounts")));
-        properties.setRoutes(Map.of("account", account));
-
-        assertThatThrownBy(() -> new ProductAccountAccess(properties, mock(RestTemplate.class), mock(com.surprising.account.provider.service.AccountCommandGateway.class), remoteAccountProperties())
-                .transferOut("USDT_PERPETUAL", operation()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("route is not configured");
-    }
-
-    private GatewayProperties propertiesWithLinearRoute() {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
-                "http://account:9086", "/api/v1/accounts", true);
-        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
-                new GatewayProperties.ProductRoute("http://account-linear:9186", "/api/v1/accounts")));
-        properties.setRoutes(Map.of("account", account));
-        return properties;
-    }
-
-    private ProductTransferOperationRequest operation() {
-        return new ProductTransferOperationRequest(7001L, 42L,
-                ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
-                AccountType.USDT_PERPETUAL, AccountType.FUNDING,
-                "USDT", 1_250L, "transfer-007", "test");
+    @Test void disabledProductsAreNotScannedDuringReconciliation() {
+        var products = mock(GatewayProductServices.class);
+        when(products.enabled()).thenReturn(List.of(ProductLine.SPOT));
+        assertThat(new ProductAccountAccess(products).pendingTransfers(ProductLine.OPTION,10)).isEmpty();
+        verify(products,never()).service(any(),any());
     }
 }

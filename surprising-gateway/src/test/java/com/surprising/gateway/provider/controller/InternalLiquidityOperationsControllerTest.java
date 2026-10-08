@@ -8,7 +8,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.auth.AdminAuditRepository;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.LeverageSettingRequest;
@@ -21,14 +21,16 @@ import tools.jackson.databind.ObjectMapper;
 
 class InternalLiquidityOperationsControllerTest {
     private final String token = "a-test-operations-secret-with-32-characters";
-    private final LocalBusinessApi local = mock(LocalBusinessApi.class);
+    private final GatewayProductServices local = mock(GatewayProductServices.class);
     private final AccountCommandGateway accounts = mock(AccountCommandGateway.class);
     private final LeverageService leverage = mock(LeverageService.class);
     private final InstrumentService instruments = mock(InstrumentService.class);
     private final AdminAuditRepository audit = mock(AdminAuditRepository.class);
     private InternalLiquidityOperationsController controller(String configured) {
-        when(local.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
-        return new InternalLiquidityOperationsController(configured, local, accounts, leverage, instruments, audit, new ObjectMapper());
+        when(local.service(ProductLine.LINEAR_PERPETUAL, AccountCommandGateway.class)).thenReturn(accounts);
+        when(local.service(ProductLine.LINEAR_PERPETUAL, LeverageService.class)).thenReturn(leverage);
+        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND)).when(local).requireEnabled(ProductLine.INVERSE_PERPETUAL);
+        return new InternalLiquidityOperationsController(configured, local, instruments, audit, new ObjectMapper());
     }
     private MockHttpServletRequest request() {
         var r = new MockHttpServletRequest("POST", "/internal/v1/operations/liquidity/balance-adjustments");

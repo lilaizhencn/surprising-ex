@@ -77,7 +77,7 @@ class OrderBatchServiceTest {
         OrderCommandReceipt firstReceipt = service.receipt(first);
         OrderCommandReceipt replayReceipt = service.receipt(second);
         assertThat(replayReceipt).isEqualTo(firstReceipt);
-        assertThat(firstReceipt.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(first.commandId()));
+        assertThat(firstReceipt.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(first.commandId()) + "?productLine=LINEAR_PERPETUAL");
         assertThat(firstReceipt.prospectiveOrderIds()).hasSize(20);
         assertThat(firstReceipt.result()).isInstanceOf(OrderBatchResponse.class);
         assertThat(((OrderBatchResponse) firstReceipt.result()).results())
@@ -118,7 +118,7 @@ class OrderBatchServiceTest {
         OrderCommandReceipt unknownReceipt = service.receipt(unknown);
         assertThat(unknownReceipt.outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(unknownReceipt.code()).isEqualTo("RESULT_UNKNOWN");
-        assertThat(unknownReceipt.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+        assertThat(unknownReceipt.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=LINEAR_PERPETUAL");
     }
 
     @Test
@@ -137,11 +137,11 @@ class OrderBatchServiceTest {
         assertThat(initial.outcome()).isEqualTo("MATCHING_PENDING");
         assertThat(initial.code()).isEqualTo("MATCHING_PENDING");
         assertThat(initial.commandId()).isEqualTo(commandId);
-        assertThat(initial.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+        assertThat(initial.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=LINEAR_PERPETUAL");
         assertThat(queried.outcome()).isEqualTo("MATCHING_PENDING");
         assertThat(queried.code()).isEqualTo("MATCHING_PENDING");
         assertThat(queried.commandId()).isEqualTo(commandId);
-        assertThat(queried.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+        assertThat(queried.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=LINEAR_PERPETUAL");
     }
 
     @Test

@@ -2,7 +2,6 @@ package com.surprising.websocket.provider.service;
 
 import com.surprising.account.provider.service.AccountOpenInterestSnapshotService;
 import com.surprising.websocket.api.model.WsChannel;
-import com.surprising.websocket.provider.config.WebSocketProperties;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -12,24 +11,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class OpenInterestPublisher {
     private final SubscriptionRegistry registry;
-    private final AccountOpenInterestSnapshotService snapshots;
-    private final WebSocketProperties properties;
+    private final com.surprising.gateway.provider.product.GatewayProductServices products;
 
-    public OpenInterestPublisher(SubscriptionRegistry registry, AccountOpenInterestSnapshotService snapshots,
-                                 WebSocketProperties properties) {
+    public OpenInterestPublisher(SubscriptionRegistry registry, com.surprising.gateway.provider.product.GatewayProductServices products) {
         this.registry = registry;
-        this.snapshots = snapshots;
-        this.properties = properties;
+        this.products = products;
     }
 
     @Scheduled(fixedDelay = 1000)
     public void publish() {
-        var product = properties.getKafka().getProductLine();
+        for (var product : products.enabled()) publish(product);
+    }
+
+    private void publish(com.surprising.product.api.ProductLine product) {
         var topics = registry.topics(WsChannel.OPEN_INTEREST).stream()
                 .filter(topic -> topic.productLine() == product).toList();
         if (topics.isEmpty()) return;
         try {
-            var snapshot = snapshots.snapshot(product);
+            var snapshot = products.service(product, AccountOpenInterestSnapshotService.class).snapshot(product);
             for (var topic : topics) {
                 long longSteps = 0, shortSteps = 0;
                 for (var row : snapshot.shards()) {

@@ -360,7 +360,7 @@ class GatewayProxyServiceTest {
     }
 
     @Test
-    void explicitProductLineOverridesBinancePathDefault() {
+    void explicitProductLineConflictingWithBinancePathIsRejected() {
         GatewayProperties properties = properties();
         properties.getRoutes().get("remote-market").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
                 new GatewayProperties.ProductRoute("http://order-linear-perpetual:9084",
@@ -377,10 +377,10 @@ class GatewayProxyServiceTest {
         request.addParameter("productLine", "OPTION");
         request.addHeader("Authorization", "Bearer user");
 
-        controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes());
-
-        assertThat(restTemplate.url.toString())
-                .isEqualTo("http://order-option:9284/api/v1/trading/orders?productLine=OPTION");
+        assertThatThrownBy(() -> controller.proxy("remote-market", HttpMethod.POST, request, "{}".getBytes()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("conflicting product selectors");
+        assertThat(restTemplate.url).isNull();
     }
 
     @Test
@@ -542,7 +542,14 @@ class GatewayProxyServiceTest {
         }).when(local).invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "localBusinessApi", local);
+        var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        when(products.enabled()).thenReturn(java.util.List.of(ProductLine.LINEAR_PERPETUAL));
+        when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
+        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "products", products);
+        var config = new com.surprising.gateway.provider.product.GatewayProductsProperties();
+        config.setEnabled(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
+                ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));
+        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "productSelection", new com.surprising.gateway.provider.product.GatewayProductSelection(config, mapper));
         return gateway;
     }
 

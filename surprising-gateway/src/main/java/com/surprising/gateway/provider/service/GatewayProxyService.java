@@ -51,7 +51,9 @@ public class GatewayProxyService {
             GatewayTraceFilter.TRACE_ID_HEADER);
 
     @Autowired
-    private com.surprising.gateway.provider.local.LocalBusinessApi localBusinessApi;
+    private com.surprising.gateway.provider.product.GatewayProductServices products;
+    @Autowired
+    private com.surprising.gateway.provider.product.GatewayProductSelection productSelection;
 
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
@@ -125,7 +127,8 @@ public class GatewayProxyService {
                                         byte[] body) {
         long startedNanos = System.nanoTime();
         boolean adminRequest = isAdminRequest(request);
-        GatewayProperties.BackendRoute route = resolveRoute(service, adminRequest, request, body);
+        GatewayProperties.BackendRoute route = !adminRequest && method == HttpMethod.POST && isProductTransferRequest(service, request)
+                ? route(service, false) : resolveRoute(service, adminRequest, request, body);
         GatewayIdentity identity = adminRequest ? enforceAdminIdentity(request) : enforceIdentity(route, request);
         if (adminRequest) {
             enforceAdminPermission(service, method, identity);
@@ -167,7 +170,8 @@ public class GatewayProxyService {
                                               HttpServletRequest request,
                                               byte[] body,
                                               Long authenticatedUserId) {
-        GatewayProperties.BackendRoute route = resolveRoute(service, false, request, body);
+        GatewayProperties.BackendRoute route = method == HttpMethod.POST && "account".equalsIgnoreCase(service) && "/transfers".equals(targetSuffix)
+                ? route(service, false) : resolveRoute(service, false, request, body);
         GatewayIdentity identity = authenticatedUserId == null
                 ? enforceIdentity(route, request)
                 : userIdentity(Long.toString(authenticatedUserId));
@@ -225,8 +229,11 @@ public class GatewayProxyService {
                                             GatewayProperties.BackendRoute route) {
         if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
             HttpHeaders trustedHeaders = headers(request, identity, route);
-            trustedHeaders.set("X-Product-Line", localBusinessApi.productLine().name());
-            return localBusinessApi.invoke(service, target, method, trustedHeaders, body,
+            ProductLine product = productSelection.resolve(request, body, !isSharedLocalService(service));
+            if (product != null) trustedHeaders.set("X-Product-Line", product.name());
+            else trustedHeaders.remove("X-Product-Line");
+            ProductLine owner = product == null ? products.enabled().getFirst() : product;
+            return products.local(owner).invoke(service, target, method, trustedHeaders, body,
                     properties.getHttpClient().getReadTimeout());
         }
         try {
@@ -338,15 +345,16 @@ public class GatewayProxyService {
         return route;
     }
 
+    private boolean isSharedLocalService(String service) {
+        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin").contains(service.toLowerCase(Locale.ROOT));
+    }
+
     private GatewayProperties.BackendRoute resolveRoute(String service, boolean admin,
                                                          HttpServletRequest request, byte[] body) {
         GatewayProperties.BackendRoute configured = route(service, admin);
         if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
-            ProductLine requested = productLine(request, body);
-            if (requested != null && requested != localBusinessApi.productLine()) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product is not enabled in this application");
-            }
-            localBusinessApi.validateProductSelectors(request, body);
+            ProductLine requested = productSelection.resolve(request, body, !isSharedLocalService(service));
+            if (requested != null) products.local(requested).validateProductSelectors(request, body);
             return configured;
         }
         return resolveProductRoute(configured, request, body);
@@ -358,9 +366,15 @@ public class GatewayProxyService {
         if (route == null || !route.hasProductRoutes()) {
             return route;
         }
-        ProductLine productLine = productLine(request, body);
+        ProductLine productLine = productSelection.resolve(request, body, true);
         if (productLine == null) {
             return route;
+        }
+        var endpoint = route.getProductRoutes().get(productLine);
+        if (products.enabled().size() > 1 && (endpoint == null || endpoint.getBaseUrl() == null
+                || endpoint.getBaseUrl().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "product route is not configured: " + productLine.name());
         }
         GatewayProperties.BackendRoute resolved = route.resolve(productLine);
         if (resolved == null) {
@@ -368,110 +382,6 @@ public class GatewayProxyService {
                     "product route is not configured: " + productLine.name());
         }
         return resolved;
-    }
-
-    private ProductLine productLine(HttpServletRequest request, byte[] body) {
-        String value = firstNonBlank(
-                request.getHeader("X-Product-Line"),
-                request.getHeader("X-Account-Type"),
-                request.getHeader("X-Contract-Type"),
-                request.getParameter("productLine"),
-                request.getParameter("product-line"),
-                request.getParameter("product_line"),
-                request.getParameter("accountType"),
-                request.getParameter("account-type"),
-                request.getParameter("account_type"),
-                request.getParameter("contractType"),
-                request.getParameter("contract-type"),
-                request.getParameter("contract_type"),
-                bodyProductLine(body),
-                pathProductLine(request.getRequestURI()));
-        if (value == null) {
-            return null;
-        }
-        return parseProductLine(value);
-    }
-
-    private String pathProductLine(String requestUri) {
-        if (requestUri == null) {
-            return null;
-        }
-        if (requestUri.equals("/api/v3") || requestUri.startsWith("/api/v3/")) {
-            return ProductLine.SPOT.name();
-        }
-        if (requestUri.equals("/fapi/v1") || requestUri.startsWith("/fapi/v1/")) {
-            return ProductLine.LINEAR_PERPETUAL.name();
-        }
-        if (requestUri.equals("/dapi/v1") || requestUri.startsWith("/dapi/v1/")) {
-            return ProductLine.INVERSE_PERPETUAL.name();
-        }
-        if (requestUri.equals("/eapi/v1") || requestUri.startsWith("/eapi/v1/")) {
-            return ProductLine.OPTION.name();
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private String bodyProductLine(byte[] body) {
-        if (body == null || body.length == 0) {
-            return null;
-        }
-        try {
-            Map<String, Object> payload = objectMapper.readValue(body, Map.class);
-            return firstNonBlank(
-                    stringValue(payload.get("productLine")),
-                    stringValue(payload.get("product-line")),
-                    stringValue(payload.get("product_line")),
-                    stringValue(payload.get("accountType")),
-                    stringValue(payload.get("account-type")),
-                    stringValue(payload.get("account_type")),
-                    stringValue(payload.get("contractType")),
-                    stringValue(payload.get("contract-type")),
-                    stringValue(payload.get("contract_type")));
-        } catch (JacksonException | IllegalArgumentException ex) {
-            return null;
-        }
-    }
-
-    private ProductLine parseProductLine(String value) {
-        String normalized = value == null ? "" : value.trim();
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        ProductLine byAccountType = ProductLine.fromAccountTypeCode(normalized).orElse(null);
-        if (byAccountType != null) {
-            return byAccountType;
-        }
-        ProductLine byContractType = ProductLine.fromContractTypeCode(normalized).orElse(null);
-        if (byContractType != null) {
-            return byContractType;
-        }
-        String enumName = normalized.toUpperCase(Locale.ROOT)
-                .replace('-', '_')
-                .replace('.', '_');
-        for (ProductLine productLine : ProductLine.values()) {
-            if (productLine.name().equals(enumName)
-                    || productLine.topicSegment().equalsIgnoreCase(normalized)) {
-                return productLine;
-            }
-        }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported product line: " + value);
-    }
-
-    private String firstNonBlank(String... values) {
-        if (values == null) {
-            return null;
-        }
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value.trim();
-            }
-        }
-        return null;
-    }
-
-    private String stringValue(Object value) {
-        return value == null ? null : String.valueOf(value);
     }
 
     private GatewayIdentity enforceIdentity(GatewayProperties.BackendRoute route, HttpServletRequest request) {

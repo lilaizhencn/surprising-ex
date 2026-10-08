@@ -14,12 +14,10 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 /** 保留公共 API 的响应契约，将已鉴权的请求直接交给进程内业务入口。 */
-@Component
 public final class LocalBusinessApi {
     private static final org.springframework.web.util.pattern.PathPattern WEBSOCKET_METRICS =
             org.springframework.web.util.pattern.PathPatternParser.defaultInstance.parse("/api/v1/admin/websocket/metrics");
@@ -50,7 +48,8 @@ public final class LocalBusinessApi {
     @jakarta.annotation.PostConstruct
     public void validateConfiguration() {
         if (productLine() == null || productLine() != tradingProperties.getKafka().getProductLine()) {
-            throw new IllegalStateException("account and trading must use the same product line");
+            throw new IllegalStateException("account and trading must use the same product line: account="
+                    + productLine() + ", trading=" + tradingProperties.getKafka().getProductLine());
         }
     }
 
@@ -110,11 +109,10 @@ public final class LocalBusinessApi {
         if (value == null || value.isBlank()) {
             return;
         }
-        var current = productLine();
-        if (!current.name().equalsIgnoreCase(value.replace('-', '_'))
-                && !current.topicSegment().equalsIgnoreCase(value)
-                && !current.accountTypeCode().equalsIgnoreCase(value)
-                && !current.contractTypeCode().equalsIgnoreCase(value)) {
+        var selected = "FUNDING".equalsIgnoreCase(value)
+                ? com.surprising.product.api.ProductLine.SPOT
+                : com.surprising.product.api.ProductLine.fromExternalCode(value).orElse(null);
+        if (selected != productLine()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product is not enabled in this application");
         }
     }

@@ -24,6 +24,9 @@ class WebSocketApplicationYamlTest {
                 .contains(1000);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-line"))
-                .contains("${PRODUCT_LINE:LINEAR_PERPETUAL}");
+                .containsOnlyNulls();
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.gateway.products.enabled"))
+                .contains("${GATEWAY_PRODUCT_LINES:}");
     }
 }

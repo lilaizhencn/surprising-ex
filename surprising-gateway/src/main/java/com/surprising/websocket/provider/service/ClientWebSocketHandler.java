@@ -22,15 +22,18 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
     private final WebSocketJwtAuthenticator jwtAuthenticator;
+    private final com.surprising.gateway.provider.product.GatewayProductsProperties products;
 
     public ClientWebSocketHandler(ObjectMapper objectMapper,
                                   SubscriptionRegistry registry,
                                   WebSocketProperties properties,
-                                  WebSocketJwtAuthenticator jwtAuthenticator) {
+                                  WebSocketJwtAuthenticator jwtAuthenticator,
+                                  com.surprising.gateway.provider.product.GatewayProductsProperties products) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.properties = properties;
         this.jwtAuthenticator = jwtAuthenticator;
+        this.products = products;
     }
 
     @Override
@@ -66,9 +69,8 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
+        products.requireEnabled(topic.productLine());
         if (topic.channel() == com.surprising.websocket.api.model.WsChannel.OPEN_INTEREST) {
-            com.surprising.product.api.ProductLineConfiguration.requireSame(
-                    properties.getKafka().getProductLine(), topic.productLine(), "open interest subscription");
             if (topic.productLine() == com.surprising.product.api.ProductLine.SPOT)
                 throw new IllegalArgumentException("open interest requires a derivatives product");
         }

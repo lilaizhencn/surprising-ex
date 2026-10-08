@@ -32,7 +32,6 @@ class CustodyWalletWebhookServiceTest {
         GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
         wallet.setEnabled(true);
         wallet.setWebhookSecret("webhook-secret");
-        wallet.setSpotAccountBaseUrl("http://account:9086");
     }
 
     @Test

@@ -37,13 +37,11 @@ import java.util.UUID;
 import com.surprising.trading.maintenance.MaintenanceRequest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
-@Component
 public final class TradingLocalRoutes {
     private static final PathPattern EFFECTIVE_FEE = PathPatternParser.defaultInstance.parse("/api/v1/trading/fees/effective");
     private static final PathPattern ADMIN_MAINTENANCE_CONTROLLER_LIST = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/maintenance");

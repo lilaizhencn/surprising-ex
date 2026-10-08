@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRODUCT_LINE="${PRODUCT_LINE:?PRODUCT_LINE must be explicit}"
 RUN_ID="${RUN_ID:?RUN_ID must be explicit}"
 ACTION="${ACTION:-up}"
+CORE_ONLY="${CORE_ONLY:-false}"
 JAVA_HOME="${JAVA_HOME:-$HOME/.sdkman/candidates/java/27.0.0-amzn}"
 RUNTIME_ROOT="${RUNTIME_ROOT:-${TMPDIR:-/tmp}/surprising-product-line-runtime}"
 RUN_DIR="$RUNTIME_ROOT/$RUN_ID"
@@ -14,6 +15,7 @@ JFR_DIR="$RUN_DIR/jfr"
 READY_FILE="$RUN_DIR/ready.tsv"
 OWNER_FILE="$RUN_DIR/owner"
 LOCK_DIR="$RUNTIME_ROOT/active.lock"
+if [[ "$CORE_ONLY" == true ]]; then LOCK_DIR="$RUNTIME_ROOT/core-$PRODUCT_LINE.lock"; fi
 LOCK_OWNER="$LOCK_DIR/owner"
 JVM_XMS="${JVM_XMS:-512m}"
 JVM_XMX="${JVM_XMX:-512m}"
@@ -76,6 +78,8 @@ case "$ACTION" in
   up|fresh|down|status|test|dry-run) ;;
   *) fail "unsupported ACTION=$ACTION" ;;
 esac
+case "$CORE_ONLY" in true|false) ;; *) fail 'CORE_ONLY must be true or false' ;; esac
+[[ "$CORE_ONLY" != true || "$ACTION" != test ]] || fail 'CORE_ONLY does not run the full HTTP lifecycle test'
 case "$BUILD_CHANGED" in true|false) ;; *) fail 'BUILD_CHANGED must be true or false' ;; esac
 case "$JVM_GC" in ZGC|G1) ;; *) fail 'JVM_GC must be ZGC or G1' ;; esac
 case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false' ;; esac
@@ -151,6 +155,7 @@ detect_jvm_campaign_support() {
 }
 
 service_enabled() {
+  if [[ "$CORE_ONLY" == true && "$1" != core && "$1" != tools ]]; then return 1; fi
   case "$1" in
     derivatives-lifecycle) [[ "$PRODUCT_LINE" != SPOT ]] ;;
     *) return 0 ;;
@@ -185,6 +190,7 @@ preflight_port() {
 
 preflight() {
   [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 27 unavailable JAVA_HOME=$JAVA_HOME"
+  [[ "$CORE_ONLY" != true ]] || return 0
   command -v curl >/dev/null || fail 'curl unavailable'
   command -v nc >/dev/null || fail 'nc unavailable'
   if [[ "$POSTGRES_MODE" == docker ]] || {
@@ -245,6 +251,7 @@ postgres_exec() {
 }
 
 initialize_database() {
+  [[ "$CORE_ONLY" != true ]] || return 0
   local initialized
   initialized="$(postgres_exec -Atqc "SELECT to_regclass('public.instruments') IS NOT NULL")"
   if [[ "$initialized" != t ]]; then
@@ -371,7 +378,7 @@ start_owned_process() {
 
 COMMON_ENV=(
     env \
-    PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false \
+    PRODUCT_LINE="$PRODUCT_LINE" GATEWAY_PRODUCT_LINES="${GATEWAY_PRODUCT_LINES:-$PRODUCT_LINE}" WALLET_ENABLED=false \
     GATEWAY_JWT_SECRET="${GATEWAY_JWT_SECRET:-local-dev-change-me-surprising-ex-gateway-secret-2026}" \
     GATEWAY_PRODUCT_TRANSFER_ENABLED="${GATEWAY_PRODUCT_TRANSFER_ENABLED:-false}" \
     AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
@@ -528,11 +535,13 @@ start_stack() {
   trap 'cleanup_failed_start' EXIT ERR INT TERM
   initialize_database
   start_core "$core_action"
-  start_http_service gateway
-  start_http_service price
-  start_realtime_service
-  service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
-  start_http_service maker
+  if [[ "$CORE_ONLY" != true ]]; then
+    start_http_service gateway
+    start_http_service price
+    start_realtime_service
+    service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
+    start_http_service maker
+  fi
   trap - EXIT ERR INT TERM
   printf 'PRODUCT_LINE_RUNTIME=PASS productLine=%s runId=%s wallet=ABSENT\n' "$PRODUCT_LINE" "$RUN_ID"
 }
@@ -675,9 +684,10 @@ print_dry_run() {
   printf 'START_ORDER='
   local index
   for ((index = 0; index < member_count; index++)); do (( index > 0 )) && printf ','; printf 'host-core-node%s' "$index"; done
-  printf ',gateway,price,realtime'
-  service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
-  printf ',maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
+  for service in "${SERVICES[@]}"; do
+    if service_enabled "$service"; then printf ',%s' "$service"; fi
+  done
+  printf '\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
     "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$KAFKA_BOOTSTRAP_SERVERS" "$VALKEY_HOST" "$VALKEY_PORT"
 }
 

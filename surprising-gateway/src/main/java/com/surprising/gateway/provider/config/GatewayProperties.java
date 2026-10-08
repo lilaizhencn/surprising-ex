@@ -97,7 +97,6 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "custody-wallet.api-key", wallet.getApiKey());
         requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
-        requireHttpsUrl(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
         BackendRoute walletAdmin = adminRoutes == null ? null : adminRoutes.get("wallet-admin");
         if (walletAdmin == null || !walletAdmin.hasBasicAuth()) {
             failures.add("admin-routes.wallet-admin.basic-auth must be configured");
@@ -448,8 +447,6 @@ public class GatewayProperties implements EnvironmentAware {
         private String apiSecret = "";
         @Setter
         private String webhookSecret = "";
-        @Setter
-        private String spotAccountBaseUrl = "";
 
         private Map<String, String> withdrawalAddressIds = Map.of();
         private Duration requestTimeout = Duration.ofSeconds(10);

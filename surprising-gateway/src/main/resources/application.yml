@@ -38,7 +38,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,markPriceReadiness
+          include: readinessState,markPriceReadiness,gatewayProducts
   endpoints:
     web:
       exposure:
@@ -46,6 +46,39 @@ management:
 
 surprising:
   gateway:
+    products:
+      enabled: ${GATEWAY_PRODUCT_LINES:}
+      cores:
+        SPOT:
+          hostnames: ${GATEWAY_CORE_SPOT_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_SPOT_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_SPOT_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_SPOT_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
+        LINEAR_PERPETUAL:
+          hostnames: ${GATEWAY_CORE_LINEAR_PERPETUAL_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_LINEAR_PERPETUAL_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_LINEAR_PERPETUAL_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_LINEAR_PERPETUAL_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
+        INVERSE_PERPETUAL:
+          hostnames: ${GATEWAY_CORE_INVERSE_PERPETUAL_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_INVERSE_PERPETUAL_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_INVERSE_PERPETUAL_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_INVERSE_PERPETUAL_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
+        LINEAR_DELIVERY:
+          hostnames: ${GATEWAY_CORE_LINEAR_DELIVERY_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_LINEAR_DELIVERY_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_LINEAR_DELIVERY_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_LINEAR_DELIVERY_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
+        INVERSE_DELIVERY:
+          hostnames: ${GATEWAY_CORE_INVERSE_DELIVERY_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_INVERSE_DELIVERY_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_INVERSE_DELIVERY_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_INVERSE_DELIVERY_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
+        OPTION:
+          hostnames: ${GATEWAY_CORE_OPTION_HOSTNAMES:${AERON_CLUSTER_HOSTNAMES:localhost}}
+          egress-hostname: ${GATEWAY_CORE_OPTION_EGRESS_HOSTNAME:${AERON_EGRESS_HOSTNAME:localhost}}
+          response-timeout: ${GATEWAY_CORE_OPTION_RESPONSE_TIMEOUT:${AERON_RESPONSE_TIMEOUT:5s}}
+          client-connections: ${GATEWAY_CORE_OPTION_CLIENT_CONNECTIONS:${AERON_CLIENT_CONNECTIONS:4}}
     withdrawal:
       single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
       daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT:50000}
@@ -63,7 +96,6 @@ surprising:
       api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY:}
       api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET:}
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET:}
-      spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL:}
       withdrawal-address-ids-json: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS:{}}
       request-timeout: ${GATEWAY_CUSTODY_WALLET_REQUEST_TIMEOUT:10s}
     kyc-documents:
@@ -204,19 +236,6 @@ surprising:
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
       account:
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
         base-url: "local:"
         target-prefix: /api/v1/accounts
         private-route: true
@@ -592,7 +611,6 @@ surprising:
   websocket:
     kafka:
       bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
       group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
       concurrency: 2

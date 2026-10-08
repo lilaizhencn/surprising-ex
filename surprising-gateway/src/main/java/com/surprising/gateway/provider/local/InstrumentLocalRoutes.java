@@ -7,13 +7,11 @@ import com.surprising.instrument.provider.service.InstrumentRequestService;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到合约入口的本地调用；不建立内部 HTTP 连接。 */
-@Component
 public final class InstrumentLocalRoutes {
     private static final PathPattern INSTRUMENT_CONTROLLER_DEFAULT = PathPatternParser.defaultInstance.parse("/api/v1/instruments/default");
     private static final PathPattern INSTRUMENT_CONTROLLER_LATEST = PathPatternParser.defaultInstance.parse("/api/v1/instruments/latest");

@@ -70,7 +70,11 @@ class AssetConfigurationIntegrationTest {
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE assets SET asset_id=2147483647 WHERE asset='BTC'"))
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE instruments SET base_asset_id=2147483647 WHERE product_line='SPOT'"))
+        Long instrumentId = jdbc.queryForObject(
+                "SELECT instrument_id FROM instruments ORDER BY instrument_id LIMIT 1", Long.class);
+        assertThat(instrumentId).isNotNull();
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE instruments SET base_asset_id=2147483647 WHERE instrument_id=?", instrumentId))
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
 

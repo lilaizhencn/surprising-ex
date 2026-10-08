@@ -2232,6 +2232,7 @@ ALTER TABLE gateway_users ALTER COLUMN username DROP NOT NULL;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS withdrawal_restricted_until TIMESTAMPTZ;
+COMMENT ON COLUMN gateway_users.withdrawal_restricted_until IS '安全设置变更后禁止提现的截止时间；为空表示无临时限制。';
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
     ON gateway_users (lower(username));

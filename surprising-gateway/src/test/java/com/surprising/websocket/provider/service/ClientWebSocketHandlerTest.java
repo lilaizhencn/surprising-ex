@@ -31,7 +31,7 @@ class ClientWebSocketHandlerTest {
     }
 
     private static ClientWebSocketHandler handler(WebSocketProperties properties) {
-        return new ClientWebSocketHandler(null, null, properties, null);
+        return new ClientWebSocketHandler(null, null, properties, null, new com.surprising.gateway.provider.product.GatewayProductsProperties());
     }
 
     private static WebSocketProperties properties() {

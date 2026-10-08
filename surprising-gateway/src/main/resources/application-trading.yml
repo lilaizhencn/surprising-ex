@@ -2,7 +2,6 @@ surprising:
   price:
     consumer:
       bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       group-id: surprising-business-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s
@@ -12,13 +11,8 @@ surprising:
     order:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       aeron:
-        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
-        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-        response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
-        client-connections: ${AERON_CLIENT_CONNECTIONS:4}
         node-id: ${TRADING_NODE_ID:0}
       event-publish:
         send-timeout: 3s
@@ -38,7 +32,6 @@ surprising:
         min-duration-seconds: 5
         max-duration-seconds: 86400
     trigger:
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       execution:
         trigger-batch-size: 200
         max-trigger-scan-pages: ${TRIGGER_MAX_SCAN_PAGES:16}

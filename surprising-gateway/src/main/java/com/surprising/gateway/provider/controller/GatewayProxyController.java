@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.service.GatewayProxyService;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.Map;
@@ -22,17 +22,17 @@ public class GatewayProxyController {
 
     private final GatewayProxyService gatewayProxyService;
 
-    private final LocalBusinessApi localBusinessApi;
+    private final GatewayProductServices products;
 
-    public GatewayProxyController(GatewayProxyService gatewayProxyService, LocalBusinessApi localBusinessApi) {
+    public GatewayProxyController(GatewayProxyService gatewayProxyService, GatewayProductServices products) {
         this.gatewayProxyService = gatewayProxyService;
-        this.localBusinessApi = localBusinessApi;
+        this.products = products;
     }
 
-    /** The bundled gateway serves exactly its configured account/trading product line. */
+    /** All enabled products share this Gateway and its public WebSocket endpoint. */
     @GetMapping("/api/v1/runtime")
     public Map<String, List<ProductLine>> runtime() {
-        return Map.of("productLines", List.of(localBusinessApi.productLine()));
+        return Map.of("productLines", products.enabled());
     }
 
     @RequestMapping(path = {
