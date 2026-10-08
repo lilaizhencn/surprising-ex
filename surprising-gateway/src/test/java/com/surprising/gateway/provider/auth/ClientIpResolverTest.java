@@ -66,6 +66,20 @@ class ClientIpResolverTest {
     }
 
     @Test
+    void prefersProxyChainOverSingleHopRealIpAndUsesRealIpOnlyAsFallback() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
+        ClientIpResolver resolver = new ClientIpResolver(properties);
+        MockHttpServletRequest forwarded = request("192.0.2.10", "198.51.100.46, 192.0.2.11");
+        forwarded.addHeader("X-Real-IP", "192.0.2.11");
+        MockHttpServletRequest realIpOnly = request("192.0.2.10", null);
+        realIpOnly.addHeader("X-Real-IP", "198.51.100.47");
+
+        assertThat(resolver.resolve(forwarded)).isEqualTo("198.51.100.46");
+        assertThat(resolver.resolve(realIpOnly)).isEqualTo("198.51.100.47");
+    }
+
+    @Test
     void ignoresMalformedClientIpHeadersAndDoesNotReturnInvalidForwardedValues() {
         GatewayProperties properties = new GatewayProperties();
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));

@@ -13,10 +13,9 @@ public final class ClientIpResolver {
             "True-Client-IP",         // Akamai / Cloudflare Enterprise
             "Fastly-Client-IP",        // Fastly
             "X-Azure-ClientIP",        // Azure Front Door / Application Gateway integrations
-            "CloudFront-Viewer-Address", // AWS CloudFront (address may include a port)
-            "X-Real-IP",               // Common reverse-proxy convention
-            "X-Client-IP"              // Common load-balancer convention
+            "CloudFront-Viewer-Address" // AWS CloudFront (address may include a port)
     );
+    private static final List<String> FALLBACK_CLIENT_IP_HEADERS = List.of("X-Real-IP", "X-Client-IP");
 
     private final GatewayProperties properties;
 
@@ -44,20 +43,26 @@ public final class ClientIpResolver {
                 return candidate;
             }
         }
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded == null || forwarded.isBlank()) {
-            return remoteAddress;
+        // Alibaba SLB/ALB, Tencent CLB, AWS ALB, Azure, Huawei ELB, and Google Cloud
+        // load balancers use X-Forwarded-For; resolve it as a trusted hop chain.
+        String forwardedClient = forwardedChainClientIp(request.getHeader("X-Forwarded-For"),
+                remoteAddress, trustedProxies);
+        if (forwardedClient != null) return forwardedClient;
+        for (String header : FALLBACK_CLIENT_IP_HEADERS) {
+            String candidate = literalValue(request.getHeader(header));
+            if (candidate != null) return candidate;
         }
+        return remoteAddress;
+    }
+
+    private String forwardedChainClientIp(String forwarded, String remoteAddress, List<String> trustedProxies) {
+        if (forwarded == null || forwarded.isBlank()) return null;
         String current = remoteAddress;
         String[] chain = forwarded.split(",", -1);
         for (int index = chain.length - 1; index >= 0; index--) {
-            if (!isAllowed(current, trustedProxies)) {
-                return current;
-            }
+            if (!isAllowed(current, trustedProxies)) return current;
             String candidate = literalValue(chain[index]);
-            if (candidate == null) {
-                return current;
-            }
+            if (candidate == null) return null;
             current = candidate;
         }
         return current;
