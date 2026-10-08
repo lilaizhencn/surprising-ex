@@ -12,13 +12,19 @@ import tools.jackson.databind.json.JsonMapper;
 
 class MarketMakerBusinessSettingsServiceTest {
     @Test
-    void savedMemorySettingsApplyImmediatelyAndStaleUpdatesCannotChangeRunningSettings() {
+    void committedSettingsApplyImmediatelyAndStaleUpdatesCannotChangeRunningSettings() {
         var properties = new MarketMakerProperties();
         properties.setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getEngine().setNodeId("process-local-node");
-        var store = new MarketMakerBusinessSettingsStore(properties, JsonMapper.builder().findAndAddModules().build());
+        var store = mock(MarketMakerBusinessSettingsStore.class);
         var settings = MarketMakerBusinessSettings.initialDisabled();
         settings.quoting().setOrderLevels(7);
+        var json = JsonMapper.builder().findAndAddModules().build();
+        var committed = json.readValue(json.writeValueAsBytes(settings), MarketMakerBusinessSettings.class);
+        when(store.save(eq(ProductLine.LINEAR_PERPETUAL), same(settings), eq(1L), eq("1"), eq("change")))
+                .thenReturn(new MarketMakerBusinessSettingsStore.Settings(committed, 2, "1", "change", Instant.now()));
+        when(store.save(eq(ProductLine.LINEAR_PERPETUAL), same(settings), eq(1L), eq("1"), eq("stale")))
+                .thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT));
         try (var validation = Validation.buildDefaultValidatorFactory()) {
             var service = new MarketMakerBusinessSettingsService(properties, store, validation.getValidator());
             service.save(settings, 1, "1", "change");

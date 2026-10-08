@@ -71,101 +71,39 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limi
 
 `/strategy-logs` 读取当前进程最多 2,048 条内存诊断记录，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
-`InMemoryMarketMakerRunEventRepository` 保留有界诊断记录，重启即清空；参考行情样本不落库、不另建队列。
-做市模块不依赖 PostgreSQL、JDBC、Redis 或其他外部存储，也不创建数据库连接池。
+`InMemoryMarketMakerRunEventRepository` 保留最多 2,048 条近期诊断记录，重启即清空；参考行情样本不逐周期落库、不另建队列。
+这些诊断记录不是交易、资金或管理员操作审计账本。已存在的历史诊断表数据不会被本服务自动删除。
 
-`/strategies/{strategyId}/config` 在 `InMemoryMarketMakerStrategyOverrideStore` 更新当前进程配置。
-后台公共设置和策略定义仍支持版本冲突检查；所有热更新在重启后丢弃，启动时重新加载 YAML。
-参数为空时恢复该进程的策略基线，全部可编辑字段为空时清除内存覆盖。
-报价、订单与账户事实仍分别由原交易服务和 Core 管理，内存诊断记录不作为交易或资金账本。
+后台公共设置由 `MarketMakerBusinessSettingsStore` 持久化到 `market_maker_business_settings`，策略定义和覆盖由
+`JdbcMarketMakerStrategyOverrideStore` 持久化；保留版本冲突检查，重启后从数据库恢复。策略及覆盖的不可变读取缓存
+只在管理员事务提交后失效，报价周期不重复查库；事务回滚不会发布候选配置。单产品线单实例的后台请求是配置唯一写入口。
+数据库连接池最多 2 个连接、最少空闲 0 个，不引入 Redis 依赖或逐周期数据库租约。
 
 ## 配置
+
+部署只设置产品线、节点、Kafka、数据库及内部服务地址。例如：
 
 ```yaml
 surprising:
   clients:
     account:
-      base-url: http://localhost:9086
+      base-url: http://localhost:9094
     instrument:
-      base-url: http://localhost:9080
-    mark-price:
-      base-url: http://localhost:9082
+      base-url: http://localhost:9094
     matching:
-      base-url: http://localhost:9081
+      base-url: http://localhost:9094
     trading:
-      base-url: http://localhost:9084
+      base-url: http://localhost:9094
   market-maker:
     infrastructure:
       product-line: LINEAR_PERPETUAL
       node-id: mm-node-a
-    engine:
-      enabled: false
-    quoting:
-      order-book-depth: 20
-      order-levels: 3
-      min-spread-ticks: 10
-      level-spacing-ticks: 10
-      refresh-threshold-ticks: 2
-      max-open-orders-per-account-symbol: 30
-      max-price-deviation-ppm: 5000
-      order-reconciliation-interval: 500ms
-      volatility-spread-multiplier-ppm: 500000
-      max-volatility-spread-ticks: 100
-    risk:
-      max-inventory-steps: 10000
-      max-inventory-skew-ppm: 800000
-    trade:
-      enabled: false
-    reference-market:
-      enabled: true
-      websocket-enabled: true
-      refresh-interval: 500ms
-      max-age: 3s
-      request-timeout: 2s
-      reconnect-backoff: 5s
-      depth-levels: 20
-      quantity-scale-ppm: 1000000
-      min-quantity-steps: 1
-      max-quantity-steps: 1000
-      sources:
-        - name: BINANCE_USDM
-          product-line: LINEAR_PERPETUAL
-          enabled: true
-          instrument-id: "604"
-          external-symbol: BTCUSDT
-          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
-          parser: BINANCE_DEPTH
-          websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
-          websocket-parser: BINANCE_DEPTH_STREAM
-        - name: OKX_SWAP
-          product-line: LINEAR_PERPETUAL
-          enabled: true
-          instrument-id: "604"
-          external-symbol: BTC-USDT-SWAP
-          url: https://www.okx.com/api/v5/market/books?instId={externalSymbol}&sz=20
-          parser: OKX_BOOKS
-          websocket-url: wss://ws.okx.com:8443/ws/v5/public
-          websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
-          websocket-parser: OKX_BOOKS_WS
-        - name: BYBIT_LINEAR
-          product-line: LINEAR_PERPETUAL
-          enabled: true
-          instrument-id: "604"
-          external-symbol: BTCUSDT
-          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={externalSymbol}&limit=50
-          parser: BYBIT_ORDERBOOK
-          websocket-url: wss://stream.bybit.com/v5/public/linear
-          websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
-          websocket-parser: BYBIT_ORDERBOOK_WS
-    strategies:
-      - strategy-id: btc-usdt-mm-a
-        product-line: LINEAR_PERPETUAL
-        enabled: true
-        account-ids: [900001, 900002]
-        instrument-ids: ["604"]
-        base-quantity-steps: 10
-        margin-mode: CROSS
 ```
+
+数据库使用 `SPRING_DATASOURCE_URL`、`SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD`。
+报价、库存、参考行情源、模拟交易和策略账户/合约绑定全部由后台配置；YAML 或环境变量中的同名业务参数不会覆盖后台设置。
+初次启动缺失公共设置时只初始化关闭状态，管理员配置并启用后才自动报价；已有设置使用其保存版本，不重置。
+后台公共设置保存成功后立即安装到运行配置，策略新增/编辑在后续工作线程检查中热生效，无需重启。
 
 ## 报价机制
 
@@ -189,11 +127,10 @@ surprising:
 ## 单实例部署与配置迁移
 
 每条产品线只部署一个做市实例，不保留跨节点租约。同一产品线更新部署时先停止旧实例再启动新实例，
-禁止同时运行使用相同账户/合约的副本。后台修改只作用于当前进程，重启恢复 YAML。
-升级前把要保留的公共设置、策略及参考行情源写入 YAML，并移除旧的 `infrastructure.coordination`
-配置；旧的做市配置表和运行记录表不会再被读取。
-默认 YAML 的 `engine.enabled=false`、`strategies=[]`，未显式配置策略时不会自动报价。
-Gateway、Kafka、外部行情和交易 Core 仍是做市业务依赖；“无外部存储”仅指做市自身的配置、租约和诊断状态。
+禁止同时运行使用相同账户/合约的副本。后台保存的公共设置、策略和覆盖保留在数据库，重启自动恢复；
+不需要导出到 YAML。升级保留既有配置表，诊断事件和参考行情样本停止新增数据库记录。
+旧 `infrastructure.coordination` 部署参数不再需要，应从启动环境移除。
+Gateway、Kafka、外部行情、配置数据库和交易 Core 仍是业务依赖。
 
 如果要跑多个做市商账号，可以使用同一个策略的多个 `account-ids`，也可以拆成多个策略。不要让多个策略同时控制同一个账号和合约，除非库存上限已经按合并风险设计。
 
@@ -482,3 +419,9 @@ JFR、局部基准源码/日志、上下文启动桩及测试报告仅用于本�
 清理完成：本轮临时 Redis、HTTP 桩和 Java 采样进程均已停止；本轮 `/tmp/surprising-round4`
 内的 JFR、基准源码/日志、启动桩及所选 24 个测试类的 XML/TXT 报告已删除。
 上面的临时路径仅作历史定位；保留 Maven 构建产物及其他任务的数据和报告。
+
+## 配置持久化与周期写入修复（2026-10-09）
+
+上面的 2026-10-08 性能记录包含当轮的无数据库/YAML 启动实验，其配置恢复语义已被本节替代。
+管理员设置与策略保持持久化；有界近期诊断缓存、批量报价输入、自有量汇总和 HTTP 连接池优化继续生效。
+验证覆盖真实 PostgreSQL 的重启恢复、版本冲突、事务提交/回滚后的缓存可见性，以及 100 个读取周期只加载两次配置查询。

@@ -1589,7 +1589,7 @@ public class MarketMakerService {
         return Long.toUnsignedString(crc32.getValue(), 36);
     }
 
-    /** Strategies start from YAML; administrator changes live only in this process. */
+    /** Durable administrator strategy definitions, served from the repository's committed configuration cache. */
     public List<MarketMakerProperties.Strategy> configuredStrategies() {
         return overrideStore.definitions().stream().filter(d -> d.productLine() == properties.getProductLine()).map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
     }

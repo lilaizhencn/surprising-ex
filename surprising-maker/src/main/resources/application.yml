@@ -20,6 +20,14 @@ spring:
       shutdown:
         await-termination: true
         await-termination-period: 10s
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/surprising_exchange}
+    username: ${SPRING_DATASOURCE_USERNAME:surprising}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: 2
+      minimum-idle: 0
+      connection-timeout: 3000
 management:
   endpoints:
     web:
@@ -53,7 +61,4 @@ surprising:
       kafka:
         bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
         instrument-snapshot-group-id: surprising-market-maker-instrument-snapshot-v1
-    # 单实例；业务配置与策略由 YAML 初始化，后台热更新只保留在当前进程。
-    engine:
-      enabled: false
-    strategies: []
+    # 业务设置及策略只从后台维护的数据库读取；报价诊断使用有界内存，不逐周期落库。
