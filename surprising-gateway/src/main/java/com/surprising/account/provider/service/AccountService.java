@@ -82,11 +82,13 @@ public class AccountService {
     }
 
     public BalanceResponse balance(long userId, String asset) {
-        CoreUserStateView snapshot = coreSnapshot(currentProductLine(), userId);
+        requireUserId(userId);
         String normalizedAsset = normalizeAsset(asset);
-        return snapshot.balances().stream()
-                .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
-                .findFirst()
+        var balance = realtimeQueries == null
+                ? coreSnapshot(currentProductLine(), userId).balances().stream()
+                    .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset)).findFirst()
+                : realtimeQueries.balance(currentProductLine(), userId, normalizedAsset, null);
+        return balance
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
                         Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
                 .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
@@ -117,11 +119,15 @@ public class AccountService {
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         requireProductAccount(accountType);
-        CoreUserStateView snapshot = coreSnapshot(accountType.productLine().orElseThrow(), userId);
+        requireUserId(userId);
+        ProductLine product = accountType.productLine().orElseThrow();
+        requireCurrentProduct(product);
         String normalizedAsset = normalizeAsset(asset);
-        BalanceResponse balance = snapshot.balances().stream()
-                .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
-                .findFirst()
+        var selected = realtimeQueries == null
+                ? coreSnapshot(product, userId).balances().stream()
+                    .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset)).findFirst()
+                : realtimeQueries.balance(product, userId, normalizedAsset, null);
+        BalanceResponse balance = selected
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
                         Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
                 .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
@@ -279,8 +285,14 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(instrumentId);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         com.surprising.trading.api.model.PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
-        return corePosition(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
-                normalizedPositionSide).orElseGet(() -> new PositionResponse(userId, normalizedSymbol,
+        var position = realtimeQueries == null
+                ? corePosition(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol,
+                    normalizedMarginMode, normalizedPositionSide)
+                : realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
+                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
+                    com.surprising.aeron.protocol.CorePositionSide.valueOf(normalizedPositionSide.name()), null)
+                    .map(value -> toCorePositionResponse(userId, value));
+        return position.orElseGet(() -> new PositionResponse(userId, normalizedSymbol,
                         normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
@@ -289,8 +301,16 @@ public class AccountService {
         requireDerivativeProduct(currentProductLine());
         String normalizedSymbol = normalizeSymbol(instrumentId);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        return corePositionMargin(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
-                com.surprising.trading.api.model.PositionSide.NET).orElseGet(() -> new PositionMarginResponse(
+        var position = realtimeQueries == null
+                ? corePositionMargin(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol,
+                    normalizedMarginMode, com.surprising.trading.api.model.PositionSide.NET)
+                : realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
+                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
+                    com.surprising.aeron.protocol.CorePositionSide.NET, null)
+                    .map(value -> new PositionMarginResponse(userId, value.instrumentId(), value.marginAsset(),
+                            normalizedMarginMode, com.surprising.trading.api.model.PositionSide.NET,
+                            value.positionMarginUnits(), Instant.now()));
+        return position.orElseGet(() -> new PositionMarginResponse(
                         userId, normalizedSymbol, "", normalizedMarginMode,
                         com.surprising.trading.api.model.PositionSide.NET, 0L, Instant.EPOCH));
     }

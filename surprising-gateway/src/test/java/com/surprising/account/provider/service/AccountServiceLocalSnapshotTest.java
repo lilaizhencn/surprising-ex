@@ -28,12 +28,38 @@ class AccountServiceLocalSnapshotTest {
         org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
         when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
             new com.surprising.realtime.api.UserReadView("READY","v",1,snapshot(),List.of(),List.of(),1,List.of()));
+        when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null))
+                .thenReturn(java.util.Optional.of(snapshot().balances().getFirst()));
         assertThat(service.balance(1001L,"USDT").availableUnits()).isEqualTo(800);
         assertThat(service.positions(1001L).count()).isEqualTo(1);
         when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenThrow(
             new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null)).thenThrow(
+            new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
         assertThatThrownBy(()->service.balance(1001L,"USDT")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         verifyNoInteractions(aeron,projection);
+    }
+
+    @Test
+    void individualPositionMarginAndProductBalanceUseOnlyTargetReadViewQueries() {
+        var projection = mock(AccountQueryService.class);
+        var aeron = mock(AccountAeronGateway.class);
+        var queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        var service = service(aeron, projection);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        when(queries.position(ProductLine.LINEAR_PERPETUAL, 1001, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null))
+                .thenReturn(java.util.Optional.of(snapshot().positions().getFirst()));
+        when(queries.balance(ProductLine.LINEAR_PERPETUAL, 1001, "USDT", null))
+                .thenReturn(java.util.Optional.of(snapshot().balances().getFirst()));
+        assertThat(service.position(1001, "1").signedQuantitySteps()).isEqualTo(10);
+        assertThat(service.positionMargin(1001, "1", "CROSS").marginUnits()).isEqualTo(200);
+        assertThat(service.productBalance(1001, AccountType.USDT_PERPETUAL, "usdt").availableUnits()).isEqualTo(800);
+        when(queries.position(ProductLine.LINEAR_PERPETUAL, 1001, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null))
+                .thenReturn(java.util.Optional.empty());
+        assertThat(service.position(1001, "1").signedQuantitySteps()).isZero();
+        org.mockito.Mockito.verify(queries, org.mockito.Mockito.never()).require(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(aeron, projection);
     }
 
     @Test
