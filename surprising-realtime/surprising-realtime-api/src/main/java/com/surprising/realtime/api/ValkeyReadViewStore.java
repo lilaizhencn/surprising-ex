@@ -97,11 +97,20 @@ public final class ValkeyReadViewStore {
         if (commands.isEmpty()) return;
         byte[] script = utf8(DELTA.getScriptAsString());
         redis.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
-            for (var command : commands)
-                connection.scriptingCommands().eval(script,
-                        org.springframework.data.redis.connection.ReturnType.INTEGER, 2, command);
+            var scripting = connection.scriptingCommands();
+            if (commands.size() == 1) {
+                scripting.eval(script, org.springframework.data.redis.connection.ReturnType.INTEGER, 2, commands.getFirst());
+            } else {
+                // Load once on this pipeline's connection, before every SHA command. This
+                // also handles eviction/restart/flush between batches without a round trip.
+                scripting.scriptLoad(script);
+                for (var command : commands)
+                    scripting.evalSha(DELTA.getSha1(), org.springframework.data.redis.connection.ReturnType.INTEGER, 2, command);
+            }
             return null;
         });
+        // An external SCRIPT FLUSH interleaving this pipeline can still fail. Lettuce may
+        // omit per-command replies: propagate to source recovery, never replay unknown work.
     }
 
     /** Redis wire boundary: encode once as bytes, preserving each user's atomic commit. */

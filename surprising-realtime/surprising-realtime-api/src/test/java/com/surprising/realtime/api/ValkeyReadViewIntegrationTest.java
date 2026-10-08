@@ -159,6 +159,23 @@ class ValkeyReadViewIntegrationTest {
         assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42, 1003, 100).status()).isEqualTo("INITIALIZING");
     }
 
+    @Test
+    void pipelineRestoresFlushedScriptCacheWithoutLosingVersionsOrOtherProducts() {
+        store.install(snapshot(100, 1, 10), 1000);
+        store.applyCommits(List.of(commit(101, 2, 11)));
+        try (var connection = factory.getConnection()) { connection.scriptingCommands().scriptFlush(); }
+        store.applyCommits(List.of(commit(102, 3, 12), commit(103, 4, 13), commit(102, 3, 999)));
+        var view = store.read(ProductLine.SPOT, 42, 1001, 100);
+        assertThat(UserReadView.from(view).account().balances().getFirst().availableUnits()).isEqualTo(13);
+        assertThat(view.exportSequence()).isEqualTo(4);
+        assertThat(store.read(ProductLine.SPOT, 43, 1001, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42, 1001, 100).status()).isEqualTo("INITIALIZING");
+        // The recovered cache supports the next SHA-only pipeline as well.
+        store.applyCommits(List.of(commit(104, 5, 14)));
+        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42, 1001, 100))
+                .account().balances().getFirst().availableUnits()).isEqualTo(14);
+    }
+
     private static List<RealtimeFrame> commit(long sequence, long export, long units) {
         byte[] end = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
                 .putLong(export).array();
