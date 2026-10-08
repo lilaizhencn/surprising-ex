@@ -1,0 +1,71 @@
+{
+  "userId": 1,
+  "address": "bcrt1qh6zy34lqvlpqjfl6lprn5z58k88an9deu9eyvzpq6rgn9dux4nmsmw5yxt",
+  "amount": "0.001",
+  "heightBefore": 123,
+  "stage": "PASS: desktop/mobile and public API after duplicate replay",
+  "startedAt": "2026-10-08T03:41:56Z",
+  "txHash": "3b7aee3d42fa27e6a223afcdd8e8182838dbaea6f3f3abd6f989759b6564d487",
+  "blocks": [
+    "74de4be7caa89a839ce87af0043d0050c10c657aee538fa335c5b28f9966a657",
+    "2b582d6d015a17152484e52bde4635fc64427a44b89945652f108e62a1fa9517",
+    "13cd1a432eae6c30e668b5ce2418cbb7a0b0e9c9f0bc05fec027b2a740008e78",
+    "3f03a1da2a0c8a41df3dd0570f742977f52f48d20975dea68653a561143d02ad",
+    "158261c05909b21180f1fe9f2b21c7d863ba7f3fcb99c33d232b03bafce0abfc",
+    "0c50a117ae36e88a33d94cb78a0c0c278a1a0e760a885537495d528e5ab4317d"
+  ],
+  "finalPublicApi": {
+    "balance": {
+      "count": 1,
+      "balances": [
+        {
+          "userId": 1,
+          "asset": "BTC",
+          "availableUnits": 100000,
+          "lockedUnits": 0,
+          "equityUnits": 100000,
+          "updatedAt": "2026-10-08T03:47:53.093030251Z"
+        }
+      ]
+    },
+    "deposits": [
+      {
+        "id": "69aa06f1-2eb5-401c-aab4-ef3fa139d95b",
+        "tenant_id": "93fc5b0b-946a-4d45-bd16-7309327b5db5",
+        "custody_address_id": "96cfb9d3-4706-4678-907a-3bc439e8ade8",
+        "chain": "BTC",
+        "asset_symbol": "BTC",
+        "tx_hash": "3b7aee3d42fa27e6a223afcdd8e8182838dbaea6f3f3abd6f989759b6564d487",
+        "log_index": 0,
+        "amount": 0.001,
+        "status": "CONFIRMED",
+        "credited_at": "2026-10-08T03:42:40.735Z",
+        "created_at": "2026-10-08T03:42:40.735Z",
+        "updated_at": "2026-10-08T03:42:40.735Z",
+        "address": "bcrt1qh6zy34lqvlpqjfl6lprn5z58k88an9deu9eyvzpq6rgn9dux4nmsmw5yxt",
+        "subject": "user:1",
+        "custodyAddressId": "96cfb9d3-4706-4678-907a-3bc439e8ade8",
+        "txHash": "3b7aee3d42fa27e6a223afcdd8e8182838dbaea6f3f3abd6f989759b6564d487",
+        "assetSymbol": "BTC",
+        "logIndex": 0,
+        "creditedAt": "2026-10-08T03:42:40.735825Z",
+        "createdAt": "2026-10-08T03:42:40.735825Z",
+        "updatedAt": "2026-10-08T03:42:40.735825Z"
+      }
+    ]
+  },
+  "browser": {
+    "url": "https://ex.tokdou.com/assets?account=spot",
+    "desktop": "1440x1000 PASS",
+    "mobile": "390x844 PASS",
+    "javascriptErrors": []
+  },
+  "duplicateWebhook": {
+    "eventId": "d85c58d6-4c98-4258-9059-24b41ec2cdce",
+    "identicalOriginalBody": true,
+    "concurrentRequests": 16,
+    "http204": 16,
+    "transport": "loopback gateway",
+    "processedAttemptsAfter": 1
+  }
+}

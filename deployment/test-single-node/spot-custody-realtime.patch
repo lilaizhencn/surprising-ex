@@ -1,0 +1,10 @@
+--- a/scripts/start-product-line-providers-spot-e2e.sh
++++ b/scripts/start-product-line-providers-spot-e2e.sh
+@@ -529,6 +529,7 @@
+   initialize_database
+   start_core "$core_action"
+   start_http_service gateway
++  start_realtime_service
+   trap - EXIT ERR INT TERM
+   printf 'PRODUCT_LINE_RUNTIME=PASS productLine=%s runId=%s wallet=ABSENT\n' "$PRODUCT_LINE" "$RUN_ID"
+ }
