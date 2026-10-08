@@ -9,3 +9,15 @@
 HotSpot JDK 27、独立真实 Redis，本轮修改前的本地源码为基线，其余编码逻辑相同；预热后采样 200 用户 × 20 批、共 4,000 条更新，用 INFO total_net_input_bytes 统计输入，并录制最多 16MiB 的 JFR：4,201,105 字节降至 1,643,485 字节，约减少 60.9%。这不是每个 Redis 命令都独立等待的串行测试。两次本地总耗时为 261.282ms / 277.166ms，本样本不能证明吞吐或延迟改善。
 
 真实 Redis 测试覆盖两批之间 SCRIPT FLUSH 后继续执行、重复/旧版本、快照屏障、查询水位、用户和产品隔离；Mock 测试验证每批只加载一次、加载先于摘要执行、单条不增加加载，以及异常不重放。本轮未测试 Redis Cluster 的拓扑变化或脚本在批内被外部并发清空的长稳场景。原始 JFR、程序及日志汇总后清理。
+
+### 单项余额与持仓读取（2026-10-08）
+
+`ValkeyUserQueries.balance/position` 使用 `ValkeyReadViewStore.readFields`，一次 `HMGET` 同时读取
+`USER:user` 快照基线、目标 `BALANCE:<asset>` / `POSITION:<instrumentId>:<side>` 增量，以及
+fence、来源 epoch、快照时间、invalid 标记和导出水位。沿用来源 epoch 校验、15 秒新鲜度检查和
+`minExportSequence` 门槛；缺失快照或数据不可用时返回 503，不回查数据库或 Core。
+读取结果只在本次请求内物化，不新增长期缓存或 Redis 状态副本。全量订单/账户查询继续使用原读视图。
+
+真实 Redis 集成测试覆盖六条产品线、目标增量覆盖基线、余额归零、持仓归零、缺失用户、过期快照、
+来源 epoch 切换和水位落后；单项查询不传输、不解码无关订单字段。快照基线仍包含原有账户数据，
+本次并未改变实时协议或快照布局。

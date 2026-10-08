@@ -68,6 +68,51 @@ class ValkeyReadViewIntegrationTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void pointQueriesReadOnlyTargetEntitiesAndPreserveReadGuards(ProductLine product) {
+        long now = System.currentTimeMillis();
+        var state = new CoreUserStateView(product, 42, 1, CorePositionMode.ONE_WAY,
+                List.of(new CoreBalanceView("USDT", 10, 2)), List.of(),
+                List.of(new CorePositionView("1", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
+                        3, 100, 300, 0, 20)));
+        var snapshot = List.of(
+                new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_BEGIN, 42, 100, 0, now, 1, "", "", new byte[0]),
+                new RealtimeFrame(product, RealtimeFrame.Kind.USER, 42, 100, 1, now, 1, "", "user",
+                        CoreStateQueryCodec.encodeUserState(state)),
+                new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 2, now, 1, "", "", new byte[0]));
+        store.install(snapshot, now);
+        // Unrelated entities must never be transported or decoded by a point query.
+        String key = "rt:view:{" + product.name() + ":42}";
+        redis.opsForHash().put(key, "ORDER:unrelated", "intentionally invalid frame");
+        var queries = new ValkeyUserQueries(redis);
+        assertThat(queries.balance(product, 42, "USDT", null).orElseThrow().availableUnits()).isEqualTo(10);
+        assertThat(queries.balance(product, 42, "BTC", null)).isEmpty();
+        assertThat(queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null)
+                .orElseThrow().signedQuantitySteps()).isEqualTo(3);
+        var zero = new CoreUserStateView(product, 42, 2, List.of(new CoreBalanceView("USDT", 0, 0)), List.of(),
+                List.of(new CorePositionView("1", "USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
+                        0, 0, 0, 0, 0)));
+        store.applyBatch(List.of(
+                new RealtimeFrame(product, RealtimeFrame.Kind.BALANCE, 42, 101, 1, now, 0, "", "USDT",
+                        CoreStateQueryCodec.encodeUserState(zero)),
+                new RealtimeFrame(product, RealtimeFrame.Kind.POSITION, 42, 101, 2, now, 0, "1", "1:NET",
+                        CoreStateQueryCodec.encodeUserState(zero))), 7);
+        assertThat(queries.balance(product, 42, "USDT", 7L).orElseThrow().availableUnits()).isZero();
+        assertThat(queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, 7L)).isEmpty();
+        assertThatThrownBy(() -> queries.balance(product, 42, "USDT", 8L))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("READ_VIEW_BEHIND");
+        assertThatThrownBy(() -> queries.balance(product, 43, "USDT", null))
+                .hasMessageContaining("READ_VIEW_INITIALIZING");
+        redis.opsForHash().put(key, "@snapshotAt", Long.toString(now - 20000));
+        assertThatThrownBy(() -> queries.balance(product, 42, "USDT", null)).hasMessageContaining("READ_VIEW_STALE");
+        redis.opsForHash().put(key, "@snapshotAt", Long.toString(now));
+        store.sourceEpoch(product, "new-owner");
+        assertThatThrownBy(() -> queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null))
+                .hasMessageContaining("READ_VIEW_STALE");
+    }
+
     @Test
     void sourceEpochChangeAndUnavailableSnapshotCannotReturnReady() {
         store.sourceEpoch(ProductLine.SPOT, "first");

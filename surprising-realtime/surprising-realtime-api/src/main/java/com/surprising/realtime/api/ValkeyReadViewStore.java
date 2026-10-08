@@ -202,6 +202,23 @@ public final class ValkeyReadViewStore {
 
     public ReadView read(ProductLine product, long user, long now, long maxAgeMillis) {
         Map<Object, Object> values = redis.opsForHash().entries(keys(product, user).getFirst());
+        return materialize(product, values, now, maxAgeMillis);
+    }
+
+    /** One atomic HMGET of the baseline, requested entities and their validation metadata. */
+    public ReadView readFields(ProductLine product, long user, long now, long maxAgeMillis,
+                               List<String> entityFields) {
+        var fields = new ArrayList<Object>(List.of("@fence", "@epoch", "@snapshotAt", "@invalid",
+                "@exportSequence", "USER:user"));
+        fields.addAll(entityFields);
+        List<Object> selected = redis.opsForHash().multiGet(keys(product, user).getFirst(), fields);
+        var values = new HashMap<Object, Object>();
+        for (int i = 0; i < fields.size(); i++)
+            if (selected.get(i) != null) values.put(fields.get(i), selected.get(i));
+        return materialize(product, values, now, maxAgeMillis);
+    }
+
+    private ReadView materialize(ProductLine product, Map<Object, Object> values, long now, long maxAgeMillis) {
         if (!values.containsKey("@fence")) return new ReadView("INITIALIZING", "", 0, List.of());
         String epoch = redis.opsForValue().get("rt:source:" + product.name());
         boolean gap =
