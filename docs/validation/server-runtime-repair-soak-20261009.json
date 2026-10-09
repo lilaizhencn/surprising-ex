@@ -4344,17 +4344,20 @@
       },
       {
         "id": "retired-strategy-workers",
-        "severity": "medium",
-        "status": "confirmed stale wakeup mapping after strategy edit; deletion worker retention candidate if definition retirement is supported",
+        "severity": "none",
+        "status": "DISMISSED for supported administrator operations; prior confirmed stale-edit claim was incorrect",
         "evidence": [
           "MarketMakerTask.refreshStrategies only adds startedStrategies and submits two perpetual workers per strategy",
           "workers loop until whole service stops, do not retire when definition removed",
           "worker captures initial strategy for MakerQuoteWakeups.register/await, so editing instrument/account mapping does not refresh event subscriptions",
-          "service.findStrategy resolves current definitions each cycle; removing definition leaves worker repeatedly throwing/logging and retrying after100ms"
+          "service.findStrategy resolves current definitions each cycle; removing definition leaves worker repeatedly throwing/logging and retrying after100ms",
+          "Rechecked pre-audit commit ae3bd9d16 and current save validation: existing strategy identity bindings are immutable; override deletion is not definition deletion."
         ],
-        "impact": "configuration churn can leave stale workers/wakeups, unnecessary retry and warning traffic; same-id re-add never registers new wakeup mapping",
-        "nextMinimumValidation": "isolated admin add/edit/delete/re-add lifecycle test; retire and join former workers before same key re-registers, drain owned open orders before retirement, prune only derived state after ownership released; do not remove a lock while an old worker can still submit orders",
-        "limits": "repository delete currently targets overrides; definition deletion reachability must be checked separately rather than assuming admin delete exists"
+        "impact": "No reachable stale binding through supported administrator edits; original impact claim withdrawn.",
+        "nextMinimumValidation": "If strategy identity mutation or definition deletion is added later, test worker ownership before claiming retirement support.",
+        "limits": "repository delete currently targets overrides; definition deletion reachability must be checked separately rather than assuming admin delete exists",
+        "correctionUTC": "2026-10-09T01:20:00Z",
+        "resolution": "MarketMakerService.saveStrategyDefinition already rejected accountIds/instrumentIds changes since ae3bd9d16 (2026-10-05); there is no administrator definition deletion API. Captured worker binding therefore cannot become stale through a supported edit. Do not change worker concurrency or claim a reachable leak from this static candidate."
       },
       {
         "id": "scheduled-snapshot-false-success",
@@ -42864,5 +42867,6 @@
     "allSystemBusinessFunctions": "NOT_PASSED; closed candle mismatch, missing funding history projection and repeated FINAL records are confirmed gaps",
     "capacityAndP99": "NOT_CLAIMED",
     "leakFreedom": "NOT_PROVEN; duration, existing workload and instrumentation limits apply"
-  }
+  },
+  "followupRepairReport": "server-correctness-repair-20261009.json"
 }

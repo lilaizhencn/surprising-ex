@@ -96,12 +96,14 @@ lifecycle PSS起止约995→1075MiB，而GC后live heap范围74–84MiB，NMT co
 | medium | funding-restart-final-duplicates | confirmed repeated FINAL records for same instrument/funding time; financial impact unproven |
 | low | retired-instrument-caches | static retention candidate, not a reproduced leak |
 | unassigned | public-websocket-network | confirmed local-public path discontinuity in completed steady; cause unlocated |
-| medium | retired-strategy-workers | confirmed stale wakeup mapping after strategy edit; deletion worker retention candidate if definition retirement is supported |
+| none | retired-strategy-workers | 已排除当前后台操作路径；此前“编辑绑定导致旧订阅”的确认判断有误，见下方更正 |
 | high | scheduled-snapshot-false-success | REPAIRED and deployed after steady; actual systemd invocation PASS, two newly valid records, unchanged Core PID |
 
 高优先级是资金费投影：FundingSettlementRepository.latestCore / FundingPaymentRepository.corePage读取core_funding_*_projection，但现有导出路径无相应写入；线上表空、三个latest返回404。16:00UTC同一窗口BTC/ETH/SOL存在248/249/250条FINAL、164/174/168种费率；重放预测值和already-complete分支反复保存有关。FINAL不是已实际扣款证明，Core settlementId/idempotence仍是权威，未证明重复扣款。正确修复需从Archive准确导出已提交结算页，幂等投影/冻结最终费率，并验证跨页恢复与资金守恒；不能用当前仓位或猜测费率伪造历史。本轮资源修复没有修复此资金协议缺口。
 
-策略编辑后的wakeup映射保留初始策略是静态确认路径；删除定义是否由当前后台支持尚未证实。退休合约/策略缓存保留是churn候选，固定三合约两小时不能复现。K线精度缓存候选已排除：InstrumentStorageService.requireUnchangedContractTerms禁止已创建合约修改资产、价格/数量单位及乘数，资产账务精度亦不可变，当前后台操作不能触发所假设的精度变更。各项最小复现/正确修复要求在JSON，不把候选写为已复现泄漏。
+2026-10-09 更正：策略保存从 ae3bd9d16（10 月 5 日）起已经禁止修改既有 accountIds/instrumentIds，当前后台也没有删除策略定义的入口；删除覆盖配置不等于删除定义。因此此前将“编辑后 wakeup 映射陈旧”列为确认问题是误报，不修改线程模型。退休合约/策略缓存保留是churn候选，固定三合约两小时不能复现。K线精度缓存候选已排除：InstrumentStorageService.requireUnchangedContractTerms禁止已创建合约修改资产、价格/数量单位及乘数，资产账务精度亦不可变，当前后台操作不能触发所假设的精度变更。各项最小复现/正确修复要求在JSON，不把候选写为已复现泄漏。
+
+后续确认问题的修复、部署与独立核验见[正确性修复报告](server-correctness-repair-20261009.md)。本报告保留原始审计时点的发现状态，不代表修复后的现状。
 
 ## 证据与清理
 
