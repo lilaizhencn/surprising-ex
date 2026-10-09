@@ -20,6 +20,16 @@ public record CandleKey(String instrumentId, CandlePeriod period, Instant openTi
         return normalizeSymbol(instrumentId) + "|" + period.code() + "|" + openTime.toEpochMilli();
     }
 
+    public static String traceId(com.surprising.product.api.ProductLine product,
+                                 com.surprising.candlestick.api.model.CandleUpdatedEvent candle) {
+        return traceId(product, candle.instrumentId(), candle.period(), candle.openTime());
+    }
+
+    public static String traceId(com.surprising.product.api.ProductLine product, String instrumentId,
+                                 String period, Instant openTime) {
+        return "candle-" + product + "-" + instrumentId + "-" + period + "-" + openTime.toEpochMilli();
+    }
+
     public static CandleKey of(String instrumentId, CandlePeriod period, Instant openTime) {
         return new CandleKey(normalizeSymbol(instrumentId), period, openTime);
     }

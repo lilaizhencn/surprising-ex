@@ -1,6 +1,7 @@
 package com.surprising.websocket.provider.service;
 
 import lombok.extern.slf4j.Slf4j;
+import com.surprising.trading.api.TraceContext;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -28,7 +29,7 @@ public class ClientConnection implements AutoCloseable {
     private final WebSocketSession session;
     private volatile Long authenticatedUserId;
     /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
-    private final BlockingQueue<String> outbound;
+    private final BlockingQueue<OutboundMessage> outbound;
     private final long sendTimeoutNanos;
     private final AtomicBoolean open = new AtomicBoolean(true);
     private final ReentrantLock enqueueLock = new ReentrantLock();
@@ -72,14 +73,23 @@ public class ClientConnection implements AutoCloseable {
     }
 
     public boolean send(String payload) {
-        return sendBatch(List.of(payload));
+        return send(new TracedMessage(payload, TraceContext.current()));
     }
 
     /** 批量投递消息，避免同一连接在一次 fanout 中反复争用队列。 */
     public boolean sendBatch(List<String> payloads) {
-        if (payloads == null || payloads.isEmpty()) {
-            return true;
-        }
+        if (payloads == null || payloads.isEmpty()) return true;
+        String traceId = TraceContext.current();
+        return sendTracedBatch(payloads.stream().map(payload -> new TracedMessage(payload, traceId)).toList());
+    }
+
+    public boolean send(TracedMessage message) {
+        return sendTracedBatch(List.of(message));
+    }
+
+    /** Serialized payload and its trace metadata cross the same queue boundary. */
+    public boolean sendTracedBatch(List<TracedMessage> payloads) {
+        if (payloads == null || payloads.isEmpty()) return true;
         enqueueLock.lock();
         try {
             if (!open.get()) {
@@ -89,8 +99,8 @@ public class ClientConnection implements AutoCloseable {
                 close(CloseStatus.SERVICE_OVERLOAD);
                 return false;
             }
-            for (String payload : payloads) {
-                if (!outbound.offer(payload)) {
+            for (TracedMessage message : payloads) {
+                if (!outbound.offer(new OutboundMessage(message.payload(), message.traceId(), System.nanoTime()))) {
                     close(CloseStatus.SERVICE_OVERLOAD);
                     return false;
                 }
@@ -109,19 +119,41 @@ public class ClientConnection implements AutoCloseable {
         return outbound.size() + outbound.remainingCapacity();
     }
 
+    public record TracedMessage(String payload, String traceId) {
+        public TracedMessage {
+            java.util.Objects.requireNonNull(payload, "payload");
+            traceId = TraceContext.normalizeOrCreate(traceId);
+        }
+    }
+
+    private record OutboundMessage(String payload, String traceId, long queuedNanos) {}
+
     private void drain() {
         while (open.get()) {
             try {
-                String payload = outbound.take();
-                if (!sendWithinTimeout(payload)) {
-                    close(CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
-                    return;
+                OutboundMessage message = outbound.take();
+                String id = message.traceId;
+                try (var trace = TraceContext.open(id)) {
+                    long started = System.nanoTime();
+                    try {
+                        if (!sendWithinTimeout(message.payload)) {
+                            log.warn("ws.send.end session={} result=TIMEOUT queueMs={}", session.getId(),
+                                    (started - message.queuedNanos) / 1_000_000.0);
+                            close(CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
+                            return;
+                        }
+                        log.info("ws.send.end session={} result=OK queueMs={} sendMs={}", session.getId(),
+                                (started - message.queuedNanos) / 1_000_000.0, (System.nanoTime() - started) / 1_000_000.0);
+                    } catch (Exception failure) {
+                        log.warn("ws.send.end session={} result=FAILED error={}", session.getId(), failure.getClass().getSimpleName());
+                        throw failure;
+                    }
                 }
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 close(CloseStatus.GOING_AWAY);
             } catch (Exception ex) {
-                log.warn("closing websocket session={} after send failure: {}", session.getId(), ex.getMessage());
+                log.warn("closing websocket session={} after send failure error={}", session.getId(), ex.getClass().getSimpleName());
                 close(CloseStatus.SERVER_ERROR.withReason("send failure"));
             }
         }

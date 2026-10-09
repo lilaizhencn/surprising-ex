@@ -13,7 +13,14 @@ public record WsServerMessage(
         ProductLine productLine,
         Object data,
         String error,
-        Instant eventTime) {
+        Instant eventTime, String traceId) {
+
+    public WsServerMessage(String op, String id, String channel, String instrumentId, String period,
+            Long userId, ProductLine productLine, Object data, String error, Instant eventTime) {
+        this(op, id, channel, instrumentId, period, userId, productLine, data, error, eventTime,
+                com.surprising.trading.api.TraceContext.current() == null
+                        ? com.surprising.trading.api.TraceContext.newTraceId() : com.surprising.trading.api.TraceContext.current());
+    }
 
     public static WsServerMessage ack(String id, SubscriptionTopic topic) {
         return new WsServerMessage("subscribed", id, topic.channel().code(), topic.instrumentId(), topic.period(),
@@ -28,6 +35,11 @@ public record WsServerMessage(
     public static WsServerMessage event(SubscriptionTopic topic, Object data, Instant eventTime) {
         return new WsServerMessage("event", null, topic.channel().code(), topic.instrumentId(), topic.period(),
                 topic.userId(), topic.productLine(), data, null, eventTime);
+    }
+
+    public static WsServerMessage event(SubscriptionTopic topic, Object data, Instant eventTime, String traceId) {
+        return new WsServerMessage("event", null, topic.channel().code(), topic.instrumentId(), topic.period(),
+                topic.userId(), topic.productLine(), data, null, eventTime, traceId);
     }
 
     public static WsServerMessage pong(String id) {

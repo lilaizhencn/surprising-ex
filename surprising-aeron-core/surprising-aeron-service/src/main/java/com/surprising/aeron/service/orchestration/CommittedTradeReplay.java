@@ -34,7 +34,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
             throw new IllegalArgumentException("cross-product replay message");
         if (command.header().kind() == WireMessageKind.QUERY) return List.of();
         long dropped = outbox.droppedBatches(), failures = capture.failures();
-        capture.begin(logPosition, timestamp, 0, state.realtimeExportSequence());
+        capture.begin(logPosition, timestamp, 0, state.realtimeExportSequence(),
+                command.header().traceId().isEmpty() ? command.header().commandId().toString() : command.header().traceId());
         try {
             state.assertClusterCallbackComplete();
             CoreResponse response = state.apply(command, timestamp, logPosition);

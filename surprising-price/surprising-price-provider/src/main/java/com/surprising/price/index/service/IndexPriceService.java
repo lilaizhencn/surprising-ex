@@ -93,11 +93,14 @@ public class IndexPriceService {
         long sequence = sequenceRepository.next(SEQUENCE_MODULE, instrumentId);
         IndexPriceEvent event = indexPriceCalculator.calculate(instrumentId, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
-        latestIndexPriceCache.update(event);
-        markPriceService.acceptIndexPrice(event);
-        kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
-        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
+        try (var trace = com.surprising.trading.api.TraceContext.open(
+                "price-" + properties.getKafka().getProductLine() + "-INDEX-" + instrumentId + "-" + sequence)) {
+            latestIndexPriceCache.update(event);
+            markPriceService.acceptIndexPrice(event);
+            kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
+            if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
+        }
     }
 
     private boolean ownsSymbol(String instrumentId) {

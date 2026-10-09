@@ -14,7 +14,9 @@ public class MarketMakerFeignConfiguration {
     @Bean
     public RequestInterceptor marketMakerTraceRequestInterceptor() {
         return template -> {
-            template.header(TraceContext.TRACE_ID_HEADER, TraceContext.currentOrCreate());
+            String traceId = TraceContext.current();
+            template.removeHeader(TraceContext.TRACE_ID_HEADER);
+            template.header(TraceContext.TRACE_ID_HEADER, traceId == null ? TraceContext.newTraceId() : traceId);
             ProductLine productLine = MarketMakerProductLineContext.current();
             if (productLine != null) {
                 template.header("X-Product-Line", productLine.name());

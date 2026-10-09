@@ -85,8 +85,14 @@ class CommittedTradeReplayTest {
     private List<RealtimeFrame> send(CommittedTradeReplay replay, ProductLine line, CoreMessageType type, long user, byte[] payload) {
         long seq = ++sequence;
         var command = new CoreMessage(CoreMessageHeader.command(type, new UUID(99, seq), line,
-                CommandSource.OPERATIONS, 991, seq, user, TIME + seq, seq), payload);
-        return replay.apply(CoreMessageCodec.encode(command), TIME + seq, seq);
+                CommandSource.OPERATIONS, 991, seq, user, TIME + seq, seq)
+                .withTraceId("request-" + line + "-" + seq), payload);
+        var frames = replay.apply(CoreMessageCodec.encode(command), TIME + seq, seq);
+        assertThat(frames).allSatisfy(frame -> {
+            assertThat(frame.traceId()).isEqualTo(command.header().traceId());
+            assertThat(RealtimeFrameCodec.decode(RealtimeFrameCodec.encode(frame)).traceId()).isEqualTo(command.header().traceId());
+        });
+        return frames;
     }
 
     private static CoreOrderStateView order(RealtimeFrame frame) {

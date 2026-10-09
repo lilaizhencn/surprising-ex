@@ -33,7 +33,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
                          CoreResponse response, long sequence) {
         try {
             if (session == null || session.isClosing()) return;
-            byte[] bytes = new byte[com.surprising.aeron.protocol.CoreMessageCodec.encodedResponseLength(response)];
+            byte[] bytes = new byte[com.surprising.aeron.protocol.CoreMessageCodec.encodedResponseLength(header, response)];
             com.surprising.aeron.protocol.CoreMessageCodec.encodeResponse(header, response, sequence, bytes);
             responses.offer(session, new UnsafeBuffer(bytes), bytes.length, System.nanoTime());
         } finally {

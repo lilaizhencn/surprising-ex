@@ -57,6 +57,7 @@ final class CoreMatchingPhaseMetrics {
     static final class OwnerHead extends jdk.jfr.Event {
         private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(OwnerHead.class);
         public String commandType;
+        public String traceId;
         public long sequence, commandIdHigh, commandIdLow;
         public long observedNanos;
         public boolean afterPredecessor;
@@ -79,6 +80,7 @@ final class CoreMatchingPhaseMetrics {
         var header = head.request.header();
         event.sequence = head.sequence;
         event.commandType = header.messageType().name();
+        event.traceId = header.traceId().isEmpty() ? header.commandId().toString() : header.traceId();
         event.commandIdHigh = header.commandId().getMostSignificantBits();
         event.commandIdLow = header.commandId().getLeastSignificantBits();
         event.afterPredecessor = afterPredecessor;
@@ -171,6 +173,7 @@ final class CoreMatchingPhaseMetrics {
     static final class SettlementLatency extends jdk.jfr.Event {
         private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(SettlementLatency.class);
         public String commandType;
+        public String traceId;
         public long sequence;
         public int lanes;
         public long matcherToLastLaneStartNanos;
@@ -188,7 +191,9 @@ final class CoreMatchingPhaseMetrics {
         if (!SettlementLatency.TYPE.isEnabled()) return null;
         long observed = System.nanoTime();
         var event = new SettlementLatency();
-        event.commandType = pending.command().header().messageType().name();
+        var header = pending.command().header();
+        event.commandType = header.messageType().name();
+        event.traceId = header.traceId().isEmpty() ? header.commandId().toString() : header.traceId();
         event.sequence = sequence;
         event.commandIdHigh = pending.command().header().commandId().getMostSignificantBits();
         event.commandIdLow = pending.command().header().commandId().getLeastSignificantBits();
@@ -222,6 +227,7 @@ final class CoreMatchingPhaseMetrics {
         private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(CommandBoundaryLatency.class);
         public String stage;
         public String commandType;
+        public String traceId;
         public long commandIdHigh, commandIdLow;
         /** Same-JVM endpoints; never subtract these from a client JVM timestamp. */
         public long startedNanos, finishedNanos, elapsedNanos;
@@ -239,6 +245,7 @@ final class CoreMatchingPhaseMetrics {
         var event = new CommandBoundaryLatency();
         event.stage = stage;
         event.commandType = header.messageType().name();
+        event.traceId = header.traceId().isEmpty() ? header.commandId().toString() : header.traceId();
         event.commandIdHigh = header.commandId().getMostSignificantBits();
         event.commandIdLow = header.commandId().getLeastSignificantBits();
         event.startedNanos = start;

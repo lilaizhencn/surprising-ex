@@ -16,6 +16,8 @@
     <description>Gateway 和测试工具使用的 Aeron Cluster 客户端</description>
 
     <dependencies>
+        <dependency><groupId>ch.qos.logback</groupId><artifactId>logback-classic</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-product-api</artifactId>

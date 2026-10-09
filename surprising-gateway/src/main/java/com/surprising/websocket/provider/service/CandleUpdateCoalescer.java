@@ -22,7 +22,7 @@ public class CandleUpdateCoalescer {
     private final WebSocketProperties properties;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("ws-candle-coalescer-", 0).factory());
-    private final Map<SubscriptionTopic, CandleUpdatedEvent> latestPartial = new ConcurrentHashMap<>();
+    private final Map<SubscriptionTopic, SubscriptionRegistry.TimedPayload> latestPartial = new ConcurrentHashMap<>();
     private final Set<SubscriptionTopic> scheduled = ConcurrentHashMap.newKeySet();
 
     public CandleUpdateCoalescer(SubscriptionRegistry registry, WebSocketProperties properties) {
@@ -42,7 +42,7 @@ public class CandleUpdateCoalescer {
             registry.publish(topic, event, event.eventTime());
             return;
         }
-        latestPartial.put(topic, event);
+        latestPartial.put(topic, new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
         if (scheduled.add(topic)) {
             scheduler.schedule(() -> flush(topic), delayMillis(), TimeUnit.MILLISECONDS);
         }
@@ -50,9 +50,9 @@ public class CandleUpdateCoalescer {
 
     private void flush(SubscriptionTopic topic) {
         try {
-            CandleUpdatedEvent event = latestPartial.remove(topic);
+            var event = latestPartial.remove(topic);
             if (event != null) {
-                registry.publish(topic, event, event.eventTime());
+                registry.publishTimedBatch(topic, java.util.List.of(event));
             }
         } finally {
             scheduled.remove(topic);

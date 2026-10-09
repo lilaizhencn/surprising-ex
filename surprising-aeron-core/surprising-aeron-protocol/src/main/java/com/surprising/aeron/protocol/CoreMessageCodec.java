@@ -24,7 +24,7 @@ public final class CoreMessageCodec {
         if (payloadLength > MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("message payload is too large");
         }
-        return CoreProtocol.HEADER_LENGTH + payloadLength;
+        return headerLength(message.header()) + payloadLength;
     }
 
     public static int encode(CoreMessage message, byte[] destination) {
@@ -34,8 +34,16 @@ public final class CoreMessageCodec {
         }
         CoreMessageHeader header = message.header();
         encodeHeader(destination, header, message.payloadLength());
-        message.copyPayloadTo(destination, CoreProtocol.HEADER_LENGTH);
+        message.copyPayloadTo(destination, headerLength(message.header()));
         return encodedLength;
+    }
+
+    public static int headerLength(CoreMessageHeader header) {
+        return CoreProtocol.HEADER_LENGTH + (header.traceId().isEmpty() ? 0 : Short.BYTES + header.traceId().length());
+    }
+
+    public static int encodedResponseLength(CoreMessageHeader header, CoreResponse response) {
+        return Math.addExact(headerLength(header), CoreProtocol.responsePayloadLength(response));
     }
 
     public static int encodedResponseLength(CoreResponse response) {
@@ -46,13 +54,13 @@ public final class CoreMessageCodec {
                                      long committedCoreSequence, byte[] destination) {
         Objects.requireNonNull(header, "header");
         int payloadLength = CoreProtocol.responsePayloadLength(response);
-        int encodedLength = Math.addExact(CoreProtocol.HEADER_LENGTH, payloadLength);
+        int encodedLength = Math.addExact(headerLength(header), payloadLength);
         if (payloadLength > MAX_PAYLOAD_LENGTH || destination == null || destination.length < encodedLength) {
             throw new IllegalArgumentException("destination is smaller than encoded response");
         }
         encodeHeader(destination, header, payloadLength);
         CoreProtocol.encodeResponsePayload(
-                response, committedCoreSequence, destination, CoreProtocol.HEADER_LENGTH);
+                response, committedCoreSequence, destination, headerLength(header));
         return encodedLength;
     }
 
@@ -65,7 +73,7 @@ public final class CoreMessageCodec {
         CoreProtocol.putShort(destination, cursor, header.messageType().wireCode()); cursor += Short.BYTES;
         destination[cursor++] = (byte) header.source().wireCode();
         destination[cursor++] = (byte) header.route().shardCode();
-        CoreProtocol.putShort(destination, cursor, CoreProtocol.HEADER_LENGTH); cursor += Short.BYTES;
+        CoreProtocol.putShort(destination, cursor, headerLength(header)); cursor += Short.BYTES;
         CoreProtocol.putShort(destination, cursor, header.route().version()); cursor += Short.BYTES;
         CoreProtocol.putLong(destination, cursor, header.commandId().getMostSignificantBits()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.commandId().getLeastSignificantBits()); cursor += Long.BYTES;
@@ -74,7 +82,12 @@ public final class CoreMessageCodec {
         CoreProtocol.putLong(destination, cursor, header.userId()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.submittedAtEpochMillis()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.correlationId()); cursor += Long.BYTES;
-        CoreProtocol.putInt(destination, cursor, payloadLength);
+        CoreProtocol.putInt(destination, cursor, payloadLength); cursor += Integer.BYTES;
+        if (!header.traceId().isEmpty()) {
+            CoreProtocol.putShort(destination, cursor, header.traceId().length()); cursor += Short.BYTES;
+            // TraceIds only accepts ASCII; no intermediate UTF-8 array on the ingress hot path.
+            for (int i = 0; i < header.traceId().length(); i++) destination[cursor++] = (byte) header.traceId().charAt(i);
+        }
     }
 
     public static CoreMessage decode(byte[] encoded) {
@@ -97,7 +110,8 @@ public final class CoreMessageCodec {
         int shardCode = Byte.toUnsignedInt(buffer.get());
         int headerLength = Short.toUnsignedInt(buffer.getShort());
         int routeVersion = Short.toUnsignedInt(buffer.getShort());
-        if (headerLength != CoreProtocol.HEADER_LENGTH) {
+        if (headerLength != CoreProtocol.HEADER_LENGTH && (headerLength < CoreProtocol.HEADER_LENGTH + 3
+                || headerLength > CoreProtocol.HEADER_LENGTH + Short.BYTES + TraceIds.MAX_LENGTH)) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
         CoreRoute route = CoreRoute.fromWireCodes(shardCode, routeVersion);
@@ -112,12 +126,22 @@ public final class CoreMessageCodec {
                 || headerLength + payloadLength != encoded.length) {
             throw new ProtocolException("invalid payload length: " + payloadLength);
         }
+        String traceId = "";
+        if (headerLength > CoreProtocol.HEADER_LENGTH) {
+            if (buffer.remaining() < Short.BYTES) throw new ProtocolException("truncated trace id");
+            int traceLength = Short.toUnsignedInt(buffer.getShort());
+            if (traceLength < 1 || traceLength > TraceIds.MAX_LENGTH
+                    || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength)
+                throw new ProtocolException("invalid trace id header length");
+            byte[] trace = new byte[traceLength]; buffer.get(trace);
+            traceId = TraceIds.validate(new String(trace, java.nio.charset.StandardCharsets.US_ASCII));
+        }
         buffer.position(headerLength);
         byte[] payload = new byte[payloadLength];
         buffer.get(payload);
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+                submittedAtEpochMillis, correlationId, traceId);
         return CoreMessage.owned(header, payload);
     }
 }

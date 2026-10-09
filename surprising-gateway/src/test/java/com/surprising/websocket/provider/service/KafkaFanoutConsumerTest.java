@@ -108,7 +108,7 @@ class KafkaFanoutConsumerTest {
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime(), "kafka-surprising.linear-perp.price.events.v1-0-0"));
     }
 
     @Test
@@ -126,7 +126,7 @@ class KafkaFanoutConsumerTest {
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime(), "kafka-surprising.linear-perp.price.events.v1-0-0"));
     }
 
     @Test

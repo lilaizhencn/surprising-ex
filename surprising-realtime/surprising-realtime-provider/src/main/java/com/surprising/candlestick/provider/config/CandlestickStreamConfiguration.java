@@ -209,7 +209,8 @@ public class CandlestickStreamConfiguration {
         realtime.offer(new com.surprising.aeron.protocol.RealtimeFrame(
                 properties.getKafka().getProductLine(), com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,
                 0, Math.max(0, event.emittedAt().toEpochMilli()), 0, event.eventTime().toEpochMilli(),
-                0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event)));
+                0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event),
+                com.surprising.candlestick.provider.aggregation.CandleKey.traceId(properties.getKafka().getProductLine(), event)));
     }
 
     private <T> JacksonJsonSerde<T> jsonSerde(Class<T> type) {

@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Surprising diagnostic log retention
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=surprising-runtime-diagnostics.service
+
+[Install]
+WantedBy=timers.target

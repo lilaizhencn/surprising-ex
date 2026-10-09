@@ -1,6 +1,7 @@
 package com.surprising.websocket.provider.service;
 
 import com.surprising.aeron.protocol.CoreOrderBookView;
+import com.surprising.trading.api.TraceContext;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
@@ -134,14 +135,14 @@ public class SubscriptionRegistry {
         var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
         // Invocation-local: the same immutable baseline produces the same wire message.
         // Identity keys avoid hashing/comparing all levels and never conflate distinct books.
-        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
+        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, ClientConnection.TracedMessage>();
         for (ClientConnection connection : connections) {
             var previous = baselines.get(connection.id());
             if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
-            String message = encodedByBaseline.get(previous);
+            ClientConnection.TracedMessage message = encodedByBaseline.get(previous);
             if (message == null) {
                 var update = DepthUpdate.between(previous, book);
-                message = objectMapper.writeValueAsString(WsServerMessage.event(topic,
+                message = encode(WsServerMessage.event(topic,
                         new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
                 encodedByBaseline.put(previous, message);
             }
@@ -163,10 +164,9 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(payloads.size());
-        sendBatch(topic, topic, payloads, eventTime);
-        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
-            sendBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, payloads, eventTime);
-        }
+        if (!hasSubscribers(topic)) return;
+        var messages = payloads.stream().map(payload -> encode(WsServerMessage.event(topic, payload, eventTime))).toList();
+        fanout(topic, messages);
     }
 
     /** 按事件自身时间批量编码，避免同一 Kafka 批次被拆成逐条网络写入。 */
@@ -176,14 +176,14 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(events.size());
-        sendTimedBatch(topic, topic, events);
-        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
-            sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), topic, events);
-        }
+        if (!hasSubscribers(topic)) return;
+        var messages = events.stream().map(event -> encode(WsServerMessage.event(
+                topic, event.payload(), event.eventTime(), event.traceId()))).toList();
+        fanout(topic, messages);
     }
 
     public void publishUserSnapshot(com.surprising.product.api.ProductLine product,long userId,Object payload) {
-        String encoded=objectMapper.writeValueAsString(new WsServerMessage("snapshot",null,null,null,null,
+        var encoded=encode(new WsServerMessage("snapshot",null,null,null,null,
                 userId,product,payload,null,Instant.now()));
         sessionTopics.forEach((sessionId,topics)->{
             boolean subscribed=topics.stream().anyMatch(t->t.productLine()==product && t.userId()!=null && t.userId()==userId);
@@ -291,36 +291,30 @@ public class SubscriptionRegistry {
                 .register(meterRegistry);
     }
 
-    private void sendBatch(SubscriptionTopic subscription, SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
-        Set<ClientConnection> connections = subscribers.get(subscription);
-        if (connections == null || connections.isEmpty()) {
-            return;
-        }
-        List<String> messages = payloads.stream()
-                .map(payload -> objectMapper.writeValueAsString(WsServerMessage.event(topic, payload, eventTime)))
-                .toList();
-        for (ClientConnection connection : connections) {
-            boolean accepted = messages.size() == 1
-                    ? connection.send(messages.getFirst())
-                    : connection.sendBatch(messages);
-            if (!accepted) {
-                backpressureRejections.increment();
-                remove(connection.id());
-            }
+    private ClientConnection.TracedMessage encode(WsServerMessage message) {
+        return new ClientConnection.TracedMessage(objectMapper.writeValueAsString(message), message.traceId());
+    }
+
+    private boolean hasSubscribers(SubscriptionTopic topic) {
+        if (subscriberCount(topic) > 0) return true;
+        return !topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())
+                && subscriberCount(topic.withSymbol(SubscriptionTopic.WILDCARD)) > 0;
+    }
+
+    private void fanout(SubscriptionTopic topic, List<ClientConnection.TracedMessage> messages) {
+        sendEncodedBatch(topic, messages);
+        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
+            sendEncodedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), messages);
         }
     }
 
-    private void sendTimedBatch(SubscriptionTopic subscription, SubscriptionTopic topic, List<TimedPayload> events) {
+    private void sendEncodedBatch(SubscriptionTopic subscription, List<ClientConnection.TracedMessage> messages) {
         Set<ClientConnection> connections = subscribers.get(subscription);
-        if (connections == null || connections.isEmpty()) {
-            return;
-        }
-        List<String> messages = events.stream()
-                .map(event -> objectMapper.writeValueAsString(
-                        WsServerMessage.event(topic, event.payload(), event.eventTime())))
-                .toList();
+        if (connections == null || connections.isEmpty()) return;
         for (ClientConnection connection : connections) {
-            if (!connection.sendBatch(messages)) {
+            boolean accepted = messages.size() == 1
+                    ? connection.send(messages.getFirst()) : connection.sendTracedBatch(messages);
+            if (!accepted) {
                 backpressureRejections.increment();
                 remove(connection.id());
             }
@@ -342,7 +336,13 @@ public class SubscriptionRegistry {
             int subscriberCount) {
     }
 
-    public record TimedPayload(Object payload, Instant eventTime) {
+    public record TimedPayload(Object payload, Instant eventTime, String traceId) {
+        public TimedPayload(Object payload, Instant eventTime) {
+            this(payload, eventTime, TraceContext.current());
+        }
+        public TimedPayload {
+            traceId = TraceContext.normalizeOrCreate(traceId);
+        }
     }
     public WebSocketAdminMetrics metrics(String adminUserId, String adminUsername) {
         return new WebSocketAdminMetrics(java.time.Instant.now(), adminUserId, adminUsername,

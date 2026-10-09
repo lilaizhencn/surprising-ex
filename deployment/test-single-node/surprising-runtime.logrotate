@@ -1,0 +1,17 @@
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/*-gc.log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/core-node[0-9].log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/gateway.log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/price.log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/realtime.log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/derivatives-lifecycle.log
+/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/logs/maker.log {
+  daily
+  maxsize 20M
+  rotate 2
+  maxage 2
+  missingok
+  notifempty
+  compress
+  copytruncate
+  su root root
+}

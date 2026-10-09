@@ -429,7 +429,7 @@ public class ClusteredBatchTradingBenchmark {
                                      CoreResponse response, long committedSequence) {
             try {
                 if (target == null || target.isClosing()) return;
-                int length = CoreMessageCodec.encodedResponseLength(response);
+                int length = CoreMessageCodec.encodedResponseLength(responseHeader, response);
                 if (responseScratch.length < length) {
                     responseScratch = new byte[length];
                     responseBuffer.wrap(responseScratch);

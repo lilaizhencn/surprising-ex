@@ -5,6 +5,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class CoreMatchingPhaseMetricsTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.surprising.product.api.ProductLine.class)
+    void jfrCommandBoundaryRetainsProtocolRoot(com.surprising.product.api.ProductLine product) throws Exception {
+        var path = java.nio.file.Files.createTempFile("core-trace-", ".jfr");
+        try (var recording = new jdk.jfr.Recording()) {
+            recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
+            recording.start();
+            var header = com.surprising.aeron.protocol.CoreMessageHeader.query(
+                    com.surprising.aeron.protocol.CoreMessageType.STATE_HASH_QUERY, java.util.UUID.randomUUID(), product,
+                    com.surprising.aeron.protocol.CommandSource.GATEWAY, 1, 1, 7, 1, 1).withTraceId("request-core-1");
+            CoreMatchingPhaseMetrics.recordBoundary("query", header, System.nanoTime());
+            recording.stop(); recording.dump(path);
+            var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
+            assertThat(events).hasSize(1);
+            assertThat(events.getFirst().getString("traceId")).isEqualTo("request-core-1");
+            assertThat(events.getFirst().getString("stage")).isEqualTo("query");
+        } finally { java.nio.file.Files.deleteIfExists(path); }
+    }
+
     @Test
     void phaseReportsKeepIndependentCountsAndResetBetweenIntervals() {
         var metrics = new CoreMatchingPhaseMetrics();

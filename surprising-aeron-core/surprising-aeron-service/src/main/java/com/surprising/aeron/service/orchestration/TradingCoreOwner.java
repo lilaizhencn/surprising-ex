@@ -10,7 +10,6 @@ import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.aeron.service.orchestration.realtime.TradingRealtimeBoundary;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -190,7 +189,7 @@ public final class TradingCoreOwner {
                     CoreMatchingPhaseMetrics.recordBoundary("ingressToControl", next.command.header(), next.queuedNanos);
                     commandPipeline.beginControl(next);
                     state.assertClusterCallbackComplete();
-                    beginCapture(next.position, next.timestamp);
+                    beginCapture(next.position, next.timestamp, next.command.header());
                     commandPipeline.startProgressDeadline();
                     commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp, next.position,
                             window.decodedIfPresent(next.command), false, next.fingerprint));
@@ -244,15 +243,19 @@ public final class TradingCoreOwner {
     }
 
     /** 在命令开始改变业务状态前建立实时事件捕获边界。 */
-    private void beginCapture(long position, long timestamp) {
-        realtimeBoundary.beginCapture(state, position, timestamp);
+    private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
+        log.info("core.start traceId={} commandId={} type={} productLine={} logPosition={}",
+                header.traceId().isEmpty() ? header.commandId() : header.traceId(), header.commandId(),
+                header.messageType(), productLine, position);
+        realtimeBoundary.beginCapture(state, position, timestamp,
+                header.traceId().isEmpty() ? header.commandId().toString() : header.traceId());
     }
 
     /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
     private void beginCommandCommit() {
         commandPipeline.beginHeadCommit();
         var last = commandPipeline.committingHead();
-        beginCapture(last.position, last.timestamp);
+        beginCapture(last.position, last.timestamp, last.request.header());
         commandPipeline.startProgressDeadline();
     }
 
@@ -298,6 +301,7 @@ public final class TradingCoreOwner {
         long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (window.size() == 1) state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, last.position);
+        traceCommitted(last.request, last.response, last.position);
         CoreMatchingPhaseMetrics.recordBoundary("ownerRealtimePublication", timingHeader, publicationStart);
         long retirementStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
@@ -335,6 +339,7 @@ public final class TradingCoreOwner {
         }
         state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, activeControl.position);
+        traceCommitted(request, commandPipeline.controlResponse(), activeControl.position);
         if (activeControl.session != null) {
             offerResponse(activeControl.session, request, commandPipeline.controlResponse());
         }
@@ -343,6 +348,14 @@ public final class TradingCoreOwner {
         commandPipeline.pendingIngress().remove();
         commandPipeline.recordControlProgress();
         return true;
+    }
+
+    private void traceCommitted(CoreMessage request, CoreResponse response, long position) {
+        var header = request.header();
+        log.info("core.end traceId={} commandId={} type={} productLine={} logPosition={} coreSequence={} status={} result={}",
+                header.traceId().isEmpty() ? header.commandId() : header.traceId(), header.commandId(),
+                header.messageType(), productLine, position, state.committedCoreSequence(),
+                response.commandStatus(), response.resultCode());
     }
 
     /** 检查异步命令是否被中断或超过允许的等待时间。 */

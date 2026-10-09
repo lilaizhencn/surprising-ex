@@ -40,7 +40,8 @@ public final class CoreMessageFlyweightDecoder {
         int shardCode = getByte(buffer, cursor += Byte.BYTES, end);
         int headerLength = Short.toUnsignedInt(getShort(buffer, cursor += Byte.BYTES, end));
         int routeVersion = Short.toUnsignedInt(getShort(buffer, cursor += Short.BYTES, end));
-        if (headerLength != CoreProtocol.HEADER_LENGTH) {
+        if (headerLength != CoreProtocol.HEADER_LENGTH && (headerLength < CoreProtocol.HEADER_LENGTH + 3
+                || headerLength > CoreProtocol.HEADER_LENGTH + Short.BYTES + com.surprising.aeron.protocol.TraceIds.MAX_LENGTH)) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
         CoreRoute route = CoreRoute.fromWireCodes(shardCode, routeVersion);
@@ -56,11 +57,24 @@ public final class CoreMessageFlyweightDecoder {
                 || headerLength + payloadLength != length) {
             throw new ProtocolException("invalid payload length: " + payloadLength);
         }
+        String traceId = "";
+        if (headerLength > CoreProtocol.HEADER_LENGTH) {
+            cursor += Integer.BYTES;
+            int traceLength = Short.toUnsignedInt(getShort(buffer, cursor, end));
+            cursor += Short.BYTES;
+            if (traceLength < 1 || traceLength > com.surprising.aeron.protocol.TraceIds.MAX_LENGTH
+                    || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength)
+                throw new ProtocolException("invalid trace id header length");
+            check(cursor, traceLength, end);
+            byte[] trace = new byte[traceLength]; buffer.getBytes(cursor, trace);
+            traceId = com.surprising.aeron.protocol.TraceIds.validate(
+                    new String(trace, java.nio.charset.StandardCharsets.US_ASCII));
+        }
         byte[] payload = new byte[payloadLength];
         buffer.getBytes(offset + headerLength, payload);
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+                submittedAtEpochMillis, correlationId, traceId);
         return CoreMessage.owned(header, payload);
     }
 

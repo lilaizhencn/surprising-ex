@@ -117,6 +117,13 @@ public final class RealtimeWebSocketBridge
     }
 
     private void receive(RealtimeFrame f) {
+        String id = f.traceId().isEmpty() ? "core-" + f.productLine() + "-" + f.sequence() : f.traceId();
+        try (var trace = com.surprising.trading.api.TraceContext.open(id)) {
+            receiveTraced(f);
+        }
+    }
+
+    private void receiveTraced(RealtimeFrame f) {
         if (f.kind() == RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE) {
             registry.publishUserSnapshot(
                     f.productLine(),

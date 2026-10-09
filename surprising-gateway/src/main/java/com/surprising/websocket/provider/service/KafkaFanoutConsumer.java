@@ -14,6 +14,8 @@ import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.kafka.KafkaTraceAutoConfiguration;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
@@ -74,13 +76,13 @@ public class KafkaFanoutConsumer {
     }
 
     public void onCandle(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), candleTopic(), "candle update");
             CandleUpdatedEvent event = objectMapper.readValue(record.value(), CandleUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "candle update");
             candleUpdateCoalescer.publish(event, fanoutProductLine());
         } catch (Exception ex) {
-            log.error("Failed to fanout candle update: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout candle update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout candle update", ex);
         }
     }
@@ -96,12 +98,12 @@ public class KafkaFanoutConsumer {
     }
 
     public void onPriceEvent(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
             dispatchPriceEvent(record, grouped);
             publishBatches(grouped);
         } catch (Exception ex) {
-            log.error("Failed to fanout price event: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout price event: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout price event", ex);
         }
     }
@@ -113,11 +115,12 @@ public class KafkaFanoutConsumer {
     public void onPriceEventBatch(List<ConsumerRecord<String, String>> records) {
         Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
         for (ConsumerRecord<String, String> record : records) {
-            try {
+            try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
                 dispatchPriceEvent(record, grouped);
             } catch (Exception ex) {
                 log.warn("Dropped invalid price event topic={} partition={} offset={}: {}",
-                        record.topic(), record.partition(), record.offset(), ex.getMessage());
+                        record.topic(), record.partition(), record.offset(), "traceId=" + KafkaTraceAutoConfiguration.traceId(record)
+                                + " error=" + ex.getClass().getSimpleName());
             }
         }
         publishBatches(grouped);
@@ -169,13 +172,13 @@ public class KafkaFanoutConsumer {
     }
 
     public void onFundingRate(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
             PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "funding rate");
             registry.publish(topic(WsChannel.FUNDING_RATE, event.instrumentId(), null), event, event.eventTime());
         } catch (Exception ex) {
-            log.error("Failed to fanout funding rate: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout funding rate: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout funding rate", ex);
         }
     }
@@ -189,10 +192,12 @@ public class KafkaFanoutConsumer {
         try {
             Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
             for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
-                PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "funding rate");
-                addBatch(grouped, topic(WsChannel.FUNDING_RATE, event.instrumentId(), null), event, event.eventTime());
+                try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
+                    requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+                    PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
+                    KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "funding rate");
+                    addBatch(grouped, topic(WsChannel.FUNDING_RATE, event.instrumentId(), null), event, event.eventTime());
+                }
             }
             publishBatches(grouped);
         } catch (Exception ex) {
@@ -206,14 +211,14 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderEvent(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), orderEventsTopic(), "order event");
             OrderEvent event = objectMapper.readValue(record.value(), OrderEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "order event");
             registry.publish(topic(WsChannel.ORDERS, event.instrumentId(), event.userId()), event, event.eventTime());
             publishExecutionReport(fromOrderEvent(event));
         } catch (Exception ex) {
-            log.error("Failed to fanout order event: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout order event: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout order event", ex);
         }
     }
@@ -223,7 +228,7 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onTriggerOrderEvent(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), triggerOrderEventsTopic(), "trigger order event");
             TriggerOrderUpdatedEvent event = objectMapper.readValue(record.value(), TriggerOrderUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(
@@ -235,7 +240,7 @@ public class KafkaFanoutConsumer {
             registry.publish(topic(WsChannel.TRIGGER_ORDERS, event.order().instrumentId(), event.order().userId()),
                     event, event.eventTime());
         } catch (Exception ex) {
-            log.error("Failed to fanout trigger order event: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout trigger order event: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout trigger order event", ex);
         }
     }
@@ -245,13 +250,13 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPosition(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), positionEventsTopic(), "position update");
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
             requireMatchingPositionKey(record.key(), event);
             registry.publish(topic(WsChannel.POSITIONS, event.instrumentId(), event.userId()), event, event.eventTime());
         } catch (Exception ex) {
-            log.error("Failed to fanout position update: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout position update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout position update", ex);
         }
     }
@@ -261,14 +266,14 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onAccountRisk(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), accountRiskEventsTopic(), "account risk update");
             RiskAccountUpdatedEvent event = objectMapper.readValue(record.value(), RiskAccountUpdatedEvent.class);
             requireMatchingAccountRiskKey(record.key(), event);
             registry.publish(topic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, event.userId()),
                     event, event.eventTime());
         } catch (Exception ex) {
-            log.error("Failed to fanout account risk update: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout account risk update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout account risk update", ex);
         }
     }
@@ -278,13 +283,13 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPositionRisk(ConsumerRecord<String, String> record) {
-        try {
+        try (var trace = TraceContext.open(KafkaTraceAutoConfiguration.traceId(record))) {
             requireCurrentProductTopic(record.topic(), positionRiskEventsTopic(), "position risk update");
             RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "position risk update");
             registry.publish(topic(WsChannel.POSITION_RISK, event.instrumentId(), event.userId()), event, event.eventTime());
         } catch (Exception ex) {
-            log.error("Failed to fanout position risk update: {}", ex.getMessage(), ex);
+            log.error("traceId=" + KafkaTraceAutoConfiguration.traceId(record) + " Failed to fanout position risk update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout position risk update", ex);
         }
     }

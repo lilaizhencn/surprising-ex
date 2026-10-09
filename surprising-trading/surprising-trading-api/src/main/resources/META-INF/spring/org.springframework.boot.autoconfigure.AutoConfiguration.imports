@@ -1,0 +1,2 @@
+com.surprising.trading.api.http.HttpTraceAutoConfiguration
+com.surprising.trading.api.kafka.KafkaTraceAutoConfiguration

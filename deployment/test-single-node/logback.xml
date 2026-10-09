@@ -1,0 +1,25 @@
+<configuration scan="true" scanPeriod="60 seconds">
+  <property name="LOG_DIR" value="${surprising.log.directory:-logs}"/>
+  <property name="SERVICE" value="${surprising.log.service:-application}"/>
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/${SERVICE}-application.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/${SERVICE}-application.%d{yyyy-MM-dd,UTC}.%i.log.gz</fileNamePattern>
+      <maxFileSize>20MB</maxFileSize>
+      <maxHistory>2</maxHistory>
+      <totalSizeCap>2GB</totalSizeCap>
+      <cleanHistoryOnStart>true</cleanHistoryOnStart>
+    </rollingPolicy>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z',UTC} %-5level [%thread] %logger{48} %replace(%X{traceId}){'^(.+)$','traceId=$1 '} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  <!-- launcher 捕获 stderr：仅保留 WARN/ERROR，避免重复保存高频 INFO。 -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter"><level>WARN</level></filter>
+    <encoder><pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z',UTC} %-5level [%thread] %logger{48} %replace(%X{traceId}){'^(.+)$','traceId=$1 '} - %msg%n</pattern></encoder>
+  </appender>
+  <logger name="org.apache.kafka" level="WARN"/>
+  <logger name="org.springframework.kafka" level="WARN"/>
+  <root level="INFO"><appender-ref ref="FILE"/><appender-ref ref="CONSOLE"/></root>
+</configuration>

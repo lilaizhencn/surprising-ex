@@ -14,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class ClientWebSocketHandler extends TextWebSocketHandler {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClientWebSocketHandler.class);
 
     private RealtimeWebSocketBridge realtime;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
@@ -46,10 +47,17 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        try (var trace = com.surprising.trading.api.TraceContext.open(com.surprising.trading.api.TraceContext.newTraceId())) {
+            handleTracedMessage(session, message);
+        }
+    }
+
+    private void handleTracedMessage(WebSocketSession session, TextMessage message) {
         ClientConnection connection = connection(session);
         try {
             WsClientCommand command = objectMapper.readValue(message.getPayload(), WsClientCommand.class);
             String op = command.op() == null ? "" : command.op().trim().toLowerCase();
+            log.info("ws.command.start session={} op={}", session.getId(), op);
             switch (op) {
                 case "authenticate" -> authenticate(connection, command);
                 case "subscribe" -> subscribe(connection, command);
@@ -57,7 +65,9 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
                 case "ping" -> connection.send(objectMapper.writeValueAsString(WsServerMessage.pong(command.id())));
                 default -> throw new IllegalArgumentException("unsupported websocket op: " + command.op());
             }
+            log.info("ws.command.end session={} op={} result=OK", session.getId(), op);
         } catch (Exception ex) {
+            log.warn("ws.command.failed session={} error={}", session.getId(), ex.getClass().getSimpleName());
             connection.send(objectMapper.writeValueAsString(WsServerMessage.error(null, ex.getMessage())));
         }
     }

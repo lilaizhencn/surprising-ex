@@ -52,6 +52,13 @@ export PRICE_INDEX_REQUIRED_INSTRUMENT_IDS="${PRICE_INDEX_REQUIRED_INSTRUMENT_ID
 export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS="${PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS:-}"
 export JVM_XMS="${JVM_XMS:-512m}"
 export JVM_XMX="${JVM_XMX:-1g}"
+# 持续录制使用低开销 default；临时深入采样再通过 jcmd 开启限时 profile。
+export CORE_LATENCY_DIAGNOSTICS="${CORE_LATENCY_DIAGNOSTICS:-true}"
+export JFR_ENABLED="${JFR_ENABLED:-true}"
+export JFR_SETTINGS="${JFR_SETTINGS:-default}"
+export JFR_MAX_SIZE="${JFR_MAX_SIZE:-64m}"
+export JFR_MAX_AGE="${JFR_MAX_AGE:-30m}"
+export LOGGING_CONFIG="${LOGGING_CONFIG:-file:$ROOT_DIR/deployment/test-single-node/logback.xml}"
 export SERVICE_HEALTH_TIMEOUT_SECONDS="${SERVICE_HEALTH_TIMEOUT_SECONDS:-300}"
 
 exec "$ROOT_DIR/scripts/start-product-line-providers.sh" "$@"

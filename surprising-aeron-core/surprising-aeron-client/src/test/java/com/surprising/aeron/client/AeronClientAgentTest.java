@@ -27,7 +27,11 @@ class AeronClientAgentTest {
         try (var recording = new jdk.jfr.Recording()) {
             recording.enable(AeronClientPool.ClientTransportBoundary.class); recording.start();
             try (var pool = pool(Duration.ofSeconds(5), () -> new AeronClientPool.Session() {
-                public long offer(CoreMessage m) { responses.add(m.header().correlationId()); return 1; }
+                public long offer(CoreMessage m) {
+                    assertThat(m.header().traceId()).isEqualTo("request-client-1");
+                    assertThat(org.slf4j.MDC.get("traceId")).isNull();
+                    responses.add(m.header().correlationId()); return 1;
+                }
                 public int pollEgress(int limit) { return 0; }
                 public CoreResponse takeResponse(long id) {
                     return responses.remove(id) ? new CoreResponse(ResponseStatus.APPLIED, 1) : null;
@@ -36,8 +40,12 @@ class AeronClientAgentTest {
                 public boolean keepAlive() { return true; }
                 public void close() {}
             })) {
-                pool.commandAsync(CoreMessageType.CANCEL_ORDER_BATCH, new UUID(0,64), 1, new byte[0])
-                        .get(2, TimeUnit.SECONDS);
+                org.slf4j.MDC.put("traceId", "request-client-1");
+                try {
+                    var future = pool.commandAsync(CoreMessageType.CANCEL_ORDER_BATCH, new UUID(0,64), 1, new byte[0]);
+                    org.slf4j.MDC.remove("traceId");
+                    future.get(2, TimeUnit.SECONDS);
+                } finally { org.slf4j.MDC.remove("traceId"); }
             }
             recording.stop(); recording.dump(path);
             var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
@@ -47,6 +55,7 @@ class AeronClientAgentTest {
             for (var e : events) {
                 assertThat(e.getLong("commandIdHigh")).isZero();
                 assertThat(e.getLong("commandIdLow")).isEqualTo(64);
+                assertThat(e.getString("traceId")).isEqualTo("request-client-1");
             }
         } finally { java.nio.file.Files.deleteIfExists(path); }
     }

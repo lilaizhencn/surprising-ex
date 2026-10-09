@@ -64,7 +64,10 @@ public final class RealtimeJsonPublisher implements AutoCloseable {
                                     0,
                                     instrumentId,
                                     entity,
-                                    mapper.writeValueAsBytes(payload))));
+                                    mapper.writeValueAsBytes(payload),
+                                    org.slf4j.MDC.get("traceId") == null
+                                            ? "price-" + product + "-" + kind + "-" + instrumentId + "-" + sequence
+                                            : org.slf4j.MDC.get("traceId"))));
             outbox.commit();
         } catch (RuntimeException failure) {
             outbox.abort();

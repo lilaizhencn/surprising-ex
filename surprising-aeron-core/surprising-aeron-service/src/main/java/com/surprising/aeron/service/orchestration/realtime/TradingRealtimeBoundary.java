@@ -87,10 +87,10 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 在一条命令开始修改实时导出状态时建立捕获边界。 */
-    public void beginCapture(TradingCoreRuntime state, long position, long timestamp) {
+    public void beginCapture(TradingCoreRuntime state, long position, long timestamp, String traceId) {
         if (capture == null || !leader) return;
         try {
-            capture.begin(position, timestamp, 0, state.realtimeExportSequence());
+            capture.begin(position, timestamp, 0, state.realtimeExportSequence(), traceId);
         } catch (RuntimeException failure) {
             capture.failed();
         }

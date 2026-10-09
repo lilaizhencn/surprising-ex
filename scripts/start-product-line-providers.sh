@@ -23,9 +23,12 @@ JVM_CORE_XMX="${JVM_CORE_XMX:-$JVM_XMX}"
 JVM_GATEWAY_XMX="${JVM_GATEWAY_XMX:-$JVM_XMX}"
 JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-$JVM_XMX}"
 JVM_GC="${JVM_GC:-ZGC}"
+CORE_LATENCY_DIAGNOSTICS="${CORE_LATENCY_DIAGNOSTICS:-false}"
 JFR_ENABLED="${JFR_ENABLED:-false}"
 JFR_SETTINGS="${JFR_SETTINGS:-profile}"
-JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-256}"
+JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-128}"
+JFR_MAX_SIZE="${JFR_MAX_SIZE:-64m}"
+JFR_MAX_AGE="${JFR_MAX_AGE:-30m}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-postgres}"
@@ -82,8 +85,12 @@ case "$CORE_ONLY" in true|false) ;; *) fail 'CORE_ONLY must be true or false' ;;
 [[ "$CORE_ONLY" != true || "$ACTION" != test ]] || fail 'CORE_ONLY does not run the full HTTP lifecycle test'
 case "$BUILD_CHANGED" in true|false) ;; *) fail 'BUILD_CHANGED must be true or false' ;; esac
 case "$JVM_GC" in ZGC|G1) ;; *) fail 'JVM_GC must be ZGC or G1' ;; esac
+case "$CORE_LATENCY_DIAGNOSTICS" in true|false) ;; *) fail 'CORE_LATENCY_DIAGNOSTICS must be true or false' ;; esac
 case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false' ;; esac
 case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
+[[ "$JFR_STACK_DEPTH" =~ ^[0-9]+$ ]] && (( JFR_STACK_DEPTH >= 1 && JFR_STACK_DEPTH <= 2048 )) || fail 'JFR_STACK_DEPTH must be in [1,2048]'
+[[ "$JFR_MAX_SIZE" =~ ^[1-9][0-9]*[mMgG]$ ]] || fail 'JFR_MAX_SIZE must be a positive MiB/GiB size'
+[[ "$JFR_MAX_AGE" =~ ^[1-9][0-9]*[smhd]$ ]] || fail 'JFR_MAX_AGE must be a positive duration'
 case "$POSTGRES_MODE" in auto|docker|native) ;; *) fail 'POSTGRES_MODE must be auto, docker or native' ;; esac
 case "$REALTIME_ENABLED" in true|false) ;; *) fail 'REALTIME_ENABLED must be true or false' ;; esac
 case "$TRADE_EXPORT_ENABLED" in true|false) ;; *) fail 'TRADE_EXPORT_ENABLED must be true or false' ;; esac
@@ -287,22 +294,30 @@ java_args_for() {
     "-Xms$JVM_XMS"
     "-Xmx$service_xmx"
     "-Dsurprising.launcher.identity=$RUN_ID/$service"
+    "-Dsurprising.log.directory=$LOG_DIR"
+    "-Dsurprising.log.service=$service"
     "-XX:+AlwaysPreTouch"
     "--enable-native-access=ALL-UNNAMED"
     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
     "--add-opens=java.base/java.util.zip=ALL-UNNAMED"
-    "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=5,filesize=100M"
+    "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=5,filesize=20M"
   )
   if [[ "$JVM_GC" == ZGC ]]; then
     JVM_ARGS+=("-XX:+UseZGC")
   else
     JVM_ARGS+=("-XX:+UseG1GC")
   fi
-  if [[ "$JFR_ENABLED" == true ]]; then
+  if [[ "$service" == core-node* ]]; then
+    JVM_ARGS+=("-Dcore.settlementLatencyDiagnostics=$CORE_LATENCY_DIAGNOSTICS")
+  fi
+  if [[ -n "${LOGGING_CONFIG:-}" && "$service" != core-probe ]]; then
+    JVM_ARGS+=("-Dlogback.configurationFile=${LOGGING_CONFIG#file:}")
+  fi
+  if [[ "$JFR_ENABLED" == true && "$service" != core-probe ]]; then
     JVM_ARGS+=(
       "-XX:FlightRecorderOptions=stackdepth=$JFR_STACK_DEPTH"
-      "-XX:StartFlightRecording=filename=$JFR_DIR/$service.jfr,settings=$JFR_SETTINGS,dumponexit=true"
+      "-XX:StartFlightRecording=name=surprising,filename=$JFR_DIR/$service-$(date -u +%Y%m%dT%H%M%SZ).jfr,settings=$JFR_SETTINGS,maxsize=$JFR_MAX_SIZE,maxage=$JFR_MAX_AGE,dumponexit=true"
     )
   fi
 }

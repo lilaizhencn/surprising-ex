@@ -29,6 +29,21 @@ import tools.jackson.databind.ObjectMapper;
 class ClientConnectionIsolationTest {
 
     @Test
+    void writerUsesEachQueuedRootAndDoesNotChangeCallerContext() throws Exception {
+        var session = new ControlledSession("traced-writer", false, 2);
+        try (var scope = com.surprising.trading.api.TraceContext.open("caller");
+             var connection = new ClientConnection(session, 1001L, 8, Duration.ofSeconds(1))) {
+            assertThat(connection.sendTracedBatch(List.of(
+                    new ClientConnection.TracedMessage("one", "root-1"),
+                    new ClientConnection.TracedMessage("two", "root-2")))).isTrue();
+            assertThat(session.expectedMessages.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(session.traceIds).containsExactly("root-1", "root-2");
+            assertThat(com.surprising.trading.api.TraceContext.current()).isEqualTo("caller");
+        }
+        assertThat(com.surprising.trading.api.TraceContext.current()).isNull();
+    }
+
+    @Test
     void laterSendGetsItsOwnDeadline() throws Exception {
         var session = new ControlledSession("second-send", 1, 1);
         try (var connection = new ClientConnection(session, 1001L, 8, Duration.ofMillis(600))) {
@@ -130,6 +145,7 @@ class ClientConnectionIsolationTest {
         private final CountDownLatch closed = new CountDownLatch(1);
         private final CountDownLatch releaseFirstSend = new CountDownLatch(1);
         private final List<String> messages = new CopyOnWriteArrayList<>();
+        private final List<String> traceIds = new CopyOnWriteArrayList<>();
         private volatile boolean open = true;
         private volatile CloseStatus closeStatus;
         private int sendCount;
@@ -228,6 +244,7 @@ class ClientConnectionIsolationTest {
             }
             if (open) {
                 messages.add(((TextMessage) message).getPayload());
+                traceIds.add(com.surprising.trading.api.TraceContext.current());
                 expectedMessages.countDown();
             }
         }

@@ -37,6 +37,7 @@ public final class RealtimeStateCapture {
 
     private long sequence, timestamp, snapshotId;
     private int ordinal;
+    private String traceId;
     private long failures;
     private long exportSequence;
     private long previousExportSequence;
@@ -53,6 +54,12 @@ public final class RealtimeStateCapture {
     }
 
     public void begin(long position, long time, long snapshot, long previousExportSequence) {
+        begin(position, time, snapshot, previousExportSequence,
+                (snapshot == 0 ? "core-" : "snapshot-") + product.name() + "-" + (snapshot == 0 ? position : snapshot));
+    }
+
+    public void begin(long position, long time, long snapshot, long previousExportSequence, String traceId) {
+        this.traceId = TraceIds.validate(traceId);
         this.previousExportSequence = previousExportSequence;
         this.exportSequence = previousExportSequence;
         sequence = position;
@@ -127,7 +134,7 @@ public final class RealtimeStateCapture {
                                 snapshotId,
                                 instrumentId,
                                 key,
-                                payload));
+                                payload, traceId));
     }
 
     public void snapshot(long userId, RealtimeUserSnapshot snapshot, long exportSequence) {
@@ -377,7 +384,7 @@ public final class RealtimeStateCapture {
 
     public void order(CoreOrderStateView o) {
         if (!active()) return;
-        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId));
+        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId, traceId));
     }
 
     public void trigger(CoreTriggerOrderState t) {

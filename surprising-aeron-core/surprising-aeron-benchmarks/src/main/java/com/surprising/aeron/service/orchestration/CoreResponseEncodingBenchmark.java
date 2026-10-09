@@ -129,7 +129,7 @@ public class CoreResponseEncodingBenchmark {
             encodedData = data;
             response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     41, data);
-            destination = new byte[CoreMessageCodec.encodedResponseLength(response)];
+            destination = new byte[CoreMessageCodec.encodedResponseLength(header, response)];
             committedCoreSequence = 53;
         }
     }

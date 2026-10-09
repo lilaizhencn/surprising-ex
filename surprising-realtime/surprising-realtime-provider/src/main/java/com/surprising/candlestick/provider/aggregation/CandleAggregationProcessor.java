@@ -79,6 +79,13 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
      */
     @Override
     public void process(Record<String, PublicTradeEvent> record) {
+        if (record.value() == null) return;
+        try (var trace = com.surprising.trading.api.TraceContext.open(record.value().traceId())) {
+            processTraced(record);
+        }
+    }
+
+    private void processTraced(Record<String, PublicTradeEvent> record) {
         PublicTradeEvent publicTrade = record.value();
         if (publicTrade == null) {
             return;
@@ -125,6 +132,8 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
 
         CandleSnapshot snapshot = accumulator.snapshot(now, partition, offset);
         dirtyStore.put(candleKey, snapshot);
+        log.info("trade.candle.applied tradeId={} tradeSequence={} candleTraceId={}", trade.tradeId(),
+                trade.sequence(), CandleKey.traceId(properties.getKafka().getProductLine(), instrumentId, period.code(), openTime));
         if (closedThrough != null && snapshot.getCloseTime().toEpochMilli() <= closedThrough) {
             // Publish the replacement only after PostgreSQL accepts it. Otherwise the
             // higher-period consumer can observe a revision before its minute is durable.
@@ -135,8 +144,15 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         if (hotCache != null) {
             hotCache.put(snapshot.toUpdatedEvent(now));
         }
-        context.forward(new Record<>(instrumentId, snapshot.toUpdatedEvent(now), record.timestamp()));
+        forwardCandle(snapshot.toUpdatedEvent(now), record.timestamp());
         rememberTrade(instrumentId, trade);
+    }
+
+    private void forwardCandle(CandleUpdatedEvent event, long timestamp) {
+        String id = CandleKey.traceId(properties.getKafka().getProductLine(), event);
+        var headers = new org.apache.kafka.common.header.internals.RecordHeaders();
+        headers.add("X-Trace-Id", id.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        context.forward(new Record<>(event.instrumentId(), event, timestamp, headers));
     }
 
     private void rememberTrade(String instrumentId, TradeEvent trade) {
@@ -221,7 +237,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
             if (hotCache != null) {
                 hotCache.put(event);
             }
-            context.forward(new Record<>(snapshot.getInstrumentId(), event, emittedAt.toEpochMilli()));
+            forwardCandle(event, emittedAt.toEpochMilli());
             dirtyStore.delete(key);
         }
         batch.clear();

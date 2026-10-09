@@ -190,16 +190,20 @@ public class MarkPriceService {
         long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, instrumentId);
         MarkPriceEvent event = markPriceCalculator.calculate(instrumentId, sequence, index, book, trade,
                 fundingRates.get(instrumentId), basisAverage, encoding, now);
-        latestMarkPriceCache.update(event);
-        if (corePublisher != null) {
-            corePublisher.publish(event);
+        try (var trace = com.surprising.trading.api.TraceContext.open(
+                "price-" + properties.getKafka().getProductLine() + "-MARK-" + instrumentId + "-" + sequence)) {
+            latestMarkPriceCache.update(event);
+            log.info("mark.calculated instrumentId={} indexSequence={} tradeSequence={}", instrumentId,
+                    index.sequence(), trade == null ? null : trade.sequence());
+            if (corePublisher != null) corePublisher.publish(event);
+            MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
+                    fundingRates.get(instrumentId), basisAverage,
+                    properties.getCalculation().getBasisWindow().toSeconds(), now);
+            kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
+            if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
+                    event.sequence(), event.eventTime(), event);
         }
-        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
-                fundingRates.get(instrumentId), basisAverage,
-                properties.getCalculation().getBasisWindow().toSeconds(), now);
-        kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
-        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
         return true;
     }
 

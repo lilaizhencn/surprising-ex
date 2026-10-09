@@ -55,6 +55,8 @@ class MarketMakerTraceConfigurationTest {
 
         assertThat(template.headers())
                 .containsEntry("X-Product-Line", java.util.List.of("LINEAR_DELIVERY"));
+        assertThat(TraceContext.current()).isNull();
+        assertThat(template.headers().get(TraceContext.TRACE_ID_HEADER)).hasSize(1);
     }
 
     @Test

@@ -99,7 +99,7 @@ public final class ClusterServiceEgress {
 
     void publishResponse(TradingCoreOwner processor, ClientSession session, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
-        int length = CoreMessageCodec.encodedResponseLength(response);
+        int length = CoreMessageCodec.encodedResponseLength(header, response);
         if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
             outputOverflow = true;
             processor.releaseResponse(response);

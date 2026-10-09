@@ -16,12 +16,25 @@ public record CoreMessageHeader(
         long sourceSequence,
         long userId,
         long submittedAtEpochMillis,
-        long correlationId) {
+        long correlationId, String traceId) {
+
+    public CoreMessageHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
+            UUID commandId, ProductLine productLine, CoreRoute route, CommandSource source,
+            long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis, long correlationId) {
+        this(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId,
+                sourceSequence, userId, submittedAtEpochMillis, correlationId, "");
+    }
+
+    public CoreMessageHeader withTraceId(String id) {
+        return new CoreMessageHeader(schemaVersion, kind, messageType, commandId, productLine, route,
+                source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, id);
+    }
 
     public CoreMessageHeader {
         if (schemaVersion <= 0) {
             throw new IllegalArgumentException("schemaVersion must be positive");
         }
+        traceId = TraceIds.validate(traceId);
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(messageType, "messageType");
         Objects.requireNonNull(commandId, "commandId");
@@ -72,7 +85,7 @@ public record CoreMessageHeader(
     public CoreMessageHeader response(CoreMessageType responseType) {
         return new CoreMessageHeader(schemaVersion, WireMessageKind.RESPONSE, responseType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+                submittedAtEpochMillis, correlationId, traceId);
     }
 
 }

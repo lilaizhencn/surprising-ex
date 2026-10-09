@@ -1,0 +1,7 @@
+[Unit]
+Description=Rotate Surprising runtime diagnostics and retain at most two days
+
+[Service]
+Type=oneshot
+ExecStart=/opt/surprising-ex/scripts/retain-runtime-diagnostics.sh
+Nice=10
