@@ -12,6 +12,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private final TradingCoreRuntime state;
     private final RealtimeOutbox outbox = new RealtimeOutbox(65536, 32 * 1024 * 1024);
     private final com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture;
+    private com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingResult fundingResult;
+    private CommittedFundingPage fundingPage;
 
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
         state =
@@ -21,9 +23,12 @@ public final class CommittedTradeReplay implements AutoCloseable {
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.ordersAndTradesOnly(true);
+        state.funding.observeReplayPayments(result -> fundingResult = result);
     }
 
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
+        fundingPage = null;
+        fundingResult = null;
         CoreMessage command = CoreMessageCodec.decode(bytes);
         if (command.header().productLine() != state.productLine())
             throw new IllegalArgumentException("cross-product replay message");
@@ -32,7 +37,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         capture.begin(logPosition, timestamp, 0, state.realtimeExportSequence());
         try {
             state.assertClusterCallbackComplete();
-            state.apply(command, timestamp, logPosition);
+            CoreResponse response = state.apply(command, timestamp, logPosition);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             // Only the separate replay waits here. Live owner scheduling is unchanged.
             // No-progress retries are bounded; Matcher/Account Lane still own settlement.
@@ -41,7 +46,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                 if (Thread.currentThread().isInterrupted())
                     throw new IllegalStateException("committed replay interrupted; checkpoint must not advance");
                 if (state.commits.commitReadyMatching(
-                                64, timestamp, logPosition, false, (sequence, response) -> {}) == 0) {
+                                64, timestamp, logPosition, false, (sequence, matchingResponse) -> {}) == 0) {
                     java.util.concurrent.locks.LockSupport.parkNanos(idleNanos);
                     idleNanos = Math.min(idleNanos * 2, 100_000L);
                 } else idleNanos = 1_000L;
@@ -49,6 +54,14 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     throw new IllegalStateException("committed replay matching timed out");
             }
             state.assertClusterCallbackComplete();
+            if (fundingResult != null) {
+                if (response.commandStatus() != ResponseStatus.APPLIED)
+                    throw new IllegalStateException("funding payments without an applied committed command");
+                fundingPage = new CommittedFundingPage(state.productLine(), logPosition, timestamp,
+                        TradingCommandCodec.decodeApplyFunding(command.payloadUnsafe()), fundingResult.progress(),
+                        response.resultCode().name(), fundingResult.payments());
+                fundingResult = null;
+            }
             capture.commit(state.realtimeExportSequence());
             if (outbox.droppedBatches() != dropped || capture.failures() != failures)
                 throw new IllegalStateException(
@@ -66,6 +79,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
             capture.abort();
         }
     }
+
+    public CommittedFundingPage fundingPage() { return fundingPage; }
 
     public long exportSequence() {
         return state.realtimeExportSequence();
