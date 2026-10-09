@@ -1,0 +1,428 @@
+{
+  "samples": {
+    "startedAt": "2026-10-09T01:53:47.507000+00:00",
+    "endedAt": "2026-10-09T01:55:16.705000+00:00",
+    "errors": [],
+    "channels": {
+      "index": {
+        "count": 90,
+        "latencyMs": {
+          "p50": 29.0,
+          "p95": 97.0,
+          "max": 120.0
+        },
+        "maxGapMs": 1263
+      },
+      "mark": {
+        "count": 90,
+        "latencyMs": {
+          "p50": 93.5,
+          "p95": 297.0,
+          "max": 446.0
+        },
+        "maxGapMs": 1410
+      },
+      "trades": {
+        "count": 72,
+        "latencyMs": {
+          "p50": 77.5,
+          "p95": 247.0,
+          "max": 545.0
+        },
+        "maxGapMs": 1806
+      },
+      "bookTicker": {
+        "count": 472,
+        "latencyMs": {
+          "p50": 79.0,
+          "p95": 227.0,
+          "max": 538.0
+        },
+        "maxGapMs": 1192
+      }
+    },
+    "index": {
+      "httpSamples": 90,
+      "ageMedianMs": 272.926025390625,
+      "ageMaxMs": 771.824951171875,
+      "first": {
+        "instrumentId": "604",
+        "indexPrice": 81978.30166666667,
+        "sequence": 717357,
+        "status": "HEALTHY",
+        "componentCount": 3,
+        "validComponentCount": 3,
+        "eventTime": "2026-10-09T01:53:47.092020638Z",
+        "components": [
+          {
+            "source": "BINANCE",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81976.005,
+            "bidPrice": 81976,
+            "askPrice": 81976.01,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:53:46.017Z",
+            "receivedAt": "2026-10-09T01:53:46.200020094Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "BYBIT",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81979.1,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:53:46.127Z",
+            "receivedAt": "2026-10-09T01:53:46.208350005Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "OKX",
+            "sourceSymbol": "BTC-USDT",
+            "price": 81979.8,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:53:46.495Z",
+            "receivedAt": "2026-10-09T01:53:46.738777070Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          }
+        ]
+      },
+      "last": {
+        "instrumentId": "604",
+        "indexPrice": 81953.335,
+        "sequence": 717446,
+        "status": "HEALTHY",
+        "componentCount": 3,
+        "validComponentCount": 3,
+        "eventTime": "2026-10-09T01:55:16.623435984Z",
+        "components": [
+          {
+            "source": "BINANCE",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81954.105,
+            "bidPrice": 81954.1,
+            "askPrice": 81954.11,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:55:16.017Z",
+            "receivedAt": "2026-10-09T01:55:16.153101843Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "BYBIT",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81952.5,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:55:15.127Z",
+            "receivedAt": "2026-10-09T01:55:15.235144590Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "OKX",
+            "sourceSymbol": "BTC-USDT",
+            "price": 81953.4,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:55:16.386Z",
+            "receivedAt": "2026-10-09T01:55:16.567480641Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          }
+        ]
+      }
+    },
+    "mark": {
+      "httpSamples": 90,
+      "ageMedianMs": 826.2720947265625,
+      "ageMaxMs": 1121.06787109375,
+      "first": {
+        "instrumentId": "604",
+        "markPrice": 81944.7,
+        "markPriceUnits": 8194470000000,
+        "indexPrice": 81978.035,
+        "price1": 81959.33396855717,
+        "price2": 81942.36038888889,
+        "lastTradePrice": 81944.7,
+        "bestBidPrice": 81944.6,
+        "bestAskPrice": 81944.7,
+        "fundingRate": -0.000299,
+        "nextFundingTime": "2026-10-09T08:00:00Z",
+        "timeUntilFundingSeconds": 21973,
+        "basisAverage": -35.67461111111103,
+        "basisWindowSeconds": 60,
+        "clampLow": 79518.69395,
+        "clampHigh": 84437.37605,
+        "sequence": 708122,
+        "status": "HEALTHY",
+        "eventTime": "2026-10-09T01:53:46.527423339Z"
+      },
+      "last": {
+        "instrumentId": "604",
+        "markPrice": 81918.97861111112,
+        "markPriceUnits": 8191897861111,
+        "indexPrice": 81953.30166666667,
+        "price1": 81933.43653919717,
+        "price2": 81918.97861111112,
+        "lastTradePrice": 81918.2,
+        "bestBidPrice": 81918.2,
+        "bestAskPrice": 81918.3,
+        "fundingRate": -0.000319,
+        "nextFundingTime": "2026-10-09T08:00:00Z",
+        "timeUntilFundingSeconds": 21884,
+        "basisAverage": -34.32305555555547,
+        "basisWindowSeconds": 60,
+        "clampLow": 79494.70261666666,
+        "clampHigh": 84411.90071666667,
+        "sequence": 708211,
+        "status": "HEALTHY",
+        "eventTime": "2026-10-09T01:55:15.911758027Z"
+      }
+    }
+  },
+  "samples-public": {
+    "startedAt": "2026-10-09T01:59:55.610000+00:00",
+    "endedAt": "2026-10-09T02:01:24.911000+00:00",
+    "errors": [],
+    "channels": {
+      "index": {
+        "count": 90,
+        "latencyMs": {
+          "p50": 26.5,
+          "p95": 91.0,
+          "max": 277.0
+        },
+        "maxGapMs": 1233
+      },
+      "mark": {
+        "count": 89,
+        "latencyMs": {
+          "p50": 95.0,
+          "p95": 238.0,
+          "max": 370.0
+        },
+        "maxGapMs": 1282
+      },
+      "trades": {
+        "count": 74,
+        "latencyMs": {
+          "p50": 73.0,
+          "p95": 139.0,
+          "max": 262.0
+        },
+        "maxGapMs": 4027
+      },
+      "bookTicker": {
+        "count": 561,
+        "latencyMs": {
+          "p50": 78.0,
+          "p95": 244.0,
+          "max": 3573.0
+        },
+        "maxGapMs": 2019
+      }
+    },
+    "index": {
+      "httpSamples": 90,
+      "ageMedianMs": 182.3310546875,
+      "ageMaxMs": 1151.990966796875,
+      "first": {
+        "instrumentId": "604",
+        "indexPrice": 81977.56833333333,
+        "sequence": 717724,
+        "status": "HEALTHY",
+        "componentCount": 3,
+        "validComponentCount": 3,
+        "eventTime": "2026-10-09T01:59:55.385032119Z",
+        "components": [
+          {
+            "source": "BINANCE",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81974.005,
+            "bidPrice": 81974,
+            "askPrice": 81974.01,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:59:55.017Z",
+            "receivedAt": "2026-10-09T01:59:55.177649650Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "BYBIT",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81981.6,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:59:55.127Z",
+            "receivedAt": "2026-10-09T01:59:55.206835530Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "OKX",
+            "sourceSymbol": "BTC-USDT",
+            "price": 81977.1,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T01:59:55.049Z",
+            "receivedAt": "2026-10-09T01:59:55.199053323Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          }
+        ]
+      },
+      "last": {
+        "instrumentId": "604",
+        "indexPrice": 81996.68833333334,
+        "sequence": 717813,
+        "status": "HEALTHY",
+        "componentCount": 3,
+        "validComponentCount": 3,
+        "eventTime": "2026-10-09T02:01:24.629589727Z",
+        "components": [
+          {
+            "source": "BINANCE",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81992.565,
+            "bidPrice": 81992.56,
+            "askPrice": 81992.57,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T02:01:24.014Z",
+            "receivedAt": "2026-10-09T02:01:24.161326864Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "BYBIT",
+            "sourceSymbol": "BTCUSDT",
+            "price": 81999.9,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T02:01:24.126Z",
+            "receivedAt": "2026-10-09T02:01:24.209215327Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          },
+          {
+            "source": "OKX",
+            "sourceSymbol": "BTC-USDT",
+            "price": 81997.6,
+            "bidPrice": null,
+            "askPrice": null,
+            "configuredWeight": 1,
+            "effectiveWeight": 0.3333333333333333,
+            "status": "HEALTHY",
+            "reason": null,
+            "sourceTime": "2026-10-09T02:01:24.232Z",
+            "receivedAt": "2026-10-09T02:01:24.444232743Z",
+            "latencyMillis": null,
+            "transport": "PUBLIC_WEBSOCKET"
+          }
+        ]
+      }
+    },
+    "mark": {
+      "httpSamples": 90,
+      "ageMedianMs": 946.6220703125,
+      "ageMaxMs": 1038.81201171875,
+      "first": {
+        "instrumentId": "604",
+        "markPrice": 81940.1,
+        "markPriceUnits": 8194010000000,
+        "indexPrice": 81977.56833333333,
+        "price1": 81956.84466593145,
+        "price2": 81938.01438888889,
+        "lastTradePrice": 81940.1,
+        "bestBidPrice": 81940.1,
+        "bestAskPrice": 81944.1,
+        "fundingRate": -0.000337,
+        "nextFundingTime": "2026-10-09T08:00:00Z",
+        "timeUntilFundingSeconds": 21604,
+        "basisAverage": -39.55394444444436,
+        "basisWindowSeconds": 60,
+        "clampLow": 79518.24128333334,
+        "clampHigh": 84436.89538333334,
+        "sequence": 708490,
+        "status": "HEALTHY",
+        "eventTime": "2026-10-09T01:59:55.495622568Z"
+      },
+      "last": {
+        "instrumentId": "604",
+        "markPrice": 81964.9,
+        "markPriceUnits": 8196490000000,
+        "indexPrice": 81996.72166666666,
+        "price1": 81978.89547688043,
+        "price2": 81961.44794444444,
+        "lastTradePrice": 81964.9,
+        "bestBidPrice": 81964.9,
+        "bestAskPrice": 81965,
+        "fundingRate": -0.000291,
+        "nextFundingTime": "2026-10-09T08:00:00Z",
+        "timeUntilFundingSeconds": 21516,
+        "basisAverage": -35.27372222222214,
+        "basisWindowSeconds": 60,
+        "clampLow": 79536.82001666666,
+        "clampHigh": 84456.62331666666,
+        "sequence": 708578,
+        "status": "HEALTHY",
+        "eventTime": "2026-10-09T02:01:23.899300767Z"
+      }
+    }
+  },
+  "websocketMetrics": {
+    "queueDepth": 0,
+    "backpressureRejections": 0
+  },
+  "leverageObservation": {
+    "account": 1,
+    "instrumentId": "604",
+    "marginMode": "CROSS",
+    "positionSteps": 170,
+    "openOrders": 0,
+    "mutationPerformed": false
+  }
+}

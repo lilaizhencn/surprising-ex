@@ -17,6 +17,19 @@ import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
 
+    @Test
+    void returnsStructuredBusinessRejectionForLeverageWithoutChangingItToNotFound() {
+        when(leverage.set(any(), any(), any())).thenThrow(
+                new com.surprising.trading.order.service.OrderCommandRejectedException(
+                        com.surprising.aeron.protocol.CoreResultCode.LEVERAGE_UPDATE_BLOCKED));
+        var result = invoke("trading-leverage", "/api/v1/trading/leverage/settings", HttpMethod.POST,
+                userHeaders(), "{\"userId\":42,\"instrumentId\":\"604\",\"marginMode\":\"CROSS\",\"leveragePpm\":1000000}");
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(new String(result.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("\"code\":\"LEVERAGE_UPDATE_BLOCKED\"", "Close positions")
+                .doesNotContain("Aeron", "INVALID_COMMAND");
+    }
+
     private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket = mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class);
 
     private final com.surprising.trading.order.service.OrderRequestService orders = mock(com.surprising.trading.order.service.OrderRequestService.class);

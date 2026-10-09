@@ -182,10 +182,14 @@ public final class LocalBusinessApi {
             exception = exception.getCause();
         }
         if (exception instanceof ResponseStatusException status) {
+            var properties = status.getBody().getProperties();
+            if (properties != null && properties.get("code") instanceof String code) {
+                return error(status.getStatusCode(), status.getReason(), code);
+            }
             return error(status.getStatusCode(), status.getReason());
         }
         if (exception instanceof AccountCommandRejectedException rejected) {
-            return error(HttpStatus.CONFLICT, rejected.errorCode());
+            return error(HttpStatus.CONFLICT, "The account request could not be completed.", rejected.errorCode());
         }
         if (exception instanceof com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException) {
             return error(HttpStatus.SERVICE_UNAVAILABLE,
@@ -203,5 +207,10 @@ public final class LocalBusinessApi {
     private ResponseEntity<byte[]> error(org.springframework.http.HttpStatusCode status, String message) {
         return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
                 .body(mapper.writeValueAsBytes(Map.of("status", status.value(), "message", message == null ? "" : message)));
+    }
+
+    private ResponseEntity<byte[]> error(org.springframework.http.HttpStatusCode status, String message, String code) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
+                .body(mapper.writeValueAsBytes(Map.of("status", status.value(), "message", message, "code", code)));
     }
 }

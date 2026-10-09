@@ -452,7 +452,7 @@ public class AeronOrderCommandService {
     private static CoreCommandResultView requireCommandResult(
             com.surprising.aeron.protocol.CoreResponse response) {
         if (response != null && response.status() == ResponseStatus.REJECTED) {
-            throw new IllegalStateException(response.resultCode().name() + ": Core order command rejected");
+            throw new OrderCommandRejectedException(response.resultCode());
         }
         if (response == null || response.data().length == 0) {
             throw new IllegalStateException("command response is missing result payload");

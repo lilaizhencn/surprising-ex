@@ -663,6 +663,8 @@ class ClusterCommandPipelineTest {
                     live.apply(change); serial.apply(change);
                     assertThat(live.responses.getLast().commandStatus())
                             .isEqualTo(leverage == 1_000_000_000 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
+                    assertThat(live.responses.getLast().resultCode()).isEqualTo(leverage == 1_000_000_000
+                            ? CoreResultCode.LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT : CoreResultCode.NONE);
                     assertThat(release.getCount()).isOne();
                     var access = live.service.state().runtimeState.getClass().getDeclaredField("ownerLaneAccess");
                     access.setAccessible(true);
@@ -673,6 +675,24 @@ class ClusterCommandPipelineTest {
             try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"SPOT", "OPTION"}, mode = EnumSource.Mode.EXCLUDE)
+    void leverageRejectionPreservesOpenOrderFundsAndCanBeRetriedAfterCancel(ProductLine product) {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            live.apply(live.place(11, "1", 19001, 80, 1, CoreOrderSide.BUY));
+            long before = live.hash();
+            live.apply(live.message(CoreMessageType.UPDATE_LEVERAGE, 11,
+                    TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000))));
+            assertThat(live.responses.getLast().resultCode()).isEqualTo(CoreResultCode.LEVERAGE_UPDATE_BLOCKED);
+            assertThat(live.hash()).isEqualTo(before);
+            live.apply(live.cancel(11, 19001));
+            live.apply(live.message(CoreMessageType.UPDATE_LEVERAGE, 11,
+                    TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
         }
     }
 

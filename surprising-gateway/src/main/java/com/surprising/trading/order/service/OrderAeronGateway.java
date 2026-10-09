@@ -63,7 +63,7 @@ public class OrderAeronGateway implements AutoCloseable {
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, commandId, userId, payload);
         if (response.commandStatus() != ResponseStatus.APPLIED) {
-            throw new IllegalStateException(response.resultCode().name() + ": Aeron order command rejected");
+            throw new OrderCommandRejectedException(response.resultCode());
         }
         return response;
     }

@@ -16,6 +16,20 @@ import org.springframework.web.server.ResponseStatusException;
 class LeverageRequestServiceTest {
 
     @Test
+    void terminalBusinessRejectionRemainsAConflictAtTheHttpBoundary() {
+        var leverage = mock(LeverageService.class);
+        var failure = new OrderCommandRejectedException(
+                com.surprising.aeron.protocol.CoreResultCode.LEVERAGE_UPDATE_BLOCKED);
+        org.mockito.Mockito.when(leverage.set(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
+        var request = new LeverageSettingRequest(1, ProductLine.LINEAR_PERPETUAL, "604",
+                MarginMode.CROSS, 2_000_000, "web");
+        assertThatThrownBy(() -> new LeverageRequestService(leverage).set(request, null, null))
+                .isSameAs(failure)
+                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
     void adminSetRequiresTrustedAdminIdentity() {
         LeverageService leverage = mock(LeverageService.class);
         LeverageRequestService requests = new LeverageRequestService(leverage);
