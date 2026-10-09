@@ -133,6 +133,8 @@ public class BinanceApiController {
                     ex.getReason() == null ? "request failed" : ex.getReason());
         } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
             return error(HttpStatus.BAD_REQUEST, -2010, ex.getMessage());
+        } catch (com.surprising.gateway.provider.auth.ComplianceService.WithdrawalSecurityHoldException ex) {
+            return error(HttpStatus.LOCKED, -2010, ex.getMessage());
         } catch (IllegalArgumentException ex) {
             return error(HttpStatus.BAD_REQUEST, -1100, ex.getMessage());
         } catch (IllegalStateException ex) {
@@ -244,15 +246,12 @@ public class BinanceApiController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IllegalArgumentException("withdrawOrderId or Idempotency-Key is required");
         }
-        GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
-        String sourceId = wallet.getWithdrawalAddressIds().entrySet().stream()
-                .filter(entry -> entry.getKey().equalsIgnoreCase(chain))
-                .map(Map.Entry::getValue).findFirst()
-                .orElseThrow(() -> new IllegalStateException("withdrawal source address is not configured for network"));
+        String amount = required(params, "amount");
+        java.util.UUID sourceAddressId = custodyWalletClient.withdrawalAddressId(userId, chain, asset, amount);
         CustodyWithdrawalService.WithdrawalResponse result = withdrawalService.submit(userId, idempotencyKey,
                 new CustodyWithdrawalService.WithdrawalRequest(
-                        java.util.UUID.fromString(sourceId), chain, asset, required(params, "address"),
-                        required(params, "amount"), null));
+                        sourceAddressId, chain, asset, required(params, "address"),
+                        amount, null));
         return json(HttpStatus.OK, Map.of("id", result.walletWithdrawalId() == null
                         ? result.withdrawalId().toString() : result.walletWithdrawalId(),
                 "withdrawalId", result.withdrawalId().toString(), "status", result.status(),

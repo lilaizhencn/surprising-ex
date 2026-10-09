@@ -61,6 +61,31 @@ class CustodyWalletWebhookServiceTest {
     }
 
     @Test
+    void verifiesAndEchoesSignedWebhookChallenge() {
+        byte[] body = ("{\"id\":\"challenge-1\",\"type\":\"WEBHOOK.VERIFICATION\","
+                + "\"data\":{\"challenge\":\"test-challenge\"}}")
+                .getBytes(StandardCharsets.UTF_8);
+        long timestamp = Instant.now().getEpochSecond();
+
+        assertThat(service.verificationChallenge("challenge-1", "WEBHOOK.VERIFICATION",
+                Long.toString(timestamp), service.signature("webhook-secret", "challenge-1",
+                        "WEBHOOK.VERIFICATION", timestamp, body), body))
+                .containsExactly(Map.entry("challenge", "test-challenge"));
+        verify(repository, org.mockito.Mockito.never()).claim(any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsInvalidWebhookChallengeSignature() {
+        byte[] body = ("{\"id\":\"challenge-1\",\"type\":\"WEBHOOK.VERIFICATION\","
+                + "\"data\":{\"challenge\":\"test-challenge\"}}")
+                .getBytes(StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.verificationChallenge("challenge-1", "WEBHOOK.VERIFICATION",
+                Long.toString(Instant.now().getEpochSecond()), "v1=bad", body))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("signature");
+    }
+
+    @Test
     void rejectsHeaderIdentityThatDoesNotMatchSignedPayload() {
         byte[] body = "{\"id\":\"event-1\",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{}}"
                 .getBytes(StandardCharsets.UTF_8);

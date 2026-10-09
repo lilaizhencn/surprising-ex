@@ -2340,6 +2340,9 @@ VALUES
     ('admin.wallet.write', 'Write wallet withdrawals', 'Approve, reject and retry exchange withdrawals.'),
     ('admin.support.read', 'Read support console', 'View read-only customer support user overviews.'),
     ('admin.support.write', 'Write support tickets', 'Create and update customer support tickets and internal notes.'),
+    ('admin.announcements.read', 'Read announcements', 'View and preview exchange announcements.'),
+    ('admin.announcements.write', 'Write announcements', 'Create and edit announcement drafts.'),
+    ('admin.announcements.publish', 'Publish announcements', 'Publish, schedule and withdraw exchange announcements.'),
     ('admin.compliance.read', 'Read compliance', 'View KYC, AML cases and risk tags.'),
     ('admin.compliance.write', 'Write compliance', 'Update KYC, AML cases and risk tags.'),
     ('admin.permissions.read', 'Read permissions', 'View roles, permission catalog and role assignments.'),
@@ -2385,6 +2388,9 @@ SELECT r.role_id, p.permission_id
       'admin.compliance.write',
       'admin.permissions.read',
       'admin.support.write',
+      'admin.announcements.read',
+      'admin.announcements.write',
+      'admin.announcements.publish',
       'admin.gateway.*.read',
       'admin.gateway.*.write'
   )
@@ -4029,3 +4035,59 @@ INSERT INTO gateway_countries(code,flag,names) VALUES ('YT','🇾🇹','{"en":"M
 INSERT INTO gateway_countries(code,flag,names) VALUES ('ZA','🇿🇦','{"en":"South Africa","zh":"南非"}'::jsonb) ON CONFLICT (code) DO NOTHING;
 INSERT INTO gateway_countries(code,flag,names) VALUES ('ZM','🇿🇲','{"en":"Zambia","zh":"赞比亚"}'::jsonb) ON CONFLICT (code) DO NOTHING;
 INSERT INTO gateway_countries(code,flag,names) VALUES ('ZW','🇿🇼','{"en":"Zimbabwe","zh":"津巴布韦"}'::jsonb) ON CONFLICT (code) DO NOTHING;
+
+-- Announcement center: global content, locale variants, targeting, user read state and audit.
+CREATE SEQUENCE IF NOT EXISTS gateway_announcement_seq;
+CREATE TABLE IF NOT EXISTS gateway_announcements (
+    announcement_id BIGINT PRIMARY KEY DEFAULT nextval('gateway_announcement_seq'),
+    category VARCHAR(24) NOT NULL CHECK (category IN ('GENERAL','PRODUCT','MAINTENANCE','SECURITY','RISK')),
+    status VARCHAR(16) NOT NULL CHECK (status IN ('DRAFT','PUBLISHED','WITHDRAWN')),
+    priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 100),
+    starts_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ,
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_by BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    updated_by BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_announcements_time_check CHECK (expires_at IS NULL OR expires_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS gateway_announcements_active_idx
+    ON gateway_announcements (starts_at, priority DESC, announcement_id DESC)
+    WHERE status = 'PUBLISHED';
+CREATE TABLE IF NOT EXISTS gateway_announcement_translations (
+    announcement_id BIGINT NOT NULL REFERENCES gateway_announcements(announcement_id) ON DELETE CASCADE,
+    locale VARCHAR(32) NOT NULL,
+    title VARCHAR(160) NOT NULL CHECK (length(trim(title)) > 0),
+    summary VARCHAR(500) NOT NULL DEFAULT '',
+    body VARCHAR(12000) NOT NULL CHECK (length(trim(body)) > 0),
+    PRIMARY KEY (announcement_id, locale)
+);
+CREATE TABLE IF NOT EXISTS gateway_announcement_targets (
+    announcement_id BIGINT NOT NULL REFERENCES gateway_announcements(announcement_id) ON DELETE CASCADE,
+    target_type VARCHAR(16) NOT NULL CHECK (target_type IN ('PRODUCT_LINE','PLATFORM','PLACEMENT')),
+    target_value VARCHAR(32) NOT NULL,
+    PRIMARY KEY (announcement_id, target_type, target_value)
+);
+CREATE INDEX IF NOT EXISTS gateway_announcement_targets_lookup_idx
+    ON gateway_announcement_targets (target_type, target_value, announcement_id);
+CREATE TABLE IF NOT EXISTS gateway_announcement_reads (
+    announcement_id BIGINT NOT NULL REFERENCES gateway_announcements(announcement_id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES gateway_users(user_id) ON DELETE CASCADE,
+    read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (announcement_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS gateway_announcement_reads_user_idx
+    ON gateway_announcement_reads (user_id, read_at DESC, announcement_id DESC);
+CREATE TABLE IF NOT EXISTS gateway_announcement_audit (
+    audit_id BIGSERIAL PRIMARY KEY,
+    announcement_id BIGINT NOT NULL REFERENCES gateway_announcements(announcement_id) ON DELETE CASCADE,
+    action VARCHAR(16) NOT NULL CHECK (action IN ('CREATE','UPDATE','PUBLISH','WITHDRAW')),
+    admin_user_id BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    admin_username TEXT NOT NULL,
+    reason VARCHAR(1000),
+    snapshot JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS gateway_announcement_audit_history_idx
+    ON gateway_announcement_audit (announcement_id, audit_id DESC);

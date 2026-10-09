@@ -101,21 +101,6 @@ public class GatewayProperties implements EnvironmentAware {
         if (walletAdmin == null || !walletAdmin.hasBasicAuth()) {
             failures.add("admin-routes.wallet-admin.basic-auth must be configured");
         }
-        if (wallet.getWithdrawalAddressIds().isEmpty()) {
-            failures.add("custody-wallet.withdrawal-address-ids must contain at least one network");
-        } else {
-            wallet.getWithdrawalAddressIds().forEach((network, addressId) -> {
-                if (network == null || network.isBlank()) {
-                    failures.add("custody-wallet.withdrawal-address-ids contains a blank network");
-                }
-                try {
-                    java.util.UUID.fromString(addressId);
-                } catch (IllegalArgumentException | NullPointerException ex) {
-                    failures.add("custody-wallet.withdrawal-address-ids contains an invalid address id");
-                }
-            });
-        }
-
         Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
         if (configuredWithdrawal.getSingleApprovalThresholdUsdt() == null
                 || configuredWithdrawal.getSingleApprovalThresholdUsdt().signum() <= 0) {
@@ -447,21 +432,7 @@ public class GatewayProperties implements EnvironmentAware {
         private String apiSecret = "";
         @Setter
         private String webhookSecret = "";
-
-        private Map<String, String> withdrawalAddressIds = Map.of();
         private Duration requestTimeout = Duration.ofSeconds(10);
-
-
-
-        public void setWithdrawalAddressIds(Map<String, String> withdrawalAddressIds) {
-            this.withdrawalAddressIds = withdrawalAddressIds == null ? Map.of() : Map.copyOf(withdrawalAddressIds);
-        }
-
-        public void setWithdrawalAddressIdsJson(String withdrawalAddressIdsJson) {
-            if (withdrawalAddressIdsJson != null && !withdrawalAddressIdsJson.trim().equals("{}")) {
-                setWithdrawalAddressIds(readStringMap(withdrawalAddressIdsJson));
-            }
-        }
 
         public void setRequestTimeout(Duration requestTimeout) {
             this.requestTimeout = requestTimeout == null || requestTimeout.isNegative()

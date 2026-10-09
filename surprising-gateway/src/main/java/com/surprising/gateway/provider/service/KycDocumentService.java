@@ -204,6 +204,11 @@ public class KycDocumentService {
     }
 
     public String references(List<KycDocument> documents, java.time.LocalDate expiresOn, java.time.LocalDate issuedOn) {
+        return references(documents, expiresOn, issuedOn, null);
+    }
+
+    public String references(List<KycDocument> documents, java.time.LocalDate expiresOn,
+                             java.time.LocalDate addressIssuedOn, java.time.LocalDate documentIssuedOn) {
         try {
             return objectMapper.writeValueAsString(documents.stream()
                     .map(document -> Map.of(
@@ -211,7 +216,8 @@ public class KycDocumentService {
                             "reference", "document:" + document.documentId(),
                             "sha256", document.sha256(),
                             "documentExpiresOn", expiresOn == null ? "" : expiresOn.toString(),
-                            "addressIssuedOn", "ADDRESS_PROOF".equals(document.documentType()) && issuedOn != null ? issuedOn.toString() : ""))
+                            "documentIssuedOn", document.documentType().startsWith("ID_CARD_") && documentIssuedOn != null ? documentIssuedOn.toString() : "",
+                            "addressIssuedOn", "ADDRESS_PROOF".equals(document.documentType()) && addressIssuedOn != null ? addressIssuedOn.toString() : ""))
                     .toList());
         } catch (JacksonException ex) {
             throw new IllegalStateException("KYC document references cannot be serialized", ex);

@@ -5,10 +5,8 @@ import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
-import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -34,20 +32,17 @@ public class CustodyWalletController {
     private final SensitiveActionVerificationService verificationService;
     private final ComplianceService complianceService;
     private final CustodyWithdrawalService withdrawalService;
-    private final GatewayProperties properties;
 
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
                                    ComplianceService complianceService,
-                                   CustodyWithdrawalService withdrawalService,
-                                   GatewayProperties properties) {
+                                   CustodyWithdrawalService withdrawalService) {
         this.authService = authService;
         this.walletClient = walletClient;
         this.verificationService = verificationService;
         this.complianceService = complianceService;
         this.withdrawalService = withdrawalService;
-        this.properties = properties;
     }
 
     @PostMapping("/addresses")
@@ -115,7 +110,8 @@ public class CustodyWalletController {
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
             complianceService.requireWithdrawalEligibility(principal.userId());
-            java.util.UUID configuredSourceAddressId = configuredSourceAddress(request.chain());
+            java.util.UUID configuredSourceAddressId = walletClient.withdrawalAddressId(
+                    principal.userId(), request.chain(), request.assetSymbol(), request.amount());
             if (request.custodyAddressId() != null
                     && !configuredSourceAddressId.equals(request.custodyAddressId())) {
                 throw new IllegalArgumentException("withdrawal source address does not match configured custody address");
@@ -133,6 +129,8 @@ public class CustodyWalletController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        } catch (com.surprising.gateway.provider.auth.ComplianceService.WithdrawalSecurityHoldException ex) {
+            throw new ResponseStatusException(HttpStatus.LOCKED, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         } catch (IllegalStateException ex) {
@@ -153,20 +151,6 @@ public class CustodyWalletController {
         if (!verificationService.verify(userId, scene, emailCode, totpCode, java.time.Instant.now())) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
                     "security verification is required or invalid");
-        }
-    }
-
-    private java.util.UUID configuredSourceAddress(String chain) {
-        String sourceId = properties.getCustodyWallet().getWithdrawalAddressIds().entrySet().stream()
-                .filter(entry -> entry.getKey().equalsIgnoreCase(chain))
-                .map(Map.Entry::getValue)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "withdrawal source address is not configured for network"));
-        try {
-            return java.util.UUID.fromString(sourceId);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException("configured withdrawal source address is invalid", ex);
         }
     }
 

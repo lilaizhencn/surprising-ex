@@ -60,7 +60,6 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiKey("wallet-key");
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
-        wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
 
@@ -156,8 +155,6 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_ASSET_SCALES", "{\"USDT\":6}");
-        testEnvironment.put("GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS",
-                "{\"ETH\":\"11111111-1111-1111-1111-111111111111\"}");
         testEnvironment.put("SW_WALLET_ADMIN_USERNAME", "wallet-admin");
         testEnvironment.put("SW_WALLET_ADMIN_PASSWORD", "wallet-admin-secret");
         testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
@@ -185,8 +182,6 @@ class GatewayProductionSecurityConfigurationTest {
         assertThat(properties.getSecurity().getAdminIpAllowlist()).containsExactly("10.0.0.0/8");
         assertThat(properties.getSecurity().getTrustedProxyIpAllowlist()).containsExactly("192.0.2.0/24");
         assertThat(properties.getCustodyWallet().isEnabled()).isTrue();
-        assertThat(properties.getCustodyWallet().getWithdrawalAddressIds())
-                .containsEntry("ETH", "11111111-1111-1111-1111-111111111111");
         assertThat(properties.getKycDocuments().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().getType()).isEqualTo("s3");
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");

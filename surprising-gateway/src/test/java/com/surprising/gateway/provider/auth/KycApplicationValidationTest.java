@@ -27,8 +27,12 @@ class KycApplicationValidationTest {
         when(providers.selectedProvider()).thenReturn("SELF");
     }
     KycSubmissionRequest request(String country, LocalDate expiry, LocalDate issue, List<Long> ids) {
-        return new KycSubmissionRequest("INDIVIDUAL", "STANDARD", country, "PASSPORT", "SELF", null, null,
-                "NOT_REQUIRED", ids, expiry, issue);
+        return request(country, "PASSPORT", expiry, issue, null, ids);
+    }
+    KycSubmissionRequest request(String country, String type, LocalDate expiry, LocalDate addressIssue,
+                                 LocalDate documentIssue, List<Long> ids) {
+        return new KycSubmissionRequest("INDIVIDUAL", "STANDARD", country, type, "SELF", null, null,
+                "NOT_REQUIRED", ids, expiry, addressIssue, documentIssue);
     }
     @Test void rejectsUnknownCountryAndMissingDocumentsBeforeProviderWork() {
         assertThatThrownBy(() -> service.submitUserKyc("token", request("ZZ", today, today, List.of(1L)))).hasMessageContaining("country");
@@ -50,7 +54,18 @@ class KycApplicationValidationTest {
                 .thenThrow(new IllegalArgumentException("document ownership checked"));
         assertThatThrownBy(() -> service.submitUserKyc("token", request("SG", today, today.minusMonths(3), List.of(1L))))
                 .hasMessage("document ownership checked");
+        assertThatThrownBy(() -> service.submitUserKyc("token", request("SG", "ID_CARD", today,
+                today.minusDays(1), today.minusDays(2), List.of(1L))))
+                .hasMessage("document ownership checked");
         verifyNoInteractions(providers);
+    }
+    @Test void requiresValidIdentityCardIssueDate() {
+        assertThatThrownBy(() -> service.submitUserKyc("token", request("SG", "ID_CARD", today,
+                today.minusDays(1), null, List.of(1L)))).hasMessageContaining("issue date");
+        assertThatThrownBy(() -> service.submitUserKyc("token", request("SG", "ID_CARD", today,
+                today.minusDays(1), today.plusDays(1), List.of(1L)))).hasMessageContaining("issue date");
+        verify(providers, never()).start(anyLong(), any(), anyList());
+        verifyNoInteractions(documents);
     }
     @Test void pendingOrVerifiedCannotBeOverwrittenButRejectedCanResubmit() {
         for (String status : List.of("PENDING", "VERIFIED", "REJECTED")) {

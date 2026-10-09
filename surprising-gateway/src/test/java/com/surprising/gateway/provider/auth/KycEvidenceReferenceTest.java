@@ -2,11 +2,27 @@ package com.surprising.gateway.provider.auth;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.gateway.provider.service.KycDocumentService;
 class KycEvidenceReferenceTest {
+    @Test void storesIdentityCardIssueAndExpiryDatesWithItsEvidence() {
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var document = new KycDocument(1, 42, "ID_CARD_FRONT", "front.png", "image/png", 10,
+                "hash", "UPLOADED", Instant.now(), null);
+
+        String references = service.references(List.of(document), LocalDate.parse("2031-01-01"), null,
+                LocalDate.parse("2020-02-03"));
+
+        assertThat(references).contains("\"documentIssuedOn\":\"2020-02-03\"")
+                .contains("\"documentExpiresOn\":\"2031-01-01\"");
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
     void persistsAdditionalIdentityEvidence(String type) {

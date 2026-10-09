@@ -204,6 +204,11 @@ public class ComplianceService {
             if (request.documentExpiresOn() == null || request.documentExpiresOn().isBefore(today)) {
                 throw new IllegalArgumentException("identity document must not be expired");
             }
+            if ("ID_CARD".equals(request.documentType()) &&
+                    (request.documentIssuedOn() == null || request.documentIssuedOn().isAfter(today) ||
+                            request.documentIssuedOn().isAfter(request.documentExpiresOn()))) {
+                throw new IllegalArgumentException("identity card issue date must be valid and before its expiry date");
+            }
             if (List.of("STANDARD", "ENHANCED").contains(request.kycLevel())
                     && (request.addressIssuedOn() == null || request.addressIssuedOn().isBefore(today.minusMonths(3))
                     || request.addressIssuedOn().isAfter(today))) {
@@ -218,8 +223,10 @@ public class ComplianceService {
         ComplianceModels.KycSubmissionRequest providerRequest = new ComplianceModels.KycSubmissionRequest(
                 request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
                 session.provider(), session.providerReference(), request.submittedDocuments(),
-                "SELF".equals(session.provider()) ? request.faceVerificationStatus() : "PENDING", request.documentIds());
-        String submittedDocuments = kycDocumentService.references(documents, request.documentExpiresOn(), request.addressIssuedOn());
+                "SELF".equals(session.provider()) ? request.faceVerificationStatus() : "PENDING", request.documentIds(),
+                request.documentExpiresOn(), request.addressIssuedOn(), request.documentIssuedOn());
+        String submittedDocuments = kycDocumentService.references(documents, request.documentExpiresOn(),
+                request.addressIssuedOn(), request.documentIssuedOn());
         KycProfile profile = kycRepository.submit(userId, providerRequest, submittedDocuments, Instant.now());
         if (request.documentIds() != null && !request.documentIds().isEmpty()) kycDocumentService.markSubmitted(userId, request.documentIds());
         return new KycSubmissionResponse(profile, session);

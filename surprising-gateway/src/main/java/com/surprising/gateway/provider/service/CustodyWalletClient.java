@@ -12,6 +12,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -57,6 +58,65 @@ public class CustodyWalletClient {
     public List<Map<String, Object>> chains() {
         return exchange(HttpMethod.GET, API_PREFIX + "/chains", null,
                 new ParameterizedTypeReference<>() {}, null);
+    }
+
+    /** Resolve the authenticated customer's active custody address for a withdrawal. */
+    public UUID withdrawalAddressId(long userId, String chain) {
+        String normalizedChain = requireText(chain, "chain");
+        String query = query(Map.of(
+                "chain", normalizedChain,
+                "search", subject(userId),
+                "limit", "100",
+                "offset", "0"));
+        List<Map<String, Object>> addresses = exchange(HttpMethod.GET,
+                API_PREFIX + "/addresses" + query, null,
+                new ParameterizedTypeReference<>() {}, null);
+        return addresses.stream()
+                .filter(address -> subject(userId).equals(address.get("subject")))
+                .filter(address -> normalizedChain.equalsIgnoreCase(String.valueOf(address.get("chain"))))
+                .filter(address -> "ACTIVE".equalsIgnoreCase(String.valueOf(address.get("status"))))
+                .sorted((left, right) -> Long.compare(
+                        longValue(right.get("addressVersion")), longValue(left.get("addressVersion"))))
+                .map(address -> uuid(address.get("id")))
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "active custody address is unavailable for authenticated user and chain"));
+    }
+
+    /** Select a funded address for this user's exact chain/asset withdrawal. */
+    public UUID withdrawalAddressId(long userId, String chain, String asset, String amount) {
+        String normalizedChain = requireText(chain, "chain");
+        String normalizedAsset = requireText(asset, "asset");
+        BigDecimal requiredAmount;
+        try {
+            requiredAmount = new BigDecimal(amount == null ? "" : amount.trim());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("withdrawal amount must be a positive decimal", ex);
+        }
+        if (requiredAmount.signum() <= 0) {
+            throw new IllegalArgumentException("withdrawal amount must be a positive decimal");
+        }
+        String query = query(Map.of(
+                "chain", normalizedChain,
+                "assetSymbol", normalizedAsset,
+                "subject", subject(userId),
+                "requiredAmount", requiredAmount.stripTrailingZeros().toPlainString()));
+        List<Map<String, Object>> candidates = exchange(HttpMethod.GET,
+                API_PREFIX + "/address-balances" + query, null,
+                new ParameterizedTypeReference<>() {}, null);
+        return candidates.stream()
+                .filter(address -> subject(userId).equals(address.get("subject")))
+                .filter(address -> normalizedChain.equalsIgnoreCase(String.valueOf(address.get("chain"))))
+                .filter(address -> normalizedAsset.equalsIgnoreCase(String.valueOf(address.get("assetSymbol"))))
+                .filter(address -> decimalValue(address.get("availableBalance")).compareTo(requiredAmount) >= 0)
+                .sorted((left, right) -> Long.compare(
+                        longValue(right.get("addressVersion")), longValue(left.get("addressVersion"))))
+                .map(address -> uuid(address.get("custodyAddressId")))
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "no active custody address has sufficient available balance for this asset"));
     }
 
     public List<Map<String, Object>> deposits(long userId, String chain, String asset, int limit) {
@@ -163,15 +223,16 @@ public class CustodyWalletClient {
         }
         try {
             ResponseEntity<T> response = restTemplate.exchange(
-                    trimTrailingSlash(wallet.getBaseUrl()) + path,
+                    java.net.URI.create(trimTrailingSlash(wallet.getBaseUrl()) + path),
                     method, new HttpEntity<>(body, headers), responseType);
             requireSuccess(response, "custody wallet");
             return response.getBody();
         } catch (RestClientResponseException ex) {
             int status = ex.getStatusCode().value();
-            if (isDeterministicRejection(status)) {
+            String responseBody = ex.getResponseBodyAsString();
+            if (isDeterministicRejection(status, responseBody)) {
                 throw new CustodyWalletRejectedException("custody wallet rejected request", status,
-                        ex.getResponseBodyAsString(), ex);
+                        responseBody, ex);
             }
             throw new IllegalStateException("custody wallet request status is unknown", ex);
         } catch (RestClientException ex) {
@@ -192,14 +253,16 @@ public class CustodyWalletClient {
         }
         try {
             ResponseEntity<T> response = restTemplate.exchange(
-                    trimTrailingSlash(wallet.getBaseUrl()) + path,
+                    java.net.URI.create(trimTrailingSlash(wallet.getBaseUrl()) + path),
                     method, new HttpEntity<>(body, headers), responseType);
             requireSuccess(response, "custody wallet");
             return response.getBody();
         } catch (RestClientResponseException ex) {
             int status = ex.getStatusCode().value();
-            if (isDeterministicRejection(status)) {
-                throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
+            String responseBody = ex.getResponseBodyAsString();
+            if (isDeterministicRejection(status, responseBody)) {
+                throw new CustodyWalletRejectedException("custody wallet rejected request", status,
+                        responseBody, ex);
             }
             throw new IllegalStateException("custody wallet request status is unknown", ex);
         } catch (RestClientException ex) {
@@ -278,6 +341,31 @@ public class CustodyWalletClient {
         return value == null ? "" : value.trim();
     }
 
+    private long longValue(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        try {
+            return value == null ? 0L : Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private BigDecimal decimalValue(Object value) {
+        try {
+            return value == null ? BigDecimal.ZERO : new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    private UUID uuid(Object value) {
+        try {
+            return value == null ? null : UUID.fromString(String.valueOf(value));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
@@ -285,15 +373,44 @@ public class CustodyWalletClient {
     private void requireSuccess(ResponseEntity<?> response, String service) {
         if (response == null || !response.getStatusCode().is2xxSuccessful()) {
             int status = response == null ? 0 : response.getStatusCode().value();
-            if (isDeterministicRejection(status)) {
-                throw new CustodyWalletRejectedException(service + " rejected request", status, null);
+            String responseBody = responseBody(response == null ? null : response.getBody());
+            if (isDeterministicRejection(status, responseBody)) {
+                throw new CustodyWalletRejectedException(service + " rejected request", status,
+                        responseBody, null);
             }
             throw new IllegalStateException(service + " returned HTTP " + status);
         }
     }
 
-    private boolean isDeterministicRejection(int status) {
-        return status == 400 || status == 422;
+    private String responseBody(Object body) {
+        if (body == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(body);
+        } catch (JacksonException ex) {
+            return String.valueOf(body);
+        }
+    }
+
+    private boolean isDeterministicRejection(int status, String responseBody) {
+        if (status == 400 || status == 422) {
+            return true;
+        }
+        if (status != 409 || responseBody == null || responseBody.isBlank()) {
+            return false;
+        }
+        try {
+            var body = objectMapper.readTree(responseBody);
+            var error = body == null ? null : body.get("error");
+            var code = error == null ? null : error.get("code");
+            // Wallet API wraps business IllegalStateException responses in a transaction
+            // rollback. This code is a definitive rejection; idempotency-in-progress and
+            // generic uniqueness conflicts remain ambiguous and must not trigger refunds.
+            return code != null && "INVALID_STATE".equals(code.asString());
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 
     public static final class CustodyWalletRejectedException extends IllegalStateException {

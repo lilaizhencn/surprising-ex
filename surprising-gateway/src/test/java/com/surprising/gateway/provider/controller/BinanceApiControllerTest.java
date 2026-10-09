@@ -150,9 +150,12 @@ class BinanceApiControllerTest {
         when(withdrawalService.submit(eq(1001L), eq("withdraw-1"), any()))
                 .thenReturn(new CustodyWithdrawalService.WithdrawalResponse(
                         withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now));
+        CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
+        UUID sourceAddressId = UUID.randomUUID();
+        when(custodyWalletClient.withdrawalAddressId(1001L, "ETH", "USDT", "1")).thenReturn(sourceAddressId);
         BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
-                mock(CustodyWalletClient.class), withdrawalService, new ObjectMapper());
+                custodyWalletClient, withdrawalService, new ObjectMapper());
 
         MockHttpServletRequest request = withdrawalRequest();
         request.addHeader("X-Security-Email-Code", "email-code");
@@ -162,7 +165,11 @@ class BinanceApiControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(verification).verify(eq(1001L), eq("WITHDRAWAL"), eq("email-code"), eq("totp-code"), any());
-        verify(withdrawalService).submit(eq(1001L), eq("withdraw-1"), any());
+        ArgumentCaptor<CustodyWithdrawalService.WithdrawalRequest> requestCaptor =
+                ArgumentCaptor.forClass(CustodyWithdrawalService.WithdrawalRequest.class);
+        verify(withdrawalService).submit(eq(1001L), eq("withdraw-1"), requestCaptor.capture());
+        assertThat(requestCaptor.getValue().custodyAddressId()).isEqualTo(sourceAddressId);
+        verify(custodyWalletClient).withdrawalAddressId(1001L, "ETH", "USDT", "1");
     }
 
     @Test
@@ -246,8 +253,6 @@ class BinanceApiControllerTest {
     void exposesConfiguredCapitalNetworksAndAccountStatus() throws Exception {
         GatewayProperties properties = withdrawalProperties();
         properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setWithdrawalAddressIds(Map.of(
-                "TRX", UUID.randomUUID().toString(), "ETH", UUID.randomUUID().toString()));
         AuthService authService = bearerAuth();
         CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
         when(walletClient.chains()).thenReturn(List.of(
@@ -325,8 +330,6 @@ class BinanceApiControllerTest {
     private GatewayProperties withdrawalProperties() {
         GatewayProperties properties = new GatewayProperties();
         properties.getBinanceApi().setEnabled(true);
-        properties.getCustodyWallet().setWithdrawalAddressIds(
-                Map.of("ETH", UUID.randomUUID().toString()));
         return properties;
     }
 

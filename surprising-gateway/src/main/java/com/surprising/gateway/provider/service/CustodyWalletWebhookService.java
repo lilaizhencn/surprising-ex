@@ -94,6 +94,39 @@ public class CustodyWalletWebhookService {
         }
     }
 
+    public Map<String, String> verificationChallenge(String eventId, String eventType, String timestamp,
+                                                     String signature, byte[] body) {
+        GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
+        if (!wallet.isEnabled() || wallet.getWebhookSecret() == null || wallet.getWebhookSecret().isBlank()) {
+            throw new IllegalStateException("custody wallet webhook is not configured");
+        }
+        if (eventId == null || eventId.isBlank() || eventType == null || eventType.isBlank()
+                || timestamp == null || timestamp.isBlank() || signature == null || signature.isBlank()) {
+            throw new IllegalArgumentException("wallet webhook headers are required");
+        }
+        String normalizedEventId = eventId.trim();
+        String normalizedType = normalizedEventType(eventType);
+        if (!eventId.equals(normalizedEventId) || !eventType.equals(normalizedType)
+                || !"WEBHOOK.VERIFICATION".equals(normalizedType)) {
+            throw new IllegalArgumentException("wallet webhook verification identity is invalid");
+        }
+        long eventTimestamp = parseTimestamp(timestamp);
+        if (Math.abs(Instant.now().getEpochSecond() - eventTimestamp) > MAX_CLOCK_SKEW_SECONDS) {
+            throw new IllegalArgumentException("wallet webhook timestamp is outside the allowed window");
+        }
+        byte[] rawBody = body == null ? new byte[0] : body;
+        verifySignature(wallet.getWebhookSecret(), normalizedEventId, normalizedType,
+                eventTimestamp, signature, rawBody);
+        Map<String, Object> event = readEvent(rawBody);
+        if (!normalizedEventId.equals(identityValue(event.get("id"), "wallet webhook id"))
+                || !normalizedType.equals(identityValue(event.get("type"), "wallet webhook event type"))) {
+            throw new IllegalArgumentException("wallet webhook identity does not match its payload");
+        }
+        Map<String, Object> data = mapValue(event.get("data"), "wallet webhook data");
+        String challenge = stringValue(data.get("challenge"), "wallet webhook challenge");
+        return Map.of("challenge", challenge);
+    }
+
     String signature(String secret, String eventId, String eventType, long timestamp, byte[] body) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");

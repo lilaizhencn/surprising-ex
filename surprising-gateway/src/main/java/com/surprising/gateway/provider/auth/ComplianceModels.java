@@ -72,12 +72,19 @@ public final class ComplianceModels {
             @Size(max = 40) String faceVerificationStatus,
             @Size(max = 10) List<Long> documentIds,
             java.time.LocalDate documentExpiresOn,
-            java.time.LocalDate addressIssuedOn) {
+            java.time.LocalDate addressIssuedOn,
+            java.time.LocalDate documentIssuedOn) {
+        public KycSubmissionRequest(String applicantType, String kycLevel, String country, String documentType,
+                String provider, String providerReference, String submittedDocuments, String faceVerificationStatus,
+                List<Long> documentIds, java.time.LocalDate documentExpiresOn, java.time.LocalDate addressIssuedOn) {
+            this(applicantType, kycLevel, country, documentType, provider, providerReference, submittedDocuments,
+                    faceVerificationStatus, documentIds, documentExpiresOn, addressIssuedOn, null);
+        }
         public KycSubmissionRequest(String applicantType, String kycLevel, String country, String documentType,
                 String provider, String providerReference, String submittedDocuments, String faceVerificationStatus,
                 List<Long> documentIds) {
             this(applicantType,kycLevel,country,documentType,provider,providerReference,submittedDocuments,
-                    faceVerificationStatus,documentIds,null,null);
+                    faceVerificationStatus,documentIds,null,null,null);
         }
     }
 

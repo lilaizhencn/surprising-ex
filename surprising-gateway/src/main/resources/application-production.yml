@@ -26,7 +26,6 @@ surprising:
       api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY}
       api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET}
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET}
-      withdrawal-address-ids-json: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS}
     kyc-documents:
       enabled: ${GATEWAY_KYC_DOCUMENTS_ENABLED:true}
       type: s3
