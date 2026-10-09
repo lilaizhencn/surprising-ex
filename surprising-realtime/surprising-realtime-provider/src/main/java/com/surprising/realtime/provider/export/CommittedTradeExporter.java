@@ -166,6 +166,9 @@ final class CommittedTradeExporter {
                     // The image may hold part of a fragmented command. Its position controls
                     // polling; cursor remains the last complete, durable command boundary.
                     long position = archiveReplay.position(cursor);
+                    // During recovery, flushing almost every historical command wastes SQL
+                    // round trips and prevents the exporter from catching the live core.
+                    batch.catchUp(committed - position > 64 * 1024);
                     if (committed <= position) {
                         if (System.nanoTime() >= nextCheckpoint[0]) {
                             batch.flush(replay.exportSequence());
@@ -253,9 +256,10 @@ final class CommittedTradeExporter {
         }
     }
 
-    /** Export-worker-owned batch: bounded by commands/frames and a 5ms delivery deadline. */
+    /** Export-worker-owned batch: bounded by commands/frames and a delivery deadline. */
     static final class ExportBatch {
         private static final long MAX_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
+        private static final long CATCH_UP_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
         private final ProductLine product;
         private final CommittedOrderProjectionRepository orders;
         private final ReliableTradeKafkaSink sink;
@@ -263,11 +267,16 @@ final class CommittedTradeExporter {
         private final ArrayList<RealtimeFrame> orderChanges = new ArrayList<>();
         private int messages;
         private long startedAt, flushedSequence = -1;
+        private long maxDelayNanos = MAX_DELAY_NANOS;
 
         ExportBatch(ProductLine product, CommittedOrderProjectionRepository orders, ReliableTradeKafkaSink sink) {
             this.product = product;
             this.orders = orders;
             this.sink = sink;
+        }
+
+        void catchUp(boolean behind) {
+            maxDelayNanos = behind ? CATCH_UP_DELAY_NANOS : MAX_DELAY_NANOS;
         }
 
         void add(List<RealtimeFrame> changes, long sequence, long now) {
@@ -278,16 +287,16 @@ final class CommittedTradeExporter {
                 else orderChanges.add(change);
             }
             if (messages >= 256 || trades.size() + orderChanges.size() >= 4096
-                    || now - startedAt >= MAX_DELAY_NANOS) flush(sequence);
+                    || now - startedAt >= maxDelayNanos) flush(sequence);
         }
 
         void flushIfDue(long sequence, long now) {
-            if (messages > 0 && now - startedAt >= MAX_DELAY_NANOS) flush(sequence);
+            if (messages > 0 && now - startedAt >= maxDelayNanos) flush(sequence);
         }
 
         long waitNanos(long now, long maxWaitNanos) {
             return messages == 0 ? maxWaitNanos
-                    : Math.max(1, Math.min(maxWaitNanos, MAX_DELAY_NANOS - (now - startedAt)));
+                    : Math.max(1, Math.min(maxWaitNanos, maxDelayNanos - (now - startedAt)));
         }
 
         void flush(long sequence) {

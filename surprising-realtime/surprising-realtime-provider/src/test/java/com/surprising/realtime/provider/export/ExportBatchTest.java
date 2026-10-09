@@ -73,6 +73,39 @@ class ExportBatchTest {
         verify(orders,times(3)).persist(any(),anyList(),eq(1L));
     }
 
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void catchesUpInBoundedBatchesThenRestoresLiveDeadline(ProductLine product) {
+        var orders = mock(CommittedOrderProjectionRepository.class);
+        var sink = mock(ReliableTradeKafkaSink.class);
+        var projected = new ArrayList<RealtimeFrame>();
+        doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })
+                .when(orders).persist(eq(product), anyList(), anyLong());
+        var batch = new CommittedTradeExporter.ExportBatch(product, orders, sink);
+        batch.catchUp(true);
+        // A historical command taking 2ms previously triggered a SQL commit every
+        // few commands. Recovery batches retain command order without this churn.
+        for (int i = 0; i < 50; i++) {
+            batch.add(List.of(frame(product, RealtimeFrame.Kind.ORDER, i)), i, i * 2_000_000L);
+            batch.flushIfDue(i, i * 2_000_000L);
+        }
+        verifyNoInteractions(orders, sink);
+        assertThat(batch.waitNanos(98_000_000L, 10_000_000L)).isEqualTo(2_000_000L);
+        batch.flushIfDue(49, 100_000_000L);
+        verify(orders).persist(eq(product), anyList(), eq(49L));
+        assertThat(projected).extracting(RealtimeFrame::sequence).containsExactlyElementsOf(
+                java.util.stream.LongStream.range(0, 50).boxed().toList());
+        verify(sink).publish(anyList());
+        clearInvocations(orders, sink);
+        // The original capacity limits still force recovery batches to flush.
+        for (int i = 0; i < 256; i++) batch.add(List.of(), 50 + i, 101_000_000L + i);
+        verify(orders).persist(eq(product), anyList(), eq(305L));
+        clearInvocations(orders, sink);
+        batch.add(List.of(frame(product, RealtimeFrame.Kind.ORDER, 306)), 306, 102_000_000L);
+        batch.catchUp(false);
+        batch.flushIfDue(306, 107_000_000L);
+        verify(orders).persist(eq(product), anyList(), eq(306L));
+    }
+
     private static RealtimeFrame frame(ProductLine product, RealtimeFrame.Kind kind, long sequence) {
         return new RealtimeFrame(product,kind,42,sequence,0,0,0,"1","order",new byte[0]);
     }

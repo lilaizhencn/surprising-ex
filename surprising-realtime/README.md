@@ -466,3 +466,5 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 维护入口 `com.surprising.realtime.provider.export.CommittedFundingRepair` 复用同一 Archive 提交边界和回放状态，参数依次为 product、cluster-directory、aeron-directory、archive-control-channel、独立 `*.funding-repair` checkpoint、有限 end-position；连接数据库沿用部署环境 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`。可从结算窗口之前的有效 trade-export checkpoint 副本开始，只写资金费查询投影，不连接 Kafka、不改订单/水位、不向在线 Core 发送命令，也不覆盖在线 exporter 的 checkpoint。必须在运维脚本外层限制运行时间、堆和磁盘，并核对窗口覆盖；snapshot 之前的结算不可从该 snapshot 推算。
 
 本地验证包括迟到成交 SQL 失败重试、全部 12 个周期、通知排队与重复计数、10080 分钟周线重建、热缓存不回退，真实 PostgreSQL 的版本替换和资金费原子事务/幂等/缺页/冲突/零支付/产品隔离，以及真实 Archive 的分片、提交边界、SQL 失败后 checkpoint 恢复；原 Archive/Kafka 成交导出集成仍执行。在线 Core、撮合资金模型与 Kafka topic 不变，不需要重启 Core。
+
+导出恢复追赶时，已提交位置超过回放位置 64KiB 后，`ExportBatch` 暂将合批目标期限从 5ms 调整到 100ms，减少历史命令逐小批 SQL 往返；接近实时位置后恢复 5ms。原 256 命令/4096 帧上限、完整命令边界、订单事务先于 Kafka、失败不推进 checkpoint 等规则不变；外部 I/O 与调度耗时不计为端到端延迟承诺。此状态只属于原导出线程，不新增配置项或工作线程。六产品线测试覆盖追赶期限、容量上限及恢复实时期限。
