@@ -61,10 +61,14 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             Instant openTime = period.floor(minute.openTime());
             String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
             String seenKey = rollupKey + "|" + minute.openTime().toEpochMilli();
+            Long seen = seenStore.get(seenKey);
+            // Accepted trades only append to a minute. Its count is the revision;
+            // lastSequence instead identifies the last trade by event time.
+            if (seen != null && seen < 0 && minute.tradeCount() <= ~seen) continue;
             CandleRollupAccumulator previous = rollupStore.get(rollupKey);
             // A week can outlive minute dedupe retention. Any minute at/before the
             // accumulated tail is a replacement, even after its seen marker expires.
-            if (seenStore.get(seenKey) != null || (previous != null && (previous.isComplete()
+            if (seen != null || (previous != null && (previous.isComplete()
                     || previous.getLastMinute() != null && !minute.openTime().isAfter(previous.getLastMinute())))) {
                 rebuildClosedMinutes(instrumentId, period, openTime, rollupKey, record.timestamp());
                 continue;
@@ -74,7 +78,7 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             long currentOpenMillis = openTime.toEpochMilli();
             if (activeOpenMillis != null && currentOpenMillis < activeOpenMillis) {
                 rebuildClosedMinutes(instrumentId, period, openTime, rollupKey, record.timestamp());
-                seenStore.put(seenKey, minute.openTime().toEpochMilli());
+                seenStore.put(seenKey, ~minute.tradeCount());
                 continue;
             }
             if (activeOpenMillis == null || currentOpenMillis > activeOpenMillis) {
@@ -88,7 +92,7 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             }
             accumulator.add(minute);
             rollupStore.put(rollupKey, accumulator);
-            seenStore.put(seenKey, minute.openTime().toEpochMilli());
+            seenStore.put(seenKey, ~minute.tradeCount());
             forward(instrumentId, accumulator, record.timestamp());
         }
     }
@@ -113,7 +117,8 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             // SQL may already contain minutes whose Kafka notification is still queued.
             // Mark those inputs too so their later notification cannot add them twice.
             String key = rollupKey + "|" + row.openTime().toEpochMilli();
-            if (seenStore.get(key) == null) seenStore.put(key, row.openTime().toEpochMilli());
+            long revision = ~row.tradeCount();
+            if (!java.util.Objects.equals(seenStore.get(key), revision)) seenStore.put(key, revision);
         }
         if (!period.closeTime(openTime).isAfter(emittedAt)) replacement.close();
         var previous = rollupStore.get(rollupKey);
@@ -178,7 +183,11 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
         try (KeyValueIterator<String, Long> iterator = seenStore.all()) {
             while (iterator.hasNext() && expiredSeen.size() < maxEntries) {
                 KeyValue<String, Long> item = iterator.next();
-                if (item.value != null && item.value < cutoff) {
+                // The minute time is already authoritative in the key. The existing
+                // Long value now stores complemented count; old positive timestamp
+                // markers are converted by the first durable rebuild after upgrade.
+                long minuteTime = Long.parseLong(item.key.substring(item.key.lastIndexOf('|') + 1));
+                if (minuteTime < cutoff) {
                     expiredSeen.add(item.key);
                 }
             }

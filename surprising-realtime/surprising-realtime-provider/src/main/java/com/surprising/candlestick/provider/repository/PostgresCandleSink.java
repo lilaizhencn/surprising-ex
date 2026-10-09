@@ -36,8 +36,7 @@ public class PostgresCandleSink implements CandleSink {
               last_sequence=EXCLUDED.last_sequence, status=EXCLUDED.status,
               updated_at=EXCLUDED.updated_at, source_partition=EXCLUDED.source_partition,
               source_offset=EXCLUDED.source_offset
-            WHERE EXCLUDED.last_sequence > candlestick_candles.last_sequence
-              AND EXCLUDED.trade_count >= candlestick_candles.trade_count
+            WHERE EXCLUDED.trade_count > candlestick_candles.trade_count
             """;
 
     private final JdbcTemplate jdbcTemplate;

@@ -38,6 +38,30 @@ class CandleQueryPostgresTest {
         });
     }
 
+    @Test
+    void earlierEventTimeTradeRaisesRevisionWithoutChangingTheLastTradeSequence() {
+        var source = new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),
+                System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
+        var jdbc = new JdbcTemplate(source);
+        new TransactionTemplate(new DataSourceTransactionManager(source)).executeWithoutResult(tx -> {
+            tx.setRollbackOnly();
+            var open = Instant.parse("2026-01-02T00:00:00Z");
+            var old = minute(open, 2, "110", "3");
+            var revised = minute(open, 3, "110", "4");
+            revised.setLastSequence(old.getLastSequence());
+            revised.setLastTradeId(old.getLastTradeId());
+            revised.setHighPrice(new java.math.BigDecimal("120"));
+            var sink = new PostgresCandleSink(jdbc);
+            sink.upsertBatch(java.util.List.of(old, revised, old, revised));
+            var row = new CandleQueryRepository(jdbc).findLatest("2147483598", "1m").orElseThrow();
+            assertThat(row.tradeCount()).isEqualTo(3);
+            assertThat(row.lastSequence()).isEqualTo(2);
+            assertThat(row.closePrice()).isEqualByComparingTo("110");
+            assertThat(row.highPrice()).isEqualByComparingTo("120");
+            assertThat(row.baseVolume()).isEqualByComparingTo("4");
+        });
+    }
+
     private com.surprising.candlestick.provider.aggregation.CandleSnapshot minute(
             Instant open, long sequence, String close, String volume) {
         return new com.surprising.candlestick.provider.aggregation.CandleSnapshot("2147483598", "1m", open,

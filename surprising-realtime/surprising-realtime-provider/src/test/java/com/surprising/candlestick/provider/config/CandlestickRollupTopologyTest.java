@@ -63,20 +63,24 @@ class CandlestickRollupTopologyTest {
                     m.firstSequence(), m.lastSequence(), m.status(), m.eventTime()));
             // Replaying the first notification sees both already durable minutes. A later
             // notification of that second minute must not add its volume a second time.
-            input.pipeInput("1", first);
+            var revision = revisedMinute(first, 2);
+            durable.put(first.openTime(), response(revision));
+            input.pipeInput("1", revision);
             assertThat(output.readValuesToList()).hasSize(properties.getPeriods().size() - 1)
-                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(2); assertThat(row.baseVolume()).isEqualByComparingTo("2"); });
+                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(3); assertThat(row.baseVolume()).isEqualByComparingTo("3"); });
             input.pipeInput("1", future);
             assertThat(output.isEmpty()).isTrue();
-            var old = durable.get(first.openTime());
-            durable.put(first.openTime(), new com.surprising.candlestick.api.model.CandleResponse(old.instrumentId(), old.period(),
-                    old.openTime(), old.closeTime(), old.openPrice(), BigDecimal.TEN, old.lowPrice(), BigDecimal.TEN,
-                    BigDecimal.TWO, BigDecimal.TEN, 2, old.firstTradeId(), "late", old.firstSequence(), 2L,
-                    CandleStatus.CLOSED, old.updatedAt().plusSeconds(100)));
-            input.pipeInput("1", first);
+            revision = revisedMinute(first, 3);
+            durable.put(first.openTime(), response(revision));
+            input.pipeInput("1", revision);
             assertThat(output.readValuesToList()).hasSize(properties.getPeriods().size() - 1)
-                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(3); assertThat(row.baseVolume()).isEqualByComparingTo("3");
+                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(4); assertThat(row.baseVolume()).isEqualByComparingTo("4");
                         assertThat(row.highPrice()).isEqualByComparingTo("10"); });
+            for (int i = 0; i < 20; i++) input.pipeInput("1", revision);
+            assertThat(output.isEmpty()).isTrue();
+            verify(repository, times(2 * (properties.getPeriods().size() - 1))).findRange(
+                    org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("1m"),
+                    org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
         }
     }
 
@@ -115,7 +119,14 @@ class CandlestickRollupTopologyTest {
             keys.forEach(seen::delete); // retention cleanup of an active, longer-lived week
             input.pipeInput("1", first);
             assertThat(output.isEmpty()).isTrue();
-            verify(repository).findRange("1", "1m", week.floor(first.openTime()),
+            String oldKey = keys.stream().filter(key -> key.endsWith("|" + first.openTime().toEpochMilli())).findFirst().orElseThrow();
+            seen.put(oldKey, first.openTime().toEpochMilli());
+            input.pipeInput("1", first);
+            assertThat(output.isEmpty()).isTrue();
+            assertThat(seen.get(oldKey)).isEqualTo(~first.tradeCount());
+            driver.advanceWallClockTime(Duration.ofDays(3));
+            assertThat(seen.get(oldKey)).isNull();
+            verify(repository, times(2)).findRange("1", "1m", week.floor(first.openTime()),
                     week.closeTime(week.floor(first.openTime())), 10080);
         }
     }
@@ -148,16 +159,18 @@ class CandlestickRollupTopologyTest {
             var minute = minuteAt(open.toString(), CandleStatus.CLOSED);
             input.pipeInput("1", minute);
             output.readValuesToList();
-            input.pipeInput("1", minute);
+            var revision = revisedMinute(minute, 2);
+            rows.set(0, response(revision));
+            input.pipeInput("1", revision);
             assertThat(output.readValue()).satisfies(row -> {
-                assertThat(row.tradeCount()).isEqualTo(10080);
-                assertThat(row.baseVolume()).isEqualByComparingTo("10080");
+                assertThat(row.tradeCount()).isEqualTo(10081);
+                assertThat(row.baseVolume()).isEqualByComparingTo("10081");
                 assertThat(row.status()).isEqualTo(CandleStatus.CLOSED);
                 assertThat(row.lastSequence()).isEqualTo(10080);
             });
-            input.pipeInput("1", minute);
+            input.pipeInput("1", revision);
             assertThat(output.isEmpty()).isTrue();
-            verify(repository, times(2)).findRange("1", "1m", open, week.closeTime(open), 10080);
+            verify(repository).findRange("1", "1m", open, week.closeTime(open), 10080);
         }
     }
 
@@ -417,6 +430,21 @@ class CandlestickRollupTopologyTest {
 
     private CandleUpdatedEvent minute(CandleStatus status) {
         return minuteAt("2026-08-25T10:01:00Z", status);
+    }
+
+    private CandleUpdatedEvent revisedMinute(CandleUpdatedEvent minute, long count) {
+        return new CandleUpdatedEvent(minute.instrumentId(), minute.period(), minute.openTime(), minute.closeTime(),
+                minute.openPrice(), BigDecimal.TEN, minute.lowPrice(), BigDecimal.TEN,
+                BigDecimal.valueOf(count), BigDecimal.TEN, count, minute.firstTradeId(), "revision-" + count,
+                minute.firstSequence(), count, CandleStatus.CLOSED, minute.eventTime().plusSeconds(count),
+                minute.emittedAt(), minute.sourcePartition(), minute.sourceOffset());
+    }
+
+    private com.surprising.candlestick.api.model.CandleResponse response(CandleUpdatedEvent m) {
+        return new com.surprising.candlestick.api.model.CandleResponse(m.instrumentId(), m.period(),
+                m.openTime(), m.closeTime(), m.openPrice(), m.highPrice(), m.lowPrice(), m.closePrice(),
+                m.baseVolume(), m.quoteVolume(), m.tradeCount(), m.firstTradeId(), m.lastTradeId(),
+                m.firstSequence(), m.lastSequence(), m.status(), m.eventTime());
     }
 
     private CandleUpdatedEvent minuteAt(String time, CandleStatus status) {
