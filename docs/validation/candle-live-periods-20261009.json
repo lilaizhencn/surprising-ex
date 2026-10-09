@@ -1,0 +1,2982 @@
+{
+  "date": "2026-10-09",
+  "productLine": "LINEAR_PERPETUAL",
+  "backendCommit": "a59563d729375539961820c1a3bb182ae0175739",
+  "frontendCommit": "d81f15d1132975d80c4f732faaaee21e9a9e90d5",
+  "rootCause": "旧 rollup 仅消费 CLOSED 1m，前端移除张数/基础币混算后显露较大周期不实时更新。",
+  "solution": "消费全部 1m 快照，用原 RocksDB accumulator 的一个可替换 activeMinute 尾部更新高周期，不新增 topic/index/线程；重复与旧快照去重，晚到 CLOSED 及 SQL 修订保留正确总量。",
+  "deployment": {
+    "release": "a59563d7",
+    "releasePath": "/opt/surprising-ex-20261009-live-candles-a59563d7",
+    "moduleVersions": {
+      "core": "f974fa21; source identical at c79d572b",
+      "gateway": "f974fa21; source identical at c79d572b",
+      "price": "f974fa21; source identical at c79d572b",
+      "derivatives-lifecycle": "f974fa21; source identical at c79d572b",
+      "maker": "f974fa21; source identical at c79d572b",
+      "realtime": "a59563d7"
+    },
+    "changedArtifact": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+    "artifactSha256": "0f5ce86cb8538eaee2f928d9f5a5cca6a9838ac39f3cd4ce9159ef6e82c5dbbc",
+    "remoteTests": [
+      {
+        "name": "com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.candlestick.provider.config.CandlestickStreamConfigurationTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.candlestick.provider.service.CandleHotCacheTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "pidsBefore": {
+      "core-node0": 2268566,
+      "gateway": 2268770,
+      "price": 2268965,
+      "realtime": 2271965,
+      "derivatives-lifecycle": 2269882,
+      "maker": 2272277
+    },
+    "pidsAfter": {
+      "core-node0": 2268566,
+      "gateway": 2268770,
+      "price": 2268965,
+      "realtime": 2282585,
+      "derivatives-lifecycle": 2269882,
+      "maker": 2272277
+    },
+    "health": {
+      "9094": {
+        "groups": [
+          "liveness",
+          "readiness"
+        ],
+        "status": "UP"
+      },
+      "9082": {
+        "groups": [
+          "liveness",
+          "readiness"
+        ],
+        "status": "UP"
+      },
+      "9095": {
+        "groups": [
+          "liveness",
+          "readiness"
+        ],
+        "status": "UP"
+      },
+      "9087": {
+        "groups": [
+          "liveness",
+          "readiness"
+        ],
+        "status": "UP"
+      },
+      "9096": {
+        "groups": [
+          "liveness",
+          "readiness"
+        ],
+        "status": "UP"
+      }
+    },
+    "checkpointBefore": {
+      "logPosition": 13714570624,
+      "tradeSequence": 205123,
+      "sha256": "7d3e044191003aae2af518740a2f81d13e5d43183aa1955ff325ebe46bd29264"
+    },
+    "checkpointAfter": {
+      "logPosition": 13714570624,
+      "tradeSequence": 205123,
+      "sha256": "7d3e044191003aae2af518740a2f81d13e5d43183aa1955ff325ebe46bd29264"
+    },
+    "completedAt": "2026-10-09T04:19:50Z"
+  },
+  "followupState": {
+    "checkpointLogPosition": 13724341792,
+    "tradeSequence": 205930,
+    "sha256": "d8cefabd482b43ff72563a6f83d2f064fb08026e57bfff77c9b5979b623bf025",
+    "pids": {
+      "core-node0": 2268566,
+      "gateway": 2268770,
+      "maker": 2272277,
+      "realtime": 2282585,
+      "derivatives-lifecycle": 2269882,
+      "price": 2268965
+    },
+    "release": "/opt/surprising-ex-20261009-live-candles-a59563d7"
+  },
+  "retainedExecutableArtifacts": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "unusedBuildSha256": "3dfadf85d767df4bf3f0b6870464f14cf22b362196860bac8b6292ea43c36942",
+      "retainedSha256": "0f2bc4ca9e427c571ceab714116bb4decc65a0948993e3c1bcb3f369e4109d0e"
+    }
+  ],
+  "browserAllPeriods": {
+    "startedAt": "2026-10-09T04:22:55.930Z",
+    "periods": {
+      "15m": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:23:07.678Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.17,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.6
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.6,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.17,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:06.537Z",
+            "receivedAt": 1791519787654,
+            "receiveAgeMs": 24,
+            "messages": 1
+          },
+          {
+            "at": "2026-10-09T04:23:09.694Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.19,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.6
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.6,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.19,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:07.975Z",
+            "receivedAt": 1791519788718,
+            "receiveAgeMs": 976,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:23:11.701Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.29,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82453.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82453.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.29,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:10.284Z",
+            "receivedAt": 1791519790846,
+            "receiveAgeMs": 855,
+            "messages": 4
+          },
+          {
+            "at": "2026-10-09T04:23:13.707Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.36,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82453.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82453.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.36,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:11.798Z",
+            "receivedAt": 1791519793055,
+            "receiveAgeMs": 652,
+            "messages": 6
+          },
+          {
+            "at": "2026-10-09T04:23:15.714Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.59,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82453.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82453.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.59,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:14.387Z",
+            "receivedAt": 1791519795190,
+            "receiveAgeMs": 524,
+            "messages": 8
+          },
+          {
+            "at": "2026-10-09T04:23:17.724Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.67,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82454
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82454,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.67,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:17.106Z",
+            "receivedAt": 1791519797471,
+            "receiveAgeMs": 253,
+            "messages": 10
+          },
+          {
+            "at": "2026-10-09T04:23:19.730Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.77,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82454
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82454,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.77,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:19.017Z",
+            "receivedAt": 1791519799578,
+            "receiveAgeMs": 152,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:23:21.736Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.83,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82442
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82442,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.83,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:21.018Z",
+            "receivedAt": 1791519801698,
+            "receiveAgeMs": 38,
+            "messages": 14
+          },
+          {
+            "at": "2026-10-09T04:23:23.741Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.84,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82436.3
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82436.3,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.84,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:21.976Z",
+            "receivedAt": 1791519802793,
+            "receiveAgeMs": 948,
+            "messages": 15
+          },
+          {
+            "at": "2026-10-09T04:23:26.228Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 13.97,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82436.3
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82436.3,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 13.97,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:25.406Z",
+            "receivedAt": 1791519806196,
+            "receiveAgeMs": 32,
+            "messages": 19
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "5m": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:23:28.307Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 4.79,
+            "prices": [
+              82483.2,
+              82483.3,
+              82434.2,
+              82434.2
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82434.2,
+              "close": 82434.2,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 4.79,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:26.953Z",
+            "receivedAt": 1791519807269,
+            "receiveAgeMs": 1038,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:23:30.323Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 4.91,
+            "prices": [
+              82483.2,
+              82483.3,
+              82434.2,
+              82434.2
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82434.2,
+              "close": 82434.2,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 4.91,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:29.286Z",
+            "receivedAt": 1791519809515,
+            "receiveAgeMs": 808,
+            "messages": 5
+          },
+          {
+            "at": "2026-10-09T04:23:32.332Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.04,
+            "prices": [
+              82483.2,
+              82483.3,
+              82434.2,
+              82434.3
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82434.2,
+              "close": 82434.3,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.04,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:31.047Z",
+            "receivedAt": 1791519811771,
+            "receiveAgeMs": 561,
+            "messages": 7
+          },
+          {
+            "at": "2026-10-09T04:23:34.335Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.12,
+            "prices": [
+              82483.2,
+              82483.3,
+              82434.2,
+              82434.2
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82434.2,
+              "close": 82434.2,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.12,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:32.685Z",
+            "receivedAt": 1791519812996,
+            "receiveAgeMs": 1339,
+            "messages": 9
+          },
+          {
+            "at": "2026-10-09T04:23:36.339Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.2,
+            "prices": [
+              82483.2,
+              82483.3,
+              82432.4,
+              82432.4
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82432.4,
+              "close": 82432.4,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.2,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:35.879Z",
+            "receivedAt": 1791519816170,
+            "receiveAgeMs": 169,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:23:38.343Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.27,
+            "prices": [
+              82483.2,
+              82483.3,
+              82432.4,
+              82432.4
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82432.4,
+              "close": 82432.4,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.27,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:37.384Z",
+            "receivedAt": 1791519818272,
+            "receiveAgeMs": 71,
+            "messages": 14
+          },
+          {
+            "at": "2026-10-09T04:23:40.352Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.3,
+            "prices": [
+              82483.2,
+              82483.3,
+              82432.4,
+              82432.4
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82432.4,
+              "close": 82432.4,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.3,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:38.235Z",
+            "receivedAt": 1791519819284,
+            "receiveAgeMs": 1068,
+            "messages": 15
+          },
+          {
+            "at": "2026-10-09T04:23:42.357Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.44,
+            "prices": [
+              82483.2,
+              82483.3,
+              82432.4,
+              82432.5
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82432.4,
+              "close": 82432.5,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.44,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:40.911Z",
+            "receivedAt": 1791519821496,
+            "receiveAgeMs": 861,
+            "messages": 18
+          },
+          {
+            "at": "2026-10-09T04:23:44.361Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.53,
+            "prices": [
+              82483.2,
+              82483.3,
+              82432.4,
+              82432.5
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82432.4,
+              "close": 82432.5,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.53,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:43.023Z",
+            "receivedAt": 1791519823637,
+            "receiveAgeMs": 724,
+            "messages": 21
+          },
+          {
+            "at": "2026-10-09T04:23:46.366Z",
+            "openTime": "2026-10-09T04:20:00Z",
+            "volume": 5.56,
+            "prices": [
+              82483.2,
+              82483.3,
+              82417.6,
+              82417.6
+            ],
+            "seriesPrice": {
+              "open": 82483.2,
+              "high": 82483.3,
+              "low": 82417.6,
+              "close": 82417.6,
+              "time": 1791519600
+            },
+            "seriesVolume": {
+              "value": 5.56,
+              "time": 1791519600,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:44.622Z",
+            "receivedAt": 1791519825702,
+            "receiveAgeMs": 664,
+            "messages": 23
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "1m": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:23:48.421Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 0.95,
+            "prices": [
+              82436.2,
+              82436.3,
+              82416.4,
+              82416.5
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82416.4,
+              "close": 82416.5,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 0.95,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:48.390Z",
+            "receivedAt": 1791519828367,
+            "receiveAgeMs": 54,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:23:50.426Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.03,
+            "prices": [
+              82436.2,
+              82436.3,
+              82416.4,
+              82416.5
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82416.4,
+              "close": 82416.5,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.03,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:50.211Z",
+            "receivedAt": 1791519830195,
+            "receiveAgeMs": 231,
+            "messages": 4
+          },
+          {
+            "at": "2026-10-09T04:23:52.436Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.11,
+            "prices": [
+              82436.2,
+              82436.3,
+              82416.4,
+              82416.5
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82416.4,
+              "close": 82416.5,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.11,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:52.180Z",
+            "receivedAt": 1791519832161,
+            "receiveAgeMs": 275,
+            "messages": 6
+          },
+          {
+            "at": "2026-10-09T04:23:54.440Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.24,
+            "prices": [
+              82436.2,
+              82436.3,
+              82411.7,
+              82411.7
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82411.7,
+              "close": 82411.7,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.24,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:53.906Z",
+            "receivedAt": 1791519833880,
+            "receiveAgeMs": 560,
+            "messages": 9
+          },
+          {
+            "at": "2026-10-09T04:23:56.444Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.38,
+            "prices": [
+              82436.2,
+              82436.3,
+              82407.7,
+              82407.7
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82407.7,
+              "close": 82407.7,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.38,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:55.926Z",
+            "receivedAt": 1791519835952,
+            "receiveAgeMs": 492,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:23:58.449Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.57,
+            "prices": [
+              82436.2,
+              82436.3,
+              82407.6,
+              82411.6
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82407.6,
+              "close": 82411.6,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.57,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:23:58.092Z",
+            "receivedAt": 1791519838073,
+            "receiveAgeMs": 376,
+            "messages": 16
+          },
+          {
+            "at": "2026-10-09T04:24:00.454Z",
+            "openTime": "2026-10-09T04:23:00Z",
+            "volume": 1.69,
+            "prices": [
+              82436.2,
+              82436.3,
+              82407.6,
+              82411.5
+            ],
+            "seriesPrice": {
+              "open": 82436.2,
+              "high": 82436.3,
+              "low": 82407.6,
+              "close": 82411.5,
+              "time": 1791519780
+            },
+            "seriesVolume": {
+              "value": 1.69,
+              "time": 1791519780,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:24:00.195Z",
+            "receivedAt": 1791519840177,
+            "receiveAgeMs": 277,
+            "messages": 20
+          },
+          {
+            "at": "2026-10-09T04:24:06.377Z",
+            "openTime": "2026-10-09T04:24:00Z",
+            "volume": 0.06,
+            "prices": [
+              82413.9,
+              82413.9,
+              82413.9,
+              82413.9
+            ],
+            "seriesPrice": {
+              "open": 82413.9,
+              "high": 82413.9,
+              "low": 82413.9,
+              "close": 82413.9,
+              "time": 1791519840
+            },
+            "seriesVolume": {
+              "value": 0.06,
+              "time": 1791519840,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:06.359Z",
+            "receivedAt": 1791519846355,
+            "receiveAgeMs": 22,
+            "messages": 27
+          },
+          {
+            "at": "2026-10-09T04:24:08.387Z",
+            "openTime": "2026-10-09T04:24:00Z",
+            "volume": 0.17,
+            "prices": [
+              82413.9,
+              82413.9,
+              82413.9,
+              82413.9
+            ],
+            "seriesPrice": {
+              "open": 82413.9,
+              "high": 82413.9,
+              "low": 82413.9,
+              "close": 82413.9,
+              "time": 1791519840
+            },
+            "seriesVolume": {
+              "value": 0.17,
+              "time": 1791519840,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:07.816Z",
+            "receivedAt": 1791519847797,
+            "receiveAgeMs": 590,
+            "messages": 29
+          },
+          {
+            "at": "2026-10-09T04:24:10.391Z",
+            "openTime": "2026-10-09T04:24:00Z",
+            "volume": 0.24,
+            "prices": [
+              82413.9,
+              82414,
+              82413.9,
+              82414
+            ],
+            "seriesPrice": {
+              "open": 82413.9,
+              "high": 82414,
+              "low": 82413.9,
+              "close": 82414,
+              "time": 1791519840
+            },
+            "seriesVolume": {
+              "value": 0.24,
+              "time": 1791519840,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:09.828Z",
+            "receivedAt": 1791519849916,
+            "receiveAgeMs": 475,
+            "messages": 32
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "1h": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:24:12.444Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 44.6,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82413.9
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82413.9,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 44.6,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:11.237Z",
+            "receivedAt": 1791519851688,
+            "receiveAgeMs": 756,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:24:14.449Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 44.74,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82413.9
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82413.9,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 44.74,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:13.202Z",
+            "receivedAt": 1791519853867,
+            "receiveAgeMs": 582,
+            "messages": 5
+          },
+          {
+            "at": "2026-10-09T04:24:16.455Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 44.83,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82428.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82428.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 44.83,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:15.292Z",
+            "receivedAt": 1791519856005,
+            "receiveAgeMs": 450,
+            "messages": 7
+          },
+          {
+            "at": "2026-10-09T04:24:18.467Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.01,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.01,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:18.082Z",
+            "receivedAt": 1791519858091,
+            "receiveAgeMs": 376,
+            "messages": 10
+          },
+          {
+            "at": "2026-10-09T04:24:20.471Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.06,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.06,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:19.986Z",
+            "receivedAt": 1791519860314,
+            "receiveAgeMs": 157,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:24:22.476Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.09,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.09,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:21.284Z",
+            "receivedAt": 1791519861419,
+            "receiveAgeMs": 1057,
+            "messages": 13
+          },
+          {
+            "at": "2026-10-09T04:24:24.484Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.11,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.3
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.3,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.11,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:22.613Z",
+            "receivedAt": 1791519863649,
+            "receiveAgeMs": 835,
+            "messages": 14
+          },
+          {
+            "at": "2026-10-09T04:24:26.492Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.16,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.16,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:25.126Z",
+            "receivedAt": 1791519865766,
+            "receiveAgeMs": 726,
+            "messages": 16
+          },
+          {
+            "at": "2026-10-09T04:24:28.498Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.19,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82436.3
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82436.3,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.19,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:27.183Z",
+            "receivedAt": 1791519867919,
+            "receiveAgeMs": 579,
+            "messages": 18
+          },
+          {
+            "at": "2026-10-09T04:24:30.502Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.22,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82432.6
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82432.6,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.22,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:29.437Z",
+            "receivedAt": 1791519870055,
+            "receiveAgeMs": 447,
+            "messages": 20
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "4h": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:24:32.554Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.3,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82432.6
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82432.6,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.3,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:31.578Z",
+            "receivedAt": 1791519872254,
+            "receiveAgeMs": 300,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:24:34.557Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.39,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82432.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82432.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.39,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:33.746Z",
+            "receivedAt": 1791519874475,
+            "receiveAgeMs": 82,
+            "messages": 4
+          },
+          {
+            "at": "2026-10-09T04:24:36.569Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.47,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82432.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82432.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.47,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:35.184Z",
+            "receivedAt": 1791519875567,
+            "receiveAgeMs": 1002,
+            "messages": 5
+          },
+          {
+            "at": "2026-10-09T04:24:38.574Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.55,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82428.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82428.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.55,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:36.774Z",
+            "receivedAt": 1791519877834,
+            "receiveAgeMs": 740,
+            "messages": 6
+          },
+          {
+            "at": "2026-10-09T04:24:40.589Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.67,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82428.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82428.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.67,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:39.627Z",
+            "receivedAt": 1791519879884,
+            "receiveAgeMs": 705,
+            "messages": 9
+          },
+          {
+            "at": "2026-10-09T04:24:42.598Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.76,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82428.6
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82428.6,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.76,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:41.577Z",
+            "receivedAt": 1791519882070,
+            "receiveAgeMs": 528,
+            "messages": 11
+          },
+          {
+            "at": "2026-10-09T04:24:44.603Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.85,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82428.7
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82428.7,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.85,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:43.517Z",
+            "receivedAt": 1791519884274,
+            "receiveAgeMs": 329,
+            "messages": 13
+          },
+          {
+            "at": "2026-10-09T04:24:46.608Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.91,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82415.1,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.91,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:45.628Z",
+            "receivedAt": 1791519886445,
+            "receiveAgeMs": 163,
+            "messages": 15
+          },
+          {
+            "at": "2026-10-09T04:24:48.613Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 45.96,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82415.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82415.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 45.96,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:46.699Z",
+            "receivedAt": 1791519887571,
+            "receiveAgeMs": 1042,
+            "messages": 16
+          },
+          {
+            "at": "2026-10-09T04:24:50.624Z",
+            "openTime": "2026-10-09T04:00:00Z",
+            "volume": 46.09,
+            "prices": [
+              82385.1,
+              82495.2,
+              82377,
+              82415.2
+            ],
+            "seriesPrice": {
+              "open": 82385.1,
+              "high": 82495.2,
+              "low": 82377,
+              "close": 82415.2,
+              "time": 1791518400
+            },
+            "seriesVolume": {
+              "value": 46.09,
+              "time": 1791518400,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:49.017Z",
+            "receivedAt": 1791519889897,
+            "receiveAgeMs": 727,
+            "messages": 18
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "1d": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:24:52.670Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.39,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.39,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:51.125Z",
+            "receivedAt": 1791519891866,
+            "receiveAgeMs": 804,
+            "messages": 1
+          },
+          {
+            "at": "2026-10-09T04:24:54.679Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.44,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.44,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:53.748Z",
+            "receivedAt": 1791519893968,
+            "receiveAgeMs": 711,
+            "messages": 3
+          },
+          {
+            "at": "2026-10-09T04:24:56.689Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.48,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.48,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:55.678Z",
+            "receivedAt": 1791519896088,
+            "receiveAgeMs": 601,
+            "messages": 5
+          },
+          {
+            "at": "2026-10-09T04:24:58.697Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.57,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.57,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:24:57.781Z",
+            "receivedAt": 1791519898206,
+            "receiveAgeMs": 491,
+            "messages": 7
+          },
+          {
+            "at": "2026-10-09T04:25:00.709Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.65,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.65,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:00.081Z",
+            "receivedAt": 1791519900401,
+            "receiveAgeMs": 308,
+            "messages": 9
+          },
+          {
+            "at": "2026-10-09T04:25:02.714Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.67,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.67,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:01.173Z",
+            "receivedAt": 1791519901498,
+            "receiveAgeMs": 1216,
+            "messages": 11
+          },
+          {
+            "at": "2026-10-09T04:25:04.720Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.72,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82415.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82415.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.72,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:03.709Z",
+            "receivedAt": 1791519904605,
+            "receiveAgeMs": 115,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:25:06.725Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.74,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82412.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82412.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.74,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:05.173Z",
+            "receivedAt": 1791519905713,
+            "receiveAgeMs": 1012,
+            "messages": 13
+          },
+          {
+            "at": "2026-10-09T04:25:08.731Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.81,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82412.1
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82412.1,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.81,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:06.818Z",
+            "receivedAt": 1791519907927,
+            "receiveAgeMs": 804,
+            "messages": 14
+          },
+          {
+            "at": "2026-10-09T04:25:10.735Z",
+            "openTime": "2026-10-09T00:00:00Z",
+            "volume": 360.87,
+            "prices": [
+              81710.9,
+              82495.2,
+              81575.5,
+              82412.2
+            ],
+            "seriesPrice": {
+              "open": 81710.9,
+              "high": 82495.2,
+              "low": 81575.5,
+              "close": 82412.2,
+              "time": 1791504000
+            },
+            "seriesVolume": {
+              "value": 360.87,
+              "time": 1791504000,
+              "color": "#4bd5a080"
+            },
+            "sourceEventTime": "2026-10-09T04:25:08.840Z",
+            "receivedAt": 1791519909039,
+            "receiveAgeMs": 1696,
+            "messages": 16
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      }
+    },
+    "errors": [],
+    "publicSite": true,
+    "mobile": {
+      "width": 390,
+      "volume": "360.96"
+    },
+    "pass": true,
+    "completedAt": "2026-10-09T04:25:12.101Z"
+  },
+  "browserReload": {
+    "startedAt": "2026-10-09T04:22:12.339Z",
+    "periods": {
+      "before": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:22:20.068Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 10.6,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 10.6,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:19.935Z",
+            "receivedAt": 1791519740032,
+            "receiveAgeMs": 36,
+            "messages": 1
+          },
+          {
+            "at": "2026-10-09T04:22:22.084Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 10.61,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 10.61,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:20.490Z",
+            "receivedAt": 1791519741172,
+            "receiveAgeMs": 912,
+            "messages": 3
+          },
+          {
+            "at": "2026-10-09T04:22:24.096Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 10.75,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 10.75,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:22.090Z",
+            "receivedAt": 1791519743305,
+            "receiveAgeMs": 791,
+            "messages": 5
+          },
+          {
+            "at": "2026-10-09T04:22:26.103Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 10.91,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 10.91,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:24.319Z",
+            "receivedAt": 1791519745384,
+            "receiveAgeMs": 719,
+            "messages": 7
+          },
+          {
+            "at": "2026-10-09T04:22:28.111Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.08,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.8
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.8,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.08,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:27.426Z",
+            "receivedAt": 1791519747598,
+            "receiveAgeMs": 513,
+            "messages": 9
+          },
+          {
+            "at": "2026-10-09T04:22:30.118Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.17,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.8
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.8,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.17,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:29.242Z",
+            "receivedAt": 1791519749609,
+            "receiveAgeMs": 509,
+            "messages": 11
+          },
+          {
+            "at": "2026-10-09T04:22:32.125Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.31,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.9
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.9,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.31,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:31.327Z",
+            "receivedAt": 1791519751790,
+            "receiveAgeMs": 335,
+            "messages": 13
+          },
+          {
+            "at": "2026-10-09T04:22:34.129Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.42,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.8
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.8,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.42,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:33.315Z",
+            "receivedAt": 1791519753879,
+            "receiveAgeMs": 250,
+            "messages": 15
+          },
+          {
+            "at": "2026-10-09T04:22:36.133Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.57,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.8
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.8,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.57,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:34.734Z",
+            "receivedAt": 1791519756072,
+            "receiveAgeMs": 61,
+            "messages": 17
+          },
+          {
+            "at": "2026-10-09T04:22:38.137Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.67,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82468.8
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82468.8,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.67,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:36.432Z",
+            "receivedAt": 1791519757200,
+            "receiveAgeMs": 937,
+            "messages": 18
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      },
+      "after": {
+        "samples": [
+          {
+            "at": "2026-10-09T04:22:41.522Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.93,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82465.5
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82465.5,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.93,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:41.119Z",
+            "receivedAt": 1791519761483,
+            "receiveAgeMs": 39,
+            "messages": 1
+          },
+          {
+            "at": "2026-10-09T04:22:43.528Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 11.98,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82465.4
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82465.4,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 11.98,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:42.096Z",
+            "receivedAt": 1791519762568,
+            "receiveAgeMs": 960,
+            "messages": 2
+          },
+          {
+            "at": "2026-10-09T04:22:45.537Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.09,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82465.4
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82465.4,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.09,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:43.837Z",
+            "receivedAt": 1791519764712,
+            "receiveAgeMs": 825,
+            "messages": 4
+          },
+          {
+            "at": "2026-10-09T04:22:47.543Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.29,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82465.5
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82465.5,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.29,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:46.823Z",
+            "receivedAt": 1791519766874,
+            "receiveAgeMs": 669,
+            "messages": 7
+          },
+          {
+            "at": "2026-10-09T04:22:49.548Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.34,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.5
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.5,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.34,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:48.523Z",
+            "receivedAt": 1791519769104,
+            "receiveAgeMs": 444,
+            "messages": 10
+          },
+          {
+            "at": "2026-10-09T04:22:51.555Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.38,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.6
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.6,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.38,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:49.927Z",
+            "receivedAt": 1791519770267,
+            "receiveAgeMs": 1288,
+            "messages": 12
+          },
+          {
+            "at": "2026-10-09T04:22:53.559Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.46,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.6
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.6,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.46,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:53.108Z",
+            "receivedAt": 1791519773510,
+            "receiveAgeMs": 49,
+            "messages": 15
+          },
+          {
+            "at": "2026-10-09T04:22:55.915Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.61,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.6
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.6,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.61,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:55.207Z",
+            "receivedAt": 1791519775897,
+            "receiveAgeMs": 18,
+            "messages": 19
+          },
+          {
+            "at": "2026-10-09T04:22:57.927Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.72,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.5
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.5,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.72,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:57.389Z",
+            "receivedAt": 1791519777845,
+            "receiveAgeMs": 82,
+            "messages": 22
+          },
+          {
+            "at": "2026-10-09T04:22:59.932Z",
+            "openTime": "2026-10-09T04:15:00Z",
+            "volume": 12.83,
+            "prices": [
+              82473.3,
+              82495.2,
+              82435.8,
+              82462.5
+            ],
+            "seriesPrice": {
+              "open": 82473.3,
+              "high": 82495.2,
+              "low": 82435.8,
+              "close": 82462.5,
+              "time": 1791519300
+            },
+            "seriesVolume": {
+              "value": 12.83,
+              "time": 1791519300,
+              "color": "#ed667680"
+            },
+            "sourceEventTime": "2026-10-09T04:22:58.314Z",
+            "receivedAt": 1791519778891,
+            "receiveAgeMs": 1041,
+            "messages": 24
+          }
+        ],
+        "updates": 10,
+        "pass": true
+      }
+    },
+    "errors": [],
+    "publicSite": true,
+    "reload": {
+      "sameBucket": true,
+      "beforeVolume": 11.67,
+      "afterVolume": 11.93,
+      "newerWatermark": true,
+      "pass": true
+    },
+    "mobile": {
+      "width": 390,
+      "volume": "12.91"
+    },
+    "pass": true,
+    "completedAt": "2026-10-09T04:23:01.231Z"
+  },
+  "publicMarketProbe": {
+    "start": "2026-10-09T04:24:38.947Z",
+    "end": "2026-10-09T04:25:36.403Z",
+    "events": 793,
+    "protocolErrors": [],
+    "httpResponses": 18,
+    "httpAll200": true,
+    "updates": [
+      {
+        "instrumentId": "604",
+        "period": "1m",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.82,
+        "historyCurrentTradeCount": 22,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "5m",
+        "messages": 39,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.87,
+        "historyCurrentTradeCount": 23,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "15m",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:15:00Z",
+        "historyLastBucket": "2026-10-09T04:15:00Z",
+        "historyCurrentVolume": 18.89,
+        "historyCurrentTradeCount": 474,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "1h",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 47.34,
+        "historyCurrentTradeCount": 1214,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "4h",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 47.34,
+        "historyCurrentTradeCount": 1214,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "1d",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T00:00:00Z",
+        "historyLastBucket": "2026-10-09T00:00:00Z",
+        "historyCurrentVolume": 361.57,
+        "historyCurrentTradeCount": 9400,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "1m",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.91,
+        "historyCurrentTradeCount": 25,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "5m",
+        "messages": 39,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.94,
+        "historyCurrentTradeCount": 26,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "15m",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:15:00Z",
+        "historyLastBucket": "2026-10-09T04:15:00Z",
+        "historyCurrentVolume": 18.83,
+        "historyCurrentTradeCount": 476,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "1h",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 47.49,
+        "historyCurrentTradeCount": 1212,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "4h",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 47.49,
+        "historyCurrentTradeCount": 1212,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "1d",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T00:00:00Z",
+        "historyLastBucket": "2026-10-09T00:00:00Z",
+        "historyCurrentVolume": 362.89,
+        "historyCurrentTradeCount": 9398,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "1m",
+        "messages": 38,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.93,
+        "historyCurrentTradeCount": 29,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "5m",
+        "messages": 39,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:25:00Z",
+        "historyLastBucket": "2026-10-09T04:25:00Z",
+        "historyCurrentVolume": 0.93,
+        "historyCurrentTradeCount": 29,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "15m",
+        "messages": 37,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:15:00Z",
+        "historyLastBucket": "2026-10-09T04:15:00Z",
+        "historyCurrentVolume": 17.12,
+        "historyCurrentTradeCount": 477,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "1h",
+        "messages": 37,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 45.95,
+        "historyCurrentTradeCount": 1217,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "4h",
+        "messages": 37,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T04:00:00Z",
+        "historyLastBucket": "2026-10-09T04:00:00Z",
+        "historyCurrentVolume": 45.96,
+        "historyCurrentTradeCount": 1218,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "1d",
+        "messages": 37,
+        "uniqueRevisions": 37,
+        "liveLastBucket": "2026-10-09T00:00:00Z",
+        "historyLastBucket": "2026-10-09T00:00:00Z",
+        "historyCurrentVolume": 363.68,
+        "historyCurrentTradeCount": 9416,
+        "pass": true
+      }
+    ],
+    "closedConsistency": [
+      {
+        "instrumentId": "604",
+        "period": "1m",
+        "openTime": "2026-10-09T04:24:00Z",
+        "liveVolume": 2.17,
+        "historyVolume": 2.17,
+        "liveTrades": 54,
+        "historyTrades": 54,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "5m",
+        "openTime": "2026-10-09T04:15:00Z",
+        "historyVolume": 9.23,
+        "minuteSumVolume": "9.23",
+        "historyTrades": 225,
+        "minuteSumTrades": 225,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "15m",
+        "openTime": "2026-10-09T04:00:00Z",
+        "historyVolume": 28.41,
+        "minuteSumVolume": "28.41",
+        "historyTrades": 739,
+        "minuteSumTrades": 739,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "1h",
+        "openTime": "2026-10-09T03:00:00Z",
+        "historyVolume": 91.5,
+        "minuteSumVolume": "91.50",
+        "historyTrades": 2395,
+        "minuteSumTrades": 2395,
+        "pass": true
+      },
+      {
+        "instrumentId": "604",
+        "period": "4h",
+        "openTime": "2026-10-09T00:00:00Z",
+        "historyVolume": 314.22,
+        "minuteSumVolume": "314.22",
+        "historyTrades": 8185,
+        "minuteSumTrades": 8185,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "1m",
+        "openTime": "2026-10-09T04:24:00Z",
+        "liveVolume": 2.02,
+        "historyVolume": 2.02,
+        "liveTrades": 54,
+        "historyTrades": 54,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "5m",
+        "openTime": "2026-10-09T04:15:00Z",
+        "historyVolume": 9.14,
+        "minuteSumVolume": "9.14",
+        "historyTrades": 223,
+        "minuteSumTrades": 223,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "15m",
+        "openTime": "2026-10-09T04:00:00Z",
+        "historyVolume": 28.66,
+        "minuteSumVolume": "28.66",
+        "historyTrades": 736,
+        "minuteSumTrades": 736,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "1h",
+        "openTime": "2026-10-09T03:00:00Z",
+        "historyVolume": 93.47,
+        "minuteSumVolume": "93.47",
+        "historyTrades": 2397,
+        "minuteSumTrades": 2397,
+        "pass": true
+      },
+      {
+        "instrumentId": "653",
+        "period": "4h",
+        "openTime": "2026-10-09T00:00:00Z",
+        "historyVolume": 315.34,
+        "minuteSumVolume": "315.34",
+        "historyTrades": 8185,
+        "minuteSumTrades": 8185,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "1m",
+        "openTime": "2026-10-09T04:24:00Z",
+        "liveVolume": 2.09,
+        "historyVolume": 2.09,
+        "liveTrades": 53,
+        "historyTrades": 53,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "5m",
+        "openTime": "2026-10-09T04:15:00Z",
+        "historyVolume": 7.68,
+        "minuteSumVolume": "7.68",
+        "historyTrades": 224,
+        "minuteSumTrades": 224,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "15m",
+        "openTime": "2026-10-09T04:00:00Z",
+        "historyVolume": 28.83,
+        "minuteSumVolume": "28.83",
+        "historyTrades": 740,
+        "minuteSumTrades": 740,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "1h",
+        "openTime": "2026-10-09T03:00:00Z",
+        "historyVolume": 93.65,
+        "minuteSumVolume": "93.65",
+        "historyTrades": 2402,
+        "minuteSumTrades": 2402,
+        "pass": true
+      },
+      {
+        "instrumentId": "866",
+        "period": "4h",
+        "openTime": "2026-10-09T00:00:00Z",
+        "historyVolume": 317.72,
+        "minuteSumVolume": "317.72",
+        "historyTrades": 8198,
+        "minuteSumTrades": 8198,
+        "pass": true
+      }
+    ],
+    "tradeToCandleReceiveDifference": {
+      "604:1m": {
+        "matchedLastTradeSamples": 38,
+        "p95ReceiveDifferenceMs": 1433,
+        "maxReceiveDifferenceMs": 1643
+      },
+      "604:5m": {
+        "matchedLastTradeSamples": 38,
+        "p95ReceiveDifferenceMs": 2353,
+        "maxReceiveDifferenceMs": 2552
+      },
+      "604:15m": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2353,
+        "maxReceiveDifferenceMs": 2552
+      },
+      "604:1h": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2354,
+        "maxReceiveDifferenceMs": 2553
+      },
+      "604:4h": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2354,
+        "maxReceiveDifferenceMs": 2553
+      },
+      "604:1d": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2354,
+        "maxReceiveDifferenceMs": 2553
+      },
+      "653:1m": {
+        "matchedLastTradeSamples": 38,
+        "p95ReceiveDifferenceMs": 1550,
+        "maxReceiveDifferenceMs": 1648
+      },
+      "653:5m": {
+        "matchedLastTradeSamples": 38,
+        "p95ReceiveDifferenceMs": 2252,
+        "maxReceiveDifferenceMs": 2543
+      },
+      "653:15m": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2252,
+        "maxReceiveDifferenceMs": 2544
+      },
+      "653:1h": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2253,
+        "maxReceiveDifferenceMs": 2544
+      },
+      "653:4h": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2253,
+        "maxReceiveDifferenceMs": 2544
+      },
+      "653:1d": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2253,
+        "maxReceiveDifferenceMs": 2544
+      },
+      "866:1m": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 1620,
+        "maxReceiveDifferenceMs": 1648
+      },
+      "866:5m": {
+        "matchedLastTradeSamples": 37,
+        "p95ReceiveDifferenceMs": 2545,
+        "maxReceiveDifferenceMs": 2592
+      },
+      "866:15m": {
+        "matchedLastTradeSamples": 35,
+        "p95ReceiveDifferenceMs": 2331,
+        "maxReceiveDifferenceMs": 2545
+      },
+      "866:1h": {
+        "matchedLastTradeSamples": 35,
+        "p95ReceiveDifferenceMs": 2331,
+        "maxReceiveDifferenceMs": 2545
+      },
+      "866:4h": {
+        "matchedLastTradeSamples": 35,
+        "p95ReceiveDifferenceMs": 2331,
+        "maxReceiveDifferenceMs": 2545
+      },
+      "866:1d": {
+        "matchedLastTradeSamples": 35,
+        "p95ReceiveDifferenceMs": 2331,
+        "maxReceiveDifferenceMs": 2545
+      }
+    },
+    "pass": true
+  },
+  "jfr": {
+    "durationSeconds": 20,
+    "maxRecordingBytes": 16777216,
+    "cpuSamples": 19,
+    "jvmCpuMean": 0.2818649293157895,
+    "machineCpuMean": 0.42487451,
+    "executionSamples": 529,
+    "rollupStackSamples": 6,
+    "monitorContentions": [
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 14.691253,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "JFR Periodic Tasks",
+        "durationMs": 217.67857199999997,
+        "monitor": "jdk/jfr/internal/PlatformRecorder"
+      },
+      {
+        "thread": "org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1",
+        "durationMs": 566.118978,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 27.985156,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1",
+        "durationMs": 29.833889999999997,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 25.696138,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "kafka-producer-network-thread | surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1-producer",
+        "durationMs": 103.488788,
+        "monitor": "org/apache/kafka/clients/producer/internals/TransactionManager"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 34.892192,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1",
+        "durationMs": 15.202669,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 12.090103,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 11.113288,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1",
+        "durationMs": 32.421415,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      },
+      {
+        "thread": "kafka-producer-network-thread | surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1-producer",
+        "durationMs": 11.118236999999999,
+        "monitor": "java/util/ArrayDeque"
+      },
+      {
+        "thread": "surprising-linear-perpetual-candlestick-verified-20261007-3782b31d-5346-43c1-9cea-ba6a7864d676-StreamThread-1",
+        "durationMs": 10.037567000000001,
+        "monitor": "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator"
+      }
+    ],
+    "topMethods": {
+      "com/surprising/aeron/service/state/TradingRuntimeState$LaneMutationTask.await": 10,
+      "java/lang/ThreadLocal$ThreadLocalMap.getEntryAfterMiss": 7,
+      "java/util/HashMap.getNode": 7,
+      "java/util/HashMap.putVal": 7,
+      "com/surprising/aeron/service/state/TradingRuntimeState.dispatchPlaceAdmission": 7,
+      "io/netty/channel/AbstractChannelHandlerContext.write": 6,
+      "java/util/concurrent/ConcurrentHashMap.get": 5,
+      "jdk/internal/event/ThreadSleepEvent.commit": 5
+    },
+    "interpretation": "短采样包含启动后追赶，不能证明全链路零延迟或性能提升；所选监视器竞争最大值记录 Kafka consumer coordinator 等待。",
+    "bytes": 1130741,
+    "sha256": "f57f7af4e22b3a2f2782cce801fbad852d6adfb2bb0f9c49b4db690ea47b84f8"
+  },
+  "evidenceArchive": {
+    "serverPath": "/var/backups/surprising/deploy-20261009-f974fa21/live-candles-evidence.tar.gz",
+    "bytes": 1745200,
+    "sha256": "08f383eec8bff4a192845bef6e8605d6320c71f5db6c4d582897f1fabf4ad848",
+    "fileCount": 47
+  },
+  "initialFailures": {
+    "preStopArtifactGuard": "Maven -am also repackaged dependency executable; guard rejected before any service stopped. Retained all non-Realtime deployed executables and reverified.",
+    "firstBrowser": "Six-second observation had two revisions; no passing claim.",
+    "secondBrowser": "5m assertion timed out during checkpoint catch-up, incoming late previous-bucket revisions while current bucket still lacked trades. Six periods rerun after catch-up passed.",
+    "priorCoverage": "Earlier frontend public continuous-update check used only 1m; it did not establish all larger periods updating."
+  },
+  "knownLatency": "Existing Streams commit interval 1s, minute and rollup topic feedback adds transaction visibility waits. Correlated lastTradeId receive difference, not end-to-end latency; detailed P95/max in probe. No zero-delay claim.",
+  "testedScope": {
+    "server": "LINEAR_PERPETUAL BTC/ETH/SOL; public read-only WS/HTTP and Chrome actual series",
+    "unit": "all 6 ProductLine values; all 11 higher periods; 28 tests",
+    "otherRuntimeProductsStarted": false,
+    "financialCommandsSent": false,
+    "walletStarted": false
+  },
+  "evidenceSha256": {
+    "browser-all-periods.json": "9295d0baed659f42af95d8e4ceef278b689c33b016f0cc38fa736cb678f13bd1",
+    "browser-all-periods-first.json": "1d16521b8fe2230619e0432f5e7e97385a16a0f7edd9a8c7889a0942c952c8c0",
+    "browser-all-periods-second.json": "b78281c4129fd3fae3ab7cdf4c951267879b5075e72680bd2d7f298c3b8dc5f9",
+    "browser-reload.json": "987533af4cc4c97eccf0178149d5a743d1be5c43cc7c467a1ef9eae7c0dc15c3",
+    "probe-all-periods-final.json": "e2f822602d4fe0d9616bb3361750029678f8dbf8f2ed49d4692f3f7cf8faccf6",
+    "probe-final-summary.json": "8f70c9cd7c49e4cecd4b85c3903938d7ae527dc32332473aef47064021092ad8",
+    "public-all-desktop.png": "ce4e841791f067b20e2dec8cc40590b7761cffe0ce6a7161b375cc0e398aa9c4",
+    "public-all-mobile.png": "1d6b9d709f3638fa2ff8c69fb502be8beffd410040334896d73c339af4feaceb",
+    "jfr-summary.json": "b7d7899aa39f2c9966882fda076c9d064751418aef0f39e17711a10a8e6dbe6d",
+    "backend-tests-live.log": "2b2021afce6332f3689c05ac22e6fad5debe0b3ef4aa18760f7b706414dc8cb4",
+    "backend-test-retry.log": "fd9f029f5e272401f3f2cfb8d1632f80805f2532a03cc09f46fb401dfdedacd1"
+  },
+  "cleanup": {
+    "temporaryDirectory": "/private/tmp/surprising-candle-volume-20261009",
+    "temporaryDirectoryRemoved": true,
+    "ownBrowsersAndProbesExited": true,
+    "previewStopped": true,
+    "remoteJfrRemoved": true,
+    "productionRuntimeAndRecoveryBackupsRetained": true,
+    "remoteJfrExportRemoved": true,
+    "remoteEvidenceVerified": true
+  }
+}
