@@ -44,8 +44,9 @@ HotSpot Corretto 27+33、Maven 3.9.16，测试前可用磁盘 389GiB。
 - 第一组：CoreMessageCodecTest 9、RuntimeStateBusinessRulesTest 32、CoreDeliveryOptionFinancialMatrixTest 18、ClusterCommandPipelineTest 272；无失败，后者有 1 项 skipped，未计为通过。覆盖六产品线、现有资金/持仓/恢复边界。
 - 第二组：CoreResultCodeTest 114、四衍生品带挂单的杠杆拒绝及撤单后重试 4、Gateway 6 个测试类共 83，全通过。拒绝前后 businessStateHash 相同；没有因展示修复改变资金/持仓。
 - CoreBusinessRejectionCodeTest 1 通过，扫描生产字面量拒绝码，防止遗漏再次变为 INVALID_COMMAND。
-- 前端测试、桌面/手机与暗亮主题、隔离工作区 lint/build 结果记录在前端 README_CN.md。
+- 补充未知结果/未受理处理：明确 ResultUnknownException 与响应超时/中断使用 RESULT_UNKNOWN，未受理使用 REQUEST_NOT_ACCEPTED，保留“结果未知”与“已拒绝”的业务差别；Gateway 四类测试共 67 项通过。首次新测试因 Mockito 重设抛错 mock 的写法错误失败，修正为 doThrow 后上述 67 项全部通过。
+- 前端共享工作区 128 项、隔离提交 127 项测试通过，隔离 lint/build 与桌面/手机暗亮主题验证通过，详情记录在前端 README_CN.md。
 
 本次不部署或重启测试机。新 wire code 需要 Core 与相关客户端一起升级；旧客户端不能解码新增码，不允许先只部署 Core。线上只读观察不等于真实交易资金守恒验收；本次没有运行钱包服务。
 
-清理状态：待测试结果归档后清理本轮临时探针、浏览器、Vite、日志与报告；构建产物保留，不删除其他任务目录。
+清理状态：本轮两条探针结束、两台 Vite 已停止、浏览器已关闭；已删除本轮临时诊断目录 /private/tmp/surprising-price-leverage-20261009 及 24 份本轮测试报告。采样摘要与测试结论已归档，构建产物保留，其他任务目录未删除。

@@ -18,6 +18,25 @@ import tools.jackson.databind.json.JsonMapper;
 class LocalBusinessApiTest {
 
     @Test
+    void distinguishesUnknownOutcomeFromNotAcceptedWithoutExposingTransportExceptions() {
+        String body = "{\"userId\":42,\"instrumentId\":\"604\",\"marginMode\":\"CROSS\",\"leveragePpm\":1000000}";
+        when(leverage.set(any(), any(), any())).thenThrow(new java.util.concurrent.CompletionException(
+                new com.surprising.aeron.client.ResultUnknownException(java.util.UUID.randomUUID(), "Aeron internal timeout")));
+        var unknown = invoke("trading-leverage", "/api/v1/trading/leverage/settings", HttpMethod.POST, userHeaders(), body);
+        assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
+        assertThat(new String(unknown.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("RESULT_UNKNOWN", "not yet confirmed").doesNotContain("Aeron");
+        doThrow(
+                new com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException(
+                        com.surprising.aeron.client.CoreCommandOutcome.notAccepted(-2)))
+                .when(leverage).set(any(), any(), any());
+        var notAccepted = invoke("trading-leverage", "/api/v1/trading/leverage/settings", HttpMethod.POST, userHeaders(), body);
+        assertThat(notAccepted.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(new String(notAccepted.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("REQUEST_NOT_ACCEPTED", "was not accepted").doesNotContain("Aeron", "RESULT_UNKNOWN");
+    }
+
+    @Test
     void returnsStructuredBusinessRejectionForLeverageWithoutChangingItToNotFound() {
         when(leverage.set(any(), any(), any())).thenThrow(
                 new com.surprising.trading.order.service.OrderCommandRejectedException(

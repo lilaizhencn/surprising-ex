@@ -164,10 +164,12 @@ public final class LocalBusinessApi {
         } catch (ExecutionException exception) {
             return failure(exception.getCause());
         } catch (TimeoutException exception) {
-            return error(HttpStatus.GATEWAY_TIMEOUT, "business response timed out; command outcome may be pending");
+            return error(HttpStatus.GATEWAY_TIMEOUT,
+                    "The result is not yet confirmed. Check your orders or settings before submitting again.", "RESULT_UNKNOWN");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            return error(HttpStatus.SERVICE_UNAVAILABLE, "business response interrupted");
+            return error(HttpStatus.SERVICE_UNAVAILABLE,
+                    "The result is not yet confirmed. Check your orders or settings before submitting again.", "RESULT_UNKNOWN");
         } catch (RuntimeException exception) {
             return failure(exception);
         }
@@ -191,9 +193,13 @@ public final class LocalBusinessApi {
         if (exception instanceof AccountCommandRejectedException rejected) {
             return error(HttpStatus.CONFLICT, "The account request could not be completed.", rejected.errorCode());
         }
+        if (exception instanceof com.surprising.aeron.client.ResultUnknownException) {
+            return error(HttpStatus.GATEWAY_TIMEOUT,
+                    "The result is not yet confirmed. Check your orders or settings before submitting again.", "RESULT_UNKNOWN");
+        }
         if (exception instanceof com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException) {
             return error(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Trading service is temporarily unavailable; request was not accepted");
+                    "The request was not accepted. Please try again shortly.", "REQUEST_NOT_ACCEPTED");
         }
         if (exception instanceof IllegalArgumentException) {
             return error(HttpStatus.BAD_REQUEST, exception.getMessage());

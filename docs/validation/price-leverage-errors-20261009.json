@@ -424,5 +424,35 @@
     "positionSteps": 170,
     "openOrders": 0,
     "mutationPerformed": false
+  },
+  "tests": {
+    "initialCoreProtocol": {
+      "tests": 331,
+      "passed": 330,
+      "skipped": 1
+    },
+    "businessCodesAndGateway": {
+      "tests": 201,
+      "passed": 201
+    },
+    "sourceRejectionAudit": {
+      "tests": 1,
+      "passed": 1
+    },
+    "unknownAndNotAcceptedGateway": {
+      "tests": 67,
+      "passed": 67
+    },
+    "frontendWorkspace": {
+      "tests": 128,
+      "passed": 128
+    },
+    "frontendIsolatedCommit": {
+      "tests": 127,
+      "passed": 127,
+      "lint": "passed",
+      "build": "passed"
+    },
+    "frontendCommit": "61d1cd4"
   }
 }
