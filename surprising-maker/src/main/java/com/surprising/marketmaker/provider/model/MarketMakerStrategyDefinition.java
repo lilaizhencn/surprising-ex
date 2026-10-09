@@ -5,7 +5,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.util.List;
 
-/** Durable administrator-owned strategy, including identity and all per-strategy quote parameters. */
+/** YAML-initialized, process-local administrator-owned strategy, including identity and all per-strategy quote parameters. */
 public record MarketMakerStrategyDefinition(String strategyId, ProductLine productLine, boolean enabled,
         List<Long> accountIds, List<String> instrumentIds, long baseQuantitySteps, MarginMode marginMode,
         long spreadTicks, long levelSpacingTicks, long maxInventorySteps, long maxInventorySkewPpm,

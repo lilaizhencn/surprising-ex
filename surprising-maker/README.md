@@ -71,17 +71,15 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limi
 
 `/strategy-logs` 读取当前进程最多 2,048 条内存诊断记录，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
-`InMemoryMarketMakerRunEventRepository` 保留最多 2,048 条近期诊断记录，重启即清空；参考行情样本不逐周期落库、不另建队列。
-这些诊断记录不是交易、资金或管理员操作审计账本。已存在的历史诊断表数据不会被本服务自动删除。
+`InMemoryMarketMakerRunEventRepository` 保留有界诊断记录，重启即清空；参考行情样本不落库、不另建队列。
+做市模块不依赖 PostgreSQL、JDBC、Redis 或其他外部存储，也不创建数据库连接池。
 
-后台公共设置由 `MarketMakerBusinessSettingsStore` 持久化到 `market_maker_business_settings`，策略定义和覆盖由
-`JdbcMarketMakerStrategyOverrideStore` 持久化；保留版本冲突检查，重启后从数据库恢复。策略及覆盖的不可变读取缓存
-只在管理员事务提交后失效，报价周期不重复查库；事务回滚不会发布候选配置。单产品线单实例的后台请求是配置唯一写入口。
-数据库连接池最多 2 个连接、最少空闲 0 个，不引入 Redis 依赖或逐周期数据库租约。
+`/strategies/{strategyId}/config` 在 `InMemoryMarketMakerStrategyOverrideStore` 更新当前进程配置。
+后台公共设置和策略定义仍支持版本冲突检查；所有热更新在重启后丢弃，启动时重新加载 YAML。
+参数为空时恢复该进程的策略基线，全部可编辑字段为空时清除内存覆盖。
+报价、订单与账户事实仍分别由原交易服务和 Core 管理，内存诊断记录不作为交易或资金账本。
 
 ## 配置
-
-部署只设置产品线、节点、Kafka、数据库及内部服务地址。例如：
 
 ```yaml
 surprising:
@@ -89,6 +87,8 @@ surprising:
     account:
       base-url: http://localhost:9094
     instrument:
+      base-url: http://localhost:9094
+    mark-price:
       base-url: http://localhost:9094
     matching:
       base-url: http://localhost:9094
@@ -98,12 +98,75 @@ surprising:
     infrastructure:
       product-line: LINEAR_PERPETUAL
       node-id: mm-node-a
+    engine:
+      enabled: false
+      trade-interval: 1s
+    quoting:
+      order-book-depth: 20
+      order-levels: 3
+      min-spread-ticks: 10
+      level-spacing-ticks: 10
+      refresh-threshold-ticks: 2
+      max-open-orders-per-account-symbol: 30
+      max-price-deviation-ppm: 5000
+      order-reconciliation-interval: 500ms
+      volatility-spread-multiplier-ppm: 500000
+      max-volatility-spread-ticks: 100
+    risk:
+      max-inventory-steps: 10000
+      max-inventory-skew-ppm: 800000
+    trade:
+      enabled: false
+    reference-market:
+      enabled: true
+      websocket-enabled: true
+      refresh-interval: 500ms
+      max-age: 3s
+      request-timeout: 2s
+      reconnect-backoff: 5s
+      depth-levels: 20
+      quantity-scale-ppm: 1000000
+      min-quantity-steps: 1
+      max-quantity-steps: 1000
+      sources:
+        - name: BINANCE_USDM
+          product-line: LINEAR_PERPETUAL
+          enabled: true
+          instrument-id: "604"
+          external-symbol: BTCUSDT
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={externalSymbol}&limit=20
+          parser: BINANCE_DEPTH
+          websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
+          websocket-parser: BINANCE_DEPTH_STREAM
+        - name: OKX_SWAP
+          product-line: LINEAR_PERPETUAL
+          enabled: true
+          instrument-id: "604"
+          external-symbol: BTC-USDT-SWAP
+          url: https://www.okx.com/api/v5/market/books?instId={externalSymbol}&sz=20
+          parser: OKX_BOOKS
+          websocket-url: wss://ws.okx.com:8443/ws/v5/public
+          websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
+          websocket-parser: OKX_BOOKS_WS
+        - name: BYBIT_LINEAR
+          product-line: LINEAR_PERPETUAL
+          enabled: true
+          instrument-id: "604"
+          external-symbol: BTCUSDT
+          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={externalSymbol}&limit=50
+          parser: BYBIT_ORDERBOOK
+          websocket-url: wss://stream.bybit.com/v5/public/linear
+          websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
+          websocket-parser: BYBIT_ORDERBOOK_WS
+    strategies:
+      - strategy-id: btc-usdt-mm-a
+        product-line: LINEAR_PERPETUAL
+        enabled: true
+        account-ids: [900001, 900002]
+        instrument-ids: ["604"]
+        base-quantity-steps: 10
+        margin-mode: CROSS
 ```
-
-数据库使用 `SPRING_DATASOURCE_URL`、`SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD`。
-报价、库存、参考行情源、模拟交易和策略账户/合约绑定全部由后台配置；YAML 或环境变量中的同名业务参数不会覆盖后台设置。
-初次启动缺失公共设置时只初始化关闭状态，管理员配置并启用后才自动报价；已有设置使用其保存版本，不重置。
-后台公共设置保存成功后立即安装到运行配置，策略新增/编辑在后续工作线程检查中热生效，无需重启。
 
 ## 报价机制
 
@@ -127,10 +190,11 @@ surprising:
 ## 单实例部署与配置迁移
 
 每条产品线只部署一个做市实例，不保留跨节点租约。同一产品线更新部署时先停止旧实例再启动新实例，
-禁止同时运行使用相同账户/合约的副本。后台保存的公共设置、策略和覆盖保留在数据库，重启自动恢复；
-不需要导出到 YAML。升级保留既有配置表，诊断事件和参考行情样本停止新增数据库记录。
-旧 `infrastructure.coordination` 部署参数不再需要，应从启动环境移除。
-Gateway、Kafka、外部行情、配置数据库和交易 Core 仍是业务依赖。
+禁止同时运行使用相同账户/合约的副本。后台修改只作用于当前进程，重启恢复 YAML。
+升级前把要保留的公共设置、策略及参考行情源写入 YAML，并移除旧的 `infrastructure.coordination`
+配置；旧的做市配置表和运行记录表不会再被读取。
+默认 YAML 的 `engine.enabled=false`、`strategies=[]`，未显式配置策略时不会自动报价。
+Gateway、Kafka、外部行情和交易 Core 仍是做市业务依赖；“无外部存储”仅指做市自身的配置、租约和诊断状态。
 
 如果要跑多个做市商账号，可以使用同一个策略的多个 `account-ids`，也可以拆成多个策略。不要让多个策略同时控制同一个账号和合约，除非库存上限已经按合并风险设计。
 
@@ -422,7 +486,7 @@ JFR、局部基准源码/日志、上下文启动桩及测试报告仅用于本�
 
 ## 配置持久化与周期写入修复（2026-10-09）
 
-上面的 2026-10-08 性能记录包含当轮的无数据库/YAML 启动实验，其配置恢复语义已被本节替代。
+历史记录：此提交恢复了数据库配置，和用户明确要求的 YAML/内存模式冲突；已在下方复查中纠正。以下仅描述当时验证。
 管理员设置与策略保持持久化；有界近期诊断缓存、批量报价输入、自有量汇总和 HTTP 连接池优化继续生效。
 验证覆盖真实 PostgreSQL 的重启恢复、版本冲突、事务提交/回滚后的缓存可见性，以及 100 个读取周期只加载两次配置查询。
 
@@ -431,6 +495,49 @@ JFR、局部基准源码/日志、上下文启动桩及测试报告仅用于本�
 
 `MarketMakerService` 在每个报价阶段只读取一次已校验配置；精确 ppm 算术保留溢出校验，按批次确认订单后一次更新现有挂单缓存，回执不确定则失效并重新查询。报价方向/档位直接解析现有客户订单号，不在每次比较时拼接前缀。已铺好盘口的补单检查用直接循环累计两侧数量并同时核对已有档位和对侧交叉挂单；没有增加长期订单索引，未终态旧单仍占用容量。
 
-做市到 Gateway 的 Feign 请求使用有界 HTTP 连接池与连接、获取连接、读取超时，交易请求不自动重试；资金及订单事实仍以 Core 回执和查询为准。管理员业务设置及策略从数据库恢复，配置变更提交后才安装/失效缓存；报价周期不重复读库，近期诊断最多保留 2048 条。
+做市到 Gateway 的 Feign 请求使用有界 HTTP 连接池与连接、获取连接、读取超时，交易请求不自动重试；资金及订单事实仍以 Core 回执和查询为准。管理员业务设置及策略从 YAML 初始化，热更新只保留在当前进程；报价周期不读写外部存储，近期诊断最多保留 2048 条。
 
 局部基准、真实网络单节点资金核对和测试服务器持续观察分别记录，不能以局部报价扫描吞吐代表整套交易容量。详见[两小时运行观察与审查报告](../docs/validation/server-runtime-repair-soak-20261009.md)。正式观察已完成，报告分别列出已修复项、已确认的未修复问题和观测限制。
+
+
+## 无外部存储要求复查与测试吃单调频（2026-10-09）
+
+用户明确选择整个做市服务不依赖外部存储：YAML 初始化、热更新仅保留在内存、每产品线单实例。
+复查发现后续 `68e89f2c` 恢复了 JDBC/PostgreSQL 配置读取，违反此约定；本次重新移除依赖、数据源及
+JDBC 策略类，恢复进程内设置/策略，并保留后续独立的 HTTP 池、报价算术、挂单缓存和补单扫描优化。
+配置基准改为测量实际的 `InMemoryMarketMakerStrategyOverrideStore`，不再引用已删除 JDBC 类。
+
+另一个身份边界是策略 ID 大小写：内存键不区分大小写，而 worker 与订单前缀保留原 ID；
+只改大小写可能绕过现有绑定检查并产生重复 worker 或旧唤醒映射。现在拒绝修改已有 ID 的拼写，
+拒绝时保留版本、账户与合约绑定；同一 ID 的合法参数编辑及版本冲突检查继续生效。
+
+测试服务器只通过原后台 API 热更新 `LINEAR_PERPETUAL` 的 `engine.tradeInterval`：10s → 1s，
+版本 12 → 13，2026-10-09T01:15:52.687055Z 生效。测试吃单账户仍为 22，批次仍为 1 单，
+数量 1–10 张、库存阈值 100、扫单档数 5、滑点参数 20 和被动报价配置均未改变。
+本轮没有发布二进制或重启服务器；该运行实例仍使用原数据库配置，只有源码恢复了无存储模式。
+下次部署该源码前必须将当前配置迁到 YAML。仓库默认 YAML 设置 `engine.trade-interval: 1s`，
+仍默认关闭自动引擎和测试吃单，未配置策略时不会报价。
+
+01:18:27Z 的有界近期记录中，BTC/ETH/SOL 各有 105 条 `TRADE_EXECUTED`，各覆盖约 115 秒，
+相邻事件间隔中位数分别 1.0923/1.0903/1.0903 秒，没有该样本中的 `TRADE_REJECTED` 或 `TRADE_NO_FILL`。
+该队列会淘汰历史记录，不是全窗口尝试次数或完整成交率统计；事件记录开始时刻亦不等于成交撮合时刻。
+健康为 UP；01:19:31Z 测试账户快照净仓位为 604=4、653=35、866=33 张，均未超 100 张阈值；
+余额权益 7,218,887,573,586、可用 7,210,639,733,386、冻结 8,247,840,200，单位为原 USDT 记账单位。
+这是调频后的单次账户快照，没有调频前的资金基线，不能由此声称已完成资金守恒对账。
+
+JDK 27 下选定 18 个测试类、161 项测试全部通过，含做市报价/吃单/未知回执、设置热更新与重启重置、
+六产品线 YAML 绑定、运行 classpath 无 JDBC/PostgreSQL/Redis/Lettuce、身份拼写保护、真实 Redis 点查
+及六产品线 Gateway 批量输入。首次扩大 reactor 被其他任务正在修改的 `CommittedTradeReplay` 同名变量
+编译错误阻断；本轮未修改该文件，改为构建所需依赖后独立验证 Gateway。独立构建首次使用旧本地依赖
+导致协议类缺失，安装当前依赖后重跑通过；不把失败构建算作通过。未重跑 Core 资金守恒、真实强平、
+交割、行权或长时间负载测试，也未启动 wallet。CodeGraph 的该区域索引仍旧，以上检查以当前源码为准。
+
+本轮更新后的配置读取基准已打包并实跑：JMH 单 fork、2×1s 预热、2×1s 测量、256 MiB ZGC，
+JFR profile 上限 16 MiB。实际内存配置的 definitions＋单策略覆盖查询约 14,115,050 次/s，168.001 B/次；
+没有同条件旧实现对照，短测仅用于确认实际实现能运行及其分配量，不是整机吞吐或延迟结论。
+基准完整构建首次因本地旧 price 依赖缺少共享解析方法失败；安装当前 price 依赖后打包和上述实跑通过。
+
+清理完成：本轮 Maven/JMH fork、临时 Redis 和网络测试桩已停止；已删除本轮
+`/tmp/surprising-maker-review-20261009` 中的日志、服务器采样副本、JFR 和 JMH JSON，
+以及以上 18 个测试类的 XML/TXT 报告；保留构建 JAR、其他任务文件和服务器运行数据。
+临时路径仅作历史定位。

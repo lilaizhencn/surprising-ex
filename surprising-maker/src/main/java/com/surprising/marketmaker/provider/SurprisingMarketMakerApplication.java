@@ -40,7 +40,7 @@ public class SurprisingMarketMakerApplication {
     @PostConstruct
     void logEffectiveMarketMatrixConfiguration() {
         properties.validateBusinessSettings();
-        log.info("Single-instance maker: durable administrator configuration, bounded in-memory diagnostics; productLine={}",
+        log.info("Single-instance maker: YAML startup configuration, in-memory administrator changes; productLine={}",
                 properties.getProductLine());
     }
 
