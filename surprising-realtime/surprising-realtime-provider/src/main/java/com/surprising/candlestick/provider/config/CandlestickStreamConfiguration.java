@@ -1,7 +1,6 @@
 package com.surprising.candlestick.provider.config;
 
 import com.surprising.candlestick.api.model.CandlePeriod;
-import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleAggregationProcessor;
@@ -191,9 +190,8 @@ public class CandlestickStreamConfiguration {
         KStream<String, CandleUpdatedEvent> rollups = streamsBuilder
                 .stream(properties.getKafka().getCandleTopic(), Consumed.with(Serdes.String(), updateSerde))
                 .filter((key, event) -> event != null
-                        && event.status() == CandleStatus.CLOSED
                         && CandlePeriod.M1.code().equals(event.period()),
-                        Named.as("closed-one-minute-candles"))
+                        Named.as("one-minute-candle-snapshots"))
                 .process(() -> new CandleRollupProcessor(properties, hotCache, minutes),
                         Named.as("candlestick-rollup"),
                         CandleStores.ROLLUP_STORE,

@@ -211,7 +211,8 @@ class CandlestickRollupTopologyTest {
 
             trades.pipeInput("1", new PublicTradeEvent(
                     "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
-            assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
+            assertThat(output.readValuesToList()).hasSize(2)
+                    .allSatisfy(event -> assertThat(event.status()).isEqualTo(CandleStatus.PARTIAL));
             // Export can repeat the same identity after Kafka commit / checkpoint crash window.
             trades.pipeInput("1", new PublicTradeEvent(
                     "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
@@ -226,18 +227,18 @@ class CandlestickRollupTopologyTest {
             assertThat(closed.period()).isEqualTo("1m");
             assertThat(closed.status()).isEqualTo(CandleStatus.CLOSED);
             var frames = org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.protocol.RealtimeFrame.class);
-            verify(router, times(3)).offer(frames.capture());
+            verify(router, times(4)).offer(frames.capture());
             assertThat(frames.getAllValues()).allSatisfy(frame -> {
                 assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE);
                 assertThat(frame.productLine()).isEqualTo(properties.getKafka().getProductLine());
             });
             assertThat(frames.getAllValues()).extracting(com.surprising.aeron.protocol.RealtimeFrame::entityId)
-                    .containsExactlyInAnyOrder("1m", "1m", "5m");
+                    .containsExactlyInAnyOrder("1m", "1m", "5m", "5m");
         }
     }
 
     @Test
-    void feedbackConsumesOnlyClosedM1AndDoesNotRecursivelyRollHigherEvents() {
+    void feedbackConsumesMinuteSnapshotsAndDoesNotRecursivelyRollHigherEvents() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
@@ -255,7 +256,10 @@ class CandlestickRollupTopologyTest {
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
 
             input.pipeInput("1", minute(CandleStatus.PARTIAL), 1L);
-            assertThat(output.isEmpty()).isTrue();
+            assertThat(output.readValue()).satisfies(event -> {
+                assertThat(event.period()).isEqualTo("5m");
+                assertThat(event.baseVolume()).isEqualByComparingTo("1");
+            });
 
             input.pipeInput("1", minute(CandleStatus.CLOSED), 2L);
             CandleUpdatedEvent rollup = output.readValue();
@@ -387,7 +391,8 @@ class CandlestickRollupTopologyTest {
 
             trades.pipeInput("1", new PublicTradeEvent(
                     "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
-            assertThat(output.readValue().status()).isEqualTo(CandleStatus.PARTIAL);
+            assertThat(output.readValuesToList()).hasSize(2)
+                    .allSatisfy(event -> assertThat(event.status()).isEqualTo(CandleStatus.PARTIAL));
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.readValue().status()).isEqualTo(CandleStatus.CLOSED);
             CandleUpdatedEvent rollup = output.readValue();

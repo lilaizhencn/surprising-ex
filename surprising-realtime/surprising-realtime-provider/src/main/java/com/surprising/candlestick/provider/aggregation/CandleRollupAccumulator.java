@@ -26,6 +26,9 @@ public class CandleRollupAccumulator {
     private Instant lastMinute;
     private Instant updatedAt;
     private boolean complete;
+    // One replaceable minute tail, owned and restored with this rollup's RocksDB value.
+    // Its cumulative quantities are excluded from the folded totals until the minute advances.
+    private CandleUpdatedEvent activeMinute;
 
     public static CandleRollupAccumulator create(String instrumentId, CandlePeriod period, Instant openTime) {
         CandleRollupAccumulator value = new CandleRollupAccumulator();
@@ -67,6 +70,21 @@ public class CandleRollupAccumulator {
     }
 
     public CandleUpdatedEvent event(Instant emittedAt) {
+        if (activeMinute != null) {
+            boolean empty = firstMinute == null;
+            return new CandleUpdatedEvent(instrumentId, period, openTime, closeTime,
+                    empty ? activeMinute.openPrice() : openPrice,
+                    empty ? activeMinute.highPrice() : highPrice.max(activeMinute.highPrice()),
+                    empty ? activeMinute.lowPrice() : lowPrice.min(activeMinute.lowPrice()),
+                    activeMinute.closePrice(), baseVolume.add(activeMinute.baseVolume()),
+                    quoteVolume.add(activeMinute.quoteVolume()), Math.addExact(tradeCount, activeMinute.tradeCount()),
+                    empty ? activeMinute.firstTradeId() : firstTradeId, activeMinute.lastTradeId(),
+                    empty ? activeMinute.firstSequence() : firstSequence, activeMinute.lastSequence(),
+                    complete ? CandleStatus.CLOSED : CandleStatus.PARTIAL,
+                    updatedAt == null || activeMinute.eventTime().isAfter(updatedAt)
+                            ? activeMinute.eventTime() : updatedAt,
+                    emittedAt, null, null);
+        }
         return new CandleUpdatedEvent(instrumentId, period, openTime, closeTime, openPrice, highPrice, lowPrice, closePrice,
                 baseVolume, quoteVolume, tradeCount, firstTradeId, lastTradeId, firstSequence, lastSequence,
                 complete ? CandleStatus.CLOSED : CandleStatus.PARTIAL, updatedAt, emittedAt, null, null);
@@ -110,4 +128,6 @@ public class CandleRollupAccumulator {
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
     public boolean isComplete() { return complete; }
     public void setComplete(boolean complete) { this.complete = complete; }
+    public CandleUpdatedEvent getActiveMinute() { return activeMinute; }
+    public void setActiveMinute(CandleUpdatedEvent activeMinute) { this.activeMinute = activeMinute; }
 }

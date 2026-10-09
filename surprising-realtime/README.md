@@ -1,5 +1,15 @@
 # 统一行情应用：成交导出、K 线与实时路由
 
+## 未收盘 K 线实时更新（2026-10-09）
+
+`CandlestickStreamConfiguration` 将所有 1m 完整快照（PARTIAL/CLOSED）交给
+`CandleRollupProcessor`，因此 5m、15m、1h、4h、1d 等周期不再等待分钟收盘才更新。
+`CandleRollupAccumulator.activeMinute` 在原有 RocksDB 值中保存唯一活动分钟快照；
+同一分钟更新替换该快照，跨分钟只折入累计值一次，晚到的 CLOSED 通知通过原有 seen 标记去重。
+历史分钟修正仍从已持久化分钟有界重建，并保留尚未包含在 SQL 中的活动分钟。
+普通实时更新不访问 SQL；状态所有者仍是该产品线 Kafka Streams 分区，恢复沿用原有 changelog。
+HTTP 热缓存与 WebSocket 都使用同一完整 OHLCV 快照，前端无需用张数重算基础币成交量。
+
 `surprising-realtime-provider` 现在同时运行可靠成交导出、K 线与实时路由，默认 HTTP 端口 **9095**。
 盘口查询已迁入 gateway；不再部署 market-data provider。原有实时协议、Valkey 查询视图和 Core 权威状态保持不变。
 

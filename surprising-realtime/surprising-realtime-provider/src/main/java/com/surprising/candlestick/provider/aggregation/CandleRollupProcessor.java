@@ -61,11 +61,30 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             Instant openTime = period.floor(minute.openTime());
             String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
             String seenKey = rollupKey + "|" + minute.openTime().toEpochMilli();
+            CandleRollupAccumulator previous = rollupStore.get(rollupKey);
+            if (minute.status() == com.surprising.candlestick.api.model.CandleStatus.PARTIAL) {
+                updateActiveMinute(instrumentId, period, openTime, rollupKey, minute, previous, record.timestamp());
+                continue;
+            }
+            if (previous != null && !previous.isComplete() && previous.getActiveMinute() != null
+                    && !minute.openTime().isBefore(previous.getActiveMinute().openTime())) {
+                var active = previous.getActiveMinute();
+                if (minute.openTime().equals(active.openTime()) && minute.tradeCount() < active.tradeCount()) continue;
+                previous.setActiveMinute(null);
+                if (minute.openTime().isAfter(active.openTime())) {
+                    previous.add(active);
+                    seenStore.put(rollupKey + "|" + active.openTime().toEpochMilli(), ~active.tradeCount());
+                }
+                previous.add(minute);
+                rollupStore.put(rollupKey, previous);
+                seenStore.put(seenKey, ~minute.tradeCount());
+                forward(instrumentId, previous, record.timestamp());
+                continue;
+            }
             Long seen = seenStore.get(seenKey);
             // Accepted trades only append to a minute. Its count is the revision;
             // lastSequence instead identifies the last trade by event time.
             if (seen != null && seen < 0 && minute.tradeCount() <= ~seen) continue;
-            CandleRollupAccumulator previous = rollupStore.get(rollupKey);
             // A week can outlive minute dedupe retention. Any minute at/before the
             // accumulated tail is a replacement, even after its seen marker expires.
             if (seen != null || (previous != null && (previous.isComplete()
@@ -97,6 +116,38 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
         }
     }
 
+    /** The input is a complete minute snapshot, never a quantity delta. Replacing the
+     * active tail keeps every larger period live without SQL or double counting. */
+    private void updateActiveMinute(String instrumentId, CandlePeriod period, Instant openTime,
+            String rollupKey, CandleUpdatedEvent minute, CandleRollupAccumulator previous, long timestamp) {
+        if (previous != null && (previous.isComplete() || previous.getLastMinute() != null
+                && !minute.openTime().isAfter(previous.getLastMinute()))) return;
+        var accumulator = previous == null
+                ? CandleRollupAccumulator.create(instrumentId, period, openTime) : previous;
+        var active = accumulator.getActiveMinute();
+        if (active != null) {
+            if (minute.openTime().isBefore(active.openTime())
+                    || minute.openTime().equals(active.openTime()) && minute.tradeCount() <= active.tradeCount()) return;
+            if (minute.openTime().isAfter(active.openTime())) {
+                // A new minute can arrive before the previous minute's SQL close notification.
+                // Fold its last accepted snapshot once; that later notification is idempotent.
+                accumulator.setActiveMinute(null);
+                accumulator.add(active);
+                seenStore.put(rollupKey + "|" + active.openTime().toEpochMilli(), ~active.tradeCount());
+            }
+        }
+        String watermarkKey = productKey + "|" + instrumentId + "|" + period.code();
+        Long activeOpenMillis = watermarkStore.get(watermarkKey);
+        if (activeOpenMillis != null && openTime.toEpochMilli() < activeOpenMillis) return;
+        if (activeOpenMillis == null || openTime.toEpochMilli() > activeOpenMillis) {
+            closeActiveRollup(instrumentId, period, activeOpenMillis, timestamp);
+            watermarkStore.put(watermarkKey, openTime.toEpochMilli());
+        }
+        accumulator.setActiveMinute(minute);
+        rollupStore.put(rollupKey, accumulator);
+        forward(instrumentId, accumulator, timestamp);
+    }
+
     /** Only a replacement/late bucket reads SQL. Ordinary new minutes retain the incremental
      * path. The existing durable minute projection supplies one bounded period (at most10080
      * rows), so no second per-minute index, changelog or schema migration is needed. A database
@@ -120,8 +171,12 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             long revision = ~row.tradeCount();
             if (!java.util.Objects.equals(seenStore.get(key), revision)) seenStore.put(key, revision);
         }
-        if (!period.closeTime(openTime).isAfter(emittedAt)) replacement.close();
         var previous = rollupStore.get(rollupKey);
+        if (previous != null && previous.getActiveMinute() != null
+                && (replacement.getLastMinute() == null
+                    || previous.getActiveMinute().openTime().isAfter(replacement.getLastMinute())))
+            replacement.setActiveMinute(previous.getActiveMinute());
+        if (!period.closeTime(openTime).isAfter(emittedAt)) replacement.close();
         if (previous != null && previous.event(emittedAt).equals(replacement.event(emittedAt))) return;
         rollupStore.put(rollupKey, replacement);
         forward(instrumentId, replacement, timestamp);
