@@ -81,6 +81,12 @@ public class LatestFundingRateCache {
         }
     }
 
+    public void removeThrough(String instrumentId, Instant fundingTime) {
+        String normalized = normalizeSymbol(instrumentId);
+        ratesByFundingTime.keySet().removeIf(key -> key.instrumentId().equals(normalized)
+                && !key.fundingTime().isAfter(fundingTime));
+    }
+
     private boolean fresh(FundingRateResponse rate, Instant now) {
         return rate.eventTime() != null
                 && !rate.eventTime().isAfter(now.plusSeconds(1))

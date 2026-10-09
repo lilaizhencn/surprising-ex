@@ -3084,12 +3084,43 @@ CREATE INDEX IF NOT EXISTS idx_core_execution_projection_maker
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_symbol_time
     ON core_execution_projection (product_line, instrument_id, occurred_at_epoch_ms DESC, export_sequence DESC);
 
+CREATE TABLE IF NOT EXISTS funding_settlement_rates (
+    product_line VARCHAR(32) NOT NULL,
+    instrument_id VARCHAR(64) NOT NULL,
+    settlement_id BIGINT NOT NULL,
+    sequence BIGINT NOT NULL,
+    funding_time TIMESTAMPTZ NOT NULL,
+    funding_interval_hours INTEGER NOT NULL CHECK (funding_interval_hours>0),
+    funding_rate_ppm BIGINT NOT NULL,
+    premium_rate_ppm BIGINT NOT NULL,
+    interest_rate_ppm BIGINT NOT NULL,
+    event_time TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line,instrument_id,settlement_id)
+);
+COMMENT ON TABLE funding_settlement_rates IS '提交Core之前冻结的结算输入；已完成历史以Core提交投影为准';
+
+CREATE TABLE IF NOT EXISTS core_funding_page_projection (
+    product_line VARCHAR(32) NOT NULL,
+    cluster_position BIGINT NOT NULL CHECK (cluster_position>0),
+    instrument_id VARCHAR(64) NOT NULL,
+    settlement_id BIGINT NOT NULL CHECK (settlement_id>0),
+    cursor_user_id BIGINT NOT NULL CHECK (cursor_user_id>=0),
+    next_cursor_user_id BIGINT NOT NULL CHECK (next_cursor_user_id>=0),
+    funding_rate_ppm BIGINT NOT NULL,
+    complete BOOLEAN NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line,cluster_position),
+    UNIQUE (product_line,instrument_id,settlement_id,cursor_user_id),
+    CHECK (NOT complete OR next_cursor_user_id=0)
+);
+COMMENT ON TABLE core_funding_page_projection IS '只保存Archive已提交的真实结算页；幂等页与流水同事务持久化';
+
 CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
     product_line VARCHAR(32) NOT NULL,
     settlement_id BIGINT NOT NULL,
     export_sequence BIGINT NOT NULL,
     instrument_id VARCHAR(64) NOT NULL,
-    instrument_change_id BIGINT NOT NULL,
+    instrument_change_id BIGINT, -- Core funding command has no instrument version; unknown is NULL.
     funding_rate_ppm BIGINT NOT NULL,
     command_status VARCHAR(32) NOT NULL,
     result_code VARCHAR(64) NOT NULL,

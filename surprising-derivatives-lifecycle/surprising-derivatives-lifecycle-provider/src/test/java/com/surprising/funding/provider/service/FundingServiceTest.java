@@ -38,6 +38,46 @@ import org.springframework.kafka.core.KafkaTemplate;
 class FundingServiceTest {
 
     @Test
+    void replayedPredictionForCompletedWindowCannotPublishAnotherFinalOrCommand() {
+        var fixture = new Fixture(new FundingProperties());
+        var time = Instant.now().minusSeconds(1);
+        var replayed = new FundingRateResponse("1", 123, 999, 999, 0, time, 8, "PREDICTED", Instant.now());
+        fixture.cache.update(replayed);
+        when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(time.toEpochMilli(), true, 0, 0))));
+        var cycle = fixture.service.settleDueRates();
+        assertThat(cycle.failedRates()).isZero();
+        assertThat(cycle.pages()).isZero();
+        verify(fixture.aeron, never()).commandWithResponse(any(), any(), any());
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository, fixture.settlementRepository);
+        assertThat(fixture.cache.duePredictions(Instant.now())).isEmpty();
+    }
+
+    @Test
+    void resumedSettlementUsesFrozenRateInsteadOfNewerReplayedPrediction() {
+        var fixture = new Fixture(new FundingProperties());
+        var time = Instant.now().minusSeconds(1);
+        var newer = new FundingRateResponse("1", 123, 999, 999, 0, time, 8, "PREDICTED", Instant.now());
+        var frozen = new FundingRateResponse("1", 100, 10, 10, 0, time, 8, "PREDICTED", Instant.now());
+        fixture.cache.update(newer);
+        when(fixture.settlementRepository.reserveCore(newer))
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(time.toEpochMilli(), frozen));
+        when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                .thenReturn(progress(time.toEpochMilli(), 5));
+        when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(time.toEpochMilli(), true, 0, 1))));
+        assertThat(fixture.service.settleDueRates().settledRates()).isEqualTo(1);
+        var bytes = ArgumentCaptor.forClass(byte[].class);
+        verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), bytes.capture());
+        var command = TradingCommandCodec.decodeApplyFunding(bytes.getValue());
+        assertThat(command.fundingRatePpm()).isEqualTo(10);
+        assertThat(command.cursorUserId()).isEqualTo(5);
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
+    }
+
+    @Test
     void startsNextIntervalAfterEarlierCoreSettlementCompleted() {
         var fixture = new Fixture(new FundingProperties());
         Instant fundingTime = Instant.now().minusSeconds(1);
@@ -46,7 +86,7 @@ class FundingServiceTest {
         fixture.cache.update(due);
         long settlementId = fundingTime.toEpochMilli();
         when(fixture.settlementRepository.reserveCore(due))
-                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, due));
         when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(
@@ -60,7 +100,7 @@ class FundingServiceTest {
 
         assertThat(cycle.failedRates()).isZero();
         verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
-        verify(fixture.rateRepository).saveFinal(due);
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
     }
 
     @Test
@@ -88,7 +128,7 @@ class FundingServiceTest {
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         when(fixture.settlementRepository.reserveCore(due))
-                .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), 7));
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), due));
         when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(
@@ -100,7 +140,7 @@ class FundingServiceTest {
         verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
         assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue())).isEqualTo(
                 new ApplyFundingCommand(fundingTime.toEpochMilli(), "1", 100));
-        verify(fixture.rateRepository).saveFinal(due);
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
     }
 
     @Test
@@ -113,7 +153,7 @@ class FundingServiceTest {
         fixture.cache.update(due);
         long settlementId = fundingTime.toEpochMilli();
         when(fixture.settlementRepository.reserveCore(due))
-                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, due));
         when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(
@@ -128,7 +168,7 @@ class FundingServiceTest {
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
         assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue()).cursorUserId()).isEqualTo(42);
-        verify(fixture.rateRepository).saveFinal(due);
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
     }
 
     @Test
@@ -142,7 +182,7 @@ class FundingServiceTest {
         fixture.cache.update(due);
         long settlementId = fundingTime.toEpochMilli();
         when(fixture.settlementRepository.reserveCore(due))
-                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, due));
         when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
                         CoreFundingProgressCodec.encode(new CoreFundingProgressView(settlementId, false, 0, 0))));
@@ -152,7 +192,7 @@ class FundingServiceTest {
         fixture.service.settleDueRates();
 
         verify(fixture.aeron, times(2)).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
-        verify(fixture.rateRepository, never()).saveFinal(due);
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
     }
 
     @Test
@@ -174,14 +214,14 @@ class FundingServiceTest {
                 fundingTime, 8, "PREDICTED", Instant.now());
         fixture.cache.update(due);
         when(fixture.settlementRepository.reserveCore(due))
-                .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), 7));
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), due));
         doThrow(new IllegalStateException("cluster unavailable")).when(fixture.aeron)
                 .commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
 
         fixture.service.settleDueRates();
 
         assertThat(fixture.service.latestRate("1")).isEqualTo(due);
-        verify(fixture.rateRepository, never()).saveFinal(any());
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
     }
 
     @Test
@@ -206,7 +246,7 @@ class FundingServiceTest {
         assertThat(fixture.service.settleDueRates().failedRates()).isZero();
         verify(fixture.settlementRepository,never()).reserveCore(any());
         verify(fixture.aeron,never()).commandWithResponse(any(),any(),any());
-        verify(fixture.rateRepository,never()).saveFinal(any());
+        org.mockito.Mockito.verifyNoInteractions(fixture.rateRepository);
         assertThat(fixture.cache.duePredictions(Instant.now())).hasSize(mode==com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED?0:1);
     }
 
@@ -241,6 +281,9 @@ class FundingServiceTest {
             when(leaseRepository.acquire(any(), any(), any())).thenReturn(true);
             when(aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
                     .thenReturn(maintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance.TRADING));
+            when(aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                    .thenReturn(new CoreResponse(ResponseStatus.OK, 0,
+                            CoreFundingProgressCodec.encode(new CoreFundingProgressView(0, false, 0, 0))));
             cache = new LatestFundingRateCache(properties);
             service = new FundingService(properties, leaseRepository, sequenceRepository, rateInputRepository,
                     rateRepository, settlementRepository, paymentRepository, cache, kafka, aeron);

@@ -122,3 +122,15 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 `LifecycleBusinessSettingsService.install` 安装属性与当前版本后发布现有 Settings。间隔变化只重排对应任务；执行中的任务完成后采用新间隔，旧回调通过代次检查失效。间隔从上次执行开始计算，并保留完成后至少 25ms 的原调度间隙；业务异常后继续安排下一轮，不中断资金费结算，也不改变业务幂等、产品线隔离或 Core 资金状态。
 
 新增调度组件仅拥有定时句柄、期限和执行状态，业务动作仍由既有 maintenance task/service 承担。HotSpot JDK 27 测试覆盖五条衍生产品装配、永续专属资金费及独立调度池、热更新与取消回调；资金费、强平、保险和生命周期相关回归通过。需要外部 PostgreSQL 的业务配置集成测试本轮跳过，未对五产品运行实际 HTTP → Core 交易及资金费结算的端到端或长稳测试。
+
+## 资金费输入冻结与真实历史（2026-10-09）
+
+结算先查询 Core 维护状态和最新资金费游标：已完成或已被后续窗口覆盖的预测仅从本地待结算缓存移除，不能再次发布 FINAL。Core 状态不可用时停止本次结算并重试，不能当作新窗口开始。
+
+`FundingSettlementRepository.reserveCore` 在首次提交 Core 前按产品线、合约、结算时间冻结完整费率输入到 `funding_settlement_rates`；后续分页、进程重启及预测重放继续使用首次费率。该表是尚未执行命令的持久输入，不是结算成功凭据。已完成历史只读取 realtime 从 Archive 实际支付构建的 `core_funding_settlement_projection` 和 `core_funding_payment_projection`。`FundingRateRepository` 不再把内存中的预测写成 FINAL，也不读旧 `funding_rate_ticks` 作为结算历史。
+
+旧核心命令未保存预测的溢价、利息和周期；回放得到的真实费率仍可显示，但未知组成项通过 `FundingRateHistoryResponse` 返回 null，只有与实际费率一致的冻结输入才能补齐组成项。不根据当前仓位或重复预测推算过去扣款，旧预测记录留存供审计。
+
+部署前执行 `init.sql` 中新增的 `funding_settlement_rates`、`core_funding_page_projection` DDL，并对既有 `core_funding_settlement_projection.instrument_change_id` 执行 `DROP NOT NULL`；核心资金费命令没有合约配置版本，不能伪造该值。先准备表，再更新 realtime 与 lifecycle；在线 Core 不需要重启。真实历史补入程序和隔离边界见 [realtime README](../surprising-realtime/README.md)。
+
+验证包含 U/币本位核心真实资金费、重启续页、已完成预测重放、冻结输入在数据库重启读取和产品线隔离、真实历史排序与游标分页，以及数据库未知组成项。真实 PostgreSQL 测试需要 `INSTRUMENT_TEST_JDBC_URL`、`INSTRUMENT_TEST_DB_USER`、`INSTRUMENT_TEST_DB_PASSWORD`，使用随机 schema 并清理；不启动 wallet。

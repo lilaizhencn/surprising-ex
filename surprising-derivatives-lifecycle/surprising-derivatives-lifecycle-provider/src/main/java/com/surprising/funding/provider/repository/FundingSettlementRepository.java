@@ -30,7 +30,21 @@ public class FundingSettlementRepository {
                 .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.instrumentId()));
         long settlementId = rate.fundingTime().toEpochMilli();
         if (settlementId <= 0) throw new IllegalArgumentException("funding time must produce a positive settlement id");
-        return new CoreSettlement(settlementId, markPrice.instrumentChangeId());
+        // A restart, a concurrent coordinator or Kafka prediction replay must reuse the
+        // exact rate chosen before the first Core page; later predictions cannot replace it.
+        jdbcTemplate.update("""
+                INSERT INTO funding_settlement_rates(product_line,instrument_id,settlement_id,sequence,
+                  funding_time,funding_interval_hours,funding_rate_ppm,premium_rate_ppm,interest_rate_ppm,event_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
+                """, properties.getKafka().getProductLine().name(), rate.instrumentId(), settlementId, rate.sequence(),
+                java.sql.Timestamp.from(rate.fundingTime()), rate.fundingIntervalHours(), rate.fundingRatePpm(),
+                rate.premiumRatePpm(), rate.interestRatePpm(), java.sql.Timestamp.from(rate.eventTime()));
+        var frozen = jdbcTemplate.queryForObject("""
+                SELECT *, 'PREDICTED' AS status FROM funding_settlement_rates
+                 WHERE product_line=? AND instrument_id=? AND settlement_id=?
+                """, (rs, row) -> FundingRateRepository.toRate(rs),
+                properties.getKafka().getProductLine().name(), rate.instrumentId(), settlementId);
+        return new CoreSettlement(settlementId, java.util.Objects.requireNonNull(frozen));
     }
 
     public Optional<FundingSettlementResponse> latestCore(String instrumentId) {
@@ -50,6 +64,6 @@ public class FundingSettlementRepository {
         }, properties.getKafka().getProductLine().name(), instrumentId).stream().findFirst();
     }
 
-    public record CoreSettlement(long settlementId, long instrumentChangeId) {
+    public record CoreSettlement(long settlementId, FundingRateResponse rate) {
     }
 }

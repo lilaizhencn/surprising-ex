@@ -100,8 +100,9 @@ public class FundingService {
         int settledRates = 0;
         int pages = 0;
         int failedRates = 0;
-        for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now).stream()
+        for (FundingRateResponse prediction : latestFundingRateCache.duePredictions(now).stream()
                 .limit(properties.getSettlement().getBatchSize()).toList()) {
+            FundingRateResponse rate = prediction;
             dueRates++;
             if (!ownsSymbol(rate.instrumentId())) continue;
             try {
@@ -117,17 +118,18 @@ public class FundingService {
                     continue; // No funding payment occurred; do not publish a false FINAL rate.
                 }
                 if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT) continue;
+                var probe = new FundingSettlementRepository.CoreSettlement(rate.fundingTime().toEpochMilli(), rate);
+                CoreFundingProgressView persisted = decodeProgressOrQuery(rate.instrumentId(), probe, null);
+                if (persisted != null && (persisted.settlementId() > probe.settlementId()
+                        || persisted.complete() && persisted.settlementId() == probe.settlementId())) {
+                    latestFundingRateCache.removeThrough(rate.instrumentId(), rate.fundingTime());
+                    continue; // Only committed replay may publish FINAL history, never a replayed prediction.
+                }
                 FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
+                rate = settlement.rate();
                 String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
                         + rate.instrumentId() + ':' + settlement.settlementId();
                 long cursor = 0;
-                CoreFundingProgressView persisted = decodeProgressOrQuery(rate.instrumentId(), settlement, null);
-                if (persisted != null && persisted.complete()
-                        && persisted.settlementId() == settlement.settlementId()) {
-                    rateRepository.saveFinal(rate);
-                    latestFundingRateCache.removeIfCurrent(rate);
-                    continue;
-                }
                 if (persisted != null && !persisted.complete()) {
                     cursor = persisted.nextCursorUserId();
                 }
@@ -154,8 +156,7 @@ public class FundingService {
                     cursor = progress.nextCursorUserId();
                 }
                 if (!complete) continue;
-                rateRepository.saveFinal(rate);
-                latestFundingRateCache.removeIfCurrent(rate);
+                latestFundingRateCache.removeThrough(rate.instrumentId(), rate.fundingTime());
                 settledRates++;
             } catch (Exception exception) {
                 failedRates++;
@@ -176,19 +177,20 @@ public class FundingService {
                 effective = aeron.query(CoreMessageType.FUNDING_PROGRESS_QUERY, UUID.randomUUID(),
                         com.surprising.aeron.protocol.CoreStateQueryCodec.encodeFundingProgressQuery(instrumentId));
             } catch (RuntimeException exception) {
-                return null;
+                throw new IllegalStateException("Aeron funding progress unavailable", exception);
             }
         }
         if (effective == null || (effective.status() != com.surprising.aeron.protocol.ResponseStatus.OK
                 && effective.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED)
                 || effective.data().length == 0) {
-            return null;
+            throw new IllegalStateException("Aeron funding progress unavailable");
         }
         CoreFundingProgressView progress = CoreFundingProgressCodec.decode(effective.data());
         if (progress.settlementId() != 0 && progress.settlementId() != settlement.settlementId()) {
             // The progress query returns the most recent settlement for this instrument.
             // A finished earlier funding interval does not belong to the new interval.
-            if (progress.complete() && progress.settlementId() < settlement.settlementId()) return null;
+            if (progress.settlementId() > settlement.settlementId()) return progress;
+            if (progress.complete()) return null;
             throw new IllegalStateException("Aeron funding settlement progress mismatch");
         }
         return progress;
