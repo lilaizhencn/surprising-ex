@@ -454,3 +454,15 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 本轮使用独立临时 PostgreSQL、自动销毁的 Redis/Archive/Kafka 测试实例；分析入档后停止进程并清理本轮原始 JFR、临时程序、数据库目录、日志和对应测试报告，保留既有工作区数据和构建产物。
 
 清理完成：本轮独立 PostgreSQL 已停止，原始录制、临时程序/数据库/日志及 122 份对应测试报告已删除；没有遗留本轮 profile 进程，既有 Aeron 数据目录保持原样。
+
+## 迟到成交与资金费真实投影（2026-10-09）
+
+分钟关闭仅是持久化边界，不再当作成交事件时间水位。`CandleAggregationProcessor` 在现有去重保留期内继续更新该分钟的 RocksDB 累加器，迟到修订先保存在 dirty store，PostgreSQL 写入成功后才发布 CLOSED 替换；写入失败保留 dirty 状态等待重试。`PostgresCandleSink` 只接受序号更高且成交笔数不减少的完整分钟，重复写入不能回退历史。超过保留期的输入仍丢弃，不能把任意旧成交当作新历史。
+
+`CandleRollupProcessor` 对普通新分钟继续增量聚合。已处理分钟的修订或已关闭周期的迟到分钟，读取该周期的持久 CLOSED 分钟并替换聚合值，最多读取周线 10080 条；同时登记现有 seen store，防止 SQL 已有但通知仍排队的分钟被重复相加。查询失败不提交本条输入。没有新增重复分钟索引、changelog、历史缓存或线程；热缓存拒绝成交笔数、序号倒退的旧通知。旧版本已丢弃且记为去重的成交不会自动补回；不通过重置业务消费组或向行情伪造成交恢复历史。
+
+`CommittedTradeExporter` 在回放真实 APPLY_FUNDING 后，先刷新更早的订单/成交，再将 `CommittedFundingPage` 的支付页及流水放在同一 SQL 事务中。页以产品线与日志位置幂等，完成游标链连续且费率一致后才写完成汇总；页冲突、缺页或数据库失败阻止 checkpoint 前进。费率、金额、多空方向来自核心执行结果，不从当前仓位重建。未知合约配置版本保留 null。
+
+维护入口 `com.surprising.realtime.provider.export.CommittedFundingRepair` 复用同一 Archive 提交边界和回放状态，参数依次为 product、cluster-directory、aeron-directory、archive-control-channel、独立 `*.funding-repair` checkpoint、有限 end-position；连接数据库沿用部署环境 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`。可从结算窗口之前的有效 trade-export checkpoint 副本开始，只写资金费查询投影，不连接 Kafka、不改订单/水位、不向在线 Core 发送命令，也不覆盖在线 exporter 的 checkpoint。必须在运维脚本外层限制运行时间、堆和磁盘，并核对窗口覆盖；snapshot 之前的结算不可从该 snapshot 推算。
+
+本地验证包括迟到成交 SQL 失败重试、全部 12 个周期、通知排队与重复计数、10080 分钟周线重建、热缓存不回退，真实 PostgreSQL 的版本替换和资金费原子事务/幂等/缺页/冲突/零支付/产品隔离，以及真实 Archive 的分片、提交边界、SQL 失败后 checkpoint 恢复；原 Archive/Kafka 成交导出集成仍执行。在线 Core、撮合资金模型与 Kafka topic 不变，不需要重启 Core。

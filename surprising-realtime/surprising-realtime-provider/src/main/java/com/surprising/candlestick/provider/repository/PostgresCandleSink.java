@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 只负责 {@code candlestick_candles} 表的批量写入。
  *
- * <p>处理器只写入首次关闭的完整 1 分钟快照；相同 instrumentId 和开盘时间的重试不会改写历史。</p>
+ * <p>只写关闭的分钟快照；迟到成交产生更高版本的完整替换，重复或旧版本不回退历史。</p>
  */
 @Repository
 public class PostgresCandleSink implements CandleSink {
@@ -27,7 +27,17 @@ public class PostgresCandleSink implements CandleSink {
                 first_trade_id, last_trade_id, first_sequence, last_sequence,
                 status, updated_at, source_partition, source_offset
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (instrument_id, period, open_time) DO NOTHING
+            ON CONFLICT (instrument_id, period, open_time) DO UPDATE SET
+              open_price=EXCLUDED.open_price, high_price=EXCLUDED.high_price,
+              low_price=EXCLUDED.low_price, close_price=EXCLUDED.close_price,
+              base_volume=EXCLUDED.base_volume, quote_volume=EXCLUDED.quote_volume,
+              trade_count=EXCLUDED.trade_count, first_trade_id=EXCLUDED.first_trade_id,
+              last_trade_id=EXCLUDED.last_trade_id, first_sequence=EXCLUDED.first_sequence,
+              last_sequence=EXCLUDED.last_sequence, status=EXCLUDED.status,
+              updated_at=EXCLUDED.updated_at, source_partition=EXCLUDED.source_partition,
+              source_offset=EXCLUDED.source_offset
+            WHERE EXCLUDED.last_sequence > candlestick_candles.last_sequence
+              AND EXCLUDED.trade_count >= candlestick_candles.trade_count
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -37,7 +47,7 @@ public class PostgresCandleSink implements CandleSink {
     }
 
     /**
-     * 使用一个 JDBC batch 首次持久化关闭的 1 分钟 K 线；冲突行保持不可变。
+     * 使用 JDBC batch 持久化完整分钟快照；旧版本和重复重试不覆盖较新成交。
      */
     @Override
     public void upsertBatch(List<CandleSnapshot> candles) {

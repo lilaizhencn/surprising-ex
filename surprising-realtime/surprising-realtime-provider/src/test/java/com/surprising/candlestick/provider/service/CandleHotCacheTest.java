@@ -36,6 +36,24 @@ class CandleHotCacheTest {
                 .isEqualTo(first.plusSeconds(60));
     }
 
+    @Test
+    void olderClosedMinuteNotificationCannotReplaceRevisedHotCandle() {
+        var cache = new CandleHotCache();
+        var time = Instant.parse("2026-07-01T00:00:00Z");
+        var original = event("1", "1m", time);
+        var revised = new CandleUpdatedEvent("1", "1m", time, time.plusSeconds(60), BigDecimal.ONE,
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN, BigDecimal.TEN, BigDecimal.TEN, 2L,
+                "trade-1", "trade-2", 1L, 2L, CandleStatus.CLOSED, time, time, 0, 2L);
+        cache.put(original);
+        cache.put(revised);
+        cache.put(original);
+        assertThat(cache.latest("1", "1m")).get().satisfies(candle -> {
+            assertThat(candle.tradeCount()).isEqualTo(2);
+            assertThat(candle.closePrice()).isEqualByComparingTo("10");
+        });
+        assertThat(cache.size()).isEqualTo(1);
+    }
+
     private CandleUpdatedEvent event(String instrumentId, String period, Instant openTime) {
         return new CandleUpdatedEvent(instrumentId, period, openTime, openTime.plusSeconds(60), BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, 1L,

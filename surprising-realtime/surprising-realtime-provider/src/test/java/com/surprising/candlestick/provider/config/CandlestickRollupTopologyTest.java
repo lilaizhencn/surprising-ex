@@ -34,6 +34,94 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 
 class CandlestickRollupTopologyTest {
     @Test
+    void revisionsReplaceEveryPeriodAndQueuedMinuteNotificationsCannotDoubleCount() {
+        var properties = new CandlestickProperties();
+        properties.setPeriods(java.util.Arrays.stream(com.surprising.candlestick.api.model.CandlePeriod.values())
+                .map(com.surprising.candlestick.api.model.CandlePeriod::code).toList());
+        var durable = new java.util.TreeMap<Instant, com.surprising.candlestick.api.model.CandleResponse>();
+        var repository = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
+        when(repository.findRange(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("1m"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> List.copyOf(durable.subMap(call.getArgument(2), true, call.getArgument(3), false).values()));
+        var builder = new StreamsBuilder();
+        new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
+        var config = new Properties();
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "all-period-replacement-test");
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "unused:9092");
+        try (var driver = new TopologyTestDriver(builder.build(), config, Instant.parse("2026-08-25T10:02:00Z"))) {
+            var serde = jsonSerde(CandleUpdatedEvent.class);
+            var input = driver.createInputTopic(properties.getKafka().getCandleTopic(), Serdes.String().serializer(), serde.serializer());
+            var output = driver.createOutputTopic(properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
+            var first = minuteAt("2026-08-25T10:00:00Z", CandleStatus.CLOSED);
+            input.pipeInput("1", first);
+            assertThat(output.readValuesToList()).hasSize(properties.getPeriods().size() - 1);
+            var future = minuteAt("2026-08-25T10:01:00Z", CandleStatus.CLOSED);
+            for (var m : List.of(first, future)) durable.put(m.openTime(), new com.surprising.candlestick.api.model.CandleResponse(
+                    m.instrumentId(), m.period(), m.openTime(), m.closeTime(), m.openPrice(), m.highPrice(), m.lowPrice(),
+                    m.closePrice(), m.baseVolume(), m.quoteVolume(), m.tradeCount(), m.firstTradeId(), m.lastTradeId(),
+                    m.firstSequence(), m.lastSequence(), m.status(), m.eventTime()));
+            // Replaying the first notification sees both already durable minutes. A later
+            // notification of that second minute must not add its volume a second time.
+            input.pipeInput("1", first);
+            assertThat(output.readValuesToList()).hasSize(properties.getPeriods().size() - 1)
+                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(2); assertThat(row.baseVolume()).isEqualByComparingTo("2"); });
+            input.pipeInput("1", future);
+            assertThat(output.isEmpty()).isTrue();
+            var old = durable.get(first.openTime());
+            durable.put(first.openTime(), new com.surprising.candlestick.api.model.CandleResponse(old.instrumentId(), old.period(),
+                    old.openTime(), old.closeTime(), old.openPrice(), BigDecimal.TEN, old.lowPrice(), BigDecimal.TEN,
+                    BigDecimal.TWO, BigDecimal.TEN, 2, old.firstTradeId(), "late", old.firstSequence(), 2L,
+                    CandleStatus.CLOSED, old.updatedAt().plusSeconds(100)));
+            input.pipeInput("1", first);
+            assertThat(output.readValuesToList()).hasSize(properties.getPeriods().size() - 1)
+                    .allSatisfy(row -> { assertThat(row.tradeCount()).isEqualTo(3); assertThat(row.baseVolume()).isEqualByComparingTo("3");
+                        assertThat(row.highPrice()).isEqualByComparingTo("10"); });
+        }
+    }
+
+    @Test
+    void weeklyRevisionRebuildIsBoundedTo10080MinutesAndRemainsIdempotent() {
+        var properties = new CandlestickProperties();
+        properties.setPeriods(List.of("1m", "1w"));
+        var week = com.surprising.candlestick.api.model.CandlePeriod.W1;
+        Instant open = week.floor(Instant.parse("2026-08-25T10:00:00Z"));
+        var rows = new java.util.ArrayList<com.surprising.candlestick.api.model.CandleResponse>(10080);
+        for (int i = 0; i < 10080; i++) {
+            Instant time = open.plusSeconds(i * 60L);
+            rows.add(new com.surprising.candlestick.api.model.CandleResponse("1", "1m", time, time.plusSeconds(60),
+                    BigDecimal.ONE, BigDecimal.TWO, BigDecimal.ONE, BigDecimal.TWO, BigDecimal.ONE, BigDecimal.TWO,
+                    1, "first-"+i, "last-"+i, (long)i+1, (long)i+1, CandleStatus.CLOSED, time.plusSeconds(60)));
+        }
+        var repository = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
+        when(repository.findRange("1", "1m", open, week.closeTime(open), 10080)).thenReturn(rows);
+        var builder = new StreamsBuilder();
+        new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
+        var config = new Properties();
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "weekly-replacement-test");
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "unused:9092");
+        try (var driver = new TopologyTestDriver(builder.build(), config, week.closeTime(open))) {
+            var serde = jsonSerde(CandleUpdatedEvent.class);
+            var input = driver.createInputTopic(properties.getKafka().getCandleTopic(), Serdes.String().serializer(), serde.serializer());
+            var output = driver.createOutputTopic(properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
+            var minute = minuteAt(open.toString(), CandleStatus.CLOSED);
+            input.pipeInput("1", minute);
+            output.readValuesToList();
+            input.pipeInput("1", minute);
+            assertThat(output.readValue()).satisfies(row -> {
+                assertThat(row.tradeCount()).isEqualTo(10080);
+                assertThat(row.baseVolume()).isEqualByComparingTo("10080");
+                assertThat(row.status()).isEqualTo(CandleStatus.CLOSED);
+                assertThat(row.lastSequence()).isEqualTo(10080);
+            });
+            input.pipeInput("1", minute);
+            assertThat(output.isEmpty()).isTrue();
+            verify(repository, times(2)).findRange("1", "1m", open, week.closeTime(open), 10080);
+        }
+    }
+
+    @Test
     void closedM1IsEmittedOnlyAfterSinkRetrySucceeds() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
@@ -54,7 +142,7 @@ class CandlestickRollupTopologyTest {
         var json = new tools.jackson.databind.ObjectMapper();
         org.springframework.test.util.ReflectionTestUtils.setField(configuration, "realtime", router);
         org.springframework.test.util.ReflectionTestUtils.setField(configuration, "objectMapper", json);
-        configuration.candlestickTopology(builder, properties, sink, symbols, mapper, new CandleHotCache());
+        configuration.candlestickTopology(builder, properties, sink, symbols, mapper, new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "flush-boundary-test");
@@ -101,12 +189,12 @@ class CandlestickRollupTopologyTest {
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
         new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
-                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache());
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "rollup-topology-test");
         streams.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "unused:9092");
-        try (TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streams)) {
+        try (TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streams, Instant.parse("2026-08-25T10:02:00Z"))) {
             JacksonJsonSerde<CandleUpdatedEvent> serde = jsonSerde(CandleUpdatedEvent.class);
             TestInputTopic<String, CandleUpdatedEvent> input = driver.createInputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().serializer(), serde.serializer());
@@ -139,17 +227,17 @@ class CandlestickRollupTopologyTest {
     }
 
     @Test
-    void lateMinuteBeforeRollupWatermarkIsDropped() {
+    void lateMinuteBeforeRollupWatermarkRebuildsItsOwnClosedBucket() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
         new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
-                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache());
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "rollup-late-minute-test");
         streams.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "unused:9092");
-        try (TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streams)) {
+        try (TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streams, Instant.parse("2026-08-25T10:07:00Z"))) {
             JacksonJsonSerde<CandleUpdatedEvent> serde = jsonSerde(CandleUpdatedEvent.class);
             TestInputTopic<String, CandleUpdatedEvent> input = driver.createInputTopic(
                     properties.getKafka().getCandleTopic(), Serdes.String().serializer(), serde.serializer());
@@ -162,7 +250,9 @@ class CandlestickRollupTopologyTest {
             assertThat(active.status()).isEqualTo(CandleStatus.PARTIAL);
 
             input.pipeInput("1", minuteAt("2026-08-25T10:00:00Z", CandleStatus.CLOSED), 2L);
-            assertThat(output.isEmpty()).isTrue();
+            var repaired = output.readValue();
+            assertThat(repaired.openTime()).isEqualTo(Instant.parse("2026-08-25T10:00:00Z"));
+            assertThat(repaired.status()).isEqualTo(CandleStatus.CLOSED);
         }
     }
 
@@ -172,7 +262,7 @@ class CandlestickRollupTopologyTest {
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
         new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
-                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache());
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "rollup-wall-clock-close-test");
@@ -196,7 +286,7 @@ class CandlestickRollupTopologyTest {
     }
 
     @Test
-    void lateTradeCannotReviseClosedOneMinuteCandle() {
+    void lateTradeRevisesClosedMinuteOnlyAfterDurableWriteAndDoesNotDoubleCount() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         properties.getFlush().setInterval(Duration.ofSeconds(1));
@@ -210,9 +300,25 @@ class CandlestickRollupTopologyTest {
                                 TradeSide.BUY, null, null),
                         new TradeEvent("1", "t2", 2, tradeTime.plusSeconds(1), BigDecimal.TEN,
                                 BigDecimal.ONE, TradeSide.BUY, null, null));
+        var durable = new java.util.concurrent.atomic.AtomicReference<com.surprising.candlestick.provider.aggregation.CandleSnapshot>();
+        var failFirstRevision = new java.util.concurrent.atomic.AtomicBoolean(true);
+        org.mockito.Mockito.doAnswer(call -> {
+            var next = call.<List<com.surprising.candlestick.provider.aggregation.CandleSnapshot>>getArgument(0).getFirst();
+            if (next.getTradeCount() == 2 && failFirstRevision.getAndSet(false)) throw new IllegalStateException("revision write unavailable");
+            durable.set(next); return null;
+        })
+                .when(sink).upsertBatch(org.mockito.ArgumentMatchers.anyList());
+        var minutes = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
+        when(minutes.findRange(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("1m"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> { var c = durable.get(); return List.of(new com.surprising.candlestick.api.model.CandleResponse(
+                        c.getInstrumentId(), c.getPeriod(), c.getOpenTime(), c.getCloseTime(), c.getOpenPrice(),
+                        c.getHighPrice(), c.getLowPrice(), c.getClosePrice(), c.getBaseVolume(), c.getQuoteVolume(),
+                        c.getTradeCount(), c.getFirstTradeId(), c.getLastTradeId(), c.getFirstSequence(), c.getLastSequence(),
+                        c.getStatus(), c.getUpdatedAt())); });
         StreamsBuilder builder = new StreamsBuilder();
         new CandlestickStreamConfiguration().candlestickTopology(builder, properties, sink,
-                symbols, mapper, new CandleHotCache());
+                symbols, mapper, new CandleHotCache(), minutes);
 
         Properties streams = new Properties();
         streams.put(StreamsConfig.APPLICATION_ID_CONFIG, "closed-minute-immutable-test");
@@ -237,9 +343,36 @@ class CandlestickRollupTopologyTest {
 
             trades.pipeInput("1", new PublicTradeEvent(
                     "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
-            assertThat(output.readValuesToList()).isEmpty();
-            verify(sink, times(1)).upsertBatch(org.mockito.ArgumentMatchers.anyList());
+            assertThat(output.isEmpty()).isTrue(); // replacement is not published before durable write
+            driver.advanceWallClockTime(Duration.ofSeconds(1));
+            assertThat(output.isEmpty()).isTrue(); // failed SQL keeps the dirty replacement for retry
+            trades.pipeInput("1", new PublicTradeEvent(
+                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "duplicate"));
+            driver.advanceWallClockTime(Duration.ofSeconds(1));
+            var revised = output.readValue();
+            assertThat(revised.status()).isEqualTo(CandleStatus.CLOSED);
+            assertThat(revised.closePrice()).isEqualByComparingTo("10");
+            assertThat(revised.baseVolume()).isEqualByComparingTo("2");
+            assertThat(revised.tradeCount()).isEqualTo(2);
+            assertThat(output.readValue().period()).isEqualTo("5m");
+            verify(sink, times(3)).upsertBatch(org.mockito.ArgumentMatchers.anyList());
         }
+    }
+
+    private com.surprising.candlestick.provider.repository.CandleQueryRepository minutes() {
+        var repository = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
+        when(repository.findRange(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("1m"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> {
+                    Instant open = call.getArgument(2);
+                    var m = minuteAt(open.equals(Instant.parse("2026-08-25T10:00:00Z"))
+                            ? "2026-08-25T10:01:00Z" : open.toString(), CandleStatus.CLOSED);
+                    return List.of(new com.surprising.candlestick.api.model.CandleResponse(m.instrumentId(), m.period(),
+                            m.openTime(), m.closeTime(), m.openPrice(), m.highPrice(), m.lowPrice(), m.closePrice(),
+                            m.baseVolume(), m.quoteVolume(), m.tradeCount(), m.firstTradeId(), m.lastTradeId(),
+                            m.firstSequence(), m.lastSequence(), m.status(), m.eventTime()));
+                });
+        return repository;
     }
 
     private CandleUpdatedEvent minute(CandleStatus status) {

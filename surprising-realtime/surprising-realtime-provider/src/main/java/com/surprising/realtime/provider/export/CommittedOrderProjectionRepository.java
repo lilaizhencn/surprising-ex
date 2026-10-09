@@ -39,6 +39,83 @@ public class CommittedOrderProjectionRepository {
         this.transaction = new TransactionTemplate(transactions);
     }
 
+    /** One committed funding page and its nonzero ledger entries commit together. The
+     * completed interval is published only after the full cursor chain is present. Funding
+     * projection export_sequence uses the immutable cluster log position, including pages
+     * which emit no order/trade frame; it is not the trade-export sequence namespace. */
+    void persistFunding(com.surprising.aeron.service.orchestration.CommittedFundingPage page) {
+        transaction.executeWithoutResult(tx -> {
+            var command = page.command();
+            jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
+                    page.product().name() + ':' + command.instrumentId() + ':' + command.settlementId());
+            int inserted = jdbc.update("""
+                    INSERT INTO core_funding_page_projection(product_line,cluster_position,instrument_id,
+                      settlement_id,cursor_user_id,next_cursor_user_id,funding_rate_ppm,complete,occurred_at_epoch_ms)
+                    VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
+                    """, page.product().name(), page.clusterPosition(), command.instrumentId(), command.settlementId(),
+                    command.cursorUserId(), page.progress().nextCursorUserId(), command.fundingRatePpm(),
+                    page.progress().complete(), page.occurredAt());
+            if (inserted == 0) {
+                Integer matches = jdbc.queryForObject("""
+                        SELECT count(*) FROM core_funding_page_projection WHERE product_line=? AND cluster_position=?
+                          AND instrument_id=? AND settlement_id=? AND cursor_user_id=? AND next_cursor_user_id=?
+                          AND funding_rate_ppm=? AND complete=? AND occurred_at_epoch_ms=?
+                        """, Integer.class, page.product().name(), page.clusterPosition(), command.instrumentId(),
+                        command.settlementId(), command.cursorUserId(), page.progress().nextCursorUserId(),
+                        command.fundingRatePpm(), page.progress().complete(), page.occurredAt());
+                if (matches == null || matches != 1)
+                    throw new IllegalStateException("conflicting committed funding page identity");
+                return;
+            }
+            if (!page.payments().isEmpty()) jdbc.batchUpdate("""
+                    INSERT INTO core_funding_payment_projection(product_line,export_sequence,payment_index,
+                      settlement_id,user_id,instrument_id,margin_mode,position_side,asset,signed_quantity_steps,
+                      notional_units,funding_rate_ppm,amount_units,occurred_at_epoch_ms)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
+                @Override public int getBatchSize() { return page.payments().size(); }
+                @Override public void setValues(java.sql.PreparedStatement s, int index) throws java.sql.SQLException {
+                    var payment = page.payments().get(index);
+                    s.setString(1, page.product().name()); s.setLong(2, page.clusterPosition()); s.setInt(3, index);
+                    s.setLong(4, payment.settlementId()); s.setLong(5, payment.userId()); s.setString(6, payment.instrumentId());
+                    s.setString(7, payment.marginMode().name()); s.setString(8, payment.positionSide().name());
+                    s.setString(9, payment.asset()); s.setLong(10, payment.signedQuantitySteps());
+                    s.setLong(11, payment.notionalUnits()); s.setLong(12, payment.fundingRatePpm());
+                    s.setLong(13, payment.amountUnits()); s.setLong(14, page.occurredAt());
+                }
+            });
+            if (!page.progress().complete()) return;
+            var cursors = jdbc.query("""
+                    SELECT cursor_user_id,next_cursor_user_id,funding_rate_ppm,complete
+                      FROM core_funding_page_projection
+                     WHERE product_line=? AND instrument_id=? AND settlement_id=? ORDER BY cluster_position
+                    """, (rs, row) -> new FundingCursor(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getBoolean(4)),
+                    page.product().name(), command.instrumentId(), command.settlementId());
+            long expectedCursor = 0;
+            for (int index = 0; index < cursors.size(); index++) {
+                var cursor = cursors.get(index);
+                if (cursor.current() != expectedCursor || cursor.rate() != command.fundingRatePpm()
+                        || cursor.complete() != (index == cursors.size() - 1))
+                    throw new IllegalStateException("committed funding history has an incomplete cursor chain");
+                expectedCursor = cursor.next();
+            }
+            jdbc.update("""
+                    INSERT INTO core_funding_settlement_projection(product_line,settlement_id,export_sequence,
+                      instrument_id,funding_rate_ppm,command_status,result_code,total_long_payment_units,
+                      total_short_payment_units,position_count,occurred_at_epoch_ms)
+                    SELECT ?,?,?,?,?,'APPLIED',?,
+                      COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps>0),0),
+                      COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps<0),0),count(*)::integer,?
+                    FROM core_funding_payment_projection WHERE product_line=? AND instrument_id=? AND settlement_id=?
+                    ON CONFLICT (product_line,instrument_id,settlement_id) DO NOTHING
+                    """, page.product().name(), command.settlementId(), page.clusterPosition(), command.instrumentId(),
+                    command.fundingRatePpm(), page.resultCode(), page.occurredAt(),
+                    page.product().name(), command.instrumentId(), command.settlementId());
+        });
+    }
+
+    private record FundingCursor(long current, long next, long rate, boolean complete) {}
+
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
     void persist(ProductLine product, List<RealtimeFrame> orders, long exportSequence) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");

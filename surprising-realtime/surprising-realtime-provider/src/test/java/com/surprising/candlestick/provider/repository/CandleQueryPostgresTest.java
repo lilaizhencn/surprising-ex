@@ -14,6 +14,40 @@ import org.springframework.transaction.support.TransactionTemplate;
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class CandleQueryPostgresTest {
     @Test
+    void lateTradeReplacesMinuteAndRollupWhileDuplicateAndOlderVersionsCannotUndoIt() {
+        var source = new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),
+                System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
+        var jdbc = new JdbcTemplate(source);
+        new TransactionTemplate(new DataSourceTransactionManager(source)).executeWithoutResult(tx -> {
+            tx.setRollbackOnly();
+            var open = Instant.parse("2026-01-02T00:00:00Z");
+            var old = minute(open, 1, "100", "1");
+            var revised = minute(open, 2, "110", "3");
+            var sink = new PostgresCandleSink(jdbc);
+            sink.upsertBatch(java.util.List.of(old));
+            sink.upsertBatch(java.util.List.of(revised));
+            sink.upsertBatch(java.util.List.of(old));
+            sink.upsertBatch(java.util.List.of(revised));
+            var query = new CandleQueryRepository(jdbc);
+            for (String period : java.util.List.of("1m", "5m", "15m", "1h", "1d", "1w")) {
+                var row = query.findLatest("2147483598", period).orElseThrow();
+                assertThat(row.closePrice()).isEqualByComparingTo("110");
+                assertThat(row.baseVolume()).isEqualByComparingTo("3");
+                assertThat(row.tradeCount()).isEqualTo(2);
+            }
+        });
+    }
+
+    private com.surprising.candlestick.provider.aggregation.CandleSnapshot minute(
+            Instant open, long sequence, String close, String volume) {
+        return new com.surprising.candlestick.provider.aggregation.CandleSnapshot("2147483598", "1m", open,
+                open.plusSeconds(60), new java.math.BigDecimal("100"), new java.math.BigDecimal(close),
+                new java.math.BigDecimal("100"), new java.math.BigDecimal(close), new java.math.BigDecimal(volume),
+                new java.math.BigDecimal(volume).multiply(new java.math.BigDecimal(close)), sequence, "first", "last" + sequence,
+                1L, sequence, com.surprising.candlestick.api.model.CandleStatus.CLOSED, open.plusSeconds(60 + sequence), 0, sequence);
+    }
+
+    @Test
     void readsMinuteAndRollupByPermanentIdWithoutMixingOtherMarkets() {
         var source = new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),
                 System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));

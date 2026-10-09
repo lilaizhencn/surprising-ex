@@ -4,6 +4,7 @@ import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.candlestick.provider.service.CandleHotCache;
+import com.surprising.candlestick.provider.repository.CandleQueryRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -22,17 +23,20 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
     private final List<CandlePeriod> periods;
     private final String productKey;
     private final CandleHotCache hotCache;
+    private final CandleQueryRepository minutes;
     private ProcessorContext<String, CandleUpdatedEvent> context;
     private KeyValueStore<String, CandleRollupAccumulator> rollupStore;
     private KeyValueStore<String, Long> seenStore;
     private KeyValueStore<String, Long> watermarkStore;
 
-    public CandleRollupProcessor(CandlestickProperties properties, CandleHotCache hotCache) {
+    public CandleRollupProcessor(CandlestickProperties properties, CandleHotCache hotCache,
+                                CandleQueryRepository minutes) {
         this.properties = properties;
         this.periods = properties.getPeriods().stream().map(CandlePeriod::fromCode)
                 .filter(period -> period != CandlePeriod.M1).distinct().toList();
         this.productKey = properties.getKafka().getProductLine().topicSegment();
         this.hotCache = hotCache;
+        this.minutes = java.util.Objects.requireNonNull(minutes);
     }
 
     @Override
@@ -57,20 +61,24 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             Instant openTime = period.floor(minute.openTime());
             String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
             String seenKey = rollupKey + "|" + minute.openTime().toEpochMilli();
-            if (seenStore.get(seenKey) != null) {
+            CandleRollupAccumulator previous = rollupStore.get(rollupKey);
+            if (seenStore.get(seenKey) != null || (previous != null && previous.isComplete())) {
+                rebuildClosedMinutes(instrumentId, period, openTime, rollupKey, record.timestamp());
                 continue;
             }
             String watermarkKey = productKey + "|" + instrumentId + "|" + period.code();
             Long activeOpenMillis = watermarkStore.get(watermarkKey);
             long currentOpenMillis = openTime.toEpochMilli();
             if (activeOpenMillis != null && currentOpenMillis < activeOpenMillis) {
+                rebuildClosedMinutes(instrumentId, period, openTime, rollupKey, record.timestamp());
+                seenStore.put(seenKey, minute.openTime().toEpochMilli());
                 continue;
             }
             if (activeOpenMillis == null || currentOpenMillis > activeOpenMillis) {
                 closeActiveRollup(instrumentId, period, activeOpenMillis, record.timestamp());
                 watermarkStore.put(watermarkKey, currentOpenMillis);
             }
-            CandleRollupAccumulator accumulator = Optional.ofNullable(rollupStore.get(rollupKey))
+            CandleRollupAccumulator accumulator = Optional.ofNullable(previous)
                     .orElseGet(() -> CandleRollupAccumulator.create(instrumentId, period, openTime));
             if (accumulator.isComplete()) {
                 continue;
@@ -80,6 +88,35 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             seenStore.put(seenKey, minute.openTime().toEpochMilli());
             forward(instrumentId, accumulator, record.timestamp());
         }
+    }
+
+    /** Only a replacement/late bucket reads SQL. Ordinary new minutes retain the incremental
+     * path. The existing durable minute projection supplies one bounded period (at most10080
+     * rows), so no second per-minute index, changelog or schema migration is needed. A database
+     * failure propagates: the input offset must not commit with a stale higher-period value. */
+    private void rebuildClosedMinutes(String instrumentId, CandlePeriod period, Instant openTime,
+                                      String rollupKey, long timestamp) {
+        var replacement = CandleRollupAccumulator.create(instrumentId, period, openTime);
+        Instant emittedAt = Instant.ofEpochMilli(context.currentSystemTimeMs());
+        var rows = minutes.findRange(instrumentId, "1m", openTime, period.closeTime(openTime),
+                Math.toIntExact(period.duration().toMinutes()));
+        if (rows.isEmpty()) throw new IllegalStateException("durable closed minutes missing for rollup revision");
+        for (var row : rows) {
+            replacement.add(new CandleUpdatedEvent(row.instrumentId(), row.period(),
+                row.openTime(), row.closeTime(), row.openPrice(), row.highPrice(), row.lowPrice(),
+                row.closePrice(), row.baseVolume(), row.quoteVolume(), row.tradeCount(), row.firstTradeId(),
+                row.lastTradeId(), row.firstSequence(), row.lastSequence(), row.status(), row.updatedAt(),
+                emittedAt, null, null));
+            // SQL may already contain minutes whose Kafka notification is still queued.
+            // Mark those inputs too so their later notification cannot add them twice.
+            String key = rollupKey + "|" + row.openTime().toEpochMilli();
+            if (seenStore.get(key) == null) seenStore.put(key, row.openTime().toEpochMilli());
+        }
+        if (!period.closeTime(openTime).isAfter(emittedAt)) replacement.close();
+        var previous = rollupStore.get(rollupKey);
+        if (previous != null && previous.event(emittedAt).equals(replacement.event(emittedAt))) return;
+        rollupStore.put(rollupKey, replacement);
+        forward(instrumentId, replacement, timestamp);
     }
 
     private void closeActiveRollup(String instrumentId, CandlePeriod period, Long activeOpenMillis, long timestamp) {

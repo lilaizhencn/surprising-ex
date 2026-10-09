@@ -110,7 +110,10 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         Instant openTime = period.floor(trade.tradeTime());
         String candleKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
         Long closedThrough = closedWatermarkStore.get(sequenceKey(instrumentId));
-        if (closedThrough != null && period.closeTime(openTime).toEpochMilli() <= closedThrough) {
+        // Closing a bucket is a persistence boundary, not an event-time watermark. A real
+        // trade can arrive after that flush. Retain its accumulator for the existing
+        // dedupe horizon and revise it; only expired history requires a separate rebuild.
+        if (period.closeTime(openTime).isBefore(now.minus(properties.getStream().getDedupeRetention()))) {
             rememberTrade(instrumentId, trade);
             return;
         }
@@ -121,8 +124,14 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         candleStore.put(candleKey, accumulator);
 
         CandleSnapshot snapshot = accumulator.snapshot(now, partition, offset);
-        snapshot.setStatus(CandleStatus.PARTIAL);
         dirtyStore.put(candleKey, snapshot);
+        if (closedThrough != null && snapshot.getCloseTime().toEpochMilli() <= closedThrough) {
+            // Publish the replacement only after PostgreSQL accepts it. Otherwise the
+            // higher-period consumer can observe a revision before its minute is durable.
+            rememberTrade(instrumentId, trade);
+            return;
+        }
+        snapshot.setStatus(CandleStatus.PARTIAL);
         if (hotCache != null) {
             hotCache.put(snapshot.toUpdatedEvent(now));
         }

@@ -129,7 +129,8 @@ public class CandlestickStreamConfiguration {
             CandleSink candleSink,
             SymbolRegistryService symbolRegistryService,
             PublicTradeEventMapper tradeEventMapper,
-            CandleHotCache hotCache) {
+            CandleHotCache hotCache,
+            com.surprising.candlestick.provider.repository.CandleQueryRepository minutes) {
 
         Serde<PublicTradeEvent> tradeSerde = jsonSerde(PublicTradeEvent.class);
         Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
@@ -193,7 +194,7 @@ public class CandlestickStreamConfiguration {
                         && event.status() == CandleStatus.CLOSED
                         && CandlePeriod.M1.code().equals(event.period()),
                         Named.as("closed-one-minute-candles"))
-                .process(() -> new CandleRollupProcessor(properties, hotCache),
+                .process(() -> new CandleRollupProcessor(properties, hotCache, minutes),
                         Named.as("candlestick-rollup"),
                         CandleStores.ROLLUP_STORE,
                         CandleStores.ROLLUP_SEEN_STORE,

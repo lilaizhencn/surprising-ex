@@ -71,9 +71,13 @@ public class CandleHotCache {
                 event.lastSequence(), event.status(), event.eventTime());
         NavigableMap<Instant, CandleResponse> bucket = buckets.computeIfAbsent(
                 new BucketKey(instrumentId, event.period()), ignored -> new ConcurrentSkipListMap<>());
-        if (bucket.put(event.openTime(), candle) == null) {
-            entryCount.incrementAndGet();
-        }
+        bucket.compute(event.openTime(), (time, previous) -> {
+            if (previous == null) entryCount.incrementAndGet();
+            else if (candle.tradeCount() < previous.tradeCount()
+                    || (previous.lastSequence() != null && candle.lastSequence() != null
+                        && candle.lastSequence() < previous.lastSequence())) return previous;
+            return candle;
+        });
         trimIfNeeded();
     }
 

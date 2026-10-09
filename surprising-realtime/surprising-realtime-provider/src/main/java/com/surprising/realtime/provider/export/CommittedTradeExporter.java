@@ -37,12 +37,25 @@ final class CommittedTradeExporter {
     }
 
     void run(java.util.concurrent.atomic.AtomicBoolean running, java.util.function.Consumer<Boolean> connected, long stopAfter) throws Exception {
+        run(running, connected, stopAfter, false);
+    }
+
+    /** Offline projection repair: separate checkpoint, finite boundary, no Kafka or order writes. */
+    void repairFunding(long stopAfter) throws Exception {
+        if (!product.isFundingProduct() || stopAfter <= 0 || stopAfter == Long.MAX_VALUE
+                || !config.checkpoint().getFileName().toString().endsWith(".funding-repair"))
+            throw new IllegalArgumentException("funding repair requires a perpetual product, finite end and separate .funding-repair checkpoint");
+        run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, true);
+    }
+
+    private void run(java.util.concurrent.atomic.AtomicBoolean running,
+            java.util.function.Consumer<Boolean> connected, long stopAfter, boolean fundingOnly) throws Exception {
         Path checkpointPath = config.checkpoint().toAbsolutePath();
         Files.createDirectories(checkpointPath.getParent());
         int clusterId = config.clusterId() == null
                 ? com.surprising.aeron.protocol.ProductLineClusterLayout.clusterId(product) : config.clusterId();
         Properties props = new Properties();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        if (!fundingOnly) props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringSerializer");
@@ -82,7 +95,7 @@ final class CommittedTradeExporter {
             TradeExportCheckpoint checkpoint = TradeExportCheckpoint.read(checkpointPath, product);
             try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
                     var sink =
-                            new ReliableTradeKafkaSink(
+                            fundingOnly ? null : new ReliableTradeKafkaSink(
                                     new KafkaProducer<String, String>(props),
                                     product,
                                     checkpoint.tradeSequence());
@@ -113,14 +126,22 @@ final class CommittedTradeExporter {
                         if (bodyLength <= 0) throw new IllegalArgumentException("empty archived Core command");
                         byte[] bytes = new byte[bodyLength];
                         buffer.getBytes(bodyOffset, bytes);
-                        batch.add(replay.apply(bytes, sessionHeader.timestamp(), header.position()),
+                        var changes = replay.apply(bytes, sessionHeader.timestamp(), header.position());
+                        if (replay.fundingPage() != null) {
+                            // Flush earlier commands, then atomically persist this exact funding
+                            // page. A SQL failure prevents checkpoint advancement and is retried
+                            // from the old committed replay state; SQL identity makes it idempotent.
+                            batch.flush(replay.exportSequence());
+                            orders.persistFunding(replay.fundingPage());
+                        }
+                        batch.add(changes,
                                 replay.exportSequence(), System.nanoTime());
                     }
                     delivered[0] = header.position();
                     if (System.nanoTime() >= nextCheckpoint[0]) {
                         batch.flush(replay.exportSequence());
                         try {
-                            new TradeExportCheckpoint(product, delivered[0], sink.tradeSequence(), replay.snapshot())
+                            new TradeExportCheckpoint(product, delivered[0], (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                     .write(checkpointPath);
                         } catch (java.io.IOException failure) {
                             throw new java.io.UncheckedIOException(failure);
@@ -148,7 +169,7 @@ final class CommittedTradeExporter {
                     if (committed <= position) {
                         if (System.nanoTime() >= nextCheckpoint[0]) {
                             batch.flush(replay.exportSequence());
-                            new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
+                            new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                     .write(checkpointPath);
                             nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                         }
@@ -218,15 +239,15 @@ final class CommittedTradeExporter {
                     cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
                     if (System.nanoTime() >= nextCheckpoint[0]) {
                         batch.flush(replay.exportSequence());
-                        new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
+                        new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                 .write(checkpointPath);
                         log.info("trade-export product={} committedPosition={} exportedPosition={} trades={}",
-                                product, committed, cursor, sink.tradeSequence());
+                                product, committed, cursor, sink == null ? "funding-only" : sink.tradeSequence());
                         nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                     }
                 }
                 batch.flush(replay.exportSequence());
-                new TradeExportCheckpoint(product, cursor, sink.tradeSequence(), replay.snapshot())
+                new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                         .write(checkpointPath);
             }
         }
@@ -250,6 +271,7 @@ final class CommittedTradeExporter {
         }
 
         void add(List<RealtimeFrame> changes, long sequence, long now) {
+            if (sink == null) return; // Funding repair never republishes orders or trades.
             if (messages++ == 0) startedAt = now;
             for (var change : changes) {
                 if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
@@ -269,6 +291,7 @@ final class CommittedTradeExporter {
         }
 
         void flush(long sequence) {
+            if (sink == null) return;
             if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty()) {
                 orders.persist(product, orderChanges, sequence);
                 sink.publish(trades);
