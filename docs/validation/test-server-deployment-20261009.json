@@ -1,0 +1,872 @@
+{
+  "date": "2026-10-09",
+  "productLine": "LINEAR_PERPETUAL",
+  "release": "c79d572be87bd9178764e5e385298d3a49bd2765",
+  "releasePath": "/opt/surprising-ex-20261009-unified-c79d572b",
+  "completedAt": "2026-10-09T03:27:56Z",
+  "moduleVersions": {
+    "core": "f974fa21; source identical at c79d572b",
+    "gateway": "f974fa21; source identical at c79d572b",
+    "price": "f974fa21; source identical at c79d572b",
+    "derivatives-lifecycle": "f974fa21; source identical at c79d572b",
+    "maker": "f974fa21; source identical at c79d572b",
+    "realtime": "c79d572b"
+  },
+  "pids": {
+    "core-node0": 2268566,
+    "gateway": 2268770,
+    "price": 2268965,
+    "realtime": 2271965,
+    "derivatives-lifecycle": 2269882,
+    "maker": 2272277
+  },
+  "health": {
+    "9094": {
+      "groups": [
+        "liveness",
+        "readiness"
+      ],
+      "status": "UP"
+    },
+    "9082": {
+      "groups": [
+        "liveness",
+        "readiness"
+      ],
+      "status": "UP"
+    },
+    "9095": {
+      "groups": [
+        "liveness",
+        "readiness"
+      ],
+      "status": "UP"
+    },
+    "9087": {
+      "groups": [
+        "liveness",
+        "readiness"
+      ],
+      "status": "UP"
+    },
+    "9096": {
+      "groups": [
+        "liveness",
+        "readiness"
+      ],
+      "status": "UP"
+    }
+  },
+  "financialRecovery": {
+    "comparedKeys": [
+      "user.1",
+      "orders.1",
+      "user.2",
+      "orders.2",
+      "user.3",
+      "orders.3",
+      "user.4",
+      "orders.4",
+      "user.22",
+      "orders.22",
+      "treasury"
+    ],
+    "differences": [],
+    "recoveredCoreHash": "330fa621a81d5745",
+    "startupProbeMatched": true
+  },
+  "sourceEquivalence": {
+    "from": "f974fa21665ccf7942087ac00ee0814cbf8a7813",
+    "to": "c79d572be87bd9178764e5e385298d3a49bd2765",
+    "changedFiles": [
+      "surprising-realtime/README.md",
+      "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java"
+    ],
+    "otherServiceSourceIdentical": true
+  },
+  "artifacts": {
+    "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "0f2bc4ca9e427c571ceab714116bb4decc65a0948993e3c1bcb3f369e4109d0e",
+    "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar": "3653388dd00eead61db435835fa1085c8023e442eb5287ea30310c2bdbd764bb",
+    "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar": "a66bb886bc282f776f91d27de4ab24420718c784ce903e6b6ffa2b5f22d12e78",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar": "8c6cb4ad34ef55e200fa687d7ae5580110da1052ec8e77ccd1509bdff34f394e",
+    "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": "2207ab4e6813f7f982788e2b7431a421f0c319e735c58142c31a521995b35caf",
+    "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": "babcf0587b3bd7e91ada36f925e626b111be061d0839db469208941275112aab",
+    "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar": "efc31c13346c5e97a39bd5e17859b4359c0957b60bf1333cf11a8ba66a572267"
+  },
+  "tests": {
+    "baseline": {
+      "release": "f974fa21665ccf7942087ac00ee0814cbf8a7813",
+      "tests": [
+        {
+          "name": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": "3",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.2"
+        },
+        {
+          "name": "com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest",
+          "tests": "9",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.473"
+        },
+        {
+          "name": "com.surprising.marketmaker.provider.task.MarketMakerTaskTest",
+          "tests": "6",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.508"
+        },
+        {
+          "name": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": "5",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.57"
+        },
+        {
+          "name": "com.surprising.marketmaker.provider.service.MarketMakerServiceTest",
+          "tests": "56",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.521"
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+          "tests": "6",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "5.358"
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+          "tests": "32",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.093"
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+          "tests": "15",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.561"
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest",
+          "tests": "8",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "5.98"
+        },
+        {
+          "name": "com.surprising.aeron.service.CoreBusinessRejectionCodeTest",
+          "tests": "1",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.066"
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+          "tests": "6",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.096"
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreResultCodeTest",
+          "tests": "114",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.343"
+        },
+        {
+          "name": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+          "tests": "3",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.131"
+        },
+        {
+          "name": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+          "tests": "9",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.078"
+        },
+        {
+          "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": "22",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.898"
+        },
+        {
+          "name": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+          "tests": "8",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "33.584"
+        },
+        {
+          "name": "com.surprising.candlestick.provider.repository.PostgresCandleSinkTest",
+          "tests": "1",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.092"
+        }
+      ],
+      "total": {
+        "tests": 304,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "buildLogSha256": "19eb41f5c0222f6cad585015d251c0dd22b299c956987851a2b92953fb0e28db",
+      "testLogSha256": "bad03202bbea143a14f11032f38a31edc73181eb4add11248745878e0aec8135"
+    },
+    "latestDelta": {
+      "class": "ExportBatchTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "combinedTests": 318
+  },
+  "maker": {
+    "configuration": "/etc/surprising/linear-perpetual-maker.yml",
+    "singleInstance": true,
+    "hotUpdates": "process memory only",
+    "externalStorageLibraries": [],
+    "observedBusinessPeerPorts": [
+      443,
+      9092,
+      9094
+    ],
+    "tradeInterval": "PT1S",
+    "strategies": 3,
+    "allRunning": true,
+    "fullBusinessSettingsPreserved": true,
+    "unsetSubscribeMessagesOmittedFromYaml": true
+  },
+  "websocket": {
+    "public": {
+      "label": "public",
+      "startedAt": "2026-10-09T03:29:22.910Z",
+      "durationMs": 60002,
+      "completedAt": "2026-10-09T03:30:23.606Z",
+      "ack": 15,
+      "errors": [],
+      "buckets": {
+        "604:mark": {
+          "messages": 60,
+          "unique": 60,
+          "duplicates": 0,
+          "maxGapMs": 1658,
+          "latencyMs": {
+            "samples": 60,
+            "p50": 109,
+            "p95": 240,
+            "max": 786
+          }
+        },
+        "604:bookTicker": {
+          "messages": 283,
+          "unique": 267,
+          "duplicates": 16,
+          "maxGapMs": 3648,
+          "latencyMs": {
+            "samples": 267,
+            "p50": 96,
+            "p95": 216,
+            "max": 3646
+          }
+        },
+        "653:bookTicker": {
+          "messages": 248,
+          "unique": 232,
+          "duplicates": 16,
+          "maxGapMs": 3444,
+          "latencyMs": {
+            "samples": 232,
+            "p50": 99,
+            "p95": 222,
+            "max": 3645
+          }
+        },
+        "653:trades": {
+          "messages": 41,
+          "unique": 41,
+          "duplicates": 0,
+          "maxGapMs": 8562,
+          "latencyMs": {
+            "samples": 41,
+            "p50": 94,
+            "p95": 203,
+            "max": 388
+          }
+        },
+        "866:bookTicker": {
+          "messages": 208,
+          "unique": 193,
+          "duplicates": 15,
+          "maxGapMs": 3333,
+          "latencyMs": {
+            "samples": 193,
+            "p50": 96,
+            "p95": 292,
+            "max": 3650
+          }
+        },
+        "604:index": {
+          "messages": 60,
+          "unique": 60,
+          "duplicates": 0,
+          "maxGapMs": 1218,
+          "latencyMs": {
+            "samples": 60,
+            "p50": 65,
+            "p95": 141,
+            "max": 248
+          }
+        },
+        "653:index": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1989,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 70,
+            "p95": 128,
+            "max": 238
+          }
+        },
+        "866:index": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1314,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 69,
+            "p95": 193,
+            "max": 230
+          }
+        },
+        "604:trades": {
+          "messages": 40,
+          "unique": 40,
+          "duplicates": 0,
+          "maxGapMs": 8576,
+          "latencyMs": {
+            "samples": 40,
+            "p50": 98,
+            "p95": 284,
+            "max": 306
+          }
+        },
+        "653:mark": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1483,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 81,
+            "p95": 162,
+            "max": 582
+          }
+        },
+        "866:mark": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1660,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 99,
+            "p95": 214,
+            "max": 761
+          }
+        },
+        "866:trades": {
+          "messages": 40,
+          "unique": 40,
+          "duplicates": 0,
+          "maxGapMs": 8255,
+          "latencyMs": {
+            "samples": 40,
+            "p50": 91,
+            "p95": 199,
+            "max": 506
+          }
+        }
+      }
+    },
+    "internal": {
+      "label": "internal",
+      "startedAt": "2026-10-09T03:29:22.910Z",
+      "durationMs": 60006,
+      "completedAt": "2026-10-09T03:30:23.393Z",
+      "ack": 15,
+      "errors": [],
+      "buckets": {
+        "604:bookTicker": {
+          "messages": 283,
+          "unique": 267,
+          "duplicates": 16,
+          "maxGapMs": 3691,
+          "latencyMs": {
+            "samples": 267,
+            "p50": 90,
+            "p95": 207,
+            "max": 3643
+          }
+        },
+        "653:mark": {
+          "messages": 60,
+          "unique": 60,
+          "duplicates": 0,
+          "maxGapMs": 1433,
+          "latencyMs": {
+            "samples": 60,
+            "p50": 75,
+            "p95": 143,
+            "max": 528
+          }
+        },
+        "604:mark": {
+          "messages": 60,
+          "unique": 60,
+          "duplicates": 0,
+          "maxGapMs": 1588,
+          "latencyMs": {
+            "samples": 60,
+            "p50": 106,
+            "p95": 229,
+            "max": 707
+          }
+        },
+        "653:bookTicker": {
+          "messages": 247,
+          "unique": 231,
+          "duplicates": 16,
+          "maxGapMs": 3553,
+          "latencyMs": {
+            "samples": 231,
+            "p50": 92,
+            "p95": 212,
+            "max": 3644
+          }
+        },
+        "653:trades": {
+          "messages": 41,
+          "unique": 41,
+          "duplicates": 0,
+          "maxGapMs": 8512,
+          "latencyMs": {
+            "samples": 41,
+            "p50": 90,
+            "p95": 175,
+            "max": 381
+          }
+        },
+        "866:bookTicker": {
+          "messages": 207,
+          "unique": 192,
+          "duplicates": 15,
+          "maxGapMs": 3336,
+          "latencyMs": {
+            "samples": 192,
+            "p50": 92,
+            "p95": 291,
+            "max": 3646
+          }
+        },
+        "604:index": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1144,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 21,
+            "p95": 94,
+            "max": 105
+          }
+        },
+        "653:index": {
+          "messages": 58,
+          "unique": 58,
+          "duplicates": 0,
+          "maxGapMs": 1993,
+          "latencyMs": {
+            "samples": 58,
+            "p50": 35,
+            "p95": 94,
+            "max": 127
+          }
+        },
+        "866:index": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1322,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 29,
+            "p95": 105,
+            "max": 223
+          }
+        },
+        "604:trades": {
+          "messages": 40,
+          "unique": 40,
+          "duplicates": 0,
+          "maxGapMs": 8576,
+          "latencyMs": {
+            "samples": 40,
+            "p50": 92,
+            "p95": 285,
+            "max": 304
+          }
+        },
+        "866:mark": {
+          "messages": 59,
+          "unique": 59,
+          "duplicates": 0,
+          "maxGapMs": 1600,
+          "latencyMs": {
+            "samples": 59,
+            "p50": 94,
+            "p95": 210,
+            "max": 698
+          }
+        },
+        "866:trades": {
+          "messages": 40,
+          "unique": 40,
+          "duplicates": 0,
+          "maxGapMs": 8257,
+          "latencyMs": {
+            "samples": 40,
+            "p50": 85,
+            "p95": 193,
+            "max": 498
+          }
+        }
+      }
+    },
+    "publicAfterSnapshot": {
+      "label": "public-after-snapshot",
+      "startedAt": "2026-10-09T03:34:06.397Z",
+      "durationMs": 30007,
+      "completedAt": "2026-10-09T03:34:36.910Z",
+      "ack": 13,
+      "errors": [],
+      "buckets": {
+        "604:trades": {
+          "messages": 27,
+          "unique": 27,
+          "duplicates": 0,
+          "maxGapMs": 1192,
+          "latencyMs": {
+            "samples": 27,
+            "p50": 58,
+            "p95": 103,
+            "max": 164
+          }
+        },
+        "604:index": {
+          "messages": 30,
+          "unique": 30,
+          "duplicates": 0,
+          "maxGapMs": 1085,
+          "latencyMs": {
+            "samples": 30,
+            "p50": 16,
+            "p95": 82,
+            "max": 83
+          }
+        },
+        "653:index": {
+          "messages": 30,
+          "unique": 30,
+          "duplicates": 0,
+          "maxGapMs": 1079,
+          "latencyMs": {
+            "samples": 30,
+            "p50": 20,
+            "p95": 79,
+            "max": 83
+          }
+        },
+        "653:bookTicker": {
+          "messages": 181,
+          "unique": 181,
+          "duplicates": 0,
+          "maxGapMs": 590,
+          "latencyMs": {
+            "samples": 181,
+            "p50": 72,
+            "p95": 126,
+            "max": 253
+          }
+        },
+        "604:bookTicker": {
+          "messages": 215,
+          "unique": 215,
+          "duplicates": 0,
+          "maxGapMs": 585,
+          "latencyMs": {
+            "samples": 215,
+            "p50": 72,
+            "p95": 119,
+            "max": 200
+          }
+        },
+        "653:trades": {
+          "messages": 26,
+          "unique": 26,
+          "duplicates": 0,
+          "maxGapMs": 1347,
+          "latencyMs": {
+            "samples": 26,
+            "p50": 76,
+            "p95": 106,
+            "max": 240
+          }
+        },
+        "866:bookTicker": {
+          "messages": 154,
+          "unique": 154,
+          "duplicates": 0,
+          "maxGapMs": 576,
+          "latencyMs": {
+            "samples": 154,
+            "p50": 77,
+            "p95": 148,
+            "max": 330
+          }
+        },
+        "653:mark": {
+          "messages": 30,
+          "unique": 30,
+          "duplicates": 0,
+          "maxGapMs": 1081,
+          "latencyMs": {
+            "samples": 30,
+            "p50": 75,
+            "p95": 121,
+            "max": 176
+          }
+        },
+        "866:mark": {
+          "messages": 30,
+          "unique": 30,
+          "duplicates": 0,
+          "maxGapMs": 1102,
+          "latencyMs": {
+            "samples": 30,
+            "p50": 85,
+            "p95": 123,
+            "max": 197
+          }
+        },
+        "604:mark": {
+          "messages": 30,
+          "unique": 30,
+          "duplicates": 0,
+          "maxGapMs": 1094,
+          "latencyMs": {
+            "samples": 30,
+            "p50": 95,
+            "p95": 174,
+            "max": 198
+          }
+        },
+        "866:trades": {
+          "messages": 27,
+          "unique": 27,
+          "duplicates": 0,
+          "maxGapMs": 1342,
+          "latencyMs": {
+            "samples": 27,
+            "p50": 49,
+            "p95": 114,
+            "max": 182
+          }
+        },
+        "866:index": {
+          "messages": 29,
+          "unique": 29,
+          "duplicates": 0,
+          "maxGapMs": 1072,
+          "latencyMs": {
+            "samples": 29,
+            "p50": 24,
+            "p95": 77,
+            "max": 77
+          }
+        }
+      }
+    },
+    "metricsBefore": {
+      "surprising.websocket.queue.depth": {
+        "availableTags": [],
+        "description": "Queued WebSocket messages across active sessions",
+        "measurements": [
+          {
+            "statistic": "VALUE",
+            "value": 0.0
+          }
+        ],
+        "name": "surprising.websocket.queue.depth"
+      },
+      "surprising.websocket.backpressure.rejections": {
+        "availableTags": [],
+        "description": "WebSocket 背压导致的连接拒绝次数",
+        "measurements": [
+          {
+            "statistic": "VALUE",
+            "value": 0.0
+          }
+        ],
+        "name": "surprising.websocket.backpressure.rejections"
+      }
+    },
+    "metricsAfter": {
+      "surprising.websocket.queue.depth": {
+        "availableTags": [],
+        "description": "Queued WebSocket messages across active sessions",
+        "measurements": [
+          {
+            "statistic": "VALUE",
+            "value": 0.0
+          }
+        ],
+        "name": "surprising.websocket.queue.depth"
+      },
+      "surprising.websocket.backpressure.rejections": {
+        "availableTags": [],
+        "description": "WebSocket 背压导致的连接拒绝次数",
+        "measurements": [
+          {
+            "statistic": "VALUE",
+            "value": 0.0
+          }
+        ],
+        "name": "surprising.websocket.backpressure.rejections"
+      }
+    },
+    "limitation": "Snapshot window coincided with 8.17–8.62 second Maker trade gaps; cause not profiled. Post-snapshot 30 second probe maximum arrival gap 1347 ms."
+  },
+  "exportCheckpoint": {
+    "before": {
+      "logPosition": 13600982240,
+      "tradeSequence": 197496,
+      "sha256": "a984dd785405be3f017ab53a3d4bc8987e41465b6739e7b562cc3763f5a68ce0"
+    },
+    "after": {
+      "logPosition": 13606814496,
+      "tradeSequence": 197949
+    }
+  },
+  "frontend": {
+    "release": "4ac3aa98d4df60b272e837655c27ef4a06a63909",
+    "assets": [
+      {
+        "path": "assets/index-DFTpaiqf.js",
+        "expected": "19cecc16fdb1238aa78866b485ec74a0f79e863fa76f981fa3d43689825d71a4",
+        "actual": "19cecc16fdb1238aa78866b485ec74a0f79e863fa76f981fa3d43689825d71a4",
+        "match": true
+      },
+      {
+        "path": "assets/Primitives-C7baAk6G.js",
+        "expected": "05ca55725e827beca331da5ea599d172ee6ecd995c970f4c4aef942deccc18ff",
+        "actual": "05ca55725e827beca331da5ea599d172ee6ecd995c970f4c4aef942deccc18ff",
+        "match": true
+      },
+      {
+        "path": "assets/TradePage-CKet9but.js",
+        "expected": "8f9d119cb098238876cd88d59770324a39c2857a97309f62fed03624dbab448c",
+        "actual": "8f9d119cb098238876cd88d59770324a39c2857a97309f62fed03624dbab448c",
+        "match": true
+      },
+      {
+        "path": "assets/index-CsH61w_R.css",
+        "expected": "b703f134f0ed315a6d9aea5b9015bc078f6a81ac1c39cf4bfb451bed9e78e882",
+        "actual": "b703f134f0ed315a6d9aea5b9015bc078f6a81ac1c39cf4bfb451bed9e78e882",
+        "match": true
+      }
+    ],
+    "htmlByteIdentityVerified": false,
+    "deploymentPerformed": false,
+    "ci": "https://github.com/lilaizhencn/surprising-ex-web/actions/runs/37875109024"
+  },
+  "backup": {
+    "directory": "/var/backups/surprising/deploy-20261009-f974fa21",
+    "databaseBytes": 486495360,
+    "databaseSha256": "529ac8670a1a62d5510d919470175a3cc449bd46f240c5a7a7807536ea8e2ce6",
+    "pgRestoreListVerified": true,
+    "archiveAndRuntimePreserved": true
+  },
+  "finalStatus": {
+    "at": "2026-10-09T03:35:32Z",
+    "release": "c79d572be87bd9178764e5e385298d3a49bd2765",
+    "releasePath": "/opt/surprising-ex-20261009-unified-c79d572b",
+    "disk": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1       387G  232G  155G  60% /\n",
+    "unit": "Result=success\nActiveState=active\nSubState=exited\n",
+    "snapshot": "Result=success\nExecMainStatus=0\n",
+    "snapshotTimer": "active\n",
+    "backupBytes": 486495360,
+    "completedAt": "2026-10-09T03:27:56Z"
+  },
+  "evidenceSha256": {
+    "final-status.json": "4158866739223976efc479e86a27114bd8d058647630f775ef0dd4eb5e8c571a",
+    "financial-comparison.json": "d3a27c5b6e410b6d53d7cf13a384a1b1adc332a2853c690f4bfa0f5964dd734c",
+    "frontend-published-verification.json": "3d576da52da2e42ef60bc6f5bcbaf6ae1ac97b9157f59de4562921629d2efe05",
+    "latest-artifacts.json": "d7f468945990e07b54312bf39c2ff929940fa797020a5c32bf3f8d5d11fe62e9",
+    "latest-deployment-result.json": "83c54605443d06d949c050361a51f8ba00aaf29d71c438a22826098c71f57971",
+    "latest-source-equivalence.json": "40517b051b387dbbd2120e97784cc6e0930bc55f0836265c6aea61e37e0864a2",
+    "post-deploy-end.json": "fae057e3a6361e8091c3400eea0474e341cec3e3a833ed9a6f2701636fea36eb",
+    "post-deploy-market.json": "cbe1f25f98beb3e0c4c577503fb94a5fe58b8d9143ba9b323caced6f1454d77a",
+    "post-deploy-start.json": "54b8215bc3003748f1c4a946458188d240df0b98a1790e57e338b78f57fef6fc",
+    "ws-internal-verification.json": "589e54e09f286999f8b9d325d2ce1ff6d7e913256fadd14b7856ed74d06b655d",
+    "ws-public-after-snapshot-verification.json": "f993074026f02fbc50cc386ee96f773861e418e5a740a35a0b817b1a089c6bf2",
+    "ws-public-verification.json": "3208ad431fb7031e2e37483ffe1ad4ff98c45962efa2c4ee603e1313d09c0a32"
+  },
+  "cleanup": {
+    "localTemporaryDirectory": "/private/tmp/surprising-deploy-20261009",
+    "localTemporaryDirectoryRemoved": true,
+    "serverBackupsRetained": true,
+    "deploymentProbeProcessesCompleted": true
+  },
+  "limitations": [
+    "No live user leverage change submitted.",
+    "Only LINEAR_PERPETUAL was deployed; other five product lines were not started.",
+    "No full historical candle reconstruction or all-product financial reconciliation performed.",
+    "Funding source commit 240ccf4c arrived after deployment and is outside this release."
+  ]
+}
