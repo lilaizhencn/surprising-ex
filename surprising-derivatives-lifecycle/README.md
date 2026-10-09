@@ -16,6 +16,8 @@
 合并不改变费率公式、结算 ID、数据库租约、产品 topic 和 Core 资金记账边界。
 `com.surprising.funding.provider` 保留为业务包；共享 funding API 模块保留。
 
+预测费率缓存保留从历史恢复的范围，不能直接改为 latest 而漏掉停机期间应结算的窗口。缓存监听器逐条校验并按 sequence 更新，offset 使用 BATCH：一个 poll 的记录处理完成后统一确认，避免启动时每条历史预测都同步提交 offset。失败仍交由原监听容器处理；重读不会覆盖更新的缓存版本。这个提交仅表示派生缓存消费进度，实际资金结算仍由 Core 命令、冻结输入及幂等结算 ID 决定。确认语义见 [Spring Kafka 官方说明](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html#committing-offsets)。
+
 ## 共享资源及隔离
 
 - 一套数据库连接池，仍使用各业务原有表；原 funding 表须部署到此实例的数据源，不能遗漏原有迁移。

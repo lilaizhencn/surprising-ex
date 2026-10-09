@@ -68,7 +68,10 @@ public class FundingKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(Math.max(1, properties.getKafka().getConcurrency()));
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        // This listener rebuilds a derived prediction cache. Commit after a poll
+        // has been processed, instead of a synchronous offset write for every
+        // historical prediction during restart. Core settlement remains separate.
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         return factory;
     }
 
