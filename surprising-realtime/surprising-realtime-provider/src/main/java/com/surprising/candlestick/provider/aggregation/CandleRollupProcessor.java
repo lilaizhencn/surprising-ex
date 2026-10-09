@@ -62,7 +62,10 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
             String rollupKey = productKey + "|" + CandleKey.of(instrumentId, period, openTime).value();
             String seenKey = rollupKey + "|" + minute.openTime().toEpochMilli();
             CandleRollupAccumulator previous = rollupStore.get(rollupKey);
-            if (seenStore.get(seenKey) != null || (previous != null && previous.isComplete())) {
+            // A week can outlive minute dedupe retention. Any minute at/before the
+            // accumulated tail is a replacement, even after its seen marker expires.
+            if (seenStore.get(seenKey) != null || (previous != null && (previous.isComplete()
+                    || previous.getLastMinute() != null && !minute.openTime().isAfter(previous.getLastMinute())))) {
                 rebuildClosedMinutes(instrumentId, period, openTime, rollupKey, record.timestamp());
                 continue;
             }

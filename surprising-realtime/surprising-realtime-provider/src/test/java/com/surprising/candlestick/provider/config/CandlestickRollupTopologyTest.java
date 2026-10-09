@@ -81,6 +81,46 @@ class CandlestickRollupTopologyTest {
     }
 
     @Test
+    void activeWeekCannotDoubleCountAnOldMinuteAfterItsSeenMarkerExpires() {
+        var properties = new CandlestickProperties();
+        properties.setPeriods(List.of("1m", "1w"));
+        var week = com.surprising.candlestick.api.model.CandlePeriod.W1;
+        var first = minuteAt("2026-08-21T10:00:00Z", CandleStatus.CLOSED);
+        var last = minuteAt("2026-08-25T10:00:00Z", CandleStatus.CLOSED);
+        var repository = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
+        var rows = java.util.stream.Stream.of(first, last).map(m ->
+                new com.surprising.candlestick.api.model.CandleResponse(m.instrumentId(), m.period(),
+                        m.openTime(), m.closeTime(), m.openPrice(), m.highPrice(), m.lowPrice(), m.closePrice(),
+                        m.baseVolume(), m.quoteVolume(), m.tradeCount(), m.firstTradeId(), m.lastTradeId(),
+                        m.firstSequence(), m.lastSequence(), m.status(), m.eventTime())).toList();
+        when(repository.findRange("1", "1m", week.floor(first.openTime()),
+                week.closeTime(week.floor(first.openTime())), 10080)).thenReturn(rows);
+        var builder = new StreamsBuilder();
+        new CandlestickStreamConfiguration().candlestickTopology(builder, properties, mock(CandleSink.class),
+                mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
+        var config = new Properties();
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "expired-weekly-minute-test");
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "unused:9092");
+        try (var driver = new TopologyTestDriver(builder.build(), config, last.closeTime())) {
+            var serde = jsonSerde(CandleUpdatedEvent.class);
+            var input = driver.createInputTopic(properties.getKafka().getCandleTopic(), Serdes.String().serializer(), serde.serializer());
+            var output = driver.createOutputTopic(properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), serde.deserializer());
+            input.pipeInput("1", first);
+            input.pipeInput("1", last);
+            assertThat(output.readValuesToList().getLast().tradeCount()).isEqualTo(2);
+            var seen = driver.<String, Long>getKeyValueStore(
+                    com.surprising.candlestick.provider.aggregation.CandleStores.ROLLUP_SEEN_STORE);
+            var keys = new java.util.ArrayList<String>();
+            try (var iterator = seen.all()) { while (iterator.hasNext()) keys.add(iterator.next().key); }
+            keys.forEach(seen::delete); // retention cleanup of an active, longer-lived week
+            input.pipeInput("1", first);
+            assertThat(output.isEmpty()).isTrue();
+            verify(repository).findRange("1", "1m", week.floor(first.openTime()),
+                    week.closeTime(week.floor(first.openTime())), 10080);
+        }
+    }
+
+    @Test
     void weeklyRevisionRebuildIsBoundedTo10080MinutesAndRemainsIdempotent() {
         var properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "1w"));
