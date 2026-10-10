@@ -68,7 +68,7 @@ class TriggerOrderIndexTest {
     }
 
     @Test
-    void ownerReadsPublishedTriggersAndRemovalWithoutSubmittingLaneTasks() throws Exception {
+    void internalReadsFollowLaneTriggersAndRemoval() throws Exception {
         try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
             long user = 1;
             while (runtime.topology().accountLaneId(user) != 3) user++;
@@ -82,7 +82,7 @@ class TriggerOrderIndexTest {
             assertThat(tasks).containsOnlyNulls();
             assertThat(runtime.triggerOrder(901)).isSameAs(trigger);
             assertThat(runtime.triggerOrder(999)).isNull();
-            assertThat(tasks).as("owner lookup must not enqueue any Lane read").containsOnlyNulls();
+            assertThat(tasks).as("unstarted worker handles do not create a second query cache").containsOnlyNulls();
 
             var changed = trigger(901, user, 110);
             runtime.putTriggerOrder(changed);

@@ -3,11 +3,10 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class LaneCommitDelta {
-    /** 本 Lane 的实体键与原语 after-image；Owner 原地更新自己的独立镜像。 */
+    /** 本 Lane 的提交结果只供本命令输出使用，不生成 Owner 业务镜像。 */
     private boolean publicationPrepared;
     /** Lane 准备的终态原语收据；Owner 不再重新遍历订单或创建 OrderRuntime 快照。 */
     private long[] terminalOrderIds = new long[4];
@@ -112,10 +111,7 @@ public final class LaneCommitDelta {
     void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
     void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
-    void drainTo(int laneId,
-                 LongObjectHashMap<LiquidationRuntime> targetLiquidations,
-                 LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
-                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+    void drainTo(com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
             users.forEach((userId, ignored) -> {
@@ -137,8 +133,8 @@ public final class LaneCommitDelta {
         orders.clear();
         reservations.clear();
         positions.clear();
-        liquidations.drainToEclipseMap(targetLiquidations);
-        riskSnapshots.drainToEclipseMap(targetRiskSnapshots);
+        liquidations.clear();
+        riskSnapshots.clear();
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
@@ -156,14 +152,8 @@ public final class LaneCommitDelta {
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this, coreSequence);
-        liquidations.drainTo((id, value) -> {
-            state.changedLiquidations.put(id, value);
-            TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, value);
-        });
-        riskSnapshots.drainTo((key, value) -> {
-            state.changedRiskSnapshots.put(key, value);
-            TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, key, value);
-        });
+        liquidations.drainTo(state.changedLiquidations::put);
+        riskSnapshots.drainTo(state.changedRiskSnapshots::put);
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
     }
@@ -230,10 +220,7 @@ public final class LaneCommitDelta {
 
     void publishTriggersToOwner(TradingRuntimeState state) {
         if (triggers == null || triggers.isEmpty()) return;
-        triggers.forEach((id, value) -> {
-            TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, value);
-            state.changedTriggerOrders.put(id, value);
-        });
+        triggers.forEach(state.changedTriggerOrders::put);
         triggers.clear();
     }
 

@@ -181,7 +181,7 @@ final class RuntimeGlobalRollback {
                 || riskScanControlChanged;
     }
 
-    /** Restore account-owned cold state before the owner publishes restored references. */
+    /** Restore account-owned cold state in its own Lane. */
     void restoreLane(AccountLaneState lane) {
         lane.assertOwner();
         int laneId = lane.laneId();
@@ -232,10 +232,6 @@ final class RuntimeGlobalRollback {
     /** Called only after every Lane has restored its account and cold state. */
     void restoreOwner() {
         state.assertOwner();
-        liquidations.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, unwrap(val)));
-        riskSnapshots.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, id, unwrap(val)));
-        algoOrders.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedAlgoOrders, id, unwrap(val)));
-        triggerOrders.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, unwrap(val)));
         timers.forEach((key, val) -> TradingRuntimeState.putOrRemove(state.cancelAllAfterTimers, key, unwrap(val)));
         markPrices.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.markPrices, id, unwrap(val)));
         riskScans.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.riskScans, id, unwrap(val)));

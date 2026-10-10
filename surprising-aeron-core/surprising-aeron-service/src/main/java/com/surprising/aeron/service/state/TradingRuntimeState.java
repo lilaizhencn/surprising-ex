@@ -197,13 +197,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
     /** 当前执行范围复用的 matcherSettlementOrder 临时缓冲，不保存第二份业务状态。 */
     final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
-    /** owner 可见的已发布清算；与提交/回滚边界同步维护。 */
-    final LongObjectHashMap<LiquidationRuntime> publishedLiquidations = new LongObjectHashMap<>(4_096);
-    /** Owner read index: immutable algo values are shared by reference, never copied. */
-    final LongObjectHashMap<CoreAlgoOrderState> publishedAlgoOrders = new LongObjectHashMap<>();
-    final LongObjectHashMap<CoreTriggerOrderState> publishedTriggerOrders = new LongObjectHashMap<>();
-    /** owner 可见的已发布风险快照；与提交/回滚边界同步维护。 */
-    final LongObjectHashMap<RiskSnapshotRuntime> publishedRiskSnapshots = new LongObjectHashMap<>(4_096);
     /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
     final LaneCommitDelta[] laneDeltas;
 
@@ -762,20 +755,17 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishLiquidation(long liquidationId, LiquidationRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped == null) putOrRemove(publishedLiquidations, liquidationId, value);
-        else laneDelta(scoped.laneId()).putLiquidation(liquidationId, value);
+        if (scoped != null) laneDelta(scoped.laneId()).putLiquidation(liquidationId, value);
     }
 
     void publishRiskSnapshot(long positionKey, RiskSnapshotRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped == null) putOrRemove(publishedRiskSnapshots, positionKey, value);
-        else laneDelta(scoped.laneId()).putRiskSnapshot(positionKey, value);
+        if (scoped != null) laneDelta(scoped.laneId()).putRiskSnapshot(positionKey, value);
     }
 
     void publishTriggerOrder(long id, CoreTriggerOrderState value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) {
-            putOrRemove(publishedTriggerOrders, id, value);
             changedTriggerOrders.put(id, value);
         } else {
             laneDelta(scoped.laneId()).putTrigger(id, value);
@@ -797,7 +787,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneCommitDelta changes = laneDeltas[laneId];
         changes.recordRiskChanges(this);
         changes.publishTriggersToOwner(this);
-        changes.drainTo(laneId, publishedLiquidations, publishedRiskSnapshots, changedUsers, changedOrders);
+        changes.drainTo(changedUsers, changedOrders);
     }
 
     MatcherSettlementChanges acquireMatcherSettlementChanges(long laneMask) {
@@ -2263,7 +2253,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) return scoped.cold.liquidations.get(liquidationId);
-        return publishedLiquidations.get(liquidationId);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            LiquidationRuntime value = onLane(laneId, lane -> lane.cold.liquidations.get(liquidationId));
+            if (value != null) return value;
+        }
+        return null;
     }
 
     public LiquidationRuntime activeLiquidation(long userId, int symbolId, CorePositionSide positionSide) {
@@ -2298,12 +2292,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     public boolean hasUnresolvedLiquidation(int symbolId) {
         assertOwner();
         if (laneCommandScope.get() != null) throw new IllegalStateException("instrument check belongs to Core owner");
-        var values = publishedLiquidations.values().iterator();
-        while (values.hasNext()) {
-            LiquidationRuntime value = values.next();
-            if ((symbolId < 0 || value.symbolId() == symbolId)
-                    && value.status() != CoreLiquidationState.Status.COMPLETED
-                    && value.status() != CoreLiquidationState.Status.CANCELED) return true;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            boolean unresolved = onLane(laneId, lane -> lane.cold.liquidations.anySatisfy(value ->
+                    (symbolId < 0 || value.symbolId() == symbolId)
+                            && value.status() != CoreLiquidationState.Status.COMPLETED
+                            && value.status() != CoreLiquidationState.Status.CANCELED));
+            if (unresolved) return true;
         }
         return false;
     }
@@ -2341,7 +2335,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) return scoped.cold.riskSnapshots.get(positionKey);
-        return publishedRiskSnapshots.get(positionKey);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            RiskSnapshotRuntime value = onLane(laneId, lane -> lane.cold.riskSnapshots.get(positionKey));
+            if (value != null) return value;
+        }
+        return null;
     }
 
     public RiskScanRuntime riskScan(int symbolId) {
@@ -2517,7 +2515,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     public CoreAlgoOrderState algoOrder(long algoOrderId) {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
-        return scoped == null ? publishedAlgoOrders.get(algoOrderId) : scoped.cold.algoOrders.get(algoOrderId);
+        if (scoped != null) return scoped.cold.algoOrders.get(algoOrderId);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            CoreAlgoOrderState value = onLane(laneId, lane -> lane.cold.algoOrders.get(algoOrderId));
+            if (value != null) return value;
+        }
+        return null;
     }
 
     boolean hasAlgoClient(long userId, String clientId) {
@@ -2529,7 +2532,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void publishAlgoOrder(CoreAlgoOrderState order) {
         assertOwner();
         if (laneCommandScope.get() != null) throw new IllegalStateException("algo publication requires Owner");
-        publishedAlgoOrders.put(order.algoOrderId(), order);
         changedAlgoOrders.add(order.algoOrderId());
     }
 
@@ -2549,7 +2551,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> lane.cold.algoOrders.remove(algoOrderId));
         }
-        publishedAlgoOrders.removeKey(algoOrderId);
         changedAlgoOrders.add(algoOrderId);
     }
 
@@ -2571,7 +2572,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) return scoped.cold.triggerOrders.get(triggerOrderId);
-        return publishedTriggerOrders.get(triggerOrderId);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            CoreTriggerOrderState value = onLane(laneId, lane -> lane.cold.triggerOrders.get(triggerOrderId));
+            if (value != null) return value;
+        }
+        return null;
     }
 
     void putTriggerOrder(CoreTriggerOrderState triggerOrder) {
@@ -2623,7 +2628,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
         assertOwner();
         TreeMap<Long, CoreAlgoOrderState> values = new TreeMap<>();
-        publishedAlgoOrders.forEachKeyValue(values::put);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLane(laneId, lane -> {
+                lane.cold.algoOrders.forEachKeyValue(values::put);
+                return null;
+            });
+        }
         return values;
     }
 
@@ -2814,8 +2824,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
         instruments.putAll(source.instruments());
-        publishedAlgoOrders.clear();
-        publishedTriggerOrders.clear();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> {
                 lane.cold.leverages.clear();
@@ -3363,8 +3371,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 publishRiskSnapshot(positionKey, null);
                 return null;
             });
-        } else {
-            publishedRiskSnapshots.removeKey(positionKey);
         }
         if (laneCommandScope.get() == null) changedRiskSnapshots.put(positionKey, null);
         if (previous != null) changedUsers.add(previous.userId());
@@ -3809,7 +3815,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
-        if (position(positionKey) == null && publishedRiskSnapshots.get(positionKey) == null) {
+        if (position(positionKey) == null && riskSnapshot(positionKey) == null) {
             identities.releasePositionKey(positionKey);
         }
     }
