@@ -211,10 +211,15 @@ final class RuntimeAccountRollback {
     }
 
     void captureOrderBefore(long orderId) {
+        captureOrderBefore(orderId, 0);
+    }
+
+    void captureOrderBefore(long orderId, long userId) {
         if (state.matcherSettlementChangesScope.get() != null) return;
         if (capturedOrderBefore(orderId) != null) return;
         OrderRuntime value = state.order(orderId);
-        int laneId = captureLane(orderId, value == null ? 0 : value.userId());
+        long resolvedUserId = userId > 0 ? userId : (value == null ? 0 : value.userId());
+        int laneId = captureLane(orderId, resolvedUserId);
         LaneLongCaptures<PatchOrderBefore> captured = patchOrdersBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
             captured.put(orderId, value == null ? ABSENT_ORDER_BEFORE
@@ -223,10 +228,15 @@ final class RuntimeAccountRollback {
     }
 
     void captureReservationBefore(long orderId) {
+        captureReservationBefore(orderId, 0);
+    }
+
+    void captureReservationBefore(long orderId, long userId) {
         if (state.matcherSettlementChangesScope.get() != null) return;
         if (capturedReservationBefore(orderId) != null) return;
         ReservationRuntime value = state.reservation(orderId);
-        int laneId = captureLane(orderId, value == null ? 0 : value.userId());
+        long resolvedUserId = userId > 0 ? userId : (value == null ? 0 : value.userId());
+        int laneId = captureLane(orderId, resolvedUserId);
         LaneLongCaptures<PatchReservationBefore> captured = patchReservationsBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
             captured.put(orderId, value == null ? ABSENT_RESERVATION_BEFORE

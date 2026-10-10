@@ -196,6 +196,14 @@ run_stage() {
   done < <(find "${dir}" -maxdepth 1 -type f -name 'client-*.jfr' -print0)
   python3 "${SCRIPT_DIR}/summarize-aeron-async-stage.py" "${dir}" --stage "${stage}" --window "${window}" > "${dir}/metrics.pretty.json"
   if (( client_status != 0 )); then echo "stage client failed: ${dir}" >&2; return "${client_status}"; fi
+  # JMH can exit successfully after a failed benchmark fork. Accept a stage only when the
+  # workload's terminal/funds verification succeeded, not merely the launcher exit status.
+  python3 - "${dir}/metrics.json" <<'PY_CHECK'
+import json, sys
+metrics = json.load(open(sys.argv[1]))
+if metrics.get('clientPass') is not True:
+    sys.exit("stage workload failed or terminal verification is missing: " + sys.argv[1])
+PY_CHECK
 }
 
 IFS=',' read -r -a WINDOWS <<< "${WINDOWS_CSV}"

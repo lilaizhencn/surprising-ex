@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.protocol.CoreResultCode;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 /** One-way place admission owned and completed by exactly one Account Lane. */
-public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+public final class PlaceAdmissionEvent extends ResolvedPlaceOrder {
     private long coreSequence;
     private long timestamp, position;
     private long userId;
@@ -100,7 +99,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         completed = false;
     }
 
-    @Override
     public void execute(AccountLaneState lane) {
         long startedNanos = System.nanoTime();
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
@@ -172,8 +170,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
      * cannot safely share a strict Lane-to-Matcher receipt ring.
      */
     public void awaitMatcherReceipt(MatcherSettlementEvent target) {
-        if (!matcherWaitRequired || target == null) {
-            throw new IllegalStateException("place admission does not require matcher handoff");
+        if (target == null) {
+            throw new IllegalArgumentException("place admission target is required");
         }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         int spins = 0;

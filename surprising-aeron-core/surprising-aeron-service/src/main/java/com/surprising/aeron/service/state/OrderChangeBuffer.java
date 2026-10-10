@@ -33,30 +33,6 @@ final class OrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, V
         }
     }
 
-    OrderRuntime applyPublished(int index, LanePublishedMap<OrderRuntime> target,
-                                OwnerSettlementMergeEvent timing) {
-        long key = keyAt(index);
-        OrderRuntime source = valueAt(index);
-        if (source == null) {
-            target.removePublished(key, timing, false);
-            return null;
-        }
-        OrderRuntime ownerValue = target.get(key);
-        if (ownerValue == null) {
-            // The ordered Lane completion is the publication fence. Keep the Lane's canonical
-            // object instead of allocating and maintaining an Owner mirror of the same order.
-            ownerValue = source;
-            target.put(key, ownerValue);
-        } else if (ownerValue != source) {
-            // Recovery/control paths can still start from an independent published value.
-            ownerValue.applyPublishedStateInPlace(source, executed[index], remaining[index],
-                    cumulativeFee[index], executedValueHigh[index], executedValueLow[index], createdAt[index], updatedAt[index], clusterPosition[index],
-                    status[index], revision[index]);
-        }
-        setValueAt(index, ownerValue);
-        return ownerValue;
-    }
-
     private void ensurePublicationCapacity(int required) {
         if (required <= executed.length) return;
         int capacity = executed.length;

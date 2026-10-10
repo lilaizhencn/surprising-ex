@@ -323,77 +323,86 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         long position = workerPosition.value;
         int idle = 0;
         if (WAIT_DIAGNOSTICS) nextDiagnosticNanos = System.nanoTime() + DIAGNOSTIC_INTERVAL_NANOS;
-        while (accepting || position < submittedPosition.value) {
-            diagnosticSample();
-            // Observe the submission cursor before the read mailbox. A later command publication
-            // therefore cannot overtake a read published by the same owner at an earlier fence.
-            long submitted=submittedPosition.value;
-            BackgroundRead<?> read=backgroundReads.peek();
-            if(read!=null && position>=read.fence()) {
-                backgroundReads.poll();read.execute();continue;
-            }
-            if (position >= submitted) {
-                enterIdle();
-                if (waitStrategy == WaitStrategy.BUSY_SPIN) Thread.onSpinWait();
-                else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
-                else {
-                    if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
-                        if (WAIT_DIAGNOSTICS) parkCount++;
-                        LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+        try {
+            while (accepting || position < submittedPosition.value) {
+                diagnosticSample();
+                // Observe the submission cursor before the read mailbox. A later command publication
+                // therefore cannot overtake a read published by the same owner at an earlier fence.
+                long submitted=submittedPosition.value;
+                BackgroundRead<?> read=backgroundReads.peek();
+                if(read!=null && position>=read.fence()) {
+                    backgroundReads.poll();read.execute();continue;
+                }
+                if (position >= submitted) {
+                    enterIdle();
+                    if (waitStrategy == WaitStrategy.BUSY_SPIN) Thread.onSpinWait();
+                    else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
+                    else {
+                        if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
+                            if (WAIT_DIAGNOSTICS) parkCount++;
+                            LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                        }
+                    }
+                    continue;
+                }
+                leaveIdle();
+                idle = 0;
+                Slot slot = slots[(int) position & mask];
+                Supplier<?> command = slot.command;
+                long executeStarted = WAIT_DIAGNOSTICS ? System.nanoTime() : 0;
+                if (command == null || slot.token == 0) {
+                    slot.failure = new IllegalStateException("matcher command publication gap");
+                } else {
+                    MatcherSettlementEvent settlement = slot.settlement;
+                    try {
+                        if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
+                        Object result = command.get();
+                        // Bind the Core sequence on the matcher worker while the completion is
+                        // already in its slot; publish that same result into the command slot.
+                        slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
+                                ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
+                        if (settlement != null && !settlement.resultPrepared()) {
+                            throw new IllegalStateException("direct matcher did not publish its native result");
+                        }
+                    } catch (Throwable failure) {
+                        if (settlement != null) settlement.failDirect(failure);
+                        slot.failure = failure;
+                    } finally {
+                        if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                     }
                 }
-                continue;
-            }
-            leaveIdle();
-            idle = 0;
-            Slot slot = slots[(int) position & mask];
-            Supplier<?> command = slot.command;
-            long executeStarted = WAIT_DIAGNOSTICS ? System.nanoTime() : 0;
-            if (command == null || slot.token == 0) {
-                slot.failure = new IllegalStateException("matcher command publication gap");
-            } else {
-                MatcherSettlementEvent settlement = slot.settlement;
-                try {
-                    if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
-                    Object result = command.get();
-                    // Bind the Core sequence on the matcher worker while the completion is
-                    // already in its slot; publish that same result into the command slot.
-                    slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
-                            ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
-                    if (settlement != null && !settlement.resultPrepared()) {
-                        throw new IllegalStateException("direct matcher did not publish its native result");
+                if (WAIT_DIAGNOSTICS) {
+                    executeNanos += Math.max(0, System.nanoTime() - executeStarted);
+                    executeCount++;
+                }
+                // Retire transport before exposing the command result. Owner may immediately reuse
+                // its command slot after this publication; only local references are used below.
+                CommandSlot target = slot.resultTarget;
+                CoreMatchingResult routedResult = target != null && slot.failure == null
+                        ? (CoreMatchingResult) slot.result : null;
+                position++;
+                workerPosition.value = position;
+                completedPosition.value = position;
+                if (routedResult != null) {
+                    try { target.publishMatcherResult(workerId, routedResult); }
+                    catch (Throwable failure) {
+                        publicationFailure = failure;
+                        accepting = false;
                     }
-                } catch (Throwable failure) {
-                    if (settlement != null) settlement.failDirect(failure);
-                    slot.failure = failure;
-                } finally {
-                    if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                 }
+                Runnable signal = completionSignal;
+                if (signal != null) signal.run();
+                completionHighWaterMark = Math.max(completionHighWaterMark,
+                        Math.toIntExact(position - consumedPosition.value));
+                if (publicationFailure != null) break;
             }
-            if (WAIT_DIAGNOSTICS) {
-                executeNanos += Math.max(0, System.nanoTime() - executeStarted);
-                executeCount++;
-            }
-            // Retire transport before exposing the command result. Owner may immediately reuse
-            // its command slot after this publication; only local references are used below.
-            CommandSlot target = slot.resultTarget;
-            CoreMatchingResult routedResult = target != null && slot.failure == null
-                    ? (CoreMatchingResult) slot.result : null;
-            position++;
-            workerPosition.value = position;
-            completedPosition.value = position;
-            if (routedResult != null) {
-                try { target.publishMatcherResult(workerId, routedResult); }
-                catch (Throwable failure) {
-                    publicationFailure = failure;
-                    accepting = false;
-                }
-            }
+        } catch (Throwable failure) {
+            // A settlement publication failure must reach the Owner, including failures in
+            // completeMatcherPublication(). Never leave a dead worker looking merely idle.
+            publicationFailure = failure;
+            accepting = false;
             Runnable signal = completionSignal;
             if (signal != null) signal.run();
-            completionHighWaterMark = Math.max(completionHighWaterMark,
-                    Math.toIntExact(position - consumedPosition.value));
-            if (publicationFailure != null) break;
         }
         leaveIdle();
         diagnosticSample();

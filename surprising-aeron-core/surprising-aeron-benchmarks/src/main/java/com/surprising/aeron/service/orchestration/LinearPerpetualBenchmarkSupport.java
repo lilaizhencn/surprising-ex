@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -953,20 +952,29 @@ final class LinearPerpetualBenchmarkSupport {
 
             @Override
             public void verify() {
-                CoreLaneMetrics metrics = harness.state().laneMetrics();
-                int parallelLanes = 0;
-                for (int highWaterMark : metrics.accountLaneQueueHighWaterMarks()) {
-                    if (highWaterMark > 0) parallelLanes++;
+                var state = harness.state().tradingState();
+                long filled = Math.min(makerQuantity, takerQuantity);
+                var makerPosition = state.user(maker).positions().get(SYMBOL);
+                var takerPosition = state.user(taker).positions().get(SYMBOL);
+                if (makerPosition == null || takerPosition == null
+                        || makerPosition.signedQuantitySteps() != -filled
+                        || takerPosition.signedQuantitySteps() != filled)
+                    throw new IllegalStateException("cross-lane fill produced incorrect positions");
+                long balances = 0;
+                for (long userId : users) {
+                    var balance = state.user(userId).balances().get(SETTLE_ASSET);
+                    if (balance == null || balance.availableUnits() < 0 || balance.lockedUnits() < 0)
+                        throw new IllegalStateException("cross-lane fill produced invalid balances");
+                    balances = Math.addExact(balances,
+                            Math.addExact(balance.availableUnits(), balance.lockedUnits()));
                 }
-                if (parallelLanes < 2) {
-                    throw new IllegalStateException("cross-lane fill did not exercise parallel settlement");
-                }
-                for (int depth : metrics.accountLaneQueueDepths()) {
-                    if (depth != 0) throw new IllegalStateException("Account Lane queue did not drain");
-                }
-                for (long rejected : metrics.accountLaneRejectedSubmissions()) {
-                    if (rejected != 0) throw new IllegalStateException("Account Lane rejected settlement work");
-                }
+                long treasury = state.treasuryState().insuranceBalances().getOrDefault(SETTLE_ASSET, 0L)
+                        + state.treasuryState().feeBalances().getOrDefault(SETTLE_ASSET, 0L);
+                if (Math.addExact(balances, treasury) != Math.multiplyExact(SAFE_BALANCE, 2)
+                        || harness.acceptedMessages() != harness.terminalMessages()
+                        || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
+                        || harness.state().activeOrderCount() != (makerQuantity > filled ? 1 : 0))
+                    throw new IllegalStateException("cross-lane fill did not conserve funds or drain commands");
             }
 
             @Override

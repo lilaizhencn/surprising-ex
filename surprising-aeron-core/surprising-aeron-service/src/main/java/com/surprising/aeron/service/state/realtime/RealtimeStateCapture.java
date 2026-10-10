@@ -73,10 +73,7 @@ public final class RealtimeStateCapture {
                     0,
                     "",
                     "",
-                    ByteBuffer.allocate(8)
-                            .order(ByteOrder.LITTLE_ENDIAN)
-                            .putLong(previousExportSequence)
-                            .array());
+                    encodeLittleEndianLong(previousExportSequence));
     }
 
     public boolean active() {
@@ -99,12 +96,22 @@ public final class RealtimeStateCapture {
                     0,
                     "",
                     "",
-                    ByteBuffer.allocate(8)
-                            .order(ByteOrder.LITTLE_ENDIAN)
-                            .putLong(exportSequence)
-                            .array());
+                    encodeLittleEndianLong(exportSequence));
         }
         outbox.commit();
+    }
+
+    private static byte[] encodeLittleEndianLong(long value) {
+        byte[] bytes = new byte[8];
+        bytes[0] = (byte) value;
+        bytes[1] = (byte) (value >> 8);
+        bytes[2] = (byte) (value >> 16);
+        bytes[3] = (byte) (value >> 24);
+        bytes[4] = (byte) (value >> 32);
+        bytes[5] = (byte) (value >> 40);
+        bytes[6] = (byte) (value >> 48);
+        bytes[7] = (byte) (value >> 56);
+        return bytes;
     }
 
     public void abort() {

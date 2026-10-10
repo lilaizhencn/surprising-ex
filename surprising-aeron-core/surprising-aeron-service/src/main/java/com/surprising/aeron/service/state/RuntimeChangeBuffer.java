@@ -94,14 +94,6 @@ class RuntimeChangeBuffer<V> {
         resetIndex();
     }
 
-    void drainToPublishedMap(LanePublishedMap<V> target) {
-        for (int i = 0; i < size; i++) {
-            V value = valueAt(i);
-            if (value == null) target.remove(keyAt(i)); else target.put(keyAt(i), value);
-        }
-        clear();
-    }
-
     boolean isEmpty() {
         return size == 0;
     }

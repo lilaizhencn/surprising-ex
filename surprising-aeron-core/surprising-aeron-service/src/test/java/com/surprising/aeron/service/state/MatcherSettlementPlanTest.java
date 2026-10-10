@@ -23,6 +23,162 @@ class MatcherSettlementPlanTest {
             List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
 
     @Test
+    void ownerPredispatchWaitsForMatcherReadinessBeforeApplyingAccounts() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(original);
+            var event = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+                    0, identities, 10, 20);
+            event.beginMatcherPublication();
+            runtime.dispatchOwnerControlledSettlement(event);
+            assertThat(event.ready()).isFalse();
+            assertThat(event.completedLaneMask()).isZero();
+            assertThat(runtime.collectMatcherSettlement(event)).isNull();
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
+            event.completeMatcherPublication();
+            assertThat(event.complete()).isTrue();
+            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            assertThat(runtime.order(11)).isSameAs(original);
+            runtime.releaseMatcherSettlement(event);
+        }
+    }
+
+    @Test
+    void readySuffixPredispatchCannotOvertakeEarlierAccountSettlement() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(original);
+            var first = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+                    0, identities, 10, 20);
+            first.beginMatcherPublication();
+            runtime.dispatchOwnerControlledSettlement(first);
+            var suffix = runtime.prepareDirectCancellation(2, original, new java.util.UUID(3, 4),
+                    0, identities, 30, 40);
+            suffix.beginMatcherPublication();
+            suffix.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
+            suffix.completeMatcherPublication();
+            runtime.dispatchOwnerControlledSettlement(suffix);
+            assertThat(suffix.completedLaneMask()).isZero();
+            first.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
+            first.completeMatcherPublication();
+            assertThat(runtime.collectMatcherSettlement(first)).isNotNull();
+            runtime.releaseMatcherSettlement(first);
+            assertThat(runtime.collectMatcherSettlement(suffix)).isNotNull();
+            runtime.releaseMatcherSettlement(suffix);
+            assertThat(runtime.order(11)).isSameAs(original);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(15)
+    void ownerMayRecycleAfterReadinessWhileMatcherIsStillSignalling() throws Exception {
+        var signalling = new java.util.concurrent.CountDownLatch(1);
+        var finishSignal = new java.util.concurrent.CountDownLatch(1);
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread matcher = null;
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(original);
+            var event = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+                    0, identities, 10, 20);
+            event.markMatcherOwnedPublication();
+            // The transport release must observe all event metadata already prepared, while
+            // readiness still prevents the Owner from consuming or recycling it.
+            event.matcherCompletionRoute(shard -> {
+                assertThat(event.dispatched()).isTrue();
+                assertThat(event.ready()).isFalse();
+            }, 0);
+            runtime.ownerCompletionSignal(() -> {
+                if (runtime.inOwnerThread()) return;
+                signalling.countDown();
+                awaitPublicationLatch(finishSignal);
+            });
+            matcher = Thread.ofPlatform().name("test-matcher-publication").start(() -> {
+                try {
+                    event.beginMatcherPublication();
+                    event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                            symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
+                    event.completeMatcherPublication();
+                } catch (Throwable error) { failure.set(error); signalling.countDown(); }
+            });
+            assertThat(signalling.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(failure.get()).isNull();
+            assertThat(event.ready()).isTrue();
+            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            runtime.releaseMatcherSettlement(event);
+            var reused = runtime.prepareDirectCancellation(2, original, new java.util.UUID(3, 4),
+                    0, identities, 30, 40);
+            assertThat(reused).isSameAs(event);
+            finishSignal.countDown();
+            matcher.join(5_000);
+            assertThat(matcher.isAlive()).isFalse();
+            assertThat(failure.get()).isNull();
+            assertThat(reused.ready()).isFalse();
+            assertThat(reused.dispatched()).isFalse();
+            assertThat(reused.directResultCoreSequence()).isEqualTo(2);
+            runtime.ownerCompletionSignal(null);
+            reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
+            reused.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
+            assertThat(runtime.collectMatcherSettlement(reused)).isNotNull();
+            runtime.releaseMatcherSettlement(reused);
+        } finally {
+            finishSignal.countDown();
+            if (matcher != null) matcher.join(5_000);
+        }
+    }
+
+    @Test
+    void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
+        try (var runtime = new TradingRuntimeState();
+             var pipeline = new com.surprising.aeron.service.matcher.MatcherCommandPipeline(256)) {
+            var event = new MatcherSettlementEvent();
+            event.batchStorage(1);
+            event.prepareDirect(1, 1, 0, 0, new java.util.UUID(1, 2), 0,
+                    runtime, new RuntimeIdentityRegistry(), 1, List.of(), null);
+            event.matcherCompletionRoute(shard -> {
+                throw new IllegalStateException("settlement publication failed");
+            }, 0);
+            pipeline.submit(1, () -> {
+                event.failDirect(new IllegalArgumentException("command failed"));
+                return new CoreMatchingResult(false, "REJECTED");
+            }, event);
+            assertThatThrownBy(() -> {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (System.nanoTime() < deadline) {
+                    pipeline.completedMatchingSequence();
+                    Thread.onSpinWait();
+                }
+                throw new AssertionError("Owner was not notified of publication failure");
+            }).isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
+            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "SUCCESS")))
+                    .isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
+        }
+    }
+
+    private static void awaitPublicationLatch(java.util.concurrent.CountDownLatch latch) {
+        try {
+            if (!latch.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                throw new IllegalStateException("test publication signal timed out");
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("test publication interrupted", failure);
+        }
+    }
+
+    @Test
     void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();

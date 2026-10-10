@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class TradingCommandCodec {
@@ -16,6 +17,49 @@ public final class TradingCommandCodec {
     private static final int TRANSFER_FUNDS_VERSION = 2;
 
     private static final int MAX_TEXT_BYTES = 64;
+
+    private static final int SYMBOL_CACHE_SIZE = 256;
+    private static final int SYMBOL_CACHE_MASK = SYMBOL_CACHE_SIZE - 1;
+
+    private static final class CachedSymbol {
+        final byte[] bytes;
+        final String value;
+
+        CachedSymbol(byte[] bytes, String value) {
+            this.bytes = bytes;
+            this.value = value;
+        }
+    }
+
+    private static final CachedSymbol[] SYMBOL_CACHE = new CachedSymbol[SYMBOL_CACHE_SIZE];
+
+    static String decodeAsciiSymbol(byte[] bytes, int offset, int length) {
+        if (length == 0) {
+            return "";
+        }
+        int hash = 0;
+        for (int i = 0; i < length; i++) {
+            hash = 31 * hash + bytes[offset + i];
+        }
+        int index = hash & SYMBOL_CACHE_MASK;
+        CachedSymbol cached = SYMBOL_CACHE[index];
+        if (cached != null && cached.bytes.length == length) {
+            boolean match = true;
+            for (int i = 0; i < length; i++) {
+                if (cached.bytes[i] != bytes[offset + i]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return cached.value;
+            }
+        }
+        byte[] copy = Arrays.copyOfRange(bytes, offset, offset + length);
+        String created = new String(copy, StandardCharsets.UTF_8);
+        SYMBOL_CACHE[index] = new CachedSymbol(copy, created);
+        return created;
+    }
 
     private TradingCommandCodec() {
     }
@@ -289,7 +333,7 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid text length: " + symbolLength);
         }
         requireRange(payload, offset, symbolLength, limit);
-        String instrumentId = new String(payload, offset, symbolLength, StandardCharsets.UTF_8);
+        String instrumentId = decodeAsciiSymbol(payload, offset, symbolLength);
         offset += symbolLength;
         requireRange(payload, offset, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 4
                 + Byte.BYTES + Short.BYTES, limit);
@@ -860,8 +904,8 @@ public final class TradingCommandCodec {
         }
         requireRemaining(buffer, length);
         // All command readers wrap the owned heap payload; String retains no reference to it.
-        String value = length == 0 ? "" : new String(buffer.array(),
-                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        String value = decodeAsciiSymbol(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length);
         buffer.position(buffer.position() + length);
         return value;
     }
@@ -874,8 +918,8 @@ public final class TradingCommandCodec {
         }
         requireRemaining(buffer, length);
         // All command readers wrap the owned heap payload; String retains no reference to it.
-        String value = length == 0 ? "" : new String(buffer.array(),
-                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        String value = decodeAsciiSymbol(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length);
         buffer.position(buffer.position() + length);
         return value;
     }
@@ -897,8 +941,8 @@ public final class TradingCommandCodec {
         }
         requireRemaining(buffer, length);
         // All command readers wrap the owned heap payload; String retains no reference to it.
-        String value = length == 0 ? "" : new String(buffer.array(),
-                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        String value = decodeAsciiSymbol(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length);
         buffer.position(buffer.position() + length);
         return value;
     }

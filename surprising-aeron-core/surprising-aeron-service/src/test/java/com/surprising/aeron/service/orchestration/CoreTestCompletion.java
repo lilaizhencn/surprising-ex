@@ -58,7 +58,11 @@ final class CoreTestCompletion {
             throw new IllegalArgumentException("invalid synchronous matching fence");
         }
         CoreResponse requestedResponse = null;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        int loop = 0;
         while (true) {
+            owner.runtimeState.assertAccountLanesHealthy();
+            owner.commits.advanceMatchingProgress(clusterTimestamp, clusterPosition, Long.MAX_VALUE);
             owner.drainMatchingCompletions();
             long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
                     ? requestedSequence : owner.firstPendingMatchingSequence();
@@ -86,11 +90,16 @@ final class CoreTestCompletion {
                 } else {
                     response = owner.commits.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
                 }
+
             }
             if (response != null && sequence == requestedSequence) {
                 requestedResponse = response;
                 break;
             }
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("completeMatchingSynchronously timeout for sequence " + requestedSequence);
+            }
+            Thread.onSpinWait();
         }
         if (requestedSequence != 0 && requestedResponse == null) {
             throw new IllegalStateException(

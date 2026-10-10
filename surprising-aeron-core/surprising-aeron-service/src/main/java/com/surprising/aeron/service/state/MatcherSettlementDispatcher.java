@@ -125,11 +125,7 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
-    /**
-     * Legacy synchronous handoff.  Asynchronous commands are Matcher-owned and never enter
-     * this method; keeping the name explicit prevents new code from accidentally reintroducing
-     * an Owner-produced Lane settlement.
-     */
+    /** Register an Owner-dispatched event; the ordered commit head applies it after readiness. */
     void dispatchOwnerControlled(MatcherSettlementEvent event) {
         owner.assertOwner();
         if (event == null || event.runtime() != owner || !event.direct() || event.dispatched())
@@ -137,43 +133,20 @@ final class MatcherSettlementDispatcher {
         long mask = event.routedLaneMask();
         owner.ensureLaneWorkerCapacity(mask);
         owner.releaseOwnerLaneAccess();
-        if (!owner.accountLanesStarted && !event.ready())
-            throw new IllegalStateException("asynchronous matcher requires running account Lanes");
         event.markDispatched();
-        long lanes = mask;
-        while (lanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(lanes);
-            lanes &= lanes - 1;
-            event.markLaneQueued(laneId);
-            if (!owner.accountLanesStarted) event.execute(owner.accountLanes[laneId]);
-            else {
-                owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                        owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-                owner.laneWorkers[laneId].submit(event);
-            }
-        }
+        // Predispatch only registers ownership. Even an already-ready result must not apply
+        // here: an earlier command for this Lane can still be waiting for its Matcher result.
+        // The ordered Owner commit head executes the registered event after readiness.
     }
 
-    /** Publish a completed Matcher fact directly into each routed Lane's shard SPSC mailbox. */
+    /** Prepare the Matcher fact's dispatch metadata before publishing its readiness flag. */
     void publishMatcherOwned(MatcherSettlementEvent event) {
-        if (event == null || event.runtime() != owner || !event.direct() || !event.ready())
+        if (event == null || event.runtime() != owner || !event.direct() || !event.resultPrepared())
             throw new IllegalStateException("invalid Matcher-owned settlement publication");
-        if (event.dispatched() && event.queuedLaneMask() != 0)
-            throw new IllegalStateException("Matcher settlement was already dispatched");
-        long lanes = event.routedLaneMask();
-        if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
-        // A Matcher-owned slot is logically reserved before the Matcher starts work so
-        // admission/commit gates can observe it.  Publication only fills the rings; do not
-        // transition that reservation a second time.
+        if (event.routedLaneMask() == 0)
+            throw new IllegalStateException("Matcher settlement has no routed Lane");
         if (!event.dispatched()) event.markDispatched();
-        int shard = event.directShard();
-        while (lanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(lanes);
-            lanes &= lanes - 1;
-            event.markLaneQueued(laneId);
-            owner.laneWorkers[laneId].publishMatcherSettlement(shard, event);
-        }
-        owner.signalOwnerCompletion();
+        // Account mutation belongs to the Owner after readiness, never to this producer.
     }
 
     /** 可复用的 matcherSettlementEvent 对象池；仅在消费者完成后回收。 */
@@ -229,16 +202,7 @@ final class MatcherSettlementDispatcher {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            // In asynchronous command scope the permanent Lane is the only account
-            // writer.  ownerLaneAccess may still be held by an earlier preparation
-            // step, but it must never turn this settlement into an inline write.
-            if (!owner.accountLanesStarted || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
-                event.execute(owner.accountLanes[laneId]);
-            } else {
-                owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                        owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-            owner.laneWorkers[laneId].submit(event);
-            }
+            event.execute(owner.accountLanes[laneId]);
         }
         return event;
     }
@@ -383,15 +347,7 @@ final class MatcherSettlementDispatcher {
             while (lanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(lanes);
                 lanes &= lanes - 1;
-                if (!owner.accountLanesStarted
-                        || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
-                    event.execute(owner.accountLanes[laneId]);
-                }
-                else {
-                    owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                            owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-                    owner.laneWorkers[laneId].submit(event);
-                }
+                event.execute(owner.accountLanes[laneId]);
             }
             return event;
         } finally {

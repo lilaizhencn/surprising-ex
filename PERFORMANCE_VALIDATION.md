@@ -5014,3 +5014,54 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 完整采集计划、随机种子、实际命令/JVM参数/PID、逐轮计数/尾延迟/时间序列、79项测试用例、资金及快照校验、JFR事件配置/summary/view/分配栈、原始路径/大小/SHA-256、异常与审计源码见[首轮证据](docs/validation/perpetual-current-20261010.json)。原始临时路径仅作历史定位，清理状态随后追加。
 
 首轮清理完成：资金/恢复及JFR汇总结构校验后，本轮进程已全部结束；删除独立临时目录 /tmp/surprising-perpetual-20261010-current（564个文件、22317759976逻辑bytes，含本轮Archive/驱动/日志/JFR/中间报告），仅删除指纹仍一致的本轮测试XML，变化或未锁定指纹的报告保留。构建JAR、其他工作区改动和入档汇总保留。重跑编排源码已另存独立准备目录，尚未启动任何新轮次。原始已删除路径仅作历史定位。
+
+
+## 2026-10-10：最新固定源码分配与线程同步诊断（采集前计划）
+
+本轮 runId `surprising-core-allocation-20261010-125104`，源码捕获 2026-10-10T12:51:04.104658+08:00，HEAD ec024555a16dba3a033079ad06835daf6847398f 加当前工作区修改。独立源目录重新构建，源码指纹见最终入档 JSON。只跑当前 master，不重跑旧版本；历史数字不作受控性能对照。清理两个引用已删除账户镜像的旧微基准，交易生产逻辑未由本任务修改。
+
+目标为探索分配与线程同步成本，没有用户容量 SLA，不事后制定吞吐/P99 达标线。业务错误/超时、未排空、资金/订单/持仓不符判场景失败；CPU 限频、新增换页、JFR DataLoss 或窗口不完整使相应性能证据无效。固定一个真实单成员 Aeron Cluster（UDP/Archive/Core），LINEAR_PERPETUAL，1 matcher、4逻辑账户Lane、global/session in-flight256。G1，节点512m–1536m，客户端128m–512m，Owner/Matcher BUSY_SPIN；其余沿用原单节点基线。MIXED/batch20/128symbols/seed25620，既有零售与支持/做市账户，持续异步买卖及补盘口，业务原生核对。
+
+预热60秒、测量60秒×3主轮（无profiler）；独立GC profiler一轮、独立节点/客户端JFR一轮，同负载同时间；长稳300秒独立。JMH single-shot/fork1/thread1/wi0，业务预热在driver内；预热是否稳定据编译与分段吞吐评估，不因设置60秒认定稳定。轮间10秒冷却。闭环窗口受背压，不能宣称恒定offered rate或容量饱和，批量按item计数，fill单列，排空另计。
+
+执行前JDK27/Maven版本、磁盘检查；先受影响service协议/状态/结算与benchmark workload Maven测试，再package真实service/benchmarks/tools。复用qualify-aeron-async-stages.sh，仅end_to_end/windows256/skip-build。JFR使用现有owner-commit-profile.jfc，逐进程独立文件、256MiB上限；汇总限于driver测量窗口，ThreadAllocationStatistics counter差分、采样权重、TLAB/非TLAB、GC、park/monitor及CPU热点分开报告。BUSY_SPIN无park不等于无等待，追加Owner/Matcher栈、队列、windowBlocked、线程存在性。系统5秒采样pmset therm、vm_stat、进程CPU/RSS/磁盘；原始预算32GiB，剩余20GiB以下停止，结束轮及时归档/清理。长稳后进行本轮数据的实际快照重启资金/hash核对；完整Archive重放如受规模/正确性阻塞要明确未测。所有已测/失败/无效和清理状态入档，保持服务器与wallet任务不参与本轮。
+
+采集前修订：全新构建成功，79项预检查中76通过、3失败，均为LinearPerpetualBenchmarkSupportTest的direct result is not published。先运行独立JFR真实Cluster诊断，实际场景失败则停止剩余吞吐/GC/长稳轮；通过时可报告该场景的局部诊断，但整体正确性验收仍失败，不能把未覆盖/失败Harness当作全量通过。负载/256窗口/资金核对不变，执行顺序调整不隐去预检查失败。
+
+
+### 2026-10-10 当前源码压测失败及修复后的重测计划（采集前）
+
+12:55 的真实单成员 Aeron 压测在预热失败：Matcher 抛出 `invalid Matcher-owned settlement publication` 后退出，Owner 在 pending=71、ingress=185 时等待发布并超时。不得把该失败录制作为分配改善或吞吐成绩。原 79 项前置检查 76 通过、3 失败；其中一项旧基准仍要求多个 Account Lane 工作线程并行，另两项在结果尚未就绪时执行结算。
+
+本轮修复：完成池化事件的生产者访问后再发布 volatile 就绪位，之后仅用捕获的 runtime/lane mask 发唤醒；Owner 预派发只登记，ready 后才结算；Matcher 工作循环的发布异常传给 Owner；旧成交基准改验持仓、资金守恒与完成性；脚本同时要求 mixedCapacity 与 mixedVerify 成功。补充交接/回收/异常回归测试。
+
+修复后只测当前 master 工作区的固定源码（HEAD ec024555，包含既有未提交优化及本轮修复），不检出旧版，对照 commit 不适用。采集前记录源码 manifest、JAR 校验和、完整 JVM 命令。沿用上轮配置：LINEAR_PERPETUAL、单成员真实 UDP/Archive/Core、1 Matcher、4 逻辑账户分区且无账户工作线程、全局/session 窗口 256、MIXED、batch=20、symbol=128、seed=25620、G1、node 512m–1536m、client 128m–512m、JDK 27、Owner/Matcher BUSY_SPIN。先 JFR 诊断 60 秒预热+60 秒测量；业务核对通过后，无 profiler 主吞吐 3×60 秒、独立 -prof gc 60 秒、长稳 300 秒（独立 JFR），每轮预热 60 秒及冷却 10 秒。长稳后验证 Archive 重放及快照重启资金/业务哈希。系统每 5 秒采样，JFR 每进程上限 256MiB，磁盘/热节流/交换监控沿用上轮。
+
+探索诊断没有用户预先指定吞吐/延迟 SLA，不能事后定线。任何业务/资金/恢复错误判失败并停后续性能轮；热节流、采集损坏或窗口错位使对应性能证据无效；只在实际稳定测量窗口计算终态吞吐和分配，busy-spin 单列，不承诺下降百分比或云端容量。扩展测试未通过前不开启本轮采集。
+
+采集前补记：预派发进一步限定为仅登记，即使较晚结果已经 ready 也不在此更新账户，由有序提交推进结算；新增较晚结果先就绪回归。饱和基准改以账户分区的实际完成计数证明覆盖，不要求已删除工作队列的高水位。最终 70 项业务/资金/恢复/基准检查通过，六产品线受影响路径 88 项补验通过（含 15 项 MatcherSettlementPlanTest 重复核验）；Python 判定 8 项通过。JAR 重新构建成功，采集前 runtime/build 源码漂移为零。
+
+13:24 环境调整（后续采集前）：JFR 场景业务核对通过，但测量中 CPU_Speed_Limit 从 77 降至最低 62，绝对吞吐/延迟证据无效；取消尚未启动的 main1/main2/main3 与 -prof gc 轮。保留失败与修复后录制的诊断归因，继续相同业务配置的 300 秒长稳（仅功能、资金、线程/native 增长观察）以及 Archive 重放/快照重启，不宣称本轮性能验收通过或无泄漏。
+
+
+### 2026-10-10 最新固定源码诊断：实际结果与故障整改
+
+初轮真实 Cluster 在预热失败，Matcher 抛 invalid Matcher-owned settlement publication 后退出；Owner pending71+ingress185=256，等待发布超时。无稳定测量窗口、未完成资金终态检查，初轮判功能失败，不当作优化前性能对照。已修复 ready 释放后仍访问可回收事件、预派发未就绪/较晚 ready 越过提交头，以及 Matcher finally 发布异常未传给 Owner；同时更新已删除镜像接口/并行工作线程断言的旧基准，压测脚本要求 mixedCapacity 与 mixedVerify 均成功。
+
+修复后 service JAR SHA-256 61ee1202ad710135015d1b018a06825137cb09f9412b47a0e60eac367f749361；benchmark JAR cfa094022acac46c5e057e16f14f19e753a6724dcb4738e67197b471671b823d。独立目录构建，1874 条捕获文件 manifest，采集前无源码漂移。只运行 master ec024555 加工作区单写者优化及本轮修复，不运行历史版本。JDK27+33 HotSpot，1成员/1Matcher/4逻辑账户分区/0账户工作线程，LINEAR_PERPETUAL，global/session256，MIXED/batch20/symbol128/seed25620、G1、Owner/Matcher BUSY_SPIN；完整 JVM/采样命令入 JSON。
+
+独立 JFR 测量60.043289秒：终态11,896,709业务项、1,139,973 Core消息、2,831,360 fills；排空12.200861ms另2,683项/251消息，最终accepted=terminal=11,899,392项/1,140,224消息，未完成0、fundsDiff0，hash80596660e5509ce8。300.018234秒功能长稳终态62,128,408项、5,951,640消息、14,784,000 fills；排空11.114342ms另2,688项/256消息，最终62,131,096项/5,951,896消息、未完成0、fundsDiff0，hash59fdf5d7a64e5b31。预热和排空不并入测量吞吐，批量按item展开；带profiler观测198,135.532/207,082.107项每秒仅诊断，不是无profiler主吞吐。
+
+热控使性能证据无效：JFR阶段CPU_Speed_Limit最低62，长稳最低60；取消尚未开始的三个主轮与独立-prof gc。JFR/长稳窗口背压93.56%/93.60%、峰值256，并不能证明有用计算饱和；BUSY_SPIN和闭环协调遗漏均未排除。两阶段系统采样Swapouts增量0但Pageouts增量472/453，已有swap、热降频不能忽略。没有用户预设容量SLA，不事后制定达标线或声称下降百分比。
+
+JFR60秒窗节点ThreadAllocationStatistics估算230.844 MB/s、1165.08 B/业务项，Counter可见区间约58.89秒，非精确对象总数；Owner164.223、Matcher45.638、Cluster callback20.982 MB/s。OrderRuntime快照/准备、MatcherResult.from、协议解码为主要分配热点；节点45次GC phase pause，p50/p95/p99/max5.237/5.873/7.975/7.975ms，客户端fork248次、max1.884ms。TICKS字段按RecordedEvent.getDuration转换，避免原始计时tick误作纳秒。Owner/Matcher未观测park或Java monitor等待事件，未出现账户工作线程；单核CPU约99%含自旋，不等于无线程同步/零分配/零GC。Owner同窗2次只读encodeLaneMetrics类加载FileRead共0.0095ms，不能宣称所有I/O为零；Archive写盘在archive-conductor，native/mmap仍有覆盖缺口。
+
+长稳JFR node文件因256MiB上限滚动，只保留最后约146秒录制、约130秒测量内Counter；DataLoss0不证明完整300秒。采集后修正Python汇总，增加CPU事件首尾覆盖与PARTIAL_MEASUREMENT/UNSCOPED_RECORDING，不改变被测JAR；11项Python测试通过。尾部98次GC phase pause、max11.070ms；GC后heap172.11→178.41MiB、范围170.76–178.89MiB，可见direct buffer8个/9,575,136B、NMT Other9,657,736B。不能据短时或部分趋势证明无泄漏。
+
+实际恢复通过：长稳Archive全量重放后资金/持仓/订单检查和状态hash59fdf5d7a64e5b31；ClusterTool产生2条新valid snapshot，停机等待12秒后实际快照重启，业务与状态hash再次一致，资金检查通过。完整重放/验证/快照一轮约316秒，快照恢复/验证一轮约34秒，含编排而非生产恢复SLA。保留Chronicle模块访问告警，不能把该告警当成已确认资金故障。
+
+修复后70项业务/资金/恢复/基准、88项六产品线检查通过（15项重复），产品API/协议/客户端312项通过；最后扩大受影响服务测试复验的结果另补。未压测HTTP/Gateway/Kafka/WS、云端容量或资金费/强平/ADL独立负载。完整证据及缺口见[整改报告](docs/validation/core-pressure-fix-and-allocation-20261010.md)和[JSON证据](docs/validation/core-pressure-fix-and-allocation-20261010.json)，原始临时路径清理后仅作历史定位。后续正式性能采集需稳定散热与JIT、无profiler主轮和独立GC/JFR、完整长稳录制，以及分段延迟/到达模型/有效计算与等待分离。
+
+收尾补验：受影响 service 11 类397项，396通过、0失败/错误，1项诊断开关条件跳过；单独打开开关后发现旧 OwnerSettlementMerge 镜像合并事件断言已不适用，保留该失败，更新为当前已有 OwnerPublication/SettlementLatency/OwnerHead/Boundary/Turn 完整核对后单项通过。采集后只改测试/汇总/文档及 ControlLaneDispatcher EOF空白；交易运行时与两份被测JAR指纹仍一致，未把采集后测试修改伪写成采集前源码。
+
+本轮清理完成：所有本轮进程已退出，删除独立临时源码/构建/Cluster/Archive/JFR/日志/测试报告目录 /private/tmp/surprising-core-allocation-20261010-125104（5094文件，12375454068逻辑bytes）及本轮Python缓存；其他任务、工作区target和未提交部署改动保留。原始路径仅作历史定位；命令、源码/JAR/录制指纹、失败与修复后日志、JFR summary/view、作用域聚合、系统采样、测试用例及实际恢复证据已保存到上述JSON。

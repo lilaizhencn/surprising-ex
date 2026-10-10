@@ -33,6 +33,9 @@ public final class ClusterCommandWindow {
     /** Order ID to newest physical slot + 1. */
     private final org.agrona.collections.Long2LongHashMap orderSlots =
             new org.agrona.collections.Long2LongHashMap(0);
+    /** User ID to newest physical slot + 1. */
+    private final org.agrona.collections.Long2LongHashMap userSlots =
+            new org.agrona.collections.Long2LongHashMap(0);
     private long lastMatchingSequence;
     private int lastMatchingPhysical = -1;
 
@@ -103,11 +106,12 @@ public final class ClusterCommandWindow {
         // already serializes different users on the same lane.
         long candidateUserId = candidateRouted ? candidateUser : 0;
         if (candidateUserId != 0) {
-            for (int i = size - 1; i >= exactPrefix; i--) {
-                Entry route = get(i);
-                if (route.routePresent && route.routeUserId == candidateUserId) {
+            long slot = userSlots.get(candidateUserId);
+            if (slot != 0) {
+                int userPrefix = (((int) slot - 1 - head) & indexMask) + 1;
+                if (userPrefix > exactPrefix && userPrefix <= size) {
                     conflict = Conflict.ACCOUNT;
-                    return i + 1;
+                    return userPrefix;
                 }
             }
         }
@@ -183,6 +187,9 @@ public final class ClusterCommandWindow {
         int physical = (head + size - 1) & indexMask;
         entry.orderCount = copyTrackedOrderIds(entry, physical);
         entry.physicalSlot = physical;
+        if (candidateUser > 0) {
+            userSlots.put(candidateUser, physical + 1L);
+        }
         return entry;
     }
 
@@ -243,6 +250,8 @@ public final class ClusterCommandWindow {
 
     public void clear() {
         removePrefix(size);
+        orderSlots.clear();
+        userSlots.clear();
         resetCandidate(0);
         releaseDecoded();
     }
@@ -259,6 +268,12 @@ public final class ClusterCommandWindow {
                 long removedSlot = orderSlots.remove(id);
                 if (removedSlot != 0 && removedSlot != physical + 1L) orderSlots.put(id, removedSlot);
                 entry.orders[k] = 0;
+            }
+            if (entry.routePresent && entry.routeUserId > 0) {
+                long removedUserSlot = userSlots.remove(entry.routeUserId);
+                if (removedUserSlot != 0 && removedUserSlot != physical + 1L) {
+                    userSlots.put(entry.routeUserId, removedUserSlot);
+                }
             }
             if (entry.sequence != 0) {
                 removedLastMatching |= physical == lastMatchingPhysical;

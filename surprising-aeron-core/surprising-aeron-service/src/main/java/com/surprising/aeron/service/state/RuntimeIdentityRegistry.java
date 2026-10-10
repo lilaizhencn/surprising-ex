@@ -61,17 +61,27 @@ public final class RuntimeIdentityRegistry {
         return clientRuntime.onLane(userId, lane -> mutation.get());
     }
 
-    /** Reuse the current control task; never dispatch or wait for another Lane task. */
+    /** Reuse the current control task or fallback to owning Account Lane in single-writer mode. */
     public long prepareClientKeyInCurrentLane(long userId, String name) {
-        if (clientRuntime == null || clientRuntime.laneCommandScope.get() == null)
-            throw new IllegalStateException("client identity requires the current Account Lane");
-        return prepareClientKeyInLane(clientRuntime.laneCommandScope.get(), userId, name);
+        if (clientRuntime == null)
+            throw new IllegalStateException("client identity requires a runtime");
+        AccountLaneState lane = clientRuntime.laneCommandScope.get();
+        if (lane == null) {
+            int laneId = clientRuntime.topology().accountLaneId(userId);
+            lane = clientRuntime.accountLanes[laneId];
+        }
+        return prepareClientKeyInLane(lane, userId, name);
     }
 
     public void rollbackClientKeyInCurrentLane(long userId, String name, long key) {
-        if (clientRuntime == null || clientRuntime.laneCommandScope.get() == null)
-            throw new IllegalStateException("client identity requires the current Account Lane");
-        rollbackClientKeyInLane(clientRuntime.laneCommandScope.get(), userId, name, key);
+        if (clientRuntime == null)
+            throw new IllegalStateException("client identity requires a runtime");
+        AccountLaneState lane = clientRuntime.laneCommandScope.get();
+        if (lane == null) {
+            int laneId = clientRuntime.topology().accountLaneId(userId);
+            lane = clientRuntime.accountLanes[laneId];
+        }
+        rollbackClientKeyInLane(lane, userId, name, key);
     }
     /** Lane 创建、回滚和回收；Owner 仅在撮合前校验/查询边界读取不可变 identity。
      * 并发容器用于这些必要读者；引用计数仅由账户 Lane 修改。Fact 不再反查此表。 */

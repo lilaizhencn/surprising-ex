@@ -137,13 +137,17 @@ final class PendingReservationTracker {
         owner.accountRollback.captureBalanceBefore(userId, reservation.assetId());
         lane.markPendingReservation(orderId, coreSequence);
         owner.accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
+        if (!pendingReservationUsers.containsKey(orderId)) {
+            indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
+        }
     }
 
     void collectControlReservation(long userId, long orderId, long coreSequence) {
         owner.assertOwner();
-        if (owner.laneCommandScope.get() != null || pendingReservationUsers.containsKey(orderId))
-            throw new IllegalStateException("control reservation must be collected once by Owner");
-        ReservationRuntime reservation = owner.publishedReservations.get(orderId);
+        if (pendingReservationUsers.containsKey(orderId)) {
+            return;
+        }
+        ReservationRuntime reservation = owner.reservation(orderId);
         if (coreSequence <= 0 || reservation == null || reservation.userId() != userId)
             throw new IllegalStateException("control reservation has not been published");
         indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
@@ -367,7 +371,8 @@ final class PendingReservationTracker {
                     owner.onLane(currentLaneId, AccountLaneState::pendingReservationCount));
         }
         if (lanePendingReservations != totalPendingReservations) {
-            throw new IllegalStateException("pending reservation counters differ from account lanes");
+            throw new IllegalStateException("pending reservation counters differ from account lanes, lane="
+                    + lanePendingReservations + ", total=" + totalPendingReservations);
         }
     }
 

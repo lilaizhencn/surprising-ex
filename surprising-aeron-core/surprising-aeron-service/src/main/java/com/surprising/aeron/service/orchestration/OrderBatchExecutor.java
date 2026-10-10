@@ -131,6 +131,7 @@ final class OrderBatchExecutor {
                 : !pending.clusterIndependent && owner.pendingMatching.firstSequence() == sequence
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
+        owner.runtimeState.releaseOwnerLaneAccess();
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
                 owner.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
@@ -147,6 +148,7 @@ final class OrderBatchExecutor {
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
             dispatchPipelinedPlaceBatchAdmission(pending, batch);
+            owner.runtimeState.releaseOwnerLaneAccess();
             owner.suspendMatchingCommitContext(pending);
             return null;
         }

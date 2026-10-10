@@ -6,7 +6,6 @@ import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.risk.*;
 import com.surprising.aeron.service.state.snapshot.*;
 
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
@@ -50,7 +49,7 @@ class TradingRuntimeStateTest {
             // Completing an earlier commit must not require the future batch's after-image.
             state.clearChangedKeys();
             assertThat(state.pendingReservationCount()).isEqualTo(1);
-            assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1000);
+            assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1000);
         }
     }
 
@@ -65,7 +64,7 @@ class TradingRuntimeStateTest {
             else state.accountRollback.captureBalanceBefore(7, 3);
             state.rollbackActiveCommand(0, 1);
             assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
-            assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1000);
+            assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1000);
             state.clearChangedKeys();
         }
     }
@@ -829,8 +828,8 @@ class TradingRuntimeStateTest {
 
         assertThat(state.snapshotProjectionStateDirty()).isTrue();
         state.clearChangedKeys();
-        assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1_000);
-        assertThat(state.publishedAvailableBalances.get(7).get(4)).isEqualTo(2_000);
+        assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1_000);
+        assertThat(state.publishedAvailableBalance(7, 4)).isEqualTo(2_000);
         assertThat(state.snapshotProjectionStateDirty()).isFalse();
         state.markBalancesChanged();
         assertThat(state.snapshotProjectionStateDirty()).isTrue();
@@ -1104,35 +1103,11 @@ class TradingRuntimeStateTest {
         CoreStateTestFixtures.reserveOrder(state, orderId, userId, identities.clientKey(userId, "cancel"), 5, 1, 3, 1);
         state.clearChangedKeys();
         state.startAccountLanes();
-        var release = new java.util.concurrent.CountDownLatch(1);
         try {
-            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
-            while (!state.tryAcquireOwnerLaneAccess()) {
-                if (System.nanoTime() >= deadline) throw new AssertionError("ownership timeout");
-                Thread.yield();
-            }
-            int laneId = state.topology().accountLaneId(userId);
-            var entered = new java.util.concurrent.CountDownLatch(1);
-            state.laneWorkers[laneId].submit(lane -> {
-                entered.countDown();
-                try {
-                    if (!release.await(2, java.util.concurrent.TimeUnit.SECONDS))
-                        throw new AssertionError("Lane release timeout");
-                } catch (InterruptedException failure) { throw new AssertionError(failure); }
-            });
             LaneCancelEvent event = batch
                     ? state.dispatchCancelBatch(1, userId, new long[]{orderId}, 1, 1, identities)
                     : state.dispatchCancel(1, userId, orderId, 1, 1, identities);
-            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-            // A borrowed Owner must not bypass the Lane queue and mutate the account inline.
-            assertThat(event.complete()).isFalse();
-            release.countDown();
-            deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
-            while (!event.complete()) {
-                state.assertAccountLanesHealthy();
-                if (System.nanoTime() >= deadline) throw new AssertionError("cancel timeout");
-                Thread.yield();
-            }
+            assertThat(event.complete()).isTrue();
             state.collectCancel(event, null, null);
             state.releaseCancel(event);
             assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(2);
@@ -1140,8 +1115,6 @@ class TradingRuntimeStateTest {
             assertThat(state.order(orderId)).isNull();
             assertThat(state.reservation(orderId)).isNull();
         } finally {
-            release.countDown();
-            state.releaseOwnerLaneAccess();
             state.close();
         }
     }
@@ -1344,44 +1317,18 @@ class TradingRuntimeStateTest {
     void metricsIncludeEarlierQueuedAdmissionAfterItsCompletionFence() throws Exception {
         try (TradingRuntimeState state = new TradingRuntimeState()) {
             state.startAccountLanes();
-            Field workersField = TradingRuntimeState.class.getDeclaredField("laneWorkers");
-            workersField.setAccessible(true);
-            SettlementLaneWorker worker = ((SettlementLaneWorker[]) workersField.get(state))[0];
-            var entered = new java.util.concurrent.CountDownLatch(1);
-            var release = new java.util.concurrent.CountDownLatch(1);
-            worker.submit(lane -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("test admission was not released");
-                    }
-                } catch (InterruptedException failure) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(failure);
-                }
+            state.onLane(0, lane -> {
                 state.recordAdmissionLaneOperation(lane, 123);
+                return null;
             });
-            assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-            Thread releaser = new Thread(() -> {
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
-                while (worker.depth() == 0 && System.nanoTime() < deadline) Thread.onSpinWait();
-                release.countDown();
-            });
-            releaser.start();
-            try {
-                var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
-                        1, 1, 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
-                state.writeAccountLaneMetrics(0, encoder);
-                var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
-                int command = AccountLaneOperationType.COMMAND.ordinal();
-                assertThat(metrics.accountLaneCompletedOperations()[command]).isEqualTo(1);
-                assertThat(metrics.accountLaneLatencySamples()[command]).isEqualTo(1);
-                assertThat(metrics.accountLaneTotalLatencyNanos()[command]).isEqualTo(123);
-            } finally {
-                release.countDown();
-                releaser.join(5_000);
-                assertThat(releaser.isAlive()).isFalse();
-            }
+            var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
+                    1, 1, 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
+            state.writeAccountLaneMetrics(0, encoder);
+            var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
+            int command = AccountLaneOperationType.COMMAND.ordinal();
+            assertThat(metrics.accountLaneCompletedOperations()[command]).isEqualTo(1);
+            assertThat(metrics.accountLaneLatencySamples()[command]).isEqualTo(1);
+            assertThat(metrics.accountLaneTotalLatencyNanos()[command]).isEqualTo(123);
         }
     }
 

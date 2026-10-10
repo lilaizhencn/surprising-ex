@@ -20,21 +20,32 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Before-images for owner-owned and account Lane cold state, retained until commit or rollback. */
 final class RuntimeGlobalRollback {
+    private static final Object NULL_VALUE = new Object();
+
+    @SuppressWarnings("unchecked")
+    private static <T> T unwrap(Object value) {
+        return value == NULL_VALUE ? null : (T) value;
+    }
+
+    private static Object wrap(Object value) {
+        return value == null ? NULL_VALUE : value;
+    }
+
     private final TradingRuntimeState state;
 
-    private ConcurrentHashMap<Long, Before<LiquidationRuntime>> liquidations = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, Before<RiskSnapshotRuntime>> riskSnapshots = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<CoreLeverageKey, Before<Long>> leverages = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, Before<CoreAlgoOrderState>> algoOrders = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, Before<CoreTriggerOrderState>> triggerOrders = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<CoreCancelAllAfterKey, Before<CoreCancelAllAfterState>> timers = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Integer, Before<MarkPriceRuntime>> markPrices = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Integer, Before<RiskScanRuntime>> riskScans = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> liquidations = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> riskSnapshots = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<CoreLeverageKey, Object> leverages = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> algoOrders = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> triggerOrders = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<CoreCancelAllAfterKey, Object> timers = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Integer, Object> markPrices = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Integer, Object> riskScans = new ConcurrentHashMap<>();
     private final HashSet<String> registeredInstruments = new HashSet<>();
     private ConcurrentHashMap<String, CoreInstrumentMaintenance> instrumentMaintenance = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, CoreInstrument.Configuration> instrumentConfigurations = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, Before<TransferRuntime>> pendingTransfers = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, Before<CoreFeePolicyState>> feePolicies = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> pendingTransfers = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, Object> feePolicies = new ConcurrentHashMap<>();
     private long nextLiquidationIdBefore;
     private boolean nextLiquidationIdChanged;
     private long marketRevisionBefore;
@@ -48,42 +59,60 @@ final class RuntimeGlobalRollback {
 
     void captureLiquidation(long liquidationId) {
         state.rejectUnsupportedOrderBatchMutation("liquidation state");
-        liquidations.computeIfAbsent(liquidationId, id -> new Before<>(state.liquidation(id)));
+        if (!liquidations.containsKey(liquidationId)) {
+            liquidations.putIfAbsent(liquidationId, wrap(state.liquidation(liquidationId)));
+        }
     }
 
     void captureRiskSnapshot(long positionKey) {
         state.rejectUnsupportedOrderBatchMutation("risk snapshot state");
-        riskSnapshots.computeIfAbsent(positionKey, key -> new Before<>(state.riskSnapshot(key)));
+        if (!riskSnapshots.containsKey(positionKey)) {
+            riskSnapshots.putIfAbsent(positionKey, wrap(state.riskSnapshot(positionKey)));
+        }
     }
 
     void captureLeverage(CoreLeverageKey key) {
-        leverages.computeIfAbsent(key, value -> new Before<>(state.leverage(value)));
+        if (!leverages.containsKey(key)) {
+            leverages.putIfAbsent(key, wrap(state.leverage(key)));
+        }
     }
 
     void captureAlgoOrder(long algoOrderId) {
-        algoOrders.computeIfAbsent(algoOrderId, id -> new Before<>(state.algoOrder(id)));
+        if (!algoOrders.containsKey(algoOrderId)) {
+            algoOrders.putIfAbsent(algoOrderId, wrap(state.algoOrder(algoOrderId)));
+        }
     }
 
     void captureTriggerOrder(long triggerOrderId, CoreTriggerOrderState current) {
-        triggerOrders.computeIfAbsent(triggerOrderId, id -> new Before<>(current));
+        if (!triggerOrders.containsKey(triggerOrderId)) {
+            triggerOrders.putIfAbsent(triggerOrderId, wrap(current));
+        }
     }
 
     void captureTriggerOrder(long triggerOrderId) {
-        triggerOrders.computeIfAbsent(triggerOrderId, id -> new Before<>(state.triggerOrder(id)));
+        if (!triggerOrders.containsKey(triggerOrderId)) {
+            triggerOrders.putIfAbsent(triggerOrderId, wrap(state.triggerOrder(triggerOrderId)));
+        }
     }
 
     void captureTimer(CoreCancelAllAfterKey key) {
-        timers.computeIfAbsent(key, value -> new Before<>(state.cancelAllAfterTimers.get(value)));
+        if (!timers.containsKey(key)) {
+            timers.putIfAbsent(key, wrap(state.cancelAllAfterTimers.get(key)));
+        }
     }
 
     void captureMarkPrice(int symbolId) {
         state.rejectUnsupportedOrderBatchMutation("mark-price state");
-        markPrices.computeIfAbsent(symbolId, id -> new Before<>(state.markPrices.get(id)));
+        if (!markPrices.containsKey(symbolId)) {
+            markPrices.putIfAbsent(symbolId, wrap(state.markPrices.get(symbolId)));
+        }
     }
 
     void captureRiskScan(int symbolId) {
         state.rejectUnsupportedOrderBatchMutation("risk-scan state");
-        riskScans.computeIfAbsent(symbolId, id -> new Before<>(state.riskScans.get(id)));
+        if (!riskScans.containsKey(symbolId)) {
+            riskScans.putIfAbsent(symbolId, wrap(state.riskScans.get(symbolId)));
+        }
     }
 
     void captureRegisteredInstrument(String instrumentId) {
@@ -91,23 +120,35 @@ final class RuntimeGlobalRollback {
     }
 
     void captureInstrumentMaintenance(CoreInstrument instrument) {
-        instrumentMaintenance.computeIfAbsent(instrument.instrumentId(), instrumentId -> instrument.maintenance());
+        if (!instrumentMaintenance.containsKey(instrument.instrumentId())) {
+            var maint = instrument.maintenance();
+            if (maint != null) instrumentMaintenance.putIfAbsent(instrument.instrumentId(), maint);
+        }
     }
 
     void captureInstrumentConfiguration(CoreInstrument instrument) {
-        instrumentConfigurations.computeIfAbsent(instrument.instrumentId(), instrumentId -> instrument.configuration());
+        if (!instrumentConfigurations.containsKey(instrument.instrumentId())) {
+            var config = instrument.configuration();
+            if (config != null) instrumentConfigurations.putIfAbsent(instrument.instrumentId(), config);
+        }
     }
 
     void capturePendingTransfer(long transferId, TransferRuntime current) {
-        pendingTransfers.computeIfAbsent(transferId, id -> new Before<>(current));
+        if (!pendingTransfers.containsKey(transferId)) {
+            pendingTransfers.putIfAbsent(transferId, wrap(current));
+        }
     }
 
     void capturePendingTransfer(long transferId) {
-        pendingTransfers.computeIfAbsent(transferId, id -> new Before<>(state.pendingTransfers.get(id)));
+        if (!pendingTransfers.containsKey(transferId)) {
+            pendingTransfers.putIfAbsent(transferId, wrap(state.pendingTransfers.get(transferId)));
+        }
     }
 
     void captureFeePolicy(long policyId, CoreFeePolicyState current) {
-        feePolicies.computeIfAbsent(policyId, id -> new Before<>(current));
+        if (!feePolicies.containsKey(policyId)) {
+            feePolicies.putIfAbsent(policyId, wrap(current));
+        }
     }
 
     void captureNextLiquidationId() {
@@ -144,24 +185,25 @@ final class RuntimeGlobalRollback {
     void restoreLane(AccountLaneState lane) {
         lane.assertOwner();
         int laneId = lane.laneId();
-        liquidations.forEach((id, before) -> {
+        liquidations.forEach((id, val) -> {
             LiquidationRuntime current = lane.cold.liquidations.remove(id);
             if (current != null) TradingRuntimeState.removeActiveLiquidation(lane, current);
-            LiquidationRuntime restored = before.value();
+            LiquidationRuntime restored = unwrap(val);
             if (restored != null && state.topology.accountLaneId(restored.userId()) == laneId) {
                 lane.cold.liquidations.put(id, restored);
                 TradingRuntimeState.indexActiveLiquidation(lane, restored);
             }
         });
-        riskSnapshots.forEach((key, before) -> {
+        riskSnapshots.forEach((key, val) -> {
             lane.cold.riskSnapshots.remove(key);
-            RiskSnapshotRuntime restored = before.value();
+            RiskSnapshotRuntime restored = unwrap(val);
             if (restored != null && state.topology.accountLaneId(restored.userId()) == laneId)
                 lane.cold.riskSnapshots.put(key, restored);
         });
-        leverages.forEach((key, before) -> {
+        leverages.forEach((key, val) -> {
             if (state.topology.accountLaneId(key.userId()) != laneId) return;
-            if (before.value() == null) {
+            Long restored = unwrap(val);
+            if (restored == null) {
                 lane.cold.leverages.remove(key);
                 Set<CoreLeverageKey> keys = lane.cold.leverageKeysByUser.get(key.userId());
                 if (keys != null) {
@@ -169,19 +211,19 @@ final class RuntimeGlobalRollback {
                     if (keys.isEmpty()) lane.cold.leverageKeysByUser.remove(key.userId());
                 }
             } else {
-                lane.cold.leverages.put(key, before.value());
+                lane.cold.leverages.put(key, restored);
                 lane.cold.leverageKeysByUser.getIfAbsentPut(key.userId(), HashSet::new).add(key);
             }
         });
-        algoOrders.forEach((id, before) -> {
+        algoOrders.forEach((id, val) -> {
             lane.cold.algoOrders.remove(id);
-            CoreAlgoOrderState restored = before.value();
+            CoreAlgoOrderState restored = unwrap(val);
             if (restored != null && state.topology.accountLaneId(restored.userId()) == laneId)
                 lane.cold.algoOrders.put(id, restored);
         });
-        triggerOrders.forEach((id, before) -> {
+        triggerOrders.forEach((id, val) -> {
             lane.removeTrigger(id);
-            CoreTriggerOrderState restored = before.value();
+            CoreTriggerOrderState restored = unwrap(val);
             if (restored != null && state.topology.accountLaneId(restored.userId()) == laneId)
                 lane.putTrigger(restored);
         });
@@ -190,13 +232,13 @@ final class RuntimeGlobalRollback {
     /** Called only after every Lane has restored its account and cold state. */
     void restoreOwner() {
         state.assertOwner();
-        liquidations.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, before.value()));
-        riskSnapshots.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, id, before.value()));
-        algoOrders.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.publishedAlgoOrders, id, before.value()));
-        triggerOrders.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, before.value()));
-        timers.forEach((key, before) -> TradingRuntimeState.putOrRemove(state.cancelAllAfterTimers, key, before.value()));
-        markPrices.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.markPrices, id, before.value()));
-        riskScans.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.riskScans, id, before.value()));
+        liquidations.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, unwrap(val)));
+        riskSnapshots.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, id, unwrap(val)));
+        algoOrders.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedAlgoOrders, id, unwrap(val)));
+        triggerOrders.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, unwrap(val)));
+        timers.forEach((key, val) -> TradingRuntimeState.putOrRemove(state.cancelAllAfterTimers, key, unwrap(val)));
+        markPrices.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.markPrices, id, unwrap(val)));
+        riskScans.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.riskScans, id, unwrap(val)));
         registeredInstruments.forEach(state.instruments::remove);
         instrumentMaintenance.forEach((instrumentId, maintenance) -> {
             CoreInstrument instrument = state.instruments.get(instrumentId);
@@ -206,8 +248,8 @@ final class RuntimeGlobalRollback {
             CoreInstrument instrument = state.instruments.get(instrumentId);
             if (instrument != null) instrument.restoreConfiguration(configuration);
         });
-        pendingTransfers.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.pendingTransfers, id, before.value()));
-        feePolicies.forEach((id, before) -> TradingRuntimeState.putOrRemove(state.feePolicies, id, before.value()));
+        pendingTransfers.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.pendingTransfers, id, unwrap(val)));
+        feePolicies.forEach((id, val) -> TradingRuntimeState.putOrRemove(state.feePolicies, id, unwrap(val)));
         if (nextLiquidationIdChanged) state.nextLiquidationId = nextLiquidationIdBefore;
         if (marketRevisionChanged) state.marketRevision = marketRevisionBefore;
         if (riskScanControlChanged) state.riskScanControl = riskScanControlBefore;
@@ -232,12 +274,11 @@ final class RuntimeGlobalRollback {
         riskScanControlChanged = false;
     }
 
+    @SuppressWarnings("unchecked")
     static <K, V> ConcurrentHashMap<K, V> clearCaptured(ConcurrentHashMap<K, V> values) {
         if (values.isEmpty()) return values;
         if (values.size() >= TradingRuntimeState.CHANGE_KEY_COMPACTION_THRESHOLD) return new ConcurrentHashMap<>();
         values.clear();
         return values;
     }
-
-    private record Before<T>(T value) {}
 }

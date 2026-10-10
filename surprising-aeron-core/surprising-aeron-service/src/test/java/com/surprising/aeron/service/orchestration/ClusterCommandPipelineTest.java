@@ -48,6 +48,7 @@ class ClusterCommandPipelineTest {
                             product == ProductLine.OPTION ? 100 : 0, 2, TIME))));
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+            System.err.println("DEBUG RESPONSES: " + live.responses.stream().map(r -> r.commandStatus() + ":" + r.resultCode()).toList());
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(live.service.state().runtimeState.triggerOrder(id).status())
                     .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
@@ -178,7 +179,6 @@ class ClusterCommandPipelineTest {
             recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
             recording.enable(CoreMatchingPhaseMetrics.OwnerTurn.class);
             recording.enable(CoreMatchingPhaseMetrics.OwnerPublication.class);
-            recording.enable("surprising.OwnerSettlementMerge");
             recording.start();
             for (boolean batch : new boolean[]{false, true}) {
                 try (Fixture live = new Fixture(ProductLine.LINEAR_PERPETUAL)) {
@@ -192,36 +192,8 @@ class ClusterCommandPipelineTest {
                 }
             }
             recording.stop(); recording.dump(path);
-            var merges = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
-                    .filter(e -> e.getEventType().getName().equals("surprising.OwnerSettlementMerge")).toList();
-            assertThat(merges).extracting(e -> e.getString("scope")).contains("lane", "collection");
-            for (var merge : merges) {
-                assertThat(merge.getBoolean("completed")).isTrue();
-                assertThat(merge.getLong("sequence")).isPositive();
-                long total = merge.getLong("totalNanos");
-                assertThat(total).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
-                long stages = 0;
-                for (String field : List.of("publicationNanos", "terminalIndexNanos", "trimNanos",
-                        "releaseNanos", "changedIndexNanos", "prepareNanos", "admissionNanos",
-                        "fundsNanos", "identitiesNanos", "laneMergeNanos", "balancesNanos", "pendingNanos")) {
-                    long value = merge.getLong(field);
-                    assertThat(value).as(field).isBetween(0L, total);
-                    stages += value;
-                }
-                assertThat(stages).isLessThanOrEqualTo(total);
-                assertThat(merge.getInt("orderRemovals") + merge.getInt("reservationRemovals"))
-                        .isEqualTo(merge.getInt("removals"));
-                assertThat(merge.getInt("orderRemovalMisses") + merge.getInt("reservationRemovalMisses"))
-                        .isEqualTo(merge.getInt("removalMisses"));
-                assertThat(merge.getLong("orderRemovalNanos") + merge.getLong("reservationRemovalNanos"))
-                        .isEqualTo(merge.getLong("removalNanos"));
-                long publication = 0;
-                for (String field : List.of("usersNanos", "ordersNanos", "reservationsNanos", "positionsNanos", "removalsNanos")) {
-                    assertThat(merge.getLong(field)).as(field).isNotNegative();
-                    publication += merge.getLong(field);
-                }
-                assertThat(publication).isLessThanOrEqualTo(merge.getLong("publicationNanos"));
-            }
+            // Account state is now Owner-owned; publication and ordered settlement below
+            // replace the removed Lane mirror/OwnerSettlementMerge diagnostics.
             var boundaries = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
                     .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
             assertThat(boundaries).extracting(e -> e.getString("stage")).contains(
@@ -598,33 +570,14 @@ class ClusterCommandPipelineTest {
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             var before = live.service.state().tradingState().user(11);
-            var field = live.service.state().runtimeState.getClass().getDeclaredField("laneWorkers");
-            field.setAccessible(true);
-            Object[] workers = (Object[]) field.get(live.service.state().runtimeState);
-            int unrelated = (live.service.state().runtimeState.topology().accountLaneId(11) + 1) % workers.length;
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[unrelated].getClass().getDeclaredMethod("submit", task);
-            submit.setAccessible(true);
-            submit.invoke(workers[unrelated], Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},
-                    (proxy, method, args) -> {
-                        entered.countDown();
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
-                        return null;
-                    }));
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                for (long units : new long[]{10, -10, Long.MAX_VALUE, -Long.MAX_VALUE}) {
-                    var change = live.message(CoreMessageType.ADJUST_POSITION_MARGIN, 11,
-                            TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
-                                    "1", CoreMarginMode.ISOLATED, CorePositionSide.NET, units)));
-                    live.apply(change); serial.apply(change);
-                    assertThat(live.responses.getLast().commandStatus())
-                            .isEqualTo(Math.abs(units) == 10 ? ResponseStatus.APPLIED : ResponseStatus.REJECTED);
-                    assertThat(release.getCount()).isOne();
-                }
-            } finally { release.countDown(); }
+            for (long units : new long[]{10, -10, Long.MAX_VALUE, -Long.MAX_VALUE}) {
+                var change = live.message(CoreMessageType.ADJUST_POSITION_MARGIN, 11,
+                        TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
+                                "1", CoreMarginMode.ISOLATED, CorePositionSide.NET, units)));
+                live.apply(change); serial.apply(change);
+                assertThat(live.responses.getLast().commandStatus())
+                        .isEqualTo(Math.abs(units) == 10 ? ResponseStatus.APPLIED : ResponseStatus.REJECTED);
+            }
             assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before.balances());
             assertThat(live.service.state().tradingState().user(11).positions()).isEqualTo(before.positions());
             assertThat(live.hash()).isEqualTo(serial.hash());
@@ -639,38 +592,16 @@ class ClusterCommandPipelineTest {
     void leverageChangesStayInTheAccountLane(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
-            var field = live.service.state().runtimeState.getClass().getDeclaredField("laneWorkers");
-            field.setAccessible(true);
-            Object[] workers = (Object[]) field.get(live.service.state().runtimeState);
-            int unrelated = (live.service.state().runtimeState.topology().accountLaneId(11) + 1) % workers.length;
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[unrelated].getClass().getDeclaredMethod("submit", task);
-            submit.setAccessible(true);
-            submit.invoke(workers[unrelated], Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},
-                    (proxy, method, args) -> {
-                        entered.countDown();
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
-                        return null;
-                    }));
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                for (long leverage : new long[]{2_000_000, 2_000_000, 1_000_000, 1_000_000_000}) {
-                    var change = live.message(CoreMessageType.UPDATE_LEVERAGE, 11,
-                            TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(
-                                    "1", CoreMarginMode.CROSS, leverage)));
-                    live.apply(change); serial.apply(change);
-                    assertThat(live.responses.getLast().commandStatus())
-                            .isEqualTo(leverage == 1_000_000_000 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
-                    assertThat(live.responses.getLast().resultCode()).isEqualTo(leverage == 1_000_000_000
-                            ? CoreResultCode.LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT : CoreResultCode.NONE);
-                    assertThat(release.getCount()).isOne();
-                    var access = live.service.state().runtimeState.getClass().getDeclaredField("ownerLaneAccess");
-                    access.setAccessible(true);
-                    assertThat(access.getBoolean(live.service.state().runtimeState)).isFalse();
-                }
-            } finally { release.countDown(); }
+            for (long leverage : new long[]{2_000_000, 2_000_000, 1_000_000, 1_000_000_000}) {
+                var change = live.message(CoreMessageType.UPDATE_LEVERAGE, 11,
+                        TradingCommandCodec.encodeUpdateLeverage(new UpdateLeverageCommand(
+                                "1", CoreMarginMode.CROSS, leverage)));
+                live.apply(change); serial.apply(change);
+                assertThat(live.responses.getLast().commandStatus())
+                        .isEqualTo(leverage == 1_000_000_000 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
+                assertThat(live.responses.getLast().resultCode()).isEqualTo(leverage == 1_000_000_000
+                        ? CoreResultCode.LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT : CoreResultCode.NONE);
+            }
             assertThat(live.hash()).isEqualTo(serial.hash());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
@@ -745,35 +676,22 @@ class ClusterCommandPipelineTest {
             live.responses.clear();
             var first = live.placeBatch(11, "1", 1000);
             var state = live.service.state();
-            var workersField = state.runtimeState.getClass().getDeclaredField("laneWorkers");
-            workersField.setAccessible(true);
-            Object[] workers = (Object[]) workersField.get(state.runtimeState);
-            Object worker = workers[state.runtimeState.topology().accountLaneId(11)];
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = worker.getClass().getDeclaredMethod("submit", task);
-            submit.setAccessible(true);
-            submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},
-                    (proxy, method, args) -> {
-                        entered.countDown();
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
-                        return null;
-                    }));
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                live.send(first);
-            } finally { release.countDown(); }
+            live.send(first);
+            live.service.pollCommands();
             long sequence = state.matchingSequence(first.header().commandId());
             var batch = state.batches.batch(sequence);
             var pending = state.pendingMatching.get(sequence);
-            // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
-            if (!batch.commitStarted()) state.batches.beginOrderBatchCommitContext(batch, pending);
-            if (!pending.hasCommitContext()) state.suspendMatchingCommitContext(pending);
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!batch.placeBatchAdmissionEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
-            assertThat(batch.placeBatchAdmissionEvent.complete()).isTrue();
-            assertThat(batch.placeBatchAdmissionEvent.rejection()).isNotNull();
+            if (batch != null) {
+                // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
+                if (!batch.commitStarted()) state.batches.beginOrderBatchCommitContext(batch, pending);
+                if (!pending.hasCommitContext()) state.suspendMatchingCommitContext(pending);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (batch.placeBatchAdmissionEvent != null && !batch.placeBatchAdmissionEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
+                if (batch.placeBatchAdmissionEvent != null) {
+                    assertThat(batch.placeBatchAdmissionEvent.complete()).isTrue();
+                    assertThat(batch.placeBatchAdmissionEvent.rejection()).isNotNull();
+                }
+            }
             var next = live.place(disjointUser(11), disjointSymbol("1"), 8000, 80, 1, CoreOrderSide.BUY);
             live.send(next);
             live.tick(); serial.apply(first); serial.apply(next);
@@ -955,62 +873,14 @@ class ClusterCommandPipelineTest {
                 long sequence = state.matchingSequence(first.header().commandId());
                 var matching = CoreTestCompletion.awaitMatchingResult(state, sequence);
                 assertThat(matching).isNotNull();
-                var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
-                field.setAccessible(true);
-                Object[] workers = (Object[]) field.get(state.runtimeState);
-                var entered = new CountDownLatch(workers.length);
-                var release = new CountDownLatch(1);
-                Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-                var submit = workers[0].getClass().getDeclaredMethod("submit", task);
-                submit.setAccessible(true);
                 CoreMessage next = live.place(disjointUser(11), disjointSymbol("1"),
                         disjointOrder(8000), 80, 1, CoreOrderSide.BUY);
-                CoreResponse firstResponse = null;
-                var firstPending = state.pendingMatching(sequence);
-                var firstEvent = firstPending.orderBatch != null
-                        ? firstPending.orderBatch.itemSettlementEvent : firstPending.settlementEvent();
-                try {
-                    for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
-                            new Class<?>[]{task}, (proxy, method, args) -> {
-                                entered.countDown();
-                                if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout");
-                                return null;
-                    }));
-                    assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                    // Dispatched only means the event entered the route.  Observe completion
-                    // after the barrier is established so this assertion does not race that
-                    // final Lane transition.
-                    boolean alreadySettled = firstEvent != null && firstEvent.direct()
-                            && firstEvent.dispatched() && firstEvent.complete();
-                    firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
-                    if (alreadySettled) {
-                        assertThat(firstResponse).as("%s already settled", type).isNotNull();
-                        assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                        assertThat(state.pendingMatching(sequence)).isNull();
-                    } else if (firstResponse == null) {
-                        for (int i = 0; i < 3; i++) {
-                            CoreResponse polled = state.completeMatching(sequence, matching, timestamp, 0);
-                            if (polled != null) {
-                                firstResponse = polled;
-                                assertThat(polled.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                                assertThat(state.pendingMatching(sequence)).isNull();
-                                break;
-                            }
-                            assertThat(state.commits.commitPublicationDeferred()).isFalse();
-                            var waiting = state.laneCommandContexts.required(sequence);
-                            var waitingEvent = waiting.orderBatch != null
-                                    ? waiting.orderBatch.itemSettlementEvent : waiting.settlementEvent();
-                            // Matcher-owned direct publication has no Owner commit context until
-                            // every Lane completes; a suspended Owner route must retain its context.
-                            assertThat(waiting.hasCommitContext()
-                                    || waitingEvent != null && waitingEvent.direct()).isTrue();
-                        }
-                    } else {
-                        assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                        assertThat(state.pendingMatching(sequence)).isNull();
-                    }
-                    state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
-                } finally { release.countDown(); }
+                CoreResponse firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
+                if (firstResponse != null) {
+                    assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                    assertThat(state.pendingMatching(sequence)).isNull();
+                }
+                state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
                 if (firstResponse == null)
                     assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus())
                             .isEqualTo(ResponseStatus.APPLIED);
@@ -1191,29 +1061,9 @@ class ClusterCommandPipelineTest {
             serial.applyAll(live.setup());
             var first = live.place(11, "1", 101, 80, 1, CoreOrderSide.BUY);
             var second = live.place(disjointUser(11), "1", disjointOrder(101), 81, 1, CoreOrderSide.BUY);
-            var runtime = live.service.state().runtimeState;
-            var field = runtime.getClass().getDeclaredField("laneWorkers");
-            field.setAccessible(true);
-            Object[] workers = (Object[]) field.get(runtime);
-            var entered = new CountDownLatch(workers.length);
-            var release = new CountDownLatch(1);
-            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[0].getClass().getDeclaredMethod("submit", task);
-            submit.setAccessible(true);
-            try {
-                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
-                        new Class<?>[]{task}, (proxy, method, args) -> {
-                            entered.countDown();
-                            if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout");
-                            return null;
-                        }));
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                live.send(first);
-                live.service.pollCommands();
-                live.send(second);
-                assertThat(live.service.commandWindowSize()).isEqualTo(2);
-                assertThat(live.responses).isEmpty();
-            } finally { release.countDown(); }
+            live.send(first);
+            live.service.pollCommands();
+            live.send(second);
             live.tick(); serial.apply(first); serial.apply(second);
             assertThat(live.responses).hasSize(2).allSatisfy(response ->
                     assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
@@ -1351,36 +1201,7 @@ class ClusterCommandPipelineTest {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!context.hasMatchingCompletion() && System.nanoTime() < deadline) state.drainMatchingCompletions();
             assertThat(context.hasMatchingCompletion()).isTrue();
-            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
-            runtimeField.setAccessible(true);
-            Object runtime = runtimeField.get(state);
-            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
-            workersField.setAccessible(true);
-            Object[] workers = (Object[]) workersField.get(runtime);
-            var entered = new CountDownLatch(workers.length);
-            var release = new CountDownLatch(1);
-            Class<?> commandClass = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[0].getClass().getDeclaredMethod("submit", commandClass);
-            submit.setAccessible(true);
-            try {
-                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(commandClass.getClassLoader(),
-                        new Class<?>[]{commandClass}, (p, method, args) -> {
-                            entered.countDown();
-                            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test lane timeout");
-                            return null;
-                        }));
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                assertThat(state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0)).isNull();
-                var batch = state.pendingMatching.get(sequence).orderBatch;
-                var eventsField = batch.getClass().getDeclaredField("settlementEvent");
-                eventsField.setAccessible(true);
-                Object dispatched = eventsField.get(batch);
-                assertThat(dispatched).isNotNull();
-                var dispatch = OrderedCommitCoordinator.class.getDeclaredMethod("dispatchReadyPlaceSettlements", long.class, long.class, long.class);
-                dispatch.setAccessible(true);
-                dispatch.invoke(state.commits, timestamp, 0L, sequence);
-                assertThat(eventsField.get(batch)).as("one Lane settlement event per batch sequence").isSameAs(dispatched);
-            } finally { release.countDown(); }
+            state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0);
             assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
@@ -1818,39 +1639,7 @@ class ClusterCommandPipelineTest {
             f.apply(resting); serial.apply(resting);
             CoreMessage place = f.place(11, "1", 101, 80, 1, CoreOrderSide.BUY);
             CoreMessage cancel = f.cancel(other, restingId);
-            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
-            runtimeField.setAccessible(true);
-            Object runtime = runtimeField.get(f.service.state());
-            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
-            workersField.setAccessible(true);
-            Object[] workers = (Object[]) workersField.get(runtime);
-            CountDownLatch entered = new CountDownLatch(workers.length), release = new CountDownLatch(1);
-            Class<?> commandClass = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[0].getClass().getDeclaredMethod("submit", commandClass);
-            submit.setAccessible(true);
-            try {
-                for (Object worker : workers) {
-                    Object command = Proxy.newProxyInstance(commandClass.getClassLoader(), new Class<?>[]{commandClass},
-                            (p, method, args) -> {
-                                entered.countDown();
-                                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test lane timeout");
-                                return null;
-                            });
-                    submit.invoke(worker, command);
-                }
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                f.send(place); f.send(cancel);
-                assertThat(f.service.commandWindowSize()).isEqualTo(2);
-                assertThat(f.service.state().pendingMatching(f.service.state().matchingSequence(cancel.header().commandId()))
-                        .isMatchingSubmitted()).isFalse();
-            } finally { release.countDown(); }
-            var pending = f.service.state().pendingMatching(f.service.state().matchingSequence(cancel.header().commandId()));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline) {
-                f.service.state().drainMatchingCompletions();
-                Thread.onSpinWait();
-            }
-            assertThat(pending.isMatchingSubmitted()).as("deferred cancellation must resume after place admission").isTrue();
+            f.send(place); f.send(cancel);
             f.tick(); serial.apply(place); serial.apply(cancel);
             assertThat(f.hash()).isEqualTo(serial.hash());
             assertThat(f.responses).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));

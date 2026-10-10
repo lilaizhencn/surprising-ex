@@ -118,8 +118,10 @@ final class MatcherSettlementChanges {
             }
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
             if (order.status() == CoreOrderStatus.REJECTED) return;
-            lane.removeOrder(orderId);
-            changes.removeOrderRoute(orderId);
+            OrderRuntime removed = lane.removeOrder(orderId);
+            if (removed != null) {
+                changes.removeOrderRoute(orderId);
+            }
             lane.clientKeysByOrderId.forEach(orderId,
                     clientKey -> identities.releaseClientKeyInLane(lane, order.userId(), clientKey));
             TradingRuntimeState.removeClientOrdersForOrder(lane, order.userId(), orderId);

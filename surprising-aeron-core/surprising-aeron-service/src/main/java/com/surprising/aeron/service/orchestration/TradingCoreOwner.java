@@ -244,9 +244,6 @@ public final class TradingCoreOwner {
 
     /** 在命令开始改变业务状态前建立实时事件捕获边界。 */
     private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
-        log.info("core.start traceId={} commandId={} type={} productLine={} logPosition={}",
-                header.traceId().isEmpty() ? header.commandId() : header.traceId(), header.commandId(),
-                header.messageType(), productLine, position);
         realtimeBoundary.beginCapture(state, position, timestamp,
                 header.traceId().isEmpty() ? header.commandId().toString() : header.traceId());
     }
@@ -301,7 +298,6 @@ public final class TradingCoreOwner {
         long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (window.size() == 1) state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, last.position);
-        traceCommitted(last.request, last.response, last.position);
         CoreMatchingPhaseMetrics.recordBoundary("ownerRealtimePublication", timingHeader, publicationStart);
         long retirementStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
@@ -339,7 +335,6 @@ public final class TradingCoreOwner {
         }
         state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, activeControl.position);
-        traceCommitted(request, commandPipeline.controlResponse(), activeControl.position);
         if (activeControl.session != null) {
             offerResponse(activeControl.session, request, commandPipeline.controlResponse());
         }
@@ -348,14 +343,6 @@ public final class TradingCoreOwner {
         commandPipeline.pendingIngress().remove();
         commandPipeline.recordControlProgress();
         return true;
-    }
-
-    private void traceCommitted(CoreMessage request, CoreResponse response, long position) {
-        var header = request.header();
-        log.info("core.end traceId={} commandId={} type={} productLine={} logPosition={} coreSequence={} status={} result={}",
-                header.traceId().isEmpty() ? header.commandId() : header.traceId(), header.commandId(),
-                header.messageType(), productLine, position, state.committedCoreSequence(),
-                response.commandStatus(), response.resultCode());
     }
 
     /** 检查异步命令是否被中断或超过允许的等待时间。 */

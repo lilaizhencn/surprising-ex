@@ -2,11 +2,10 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import java.util.UUID;
 
 /** One-way admission for one user's PLACE batch, owned by exactly one Account Lane. */
-public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Command {
+public final class PlaceBatchAdmissionEvent {
     private long coreSequence;
     private long timestamp, position;
     private long userId;
@@ -80,7 +79,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         return this;
     }
 
-    @Override
     public void execute(AccountLaneState lane) {
         long startedNanos = System.nanoTime();
         if (lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId)) {

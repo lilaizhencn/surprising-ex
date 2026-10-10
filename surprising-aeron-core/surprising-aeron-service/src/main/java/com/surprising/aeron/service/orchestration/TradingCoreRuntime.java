@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands;
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 
@@ -115,8 +116,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final BalanceTransferCommands balances = new BalanceTransferCommands(this);
 
     /** 币对配置与维护状态命令；六产品线按所属运行时隔离。 */
-    final com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands instruments =
-            new com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands(this);
+    final InstrumentConfigurationCommands instruments =
+            new InstrumentConfigurationCommands(this);
 
     /** 永续合约资金费命令；沿用 U 本位和币本位各自结算规则。 */
     final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
@@ -1241,7 +1242,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     CoreMatchingOrder matchingOrder(long orderId) {
-        com.surprising.aeron.service.state.OrderRuntime order = runtimeState.order(orderId);
+        com.surprising.aeron.service.state.OrderRuntime order = runtimeOrder(orderId);
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "runtime order is missing");
         return new CoreMatchingOrder(order.orderId(), identities.instrumentId(order.symbolId()),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
@@ -1249,7 +1250,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     OrderRuntime runtimeOrder(long orderId) {
-        return runtimeState.order(orderId);
+        OrderRuntime order = runtimeState.order(orderId);
+        return order == null ? runtimeState.provisionalOrder(orderId) : order;
     }
 
     String runtimeOrderSymbol(OrderRuntime order) {

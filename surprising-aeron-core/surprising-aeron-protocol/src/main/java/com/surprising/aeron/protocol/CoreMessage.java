@@ -5,7 +5,7 @@ import java.util.Objects;
 
 public final class CoreMessage {
 
-    private static final byte[] EMPTY_PAYLOAD = new byte[0];
+    public static final byte[] EMPTY_PAYLOAD = new byte[0];
 
     private final CoreMessageHeader header;
     private final byte[] payload;

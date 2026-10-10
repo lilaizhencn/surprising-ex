@@ -497,10 +497,13 @@ final class LinearPerpetualSaturationWorkload {
                 long closingFunds = LinearPerpetualMixedWorkload.totalFunds(harness.state().tradingState());
                 int closingActiveOrders = activeOrderCount(harness.state());
                 int closingClientIdentities = harness.state().runtimeClientIdentityCount();
-                int parallelSettlementLanes = 0;
+                int settledLogicalLanes = 0;
                 CoreLaneMetrics laneMetrics = harness.state().laneMetrics();
-                for (int highWaterMark : laneMetrics.accountLaneQueueHighWaterMarks()) {
-                    if (highWaterMark > 0) parallelSettlementLanes++;
+                long[] completedByLane = laneMetrics.accountLaneCompletedOperations();
+                for (int lane = 0; lane < laneMetrics.accountLaneCount(); lane++) {
+                    // Account partitions still route settlement, but have no worker queues.
+                    if (completedByLane[lane * CoreLaneMetrics.OPERATION_TYPE_COUNT + 1] > 0)
+                        settledLogicalLanes++;
                 }
                 long rejectedLaneSubmissions = 0;
                 for (long rejected : laneMetrics.accountLaneRejectedSubmissions()) {
@@ -526,7 +529,7 @@ final class LinearPerpetualSaturationWorkload {
                         || laneOperations != Math.addExact(laneOperationsByType[0], laneOperationsByType[1])
                         || laneOperations <= Math.multiplyExact(operationsPerRun, 2L)
                         || laneOperations > Math.multiplyExact(operationsPerRun, 3L)
-                        || parallelSettlementLanes < 2
+                        || settledLogicalLanes < 2
                         || maxBacklog() > maxInFlight || maxBacklog() < 2
                         || rejectedLaneSubmissions != 0
                         || queuedLaneOperations != 0
@@ -551,7 +554,7 @@ final class LinearPerpetualSaturationWorkload {
                             + ", laneSettlements=" + laneOperationsByType[1]
                             + ", rejectedLaneSubmissions=" + rejectedLaneSubmissions
                             + ", queuedLaneOperations=" + queuedLaneOperations
-                            + ", parallelSettlementLanes=" + parallelSettlementLanes
+                            + ", settledLogicalLanes=" + settledLogicalLanes
                             + ", settlementInFlightHighWaterMark=" + settlementInFlightHighWaterMark
                             + ", backlogSamples=" + backlogSamples
                             + ", usersInFlight=" + usersInFlight.size()

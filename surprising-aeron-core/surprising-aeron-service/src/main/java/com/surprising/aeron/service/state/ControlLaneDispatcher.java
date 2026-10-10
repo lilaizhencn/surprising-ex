@@ -2,108 +2,75 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.command.AccountLaneOperationType;
 
-/** owner 到永久 Account Lane 的控制任务派发器；任务槽复用，完成通知不携带共享状态写入。 */
+/** owner 到 Account Lane 的控制任务派发器；单写者模型下同步内联派发与收集。 */
 final class ControlLaneDispatcher {
-    /** 唯一派发和收集方；账户工作仍由所属 Lane 单写。 */
     private final TradingRuntimeState owner;
+    private Object[] results;
+    private long completedLaneMask;
+    private long pendingRevisionDelta;
+    private boolean active;
+    private AccountLaneOperationType operationType;
 
-    ControlLaneDispatcher(TradingRuntimeState owner) { this.owner = owner; }
+    ControlLaneDispatcher(TradingRuntimeState owner) {
+        this.owner = owner;
+    }
 
-    boolean pending() { return controlLaneWorkPending; }
+    boolean pending() { return false; }
+
+    boolean active() { return active; }
+
+    void recordRevisionDelta() {
+        pendingRevisionDelta = Math.incrementExact(pendingRevisionDelta);
+    }
 
     String diagnostics() {
-        long unfinished = 0;
-        for (int id = 0; id < owner.accountLanes.length; id++) {
-            if ((pendingControlLaneMask & (1L << id)) != 0
-                    && (owner.laneMutationTasks[id] == null || !owner.laneMutationTasks[id].completed)) {
-                unfinished |= 1L << id;
-            }
-        }
-        return "pending=" + controlLaneWorkPending + ",mask=" + pendingControlLaneMask
-                + ",unfinished=" + unfinished + ",operation=" + operationType;
+        return "pending=false,completed=" + Long.toHexString(completedLaneMask) + ",operation=" + operationType;
     }
+
     boolean targetsLane(int laneId) {
-        return controlLaneWorkPending && (pendingControlLaneMask & (1L << laneId)) != 0;
+        return false;
     }
-
-    /** 当前控制阶段唯一在途的 Lane 任务，复用每条 Lane 的任务及结果槽。 */
-    private long pendingControlLaneMask;
-    /** 当前是否正在收集任务，防止同一批次被覆盖。 */
-    private boolean controlLaneWorkPending;
-    /** 最近完成批次的参与 Lane，用于拒绝读取上一个批次的残留结果。 */
-    private long completedLaneMask;
-
-    /** 本阶段的业务分类，用于区分风险与结算实际任务计数。 */
-    private AccountLaneOperationType operationType;
 
     void dispatch(long laneMask, AccountLaneOperationType type, java.util.function.IntFunction<Object> operation) {
         owner.assertOwner();
         if (!owner.accountLanesStarted) throw new IllegalStateException("control work requires running Account Lanes");
-        long validMask = owner.accountLanes.length == 64 ? -1L : (1L << owner.accountLanes.length) - 1;
-        if (controlLaneWorkPending || laneMask == 0 || (laneMask & ~validMask) != 0 || operation == null || type == null)
+        int laneCount = owner.accountLanes == null ? 0 : owner.accountLanes.length;
+        long validMask = laneCount == 64 ? -1L : (1L << laneCount) - 1;
+        if (laneMask == 0 || (laneMask & ~validMask) != 0 || operation == null || type == null)
             throw new IllegalStateException("invalid control Lane dispatch");
-        owner.ensureLaneWorkerCapacity(laneMask);
-        // 后续账户操作在原有永久 Lane 线程执行；owner 只保留全局状态写入权。
+        if (results == null || results.length != laneCount) {
+            results = new Object[laneCount];
+        }
         owner.releaseOwnerLaneAccess();
         operationType = type;
-        completedLaneMask = 0;
-        pendingControlLaneMask = laneMask;
-        controlLaneWorkPending = true;
-        for (int id = 0; id < owner.accountLanes.length; id++) {
-            if ((laneMask & (1L << id)) == 0) continue;
-            TradingRuntimeState.LaneMutationTask task = owner.laneMutationTasks[id];
-            if (task == null) owner.laneMutationTasks[id] = task = owner.new LaneMutationTask(id);
-            task.prepareIndexed(operation);
-            owner.laneMutationStartedNanosScratch[id] = System.nanoTime();
-            owner.accountLaneQueueHighWaterMarks[id] = Math.max(owner.accountLaneQueueHighWaterMarks[id],
-                    owner.laneWorkers[id].depth() + 1);
-            owner.laneWorkers[id].submit(task);
+        completedLaneMask = laneMask;
+        active = true;
+        try {
+            for (int id = 0; id < laneCount; id++) {
+                if ((laneMask & (1L << id)) == 0) continue;
+                final int laneId = id;
+                results[laneId] = owner.inLaneCommandScope(owner.accountLanes[laneId], ignored -> operation.apply(laneId));
+            }
+        } finally {
+            active = false;
         }
     }
 
-    /** 未就绪立即返回；全部任务完成后收集，失败由命令续步派发 Lane 回滚。 */
     boolean poll() {
         owner.assertOwner();
-        if (!controlLaneWorkPending) throw new IllegalStateException("no control Lane work");
-        owner.assertAccountLanesHealthy();
-        for (int id = 0; id < owner.accountLanes.length; id++) {
-            if ((pendingControlLaneMask & (1L << id)) != 0 && !owner.laneMutationTasks[id].completed) return false;
+        if (pendingRevisionDelta != 0) {
+            long delta = pendingRevisionDelta;
+            pendingRevisionDelta = 0;
+            owner.setMetadata(owner.productLine(), Math.addExact(owner.revision(), delta));
         }
-        long mask = pendingControlLaneMask;
-        pendingControlLaneMask = 0;
-        completedLaneMask = mask;
-        controlLaneWorkPending = false;
-        Throwable failure = null;
-        long revisionDelta = 0;
-        for (int id = 0; id < owner.accountLanes.length; id++) {
-            if ((mask & (1L << id)) == 0) continue;
-            TradingRuntimeState.LaneMutationTask task = owner.laneMutationTasks[id];
-            revisionDelta = Math.addExact(revisionDelta, task.revisionDelta);
-            task.revisionDelta = 0;
-            task.operation = null;
-            task.indexedOperation = null;
-            owner.flushPublishedChanges(id);
-            owner.recordLaneOperation(id, operationType,
-                    System.nanoTime() - owner.laneMutationStartedNanosScratch[id]);
-            if (task.failure != null) {
-                if (failure == null) failure = task.failure;
-                else failure.addSuppressed(task.failure);
-            }
-        }
-        if (failure instanceof RuntimeException exception) throw exception;
-        if (failure instanceof Error error) throw error;
-        if (failure != null) throw new IllegalStateException("control Lane failed", failure);
-        if (revisionDelta != 0) owner.setMetadata(owner.productLine(),
-                Math.addExact(owner.revision(), revisionDelta));
         return true;
     }
 
     Object result(int laneId) {
         owner.assertOwner();
-        if (controlLaneWorkPending || laneId < 0 || laneId >= owner.accountLanes.length
-                || (completedLaneMask & (1L << laneId)) == 0)
+        int laneCount = owner.accountLanes == null ? 0 : owner.accountLanes.length;
+        if (laneId < 0 || laneId >= laneCount || (completedLaneMask & (1L << laneId)) == 0 || results == null)
             throw new IllegalStateException("Lane result is not ready");
-        return owner.laneMutationTasks[laneId].result;
+        return results[laneId];
     }
-
 }

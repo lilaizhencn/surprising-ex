@@ -17,7 +17,8 @@ def i(pattern: str, text: str, default=-1):
 
 
 def parse_jfr(path: Path, start: datetime | None, end: datetime | None):
-    result = {"samples": 0, "threads": {}, "logicalCpus": os.cpu_count() or 1}
+    result = {"samples": 0, "threads": {}, "logicalCpus": os.cpu_count() or 1,
+              "coverage": {"scope": "MISSING", "fullMeasurementWindow": False}}
     if not path.exists() or path.stat().st_size == 0:
         return result
     java = os.environ.get("SURPRISING_JAVA_HOME") or os.environ.get("JAVA_HOME")
@@ -27,12 +28,15 @@ def parse_jfr(path: Path, start: datetime | None, end: datetime | None):
         data = json.loads(raw)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
         return result
+    first = last = None
     for event in data.get("recording", {}).get("events", []):
         values = event.get("values", {})
         try:
             when = datetime.fromisoformat(values["startTime"])
         except (KeyError, ValueError):
             continue
+        first = when if first is None or when < first else first
+        last = when if last is None or when > last else last
         if start and when < start or end and when > end:
             continue
         thread = values.get("eventThread", {})
@@ -43,6 +47,19 @@ def parse_jfr(path: Path, start: datetime | None, end: datetime | None):
         slot["samples"] += 1
         slot["machinePercent"] += (user + system) * 100.0
         result["samples"] += 1
+    # DataLoss=0 does not detect recordings rotated by maxsize. Periodic CPU events
+    # must reach both measurement boundaries; allow the configured one-second cadence.
+    scoped = start is not None and end is not None and end > start
+    covered = bool(scoped and first is not None and last is not None
+                   and (first - start).total_seconds() <= 2
+                   and (end - last).total_seconds() <= 2)
+    scope = ("MEASUREMENT" if covered else "PARTIAL_MEASUREMENT") if scoped else "UNSCOPED_RECORDING"
+    result["coverage"] = {"scope": scope if first else "MISSING", "fullMeasurementWindow": covered,
+                          "firstCpuEvent": first.isoformat() if first else None,
+                          "lastCpuEvent": last.isoformat() if last else None,
+                          "requestedStart": start.isoformat() if start else None,
+                          "requestedEnd": end.isoformat() if end else None,
+                          "boundaryToleranceSeconds": 2}
     cpus = os.cpu_count() or 1
     for slot in result["threads"].values():
         if slot["samples"]:
@@ -79,6 +96,9 @@ def add_saturation_assessment(metric):
     ]
     if metric["jfr"]["threadCpuSamples"] == 0:
         reasons.append("thread-cpu-evidence-missing")
+    coverage = metric["jfr"].get("coverage", {})
+    if coverage.get("scope") in ("PARTIAL_MEASUREMENT", "UNSCOPED_RECORDING"):
+        reasons.append("thread-cpu-window-incomplete-or-unscoped")
     if not valid_blocked:
         reasons.append("window-blocked-time-missing-or-invalid")
     if not metric["clientPass"]:
@@ -125,7 +145,7 @@ def main():
         "drainNanos": i(r"drain elapsedNanos=(\d+)", client),
         "drainBusinessOperations": i(r"drain [^\n]*terminalBusinessOperations=(\d+)", client),
         "windowBlockedNanos": i(r"windowBlockedNanos=(\d+)", client),
-        "clientPass": "mixedCapacity=PASS" in client,
+        "clientPass": "mixedCapacity=PASS" in client and "mixedVerify=PASS" in client,
         "businessOpsPerSec": float(mixed.group(1)) if mixed else None,
         "coreMessagesPerSec": float(mixed.group(2)) if mixed else None,
         "peakInFlight": int(mixed.group(3)) if mixed else None,
@@ -138,7 +158,7 @@ def main():
             "laneSingleCorePercentMax": max(lanes) if lanes else float("nan"),
             "laneSingleCorePercentByThread": lanes,
         },
-        "jfr": {"threadCpuSamples": jfr["samples"], "logicalCpus": jfr["logicalCpus"]},
+        "jfr": {"threadCpuSamples": jfr["samples"], "logicalCpus": jfr["logicalCpus"], "coverage": jfr.get("coverage", {})},
     }
     if lane_work:
         ratios = [v["executionWallRatio"] for v in lane_work.values()]

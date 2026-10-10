@@ -170,19 +170,6 @@ final class LaneBalancePatches {
         if (state.realtimeCapture != null) state.realtimeCapture.balance(userId, assetId,
                 presentAfter[index] ? availableAfter[index] : 0,
                 presentAfter[index] ? lockedAfter[index] : 0);
-        IntLongHashMap balances = state.publishedAvailableBalances.get(userId);
-        if (!presentAfter[index]) {
-            if (balances != null) {
-                balances.removeKey(assetId);
-                if (balances.isEmpty()) state.publishedAvailableBalances.remove(userId);
-            }
-            return;
-        }
-        if (balances == null) {
-            balances = new IntLongHashMap();
-            state.publishedAvailableBalances.put(userId, balances);
-        }
-        balances.put(assetId, availableAfter[index]);
     }
 
     int indexOf(long userId, int assetId) {

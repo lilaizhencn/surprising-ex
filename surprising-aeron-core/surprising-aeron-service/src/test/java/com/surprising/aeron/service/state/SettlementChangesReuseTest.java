@@ -4,25 +4,6 @@ import static org.assertj.core.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
 class SettlementChangesReuseTest {
-    @Test void completionUpdatesTheIndependentOwnerMirrorWithoutAnotherSnapshot() {
-        var order = CoreStateTestFixtures.order(1, 7, 0, 1);
-        var admission = order.snapshot();
-        var changes = new OrderChangeBuffer();
-        var published = new LanePublishedMap<OrderRuntime>();
-        published.put(1, admission);
-        changes.put(1, admission);
-        changes.capturePublicationValues();
-        assertThat(changes.applyPublished(0, published, null)).isSameAs(admission);
-        // Commit metadata is not represented by revision alone.
-        order.applyCommitMetadataInPlace(123, 456);
-        assertThat(order.revision()).isEqualTo(admission.revision());
-        assertThat(order).isNotEqualTo(admission);
-        changes.put(1, order);
-        changes.capturePublicationValues();
-        assertThat(changes.applyPublished(0, published, null)).isSameAs(admission).isEqualTo(order);
-        assertThat(admission.clusterPosition()).isEqualTo(456);
-    }
-
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
             var delta = new LaneCommitDelta();
@@ -67,7 +48,7 @@ class SettlementChangesReuseTest {
             }
         }
     }
-    @Test void positionPublicationCreatesUpdatesDeletesAndRecreatesOwnerValue() {
+    @Test void positionPublicationTracksChangedPositions() {
         try (var runtime = new TradingRuntimeState()) {
             var delta = new LaneCommitDelta();
             var instrument = CoreStateTestFixtures.runtimeInstrument();
@@ -78,33 +59,22 @@ class SettlementChangesReuseTest {
             delta.putPosition(1, source);
             delta.preparePublication();
             delta.commitTerminalToOwner(runtime, 0, null, 1, null, null);
-            var published = runtime.publishedPositions.get(1);
-            assertThat(published).isEqualTo(source).isNotSameAs(source);
+            assertThat(runtime.changedPositions.get(1)).isEqualTo(source);
             runtime.clearChangedKeys();
             delta.clear();
 
             source.applyInPlace(instrument, 3, 100, 300, 5, 30);
-            assertThat(published.signedQuantitySteps()).isEqualTo(2);
             delta.putPosition(1, source);
             delta.preparePublication();
             delta.commitTerminalToOwner(runtime, 0, null, 2, null, null);
-            assertThat(runtime.publishedPositions.get(1)).isSameAs(published).isEqualTo(source);
-            assertThat(runtime.changedPositions.get(1)).isSameAs(published);
+            assertThat(runtime.changedPositions.get(1)).isEqualTo(source);
             runtime.clearChangedKeys();
             delta.clear();
 
             delta.putPosition(1, null);
             delta.preparePublication();
             delta.commitTerminalToOwner(runtime, 0, null, 3, null, null);
-            assertThat(runtime.publishedPositions.get(1)).isNull();
             assertThat(runtime.changedPositions.toArray()).containsExactly(1);
-            runtime.clearChangedKeys();
-            delta.clear();
-
-            delta.putPosition(1, source);
-            delta.preparePublication();
-            delta.commitTerminalToOwner(runtime, 0, null, 4, null, null);
-            assertThat(runtime.publishedPositions.get(1)).isEqualTo(source).isNotSameAs(published);
         }
     }
 

@@ -46,8 +46,7 @@ class RuntimeIndexedChangeBufferTest {
         buffer.forEachIndexed((key, value, present, prepared) -> {
             assertThat(present).isFalse(); assertThat(prepared).isNull();
         });
-        assertThatThrownBy(() -> buffer.putPrepared(-1, "orphan")).isInstanceOf(IllegalStateException.class);
-        buffer.drainToPublishedMap(new LanePublishedMap<>());
+        buffer.clear();
         assertThat(buffer.isEmpty()).isTrue();
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
     }

@@ -141,51 +141,22 @@ class AsyncAccountBalanceCommandTest {
         try (var state = new TradingCoreRuntime(product); var serial = new TradingCoreRuntime(product)) {
             state.activate(); serial.activate();
             long user = 11;
-            var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
-            field.setAccessible(true);
-            Object[] workers = (Object[]) field.get(state.runtimeState);
-            int unrelated = (state.runtimeState.topology().accountLaneId(user) + 1) % workers.length;
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-            var submit = workers[unrelated].getClass().getDeclaredMethod("submit", task);
-            submit.setAccessible(true);
-            submit.invoke(workers[unrelated], Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},
-                    (proxy, method, args) -> {
-                        entered.countDown();
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
-                        return null;
-                    }));
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                long[] deltas = {100, -40, -61, 20, Long.MAX_VALUE};
-                for (int i = 0; i < deltas.length; i++) {
-                    long seq = i + 1;
-                    var command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
-                            new UUID(817, seq), product, CommandSource.OPERATIONS, 817, seq, user,
-                            1_700_000_000_000L + seq, seq),
-                            TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", deltas[i])));
-                    var actual = CoreTestCompletion.applyAsynchronously(state, command);
-                    var expected = CoreTestCompletion.applyAsynchronously(serial, command);
-                    assertThat(actual.commandStatus()).isEqualTo(expected.commandStatus())
-                            .isEqualTo(i == 2 || i == 4 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
-                    assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
-                    assertThat(release.getCount()).as("unrelated account partition stays independent").isOne();
-                    var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
-                    access.setAccessible(true);
-                    assertThat(access.getBoolean(state.runtimeState)).isFalse();
-                }
-                for (int i = 0; i < 3; i++) {
-                    var mode = command(product, CoreMessageType.UPDATE_POSITION_MODE, 100 + i,
-                            TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(
-                                    i < 2 ? CorePositionMode.HEDGE : CorePositionMode.ONE_WAY)));
-                    var actual = CoreTestCompletion.applyAsynchronously(state, mode);
-                    var expected = CoreTestCompletion.applyAsynchronously(serial, mode);
-                    assertThat(actual.commandStatus()).isEqualTo(expected.commandStatus())
-                            .isEqualTo(product == ProductLine.SPOT ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
-                    assertThat(release.getCount()).isOne();
-                }
-            } finally { release.countDown(); }
+            long[] deltas = {100, -40, -61, 20, Long.MAX_VALUE};
+            for (int i = 0; i < deltas.length; i++) {
+                long seq = i + 1;
+                var command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
+                        new UUID(817, seq), product, CommandSource.OPERATIONS, 817, seq, user,
+                        1_700_000_000_000L + seq, seq),
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", deltas[i])));
+                var actual = CoreTestCompletion.applyAsynchronously(state, command);
+                var expected = CoreTestCompletion.applyAsynchronously(serial, command);
+                assertThat(actual.commandStatus()).isEqualTo(expected.commandStatus())
+                        .isEqualTo(i == 2 || i == 4 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
+                assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
+                var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
+                access.setAccessible(true);
+                assertThat(access.getBoolean(state.runtimeState)).isFalse();
+            }
             assertThat(state.tradingState().user(user).balances().get("USDT").availableUnits()).isEqualTo(80);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(serial.tradingState().businessStateHash());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot(100))) {

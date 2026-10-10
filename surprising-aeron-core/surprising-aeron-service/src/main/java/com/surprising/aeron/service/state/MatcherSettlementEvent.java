@@ -1,8 +1,7 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.CoreResultCode;
 
 import java.lang.invoke.MethodHandles;
@@ -12,7 +11,7 @@ import java.lang.invoke.VarHandle;
  * Immutable matcher fact routed once to every Account Lane it touches.
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
-public final class MatcherSettlementEvent implements SettlementLaneWorker.Command,
+public final class MatcherSettlementEvent implements
         com.surprising.aeron.service.matching.MatchingResult {
     /** Diagnostic only: no clocks or additional objects on the default trading path. */
     public static final boolean LATENCY_DIAGNOSTICS = Boolean.getBoolean("core.settlementLatencyDiagnostics");
@@ -336,7 +335,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         matcherPublicationDeferred = true;
     }
 
-    /** Publish the deferred wake-up after the Matcher has released or retained its SPSC slot. */
+    /** Finish event publication before the Matcher exposes its transport completion. */
     public void completeMatcherPublication() {
         if (!direct || !matcherPublicationDeferred) return;
         matcherPublicationDeferred = false;
@@ -526,8 +525,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             orders = Math.addExact(orders, batchPlans[index].orderCount());
         }
         // The initial route contains only the taker's Lane. The Matcher discovers maker Lanes
-        // while building the immutable fact, then publishes the same event to every routed Lane
-        // ring before it signals the Owner. A queued initial Lane is never removed from the route.
+        // while building the immutable fact, then releases the event to the Owner, which applies
+        // every routed account partition in commit order. The initial Lane remains in the route.
         if (actualLanes == 0
                 || !expandLaneRoute && (actualLanes & ~routedLaneMask) != 0
                 || expandLaneRoute && (routedLaneMask & ~actualLanes) != 0)
@@ -549,23 +548,16 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private void notifyDirectPublication() {
         TradingRuntimeState completionRuntime = runtime;
         long completionLanes = routedLaneMask;
+        // Complete every producer access before the readiness release. The Owner polls this
+        // flag and may apply, clear and reuse the pooled event without waiting for our signal.
+        if (matcherOwnedPublication) completionRuntime.publishMatcherSettlementDirect(this);
         releaseMatcherCompletionBeforeSignal();
-        // Deterministic ~1/64 sampling; use existing per-Lane cache-line padding for times.
         if (LATENCY_DIAGNOSTICS && (Long.hashCode(directCoreSequence * 0x9e3779b97f4a7c15L) & 63) == 0)
             matcherPublishedNanos = System.nanoTime();
-        // Publish the readiness flag before handing the pooled event to its Matcher-owned ring;
-        // the ring publication itself is the release boundary for the Lane consumer.
         directPublished = true;
-        try {
-            if (matcherOwnedPublication) completionRuntime.publishMatcherSettlementDirect(this);
-            else completionRuntime.signalDirectSettlement(completionLanes);
-        } catch (Throwable failure) {
-            // Keep the failure on the pooled event.  The Matcher pipeline may observe the
-            // exception after directPublished became visible; without this assignment the
-            // Lane would wait forever on a partially published route.
-            directFailure = failure;
-            throw failure;
-        }
+        // Only captured values may be used after the release; even failure handling must not
+        // write back to an event which may now belong to the next command.
+        completionRuntime.signalDirectSettlement(completionLanes);
     }
 
     /** 由 Matcher pipeline 设置；复用已有 Context，不为每笔直达命令创建回调对象。 */
@@ -817,7 +809,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         collected = false;
     }
 
-    @Override
     public void execute(AccountLaneState lane) {
         if (direct) requireDirectResult();
         long startedNanos = System.nanoTime();
@@ -1037,7 +1028,24 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         return observedCompletedLaneMask;
     }
 
-    public boolean complete() { return ready() && completedLaneMask() == routedLaneMask(); }
+    public void ensureLanesExecuted() {
+        if (!ready() || runtime == null || !runtime.inOwnerThread() || direct && !dispatched) return;
+        long remaining = routedLaneMask() & ~completedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            if ((queuedLaneMask & (1L << laneId)) == 0) {
+                markLaneQueued(laneId);
+            }
+            execute(runtime.accountLanes[laneId]);
+        }
+    }
+
+    public boolean complete() {
+        if (!ready()) return false;
+        ensureLanesExecuted();
+        return completedLaneMask() == routedLaneMask();
+    }
     public MatcherSettlementPlan plan() { return plan; }
     int planCount() { return batchPlans == null ? 1 : batchPlanCount; }
     OrderRuntime admittedOrder(int index) {

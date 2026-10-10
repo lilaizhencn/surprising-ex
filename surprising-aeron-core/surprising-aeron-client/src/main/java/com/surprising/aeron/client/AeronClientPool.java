@@ -1212,7 +1212,6 @@ public final class AeronClientPool implements AutoCloseable {
         private final AgentLane owner;
         private CoreMessage message;
         private String traceId;
-        private long traceStartedNanos;
         private long correlationId;
         private CoreMessageType commandType;
         private long commandUserId;
@@ -1242,7 +1241,6 @@ public final class AeronClientPool implements AutoCloseable {
             this.traceId = message != null && !message.header().traceId().isEmpty() ? message.header().traceId()
                     : message != null ? operationId.toString()
                     : currentTrace != null ? com.surprising.aeron.protocol.TraceIds.validate(currentTrace) : operationId.toString();
-            this.traceStartedNanos = System.nanoTime();
             this.message = message;
             this.correlationId = message == null ? 0 : message.header().correlationId();
             this.commandType = null;
@@ -1261,8 +1259,6 @@ public final class AeronClientPool implements AutoCloseable {
             this.queueDeadlineNanos = 0;
             this.deadlineNanos = 0;
             this.generation++;
-            log.info("aeron.start traceId={} commandId={} productLine={} mode={}",
-                    traceId, operationId, owner.product(), mode);
         }
 
         private synchronized long generation() {
@@ -1312,7 +1308,6 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             try (var trace = new TraceScope(traceId)) {
-                traceEnd("ADMITTED", 0);
                 CompletableFuture<Long> future = admissionFuture;
                 CommandAdmissionCallback callback = admissionCallback;
                 UUID commandId = operationId;
@@ -1332,7 +1327,6 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             try (var trace = new TraceScope(traceId)) {
-                traceEnd(response.commandStatus().name() + ":" + response.resultCode().name(), response.committedCoreSequence());
                 ClientTransportBoundary.record("delivered", operationId, traceId);
                 CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
                 CompletableFuture<CoreResponse> result = responseFuture;
@@ -1350,7 +1344,6 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             try (var trace = new TraceScope(traceId)) {
-                traceEnd("NOT_ACCEPTED", 0);
                 CompletableFuture<Long> admission = admissionFuture;
                 CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
                 CompletableFuture<CoreResponse> result = responseFuture;
@@ -1380,7 +1373,6 @@ public final class AeronClientPool implements AutoCloseable {
                 CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
                 CompletableFuture<CoreResponse> result = responseFuture;
                 UUID commandId = operationId;
-                traceEnd("RESULT_UNKNOWN", 0);
                 if (outcome != null) {
                     outcome.complete(new CoreCommandOutcome.ResultUnknown(commandId));
                 } else if (result != null) {
@@ -1396,7 +1388,6 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             try (var trace = new TraceScope(traceId)) {
-                traceEnd("FAILED:" + failure.getClass().getSimpleName(), 0);
                 CompletableFuture<Long> admission = admissionFuture;
                 CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
                 CompletableFuture<CoreResponse> result = responseFuture;
@@ -1418,18 +1409,9 @@ public final class AeronClientPool implements AutoCloseable {
             }
         }
 
-        private void traceEnd(String result, long coreSequence) {
-            log.info("aeron.end traceId={} commandId={} productLine={} result={} coreSequence={} durationMs={}",
-                    traceId, operationId, owner.product(), result, coreSequence,
-                    (System.nanoTime() - traceStartedNanos) / 1_000_000.0);
-        }
-
         private void recycle() {
             if (claimCompletion()) {
-                try (var trace = new TraceScope(traceId)) {
-                    if (traceId != null) traceEnd(cancelled ? "CANCELLED_BEFORE_OFFER" : "RELEASED_BEFORE_OFFER", 0);
-                    owner.recycle(this);
-                }
+                owner.recycle(this);
             }
         }
 
@@ -1444,7 +1426,6 @@ public final class AeronClientPool implements AutoCloseable {
         private synchronized void clear() {
             message = null;
             traceId = null;
-            traceStartedNanos = 0;
             commandType = null;
             commandPayload = null;
             correlationId = 0;

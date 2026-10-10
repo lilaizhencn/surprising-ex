@@ -40,37 +40,9 @@ class ParallelRiskScanTest {
             var index = new PositionUserIndex(source, ids, TOPOLOGY);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.startAccountLanes();
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            runtime.laneWorkers[blockedLane].submit(lane -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("test release timeout"); }
-                catch (InterruptedException e) { throw new AssertionError(e); }
-            });
-            try {
-                assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
-                runtime.enterAsynchronousCommandScope();
-                var work = new RiskScanCoordinator(TOPOLOGY.accountLaneCount(), index, runtime, ids);
-                assertThat(work.poll()).isFalse();
-                for (int lane = 0; lane < TOPOLOGY.accountLaneCount(); lane++) {
-                    if (lane == blockedLane) continue;
-                    final int id = lane;
-                    await(() -> runtime.laneMutationTasks[id].completed);
-                    var page = (RiskLaneProcessor.Page) runtime.laneMutationTasks[lane].result;
-                    assertThat(page.creations().size()).isEqualTo(1);
-                }
-                assertThat(runtime.ownerLaneAccess).isFalse();
-                assertThat(runtime.nextLiquidationId()).isEqualTo(1);
-                assertThat(work.poll()).isFalse();
-                assertThatThrownBy(runtime::requireSnapshotFenceReady).hasMessageContaining("unfinished");
-                release.countDown();
-                await(work::poll);
-                assertThat(work.completedWork()).isEqualTo(TOPOLOGY.accountLaneCount());
-                assertThat(work.poll()).isTrue();
-                assertThat(runtime.ownerLaneAccess).isFalse();
-            } finally {
-                release.countDown();
-                runtime.exitAsynchronousCommandScope();
+            var work = new RiskScanCoordinator(TOPOLOGY.accountLaneCount(), index, runtime, ids);
+            while (!work.poll()) {
+                Thread.onSpinWait();
             }
             return RuntimeStateMaterializer.materialize(runtime, ids);
         }

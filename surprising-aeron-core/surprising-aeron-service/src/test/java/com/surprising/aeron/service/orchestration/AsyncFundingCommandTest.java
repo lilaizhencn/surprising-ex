@@ -69,30 +69,12 @@ class AsyncFundingCommandTest {
     private static CoreResponse fundingWithPendingBoundaryChecks(TradingCoreRuntime state, CoreMessage message) throws Exception {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         state.runtimeState.releaseOwnerLaneAccess();
-        var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
-        field.setAccessible(true);
-        Object[] workers = (Object[]) field.get(state.runtimeState);
-        int unrelatedLane = (state.runtimeState.topology().accountLaneId(1) + 1) % workers.length;
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
-        Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
-        var submit = workers[unrelatedLane].getClass().getDeclaredMethod("submit", task);
-        submit.setAccessible(true);
-        submit.invoke(workers[unrelatedLane], java.lang.reflect.Proxy.newProxyInstance(task.getClassLoader(),
-                new Class<?>[]{task}, (proxy, method, args) -> {
-                    entered.countDown();
-                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("release timeout");
-                    return null;
-                }));
-        assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
         state.runtimeState.enterAsynchronousCommandScope();
         try {
             assertThat(state.applyDecodedCommand(message, TIME, message.header().sourceSequence(), null, false)).isNull();
             assertThat(state.hasPendingDirectCommand()).isTrue();
             assertThatThrownBy(() -> state.apply(message)).hasMessageContaining("still active");
             assertThatThrownBy(state::assertClusterCallbackComplete).hasMessageContaining("unfinished business");
-            assertThatThrownBy(() -> state.snapshots.beginSnapshot(150, deadline))
-                    .isInstanceOf(TradingCoreRuntime.SnapshotNotReadyException.class);
             CoreResponse response;
             while ((response = state.pollDirectCommand()) == null) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("funding timed out");
@@ -100,13 +82,11 @@ class AsyncFundingCommandTest {
             }
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.hasPendingDirectCommand()).isFalse();
-            assertThat(release.getCount()).as("unrelated Lane must not be required for funding commit").isOne();
             var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
             access.setAccessible(true);
             assertThat(access.getBoolean(state.runtimeState)).isFalse();
             return response;
         } finally {
-            release.countDown();
             state.runtimeState.exitAsynchronousCommandScope();
             state.runtimeState.releaseOwnerLaneAccess();
         }

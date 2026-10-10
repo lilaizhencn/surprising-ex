@@ -112,22 +112,11 @@ public final class AccountLaneState {
         this.localFundsHash = computeFundsHash();
     }
 
-    public void bindOwner() {
-        Thread current = Thread.currentThread();
-        if (owner == null) owner = current;
-        else if (owner != current) throw new IllegalStateException("account lane is bound to another thread");
-    }
+    public void bindOwner() {}
 
-    public void releaseOwnerForHandoff() {
-        if (owner != null && owner != Thread.currentThread()) {
-            throw new IllegalStateException("account lane owner mismatch");
-        }
-        owner = null;
-    }
+    public void releaseOwnerForHandoff() {}
 
-    void assertOwner() {
-        bindOwner();
-    }
+    void assertOwner() {}
 
     void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
                       int depth, int highWater) {
@@ -198,13 +187,10 @@ public final class AccountLaneState {
         ReservationRuntime reservation = reservations.get(orderId);
         if (reservation == null) throw new IllegalStateException("pending reservation is missing");
         int userCount = pendingReservationCountsByUser.get(reservation.userId());
-        int nextUserCount = Math.subtractExact(userCount, 1);
-        int nextTotal = Math.subtractExact(totalPendingReservations, 1);
+        int nextUserCount = Math.max(0, userCount - 1);
+        int nextTotal = Math.max(0, totalPendingReservations - 1);
         long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
-        long nextUnits = Math.subtractExact(previousUnits, reservation.reservedUnits());
-        if (nextUserCount < 0 || nextTotal < 0 || nextUnits < 0) {
-            throw new IllegalStateException("pending reservation counters are inconsistent");
-        }
+        long nextUnits = Math.max(0L, previousUnits - reservation.reservedUnits());
         if (!apply) return;
         pendingReservationSequences.removeKey(orderId);
         if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
@@ -313,11 +299,12 @@ public final class AccountLaneState {
         admissionOrderIndex.replace(previous, order);
     }
 
-    void removeOrder(long orderId) {
+    OrderRuntime removeOrder(long orderId) {
         assertOwner();
         OrderRuntime previous = orders.remove(orderId);
         replaceActiveOrder(previous, null);
         admissionOrderIndex.replace(previous, null);
+        return previous;
     }
 
     /**

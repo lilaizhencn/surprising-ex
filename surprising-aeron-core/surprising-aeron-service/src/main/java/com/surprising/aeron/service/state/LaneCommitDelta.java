@@ -113,14 +113,10 @@ public final class LaneCommitDelta {
     void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
     void drainTo(int laneId,
-                         LanePublishedMap<UserRuntime> targetUsers,
-                         LanePublishedMap<OrderRuntime> targetOrders,
-                         LanePublishedMap<ReservationRuntime> targetReservations,
-                         LanePublishedMap<PositionRuntime> targetPositions,
-                         LongObjectHashMap<LiquidationRuntime> targetLiquidations,
-                         LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
-                         com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
-                         com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+                 LongObjectHashMap<LiquidationRuntime> targetLiquidations,
+                 LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
+                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
             users.forEach((userId, ignored) -> {
                 if (changedUsers != null) changedUsers.add(userId);
@@ -137,42 +133,29 @@ public final class LaneCommitDelta {
             });
             if (changedOrders != null) removedOrderRoutes.forEach(changedOrders::add);
         }
-        users.drainToPublishedMap(targetUsers);
-        orders.drainToPublishedMap(targetOrders);
-        reservations.drainToPublishedMap(targetReservations);
-        positions.drainToPublishedMap(targetPositions);
+        users.clear();
+        orders.clear();
+        reservations.clear();
+        positions.clear();
         liquidations.drainToEclipseMap(targetLiquidations);
         riskSnapshots.drainToEclipseMap(targetRiskSnapshots);
-        removedOrderRoutes.forEach(orderId -> {
-            targetOrders.remove(orderId);
-
-        });
-        removedReservationRoutes.forEach(orderId -> {
-            targetReservations.remove(orderId);
-
-        });
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
 
     void commitTerminalToOwner(TradingRuntimeState state, int laneId,
-                                       TradingRuntimeState.TerminalOrderSink terminalOrderSink, long coreSequence,
-                                       com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
-                                       com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
-        OwnerSettlementMergeEvent timing = OwnerSettlementMergeEvent.sample(coreSequence, "lane", laneId);
+                               TradingRuntimeState.TerminalOrderSink terminalOrderSink, long coreSequence,
+                               com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+                               com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         publishTriggersToOwner(state);
         if (closedTriggerCount != 0) {
             state.revision = Math.addExact(state.revision, closedTriggerCount);
             closedTriggerCount = 0;
         }
         if (!publicationPrepared) throw new IllegalStateException("Lane terminal publication is not prepared");
-        long started = timing == null ? 0 : System.nanoTime();
-        publishPreparedToOwner(state, changedUsers, changedOrders, timing);
-        if (timing != null) timing.publicationNanos = System.nanoTime() - started;
-        if (timing != null) { timing.terminalOrders = terminalOrderCount; started = System.nanoTime(); }
+        publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this, coreSequence);
-        if (timing != null) timing.terminalIndexNanos = System.nanoTime() - started;
         liquidations.drainTo((id, value) -> {
             state.changedLiquidations.put(id, value);
             TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, value);
@@ -181,89 +164,46 @@ public final class LaneCommitDelta {
             state.changedRiskSnapshots.put(key, value);
             TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, key, value);
         });
-        if (timing != null) started = System.nanoTime();
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
-        if (timing != null) {
-            timing.changedIndexNanos = System.nanoTime() - started;
-            timing.completed = true;
-            timing.finish();
-        }
     }
 
     private void publishPreparedToOwner(
             TradingRuntimeState state,
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
-            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders,
-            OwnerSettlementMergeEvent timing) {
-        long started = timing == null ? 0 : System.nanoTime();
+            com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
+        // 单写者架构：零 Map 复制与搬运，仅收集变更集合用于下游输出
         users.drainTo((id, value) -> {
             if (changedUsers != null) changedUsers.add(id);
-            state.publishedUsers.applyPublished(id, value);
             state.changedUsers.add(id);
         });
-        if (timing != null) { timing.usersNanos = System.nanoTime() - started; started = System.nanoTime(); }
         for (int index = 0; index < orders.size(); index++) {
             long id = orders.keyAt(index);
             if (changedOrders != null) changedOrders.add(id);
-            if (timing != null && timing.mapTiming) timing.ordersVisited++;
-            if (!removedOrderRoutes.contains(id))
-                orders.applyPublished(index, state.publishedOrders,
-                        timing != null && timing.mapTiming ? timing : null);
-            else if (timing != null && timing.mapTiming) timing.ordersSkipped++;
         }
-        if (timing != null) { timing.ordersNanos = System.nanoTime() - started; started = System.nanoTime(); }
         for (int index = 0; index < reservations.size(); index++) {
             long id = reservations.keyAt(index);
             ReservationRuntime value = reservations.valueAt(index);
             if (changedOrders != null) changedOrders.add(id);
             if (changedUsers != null && value != null) changedUsers.add(value.userId());
-            if (!removedReservationRoutes.contains(id))
-                reservations.applyPublished(index, state.publishedReservations);
             state.changedReservations.add(id);
         }
         reservations.clear();
-        if (timing != null) { timing.reservationsNanos = System.nanoTime() - started; started = System.nanoTime(); }
         for (int index = 0; index < positions.size(); index++) {
             long id = positions.keyAt(index);
             PositionRuntime value = positions.valueAt(index);
             if (changedUsers != null && value != null) changedUsers.add(value.userId());
-            if (value == null && state.realtimeCapture != null) {
-                try { state.realtimeCapture.removedPosition(state.publishedPositions.get(id)); }
-                catch (RuntimeException failure) { state.realtimeCapture.failed(); }
-            }
-            if (value == null) {
-                state.publishedPositions.applyPublished(id, null);
-                continue;
-            }
-            PositionRuntime published = state.publishedPositions.get(id);
-            if (published == null) {
-                published = value.publicationValue();
-                state.publishedPositions.put(id, published);
-            } else {
-                published.copyStateFrom(value);
-            }
-            positions.setValueAt(index, published);
         }
-        if (timing != null) { timing.positionsNanos = System.nanoTime() - started; started = System.nanoTime(); }
-        removedOrderRoutes.forEach(id -> {
-            state.publishedOrders.removePublished(id, timing, false);
-            if (changedOrders != null) changedOrders.add(id);
-        });
-        removedReservationRoutes.forEach(id -> state.publishedReservations.removePublished(id, timing, true));
-        removedOrderRoutes.clear();
-        removedReservationRoutes.clear();
+        if (!removedOrderRoutes.isEmpty()) {
+            if (changedOrders != null) removedOrderRoutes.forEach(changedOrders::add);
+            removedOrderRoutes.clear();
+        }
+        if (!removedReservationRoutes.isEmpty()) {
+            removedReservationRoutes.clear();
+        }
         publicationPrepared = false;
-        if (timing != null) timing.removalsNanos = System.nanoTime() - started;
     }
 
-    /**
-     * Commit the marker side of a batch admission whose immutable publication was already
-     * applied by the Owner before Matcher submission. Admission directly mutates the private
-     * Lane maps and stages its public user/order/reservation after-images in the event
-     * publication, so replaying the normal terminal drain would duplicate the map walk.
-     * Balance and funds patches remain consumed by collectPlaceBatchAdmission.
-     */
     void commitBatchAdmissionToOwner(TradingRuntimeState state, int laneId) {
         if (state == null || laneId < 0 || laneId >= state.accountLanes.length) {
             throw new IllegalArgumentException("invalid batch admission owner handoff");
@@ -279,8 +219,6 @@ public final class LaneCommitDelta {
         state.changedPositions.adopt(laneId, positions);
         liquidations.forEach(state.changedLiquidations::put);
         riskSnapshots.forEach(state.changedRiskSnapshots::put);
-        removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
-        removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }

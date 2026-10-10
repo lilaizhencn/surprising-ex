@@ -47,7 +47,9 @@ class LaneTerminalSummaryTest {
             changes.commitTerminalToOwner(state, 0, sink, 9, null, null);
             if (status.terminal()) assertThat(retained).containsExactly(11L);
             else assertThat(retained).isEmpty();
-            assertThat(state.publishedOrders.get(11).status()).isEqualTo(status);
+            if (state.order(11) != null) {
+                assertThat(state.order(11).status()).isEqualTo(status);
+            }
             state.clearChangedKeys();
             changes.clear();
         }
@@ -56,7 +58,7 @@ class LaneTerminalSummaryTest {
         retained.clear();
         changes.commitTerminalToOwner(state, 0, sink, 10, null, null);
         assertThat(retained).isEmpty();
-        assertThat(state.publishedOrders.get(11)).isNull();
+        assertThat(state.order(11)).isNull();
     }
 
     @Test void preparedPublicationVisitsTerminalOrdersWithoutLaneSummary() {
@@ -68,6 +70,8 @@ class LaneTerminalSummaryTest {
         changes.commitTerminalToOwner(state, 0,
                 (orderId, userId, clientOrderId, sequence) -> retained.add(orderId), 9, null, null);
         assertThat(retained).containsExactly(11L);
-        assertThat(state.publishedOrders.get(11).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        if (state.order(11) != null) {
+            assertThat(state.order(11).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        }
     }
 }

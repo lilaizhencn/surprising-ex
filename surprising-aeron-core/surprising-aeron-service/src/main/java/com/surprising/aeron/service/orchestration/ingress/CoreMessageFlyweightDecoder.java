@@ -66,12 +66,21 @@ public final class CoreMessageFlyweightDecoder {
                     || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength)
                 throw new ProtocolException("invalid trace id header length");
             check(cursor, traceLength, end);
-            byte[] trace = new byte[traceLength]; buffer.getBytes(cursor, trace);
-            traceId = com.surprising.aeron.protocol.TraceIds.validate(
-                    new String(trace, java.nio.charset.StandardCharsets.US_ASCII));
+            char[] chars = new char[traceLength];
+            for (int i = 0; i < traceLength; i++) {
+                byte b = buffer.getByte(cursor + i);
+                if (!(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
+                        || b == '.' || b == '_' || b == ':' || b == '-')) {
+                    throw new ProtocolException("invalid trace id");
+                }
+                chars[i] = (char) b;
+            }
+            traceId = new String(chars);
         }
-        byte[] payload = new byte[payloadLength];
-        buffer.getBytes(offset + headerLength, payload);
+        byte[] payload = payloadLength == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLength];
+        if (payloadLength > 0) {
+            buffer.getBytes(offset + headerLength, payload);
+        }
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
                 submittedAtEpochMillis, correlationId, traceId);

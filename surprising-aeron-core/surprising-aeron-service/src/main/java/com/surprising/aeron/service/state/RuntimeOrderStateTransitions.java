@@ -68,7 +68,19 @@ public final class RuntimeOrderStateTransitions {
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
             AdmissionIdentity identity, long clientKey, int assetId) {
         AccountLaneState lane = runtime.laneCommandScope.get();
-        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
+        if (lane == null) {
+            int laneId = runtime.topology().accountLaneId(userId);
+            AccountLaneState targetLane = runtime.accountLanes[laneId];
+            runtime.inLaneCommandScope(targetLane, ignored -> {
+                long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
+                        openInterestSteps, targetLane.admissionOrderIndex(command.symbolId()), identity);
+                placePrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
+                runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+                return null;
+            });
+            return;
+        }
+        if (lane.laneId() != runtime.topology().accountLaneId(userId))
             throw new IllegalStateException("trigger child requires its Account Lane");
         long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
                 openInterestSteps, lane.admissionOrderIndex(command.symbolId()), identity);
@@ -80,7 +92,18 @@ public final class RuntimeOrderStateTransitions {
             ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
             long clientKey, int assetId, long coreSequence) {
         AccountLaneState lane = runtime.laneCommandScope.get();
-        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
+        if (lane == null) {
+            int laneId = runtime.topology().accountLaneId(userId);
+            AccountLaneState targetLane = runtime.accountLanes[laneId];
+            runtime.inLaneCommandScope(targetLane, ignored -> {
+                placePrepared(runtime, userId, command, commandId, requiredReservation,
+                        clientKey, command.symbolId(), assetId);
+                runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+                return null;
+            });
+            return;
+        }
+        if (lane.laneId() != runtime.topology().accountLaneId(userId))
             throw new IllegalStateException("batch reservation requires its Account Lane");
         placePrepared(runtime, userId, command, commandId, requiredReservation,
                 clientKey, command.symbolId(), assetId);

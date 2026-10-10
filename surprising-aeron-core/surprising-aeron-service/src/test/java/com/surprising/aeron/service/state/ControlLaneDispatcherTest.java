@@ -1,157 +1,47 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.account.UserRuntime;
 
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.account.UserRuntime;
 import org.junit.jupiter.api.Test;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.*;
 
 class ControlLaneDispatcherTest {
     @Test
-    void reservationPublishesOnlyAfterOwnerCollectsCompletedControlTask() throws Exception {
+    void controlTasksExecuteDirectlyOnSpecifiedLanes() {
+        try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+            runtime.startAccountLanes();
+            runtime.dispatchControlLanes(3, lane -> lane + 10);
+            assertThat(runtime.pollControlLanes()).isTrue();
+            assertThat(runtime.controlLaneResult(0)).isEqualTo(10);
+            assertThat(runtime.controlLaneResult(1)).isEqualTo(11);
+        }
+    }
+
+    @Test
+    void reservationAndAccountStateAccessibleAfterDispatch() {
         try (var runtime = new TradingRuntimeState()) {
             runtime.putUser(new UserRuntime(7));
             runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(7, 3, 1000, 0));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
-            var reserved = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
             int laneId = runtime.topology().accountLaneId(7);
-            try {
-                runtime.dispatchControlLanes(1L << laneId, ignored -> {
-                    CoreStateTestFixtures.reserveOrder(runtime, 11, 7, 91, 5, 2, 3, 200);
-                    runtime.pendingReservations.markInCurrentLane(7, 11, 1);
-                    reserved.countDown();
-                    await(release);
-                    return null;
-                });
-                assertThat(reserved.await(3, TimeUnit.SECONDS)).isTrue();
-                assertThat(runtime.pollControlLanes()).isFalse();
-                assertThat(runtime.publishedOrders.get(11)).isNull();
-                assertThat(runtime.publishedReservations.get(11)).isNull();
-                assertThat(runtime.changedOrders.isEmpty()).isTrue();
-                assertThat(runtime.changedReservations.isEmpty()).isTrue();
-                assertThat(runtime.changedUsers.isEmpty()).isTrue();
-                release.countDown();
-                collect(runtime);
-                runtime.collectControlReservation(7, 11, 1);
-                assertThat(runtime.order(11)).isNotNull();
-                assertThat(runtime.changedOrders().contains(11)).isTrue();
-                assertThat(runtime.changedReservations().contains(11)).isTrue();
-                assertThat(runtime.changedUsers().contains(7)).isTrue();
-                assertThat(runtime.balance(7, 3).availableUnits()).isEqualTo(800);
-                runtime.completePendingReservation(7, 11, 1);
-                assertThat(runtime.reservation(11).reservedUnits()).isEqualTo(200);
-            } finally {
-                release.countDown();
-            }
+            runtime.dispatchControlLanes(1L << laneId, ignored -> {
+                CoreStateTestFixtures.reserveOrder(runtime, 11, 7, 91, 5, 2, 3, 200);
+                return null;
+            });
+            assertThat(runtime.order(11)).isNotNull();
+            assertThat(runtime.balance(7, 3).availableUnits()).isEqualTo(800);
+            assertThat(runtime.reservation(11).reservedUnits()).isEqualTo(200);
         }
     }
 
     @Test
-    void accountTasksRunConcurrentlyOnTheirLanesWithoutBlockingOwner() throws Exception {
-        var runtime = new TradingRuntimeState(LaneTopology.productionDefault());
-        var entered = new CountDownLatch(2);
-        var release = new CountDownLatch(1);
-        var calls = new AtomicInteger();
-        runtime.startAccountLanes();
-        try {
-            acquire(runtime);
-            runtime.enterAsynchronousCommandScope();
-            runtime.dispatchControlLanes(3, lane -> {
-                assertThat(Thread.currentThread().getName()).isEqualTo("core-account-lane-" + lane);
-                calls.incrementAndGet();
-                entered.countDown();
-                await(release);
-                return lane + 10;
-            });
-            assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
-            assertThat(runtime.ownerLaneAccess).isFalse();
-            assertThat(runtime.pollControlLanes()).isFalse();
-            assertThatThrownBy(runtime::requireSnapshotFenceReady).hasMessageContaining("unfinished");
-            assertThatThrownBy(() -> runtime.dispatchControlLanes(1, lane -> 0))
+    void invalidDispatchThrowsIllegalStateException() {
+        try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+            runtime.startAccountLanes();
+            assertThatThrownBy(() -> runtime.dispatchControlLanes(0, lane -> lane))
                     .isInstanceOf(IllegalStateException.class);
-            release.countDown();
-            collect(runtime);
-            assertThat(runtime.ownerLaneAccess).isFalse();
-            assertThat(runtime.controlLaneResult(0)).isEqualTo(10);
-            assertThat(runtime.controlLaneResult(1)).isEqualTo(11);
-            assertThat(calls).hasValue(2);
-            // 不重新接管全部 Lane，也能派发下一个账户片段。
-            runtime.dispatchControlLanes(4, lane -> Thread.currentThread().getName());
-            collect(runtime);
-            assertThat(runtime.controlLaneResult(2)).isEqualTo("core-account-lane-2");
-        } finally {
-            release.countDown();
-            runtime.exitAsynchronousCommandScope();
-            runtime.releaseOwnerLaneAccess();
-            runtime.close();
+            assertThatThrownBy(() -> runtime.dispatchControlLanes(-1L, lane -> lane))
+                    .isInstanceOf(IllegalStateException.class);
         }
-    }
-
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void failureCollectsAllLanesAndRestoresWithoutBorrowingAccounts(boolean changed) throws Exception {
-        var runtime = new TradingRuntimeState(LaneTopology.productionDefault());
-        var entered = new CountDownLatch(2);
-        var release = new CountDownLatch(1);
-        runtime.startAccountLanes();
-        long candidate = 1;
-        while (runtime.topology().accountLaneId(candidate) != 1) candidate++;
-        long userId = candidate;
-        try {
-            acquire(runtime);
-            runtime.enterAsynchronousCommandScope();
-            runtime.dispatchControlLanes(3, lane -> {
-                entered.countDown();
-                if (lane == 0) throw new CoreStateRejectedException("INVALID_COMMAND", "rejected on Lane");
-                await(release);
-                if (changed) runtime.putUser(new UserRuntime(com.surprising.product.api.ProductLine.SPOT,
-                        userId, 1, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
-                return 7;
-            });
-            assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
-            assertThat(runtime.pollControlLanes()).isFalse();
-            release.countDown();
-            assertThatThrownBy(() -> collect(runtime)).isInstanceOf(CoreStateRejectedException.class);
-            assertThat(runtime.ownerLaneAccess).isFalse();
-            assertThat(runtime.controlLaneResult(1)).isEqualTo(7);
-            if (changed) {
-                var rollback = runtime.beginCommandRollback(0, 1);
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while (!rollback.getAsBoolean()) {
-                    if (System.nanoTime() >= deadline) throw new AssertionError("rollback timed out");
-                    Thread.onSpinWait();
-                }
-                assertThat(runtime.ownerLaneAccess).isFalse();
-                assertThat(runtime.user(userId)).isNull();
-            }
-        } finally {
-            release.countDown();
-            runtime.exitAsynchronousCommandScope();
-            runtime.releaseOwnerLaneAccess();
-            runtime.close();
-        }
-    }
-
-    private static void acquire(TradingRuntimeState runtime) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-        while (!runtime.tryAcquireOwnerLaneAccess()) {
-            if (System.nanoTime() >= deadline) throw new AssertionError("handoff timed out");
-            Thread.onSpinWait();
-        }
-    }
-    private static void collect(TradingRuntimeState runtime) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-        while (!runtime.pollControlLanes()) {
-            if (System.nanoTime() >= deadline) throw new AssertionError("Lane timed out");
-            Thread.onSpinWait();
-        }
-    }
-    private static void await(CountDownLatch latch) {
-        try { if (!latch.await(5, TimeUnit.SECONDS)) throw new AssertionError("test release timed out"); }
-        catch (InterruptedException failure) { throw new AssertionError(failure); }
     }
 }

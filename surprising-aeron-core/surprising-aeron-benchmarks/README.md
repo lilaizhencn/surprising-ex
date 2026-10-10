@@ -29,3 +29,12 @@ Lane 字段改为 `executionWallNanos`、`executionWallRatio` 和 `laneExecution
 `LinearPerpetualBenchmarkSupport.Harness` 在终态回调中先读取批量响应，再释放 Core 响应 arena 的租约。启用延迟校验时，必须在释放前通过 `CoreResponse.data()` 保存独立 payload；不能把引用 arena 存储的 `CoreResponse` 留到 `scenario.verify()`，否则后续命令复用槽位会覆盖待校验数据。
 
 Harness 只保存最后一份批量 payload，每次新批量终态覆盖它，生命周期与 Harness 相同；生产 Core 的响应池、协议和结算路径不变。该复制属于压测端的验证成本，本次修复未测量吞吐影响。回归覆盖四条衍生品线连续三轮 256 消息窗口，以及全部 benchmark 模块测试。
+
+
+## 当前账户所有权下的正确性判定
+
+`LinearPerpetualBenchmarkSupport.fill` 核对双方实际成交持仓、账户资金与手续费/保险资金守恒、剩余订单数量和 accepted/terminal 完成性。账户工作线程已移除，逻辑分区继续隔离；队列高水位不再能证明跨账户成交结算正确，不能把旧的“至少两个账户工作线程执行”当作通过条件。
+
+`qualify-aeron-async-stages.sh` 要求 `summarize-aeron-async-stage.py` 的 `clientPass=true`，即同时出现 `mixedCapacity=PASS` 与 `mixedVerify=PASS`。JMH 启动器即使在 fork 失败后返回 0，脚本也必须以失败退出，并保留录制及日志。资金核对缺失不能记为性能通过。
+
+CPU 汇总的 `jfr.coverage` 记录实际首末 CPU 事件及请求测量边界：`MEASUREMENT`、`PARTIAL_MEASUREMENT`、`UNSCOPED_RECORDING` 或 `MISSING`。周期事件允许 2 秒边界误差；maxsize 滚动即使不产生 DataLoss，也必须标为局部窗口，不能用启动/预热 CPU 或截断样本代表完整稳定测量。

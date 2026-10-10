@@ -1,9 +1,8 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 /** Sequence-local cancellation applied entirely by the order owner's Account Lane. */
-public final class LaneCancelEvent implements SettlementLaneWorker.Command {
+public final class LaneCancelEvent {
     private TradingRuntimeState runtime;
     private MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
@@ -66,7 +65,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         return this;
     }
 
-    @Override
     public void execute(AccountLaneState lane) {
         if (lane.laneId() != laneId) throw new IllegalStateException("cancel reached the wrong Account Lane");
         long startedNanos = System.nanoTime();

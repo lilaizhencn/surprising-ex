@@ -1,11 +1,10 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 /** Sequence-local fan-out that advances every affected Account Lane without an owner-side per-lane barrier. */
-public final class LaneCommitEvent implements SettlementLaneWorker.Command {
+public final class LaneCommitEvent {
     private static final int CACHE_LINE_LONGS = 16;
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
     private static final boolean LATENCY_DIAGNOSTICS = MatcherSettlementEvent.LATENCY_DIAGNOSTICS;
@@ -109,7 +108,6 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
                 runtime.accountRollback.captureUserBefore(order.userId());
                 runtime.accountRollback.captureOrderBefore(id);
                 OrderRuntime stamped = order.withCommitMetadata(metadataTimestamp, metadataPosition);
-                lane.putOrder(stamped);
                 stampedOrders[laneId][index] = stamped;
             }
         } finally { runtime.exitLaneCommandScope(lane); }
@@ -122,6 +120,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             while (lanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(lanes);
                 lanes &= lanes - 1;
+                cancelClosingTriggers(runtime.accountLanes[laneId]);
                 if (canceledTriggers[laneId] == 0) continue;
                 runtime.flushPublishedChanges(laneId);
                 count = Math.addExact(count, canceledTriggers[laneId]);
@@ -137,6 +136,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             for (int index = 0; index < metadataOrderIds[laneId].size(); index++) {
                 OrderRuntime order = stampedOrders[laneId][index];
                 if (order == null) continue;
+                runtime.accountLanes[laneId].putOrder(order);
                 runtime.publishOrder(order.orderId(), order);
                 runtime.changedOrder(order.orderId(), order);
                 runtime.changedUsers.add(order.userId());
@@ -171,7 +171,6 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         return this;
     }
 
-    @Override
     public void execute(AccountLaneState lane) {
         int laneId = lane.laneId();
         long laneBit = 1L << laneId;
@@ -179,7 +178,6 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             throw new IllegalStateException("Account Lane commit reached an unrelated lane");
         }
         long startedNanos = System.nanoTime();
-        cancelClosingTriggers(lane);
         stampMetadata(lane);
         runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         long finishedNanos = System.nanoTime();

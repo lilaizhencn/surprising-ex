@@ -251,6 +251,7 @@ final class MatchingCommandAdmission {
         }
         // 当前准入已结束；推进其他序号的异步续接前先释放 owner 的事实上下文。
         owner.clearFactContext();
+        owner.runtimeState.releaseOwnerLaneAccess();
         // Matcher input is immutable and already resolved above.  Publish it immediately while
         // the Account Lane performs the funds reservation in parallel; the ordered commit head
         // collects the Lane admission only when both facts are ready.
