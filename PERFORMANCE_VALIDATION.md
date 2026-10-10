@@ -4943,3 +4943,74 @@ Aeron dispatcher 循环迭代器/捕获 lambda；Feign 默认 HTTP 连接探测�
 独立读取5313条已提交公开成交后，60根已闭合分钟线中3根与真实成交不一致：ETH 19:03、19:12 UTC及SOL 19:04 UTC少计最后一笔。处理器关闭水位、数据库DO NOTHING和多周期不可修订设计共同阻止补入，尚未修复，K线正确性验收失败。资金费历史投影缺失、同窗口重复FINAL、策略编辑后的旧唤醒映射及本机公网WS断连也入档；不能报告系统全部通过。
 
 原始命令、逐项测试/JMH、真实网络资金核对、服务器采样、独立K线逐分钟预期/实际值、JFR/NMT、发现与清理状态见[运行审查报告](docs/validation/server-runtime-repair-soak-20261009.md)及同名JSON。没有重置Kafka、清理业务Archive/checkpoint或启动SPOT。
+
+
+## 2026-10-10：当前工作区永续合约压测（采集前计划）
+
+验证 master ff5a03da68d74bba3265df186cb896e0d9be8c27 和当前未提交 Core/协议/客户端改动，修改文件 SHA-256 在本轮 plan.json 入档。对照 commit：不适用（仅验证当前 master）。CodeGraph MCP 本会话未暴露，使用已安装 CLI 查询；索引存在但20文件待同步，源码实际构建覆盖当前修改。
+
+本轮为探索诊断，用户未提供容量 SLA，不事后设定吞吐或 p99 通过线。正确性要求零意外错误/超时、排空后 accepted=terminal、unfinished=0、资金差0、冻结/持仓及订单状态符合场景，快照恢复一致；正确性失败明确报告失败。热控/换页/磁盘不足使性能证据无效。CPU busy-spin、峰值窗口不能证明 Core 饱和。
+
+环境：MacBookPro16,1 / 16逻辑CPU / 16GiB RAM / macOS26.7.2 / Corretto HotSpot JDK27 / Maven3.9.16。单真实 Aeron Cluster 成员，保留UDP/Archive/Core，4 Account Lane、1 matcher、global/session in-flight256；G1节点512m–1536m、client128m–512m；Owner/Matcher/Lane BUSY_SPIN、owner input64、SHARED_NETWORK/YIELDING、默认UDP接收缓冲。仅本地隔离数据，不启动 wallet，不部署远端。
+
+沿用现有 U本位永续基线：MIXED/batch20/128symbols/1000零售+385支持账户/seed25620，持续做市及异步买卖交错、当前 harness 初始化资金与盘口；单独普通 MATCH_STREAM 买卖GTC各半、128symbols/1000账户/4worker/4连接/seed25601，不能与mixed合并口径。币本位不冒认成U本位负载，相关 Maven 正确性覆盖独立报告。
+
+主轮MIXED30秒业务预热+60秒稳定测量×3；独立GC profiler一次、独立节点/客户端JFR一次，均同场景30+60秒；600秒长稳独立，轮间冷却10秒。普通MATCH_STREAM30+60秒一次；其现有驱动若计时包含排空须标明计量缺口。JMH single-shot/fork1/thread1/wi0，不能把JMH秒/次当业务吞吐。闭环窗口受限持续发压，无固定计划到达率/无CO修正；报告背压、分业务尾延迟、完成性、资金与恢复、分配/GC/NMT、资源趋势。主要JIT若尚未稳定记录缺口。
+
+执行：先 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusterMixedCapacityTest,LinearPerpetualBenchmarkSupportTest,CorePerpetualEndToEndBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`；主/GC/JFR/长稳复用 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`，显式 ASYNC_ONLY_STAGE=end_to_end、ASYNC_WINDOWS=256、ASYNC_SKIP_BUILD=true。完整实际命令、独立PID及起止、源码与JAR校验随后汇总到 docs/validation/perpetual-current-20261010.json。快照/风险边界测试按源码入口选定后运行。系统每5秒检查进程/CPU/RSS、磁盘、vm_stat和pmset therm；JFR每进程256MiB上限，artifact合计3GiB、磁盘至少20GiB；达到上限停止。原始目录 `/tmp/surprising-perpetual-20261010-current`，分析入档后仅清理本轮临时集群/Archive/JFR/日志/报告，保留汇总。
+
+采集前补充：普通MATCH_STREAM增加独立币本位永续一轮（30+60秒），复用ClusterCapacityMain的product-line参数及原节点启动参数，使用独立进程/Archive/资金账户；临时match.sh仅编排现有入口，未改业务代码。追加CorePerpetualFinancialMatrixTest、CoreNativeSnapshotProductLineTest、AsyncFundingCommandTest、PublishedSnapshotRecoveryTest、RuntimeCommitRecoveryTest正确性检查，两永续全仓/逐仓资金费、强平、ADL、保险及恢复结果单列。
+
+执行中预算修订（第一轮结束后、剩余轮次/长稳采集前）：真实Archive增长约每短轮2GiB，原3GiB总预算不能容纳600秒记录。磁盘剩余超过380GiB，预算提高为32GiB，仍每5秒检查、低于20GiB停止；已结束轮次原始集群/Archive及时清理，完整计数/校验/指标和日志保留汇总。负载、并发、业务门槛未变。第一轮预热后吞吐仍在增长，30秒预热未证明JIT稳定，连同CPU限频列为本轮性能证据缺口。
+
+剩余采集前补充恢复检查：保留U本位长稳和币本位普通成交轮的本轮Archive，所有发压结束后依次重启对应单成员，查询/资金核对Archive replay恢复，再通过Aeron ClusterTool创建真实快照并再次重启核对业务哈希/余额/订单簿；不会同时启动两个成员，不重置Archive。恢复独立于吞吐窗口，完整命令/PID/快照计数入档。
+
+币本位普通成交恢复审计补充：现有ClusterCapacityMain仅核对总余额和空订单簿，恢复阶段另用本轮临时只读MatchAuditMain查询1000账户，核对冻结/预约为0、多空数量逐合约净和0、保证金非负、成交价格100且零费用/实现盈亏，并比较快照前后账户余额/持仓序列SHA-256；临时Java源码及编译命令入档，不改生产路径。
+
+普通MATCH_STREAM采集前参数修订：CodeGraph揭示RegisterInstrumentCommand必须通过InstrumentIds.parse；现有ClusterCapacityMain在多instrument模式生成15-1等无效ID。该轮改为单合约instrumentId=15、symbols=1，两永续普通轮保持相同参数，其余仍1000账户/4worker/4连接/global256/30+60秒。U本位MIXED主轮128合约不变；单合约结果不能与128合约混合口径比较。本轮不改交易逻辑/合法性校验，不以无效ID绕过检查。原多合约普通驱动可另做修复。
+
+普通成交余额/冻结/逐合约多空及恢复审计同样覆盖U本位轮：保留两个普通轮及U本位长稳Archive，发压全部结束后依次恢复；三轮各自比较重启前后状态，仍只启动一个成员。
+
+恢复等待预算修订：U本位1681万测量期Core消息的完整Archive重放超过3分钟，线程仍执行匹配/结算工作；原300秒为编排等待预算而非用户恢复SLA。在原Core PID81881继续运行的情况下更换等待编排，将启动等待预算扩大为1800秒，未重启或丢弃重放进度，未修改交易/恢复语义。实际总恢复耗时与结果入档，不修改吞吐窗口。
+
+恢复编排修订：U本位完整Archive replay于09:37:52进入Leader，原业务哈希aecf25bedd0b04b5及资金/持仓核对通过，真实快照产生2条valid记录。第一次快照重启于09:38:11触发ActiveDriverException，旧进程已退出而CNC最后心跳为09:38:09，属于重启间隔过短。保留异常日志，编排停机后等待12秒再启动，不强制删除活跃驱动目录，不重复已通过的完整Archive重放，只重试未完成的快照恢复。
+
+普通成交附加审计口径修正：首次审计的locked==0断言忽略了持仓保证金，属于审计编排错误而非已确认Core资金错误。CorePerpetualFinancialMatrixTest:839–842明确locked125=剩余持仓保证金75+50；修正为逐账户locked==positionMargin（无挂单场景）、委托冻结locked-positionMargin=0、预约0，仍保留余额守恒、多空逐合约净和0与快照前后账户哈希严格断言。原异常日志及旧审计源码入档。
+
+恢复编排再次修订：重试沿用追加日志时，旧PID的Leader行使新进程被过早判断就绪，造成只读查询超时；旧日志保留。改为只接受当前进程PID启动行之后的Leader标记，重试该未完成普通轮。U本位长稳Archive及快照已完成，不再重复。未修改任何Core资金/状态代码。
+
+
+### 2026-10-10 首轮实际结果：固定构建诊断，后续源码需重跑
+
+本轮构建为 master ff5a03da 加开跑前未提交改动，不是收尾时的工作区。09:00:37生成的 service JAR SHA-256 c8aded6b2959cc3e9a31c54f73afe1ea2e133818c25e71c47963d9929489c514，09:03:12生成的 benchmark JAR SHA-256 bb4fdbea9e051bf5c6b2bf50ca51994744c122ea6a34793bfa63a23197726e05，归档时均未变化。期间 AccountLaneState、LaneCommitDelta、MatcherSettlementDispatcher、PendingReservationTracker、TradingRuntimeState 等源码继续变化，SettlementLaneWorker/LanePublishedMap被删除；原有修改文件中7项指纹不一致，新增变化也保留最终git status。用户要求等当前代码改动完成后重新构建压测，因此以下只作为首轮固定构建的诊断记录，不能代替后续源码验证。
+
+全部8个发压轮次退出0、场景完成核对通过。主吞吐来自无profiler的测量窗口终态增量，批量按item展开；fill不计入业务操作。普通MATCH_STREAM是独立订单口径，其驱动计时包含排空。
+
+| 独立轮次 | 测量时长 | 业务终态操作/s | Core消息/s | 备注 |
+|---|---:|---:|---:|---|
+| MIXED主轮1 | 60.016162s | 252,686.452 | 24,180.537 | 排空6.062ms，2,685操作 |
+| MIXED主轮2 | 60.001520s | 265,113.117 | 25,364.524 | 排空27.472ms，2,679操作 |
+| MIXED主轮3 | 60.028163s | 289,176.367 | 27,656.452 | 排空6.746ms，2,682操作 |
+| MIXED独立GC | 60.027524s | 306,732.926 | 29,328.446 | 不并入主轮均值 |
+| MIXED独立JFR | 60.032065s | 269,455.983 | 25,778.207 | 不并入主轮均值 |
+| MIXED长稳 | 600.027518s | 293,030.134 | 28,023.195 | 69,739.735 fills/s |
+
+三主轮算术均值268,991.979业务操作/s，极差为均值13.6%；30秒预热后首轮窗口仍呈增长，未证明主要JIT已稳定。三个主轮global峰值256，窗口等待占测量时长86.50%–87.75%；持续队列占用、有效计算与自旋/依赖等待未分离，没有证明Core饱和。主轮提交到终态p99范围：单下单27.230–48.005ms、单撤单24.985–45.449ms、批量下单31.473–51.576ms、批量撤单43.220–71.237ms、标记价38.928–169.082ms。逐类型p50/p90/p95/p99/p99.9/max、样本数及批量计数见JSON；没有入口→accepted与accepted→terminal分段，不作跨进程时间差推算。闭环发压没有恒定计划到达率或coordinated omission修正。
+
+普通单合约MATCH_STREAM：U本位2,092,590笔订单/1,046,295成交，60.008秒，34,871.719订单/s，17,435.859 fills/s，p50=6.123ms、p99=26.492ms、p99.9=63.045ms；币本位1,873,266笔/936,633成交，60.005秒，31,218.329订单/s，15,609.164 fills/s，p50=6.418ms、p99=38.436ms、p99.9=88.604ms。两轮failedOrders=0，global峰值256，含标记价的submitted/completed分别2,092,650/1,873,326，unfinished=0，订单簿空、资金差0。不能与128合约MIXED合并或推导多合约容量。
+
+正确性：79项Maven测试、0失败/错误/跳过。35项覆盖混合负载、连续永续成交和256窗口；44项覆盖两永续全仓/逐仓、资金费、标记价/风控、强平/ADL/保险基金及原生快照/提交恢复。所有混合轮资金守恒、预期持仓及保留零售订单核对通过，HFT预约清零、accepted=terminal、未完成0；长稳175,826,144测量期业务终态操作、16,814,688 Core消息、41,845,760 fills，排空另计2,683操作/5.996ms。
+
+真实恢复：依次使用长稳U本位、普通U本位、普通币本位三个独立Archive，各执行完整重放→验证→实际ClusterTool快照（新增2条valid）→停机→快照重启→验证，六次最终核对通过。长稳业务哈希始终aecf25bedd0b04b5，完整重放到Leader约351秒。普通轮逐账户资金/持仓哈希在Archive和快照恢复一致：U本位b08fcaecbd26801e8cb4a21cd6bf63e205206eb0c03019798a6d1ad63dc422f3，币本位94207a67199b0dce3bbc6d7d8b4989640e86b46d6841dabbdbbeea3b81567783。各产品总资金1,000,000,000,000,000原始资产单位，委托冻结0/预约0；U本位多空各1,542,740单位、持仓保证金30,854,800，币本位多空各1,387,149、持仓保证金2,774,298；locked对应持仓保证金，并非要求locked本身为0。恢复等待/旧驱动心跳/追加日志误判/初次审计口径错误及重试均保留，不宣称所有编排尝试一次成功。历史重放日志有quorumPosition警告（ClusterErrors计数1）、Chronicle模块访问告警，不等同已验证资金错误。
+
+资源归因：三份JFR为node、client fork及JMH launcher，分别125.82/59.12/10.65MiB、116/112/113秒，DataLoss=0；通过RecordingFile流式分析只统计60秒测量窗口，原始summary及各view覆盖整个录制并单独标注。节点63次GC phase pause：p50=5.739ms、p95=6.810ms、p99/max=9.848ms；客户端327次：p50=1.420ms、p95=1.752ms、p99=1.998ms、max=2.892ms。ThreadAllocationStatistics可观测线程分配约节点299.69、客户端405.15MiB/s，边界及短命线程不完整；分配采样权重不是精确对象总数。独立JMH GC profiler仅客户端，363.017MiB/s、553次GC/575ms，43,261,025,624 B/op是含setup/warmup的单次JMH整轮，不能当作每业务操作分配。
+
+节点ObjectAllocationSample主要为OrderRuntime、long[]、byte[]、MatcherResult、ResolvedPlaceOrder；定位到MatcherResult.from、CoreMessageFlyweightDecoder.decode、TradingCommandCodec.decodePlaceOrder及ArrayList.grow，客户端主要byte[]/Long。Owner/Matcher/Account Lane的execution samples和约95%单核CPU包含BUSY_SPIN，不能作为有效计算饱和证据。测量窗743,340次FileWrite均在archive-conductor/RecordingWriter.onBlock；Owner另有2次类加载FileRead，栈经TradingCoreRuntime.encodeLaneMetrics，时间贴近只读测量边界。该边界有约72ms重叠，未观察到订单业务同步I/O，但不能宣称Owner所有I/O为零或排除native/mmap。
+
+长稳节点RSS114个稳态样本，首1,729,340/末1,597,592KiB、范围1,593,932–1,734,752KiB，OLS斜率-304.197KiB/s、跨度595.196秒。NMT端点和DirectBuffer/heap/GC/编译/停顿/线程/异常/系统采样入档；NMT端点包含初始化/预热，没有完整稳态native趋势和多轮GC后live-set，600秒RSS下降不能证明无泄漏。
+
+结论：首轮功能与资金恢复范围通过；正式性能证据无效，整体部分验证。pmset观测CPU_Speed_Limit从100降低，最低52，发压窗口持续限频；既有swap约4.7GiB也需保留系统背景。没有容量SLA、稳定预热及Core饱和证据，不据此宣布容量达标/优化收益或三节点容量。未覆盖HTTP/Gateway/Kafka/WebSocket完整应用、远端部署、止盈止损专项压力及资金费/强平/ADL单独尾延迟；这些业务的Maven正确性不是对应压测。下一轮需待源码完成后固定指纹重建；正式容量验收另需解决热控、校验发压端余量、稳定预热并补分段延迟/到达模型，不能复用首轮主分数。
+
+完整采集计划、随机种子、实际命令/JVM参数/PID、逐轮计数/尾延迟/时间序列、79项测试用例、资金及快照校验、JFR事件配置/summary/view/分配栈、原始路径/大小/SHA-256、异常与审计源码见[首轮证据](docs/validation/perpetual-current-20261010.json)。原始临时路径仅作历史定位，清理状态随后追加。
+
+首轮清理完成：资金/恢复及JFR汇总结构校验后，本轮进程已全部结束；删除独立临时目录 /tmp/surprising-perpetual-20261010-current（564个文件、22317759976逻辑bytes，含本轮Archive/驱动/日志/JFR/中间报告），仅删除指纹仍一致的本轮测试XML，变化或未锁定指纹的报告保留。构建JAR、其他工作区改动和入档汇总保留。重跑编排源码已另存独立准备目录，尚未启动任何新轮次。原始已删除路径仅作历史定位。
