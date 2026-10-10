@@ -29,16 +29,29 @@ public final class TreasuryRuntime {
             new IntObjectHashMap<>();
     private final IntObjectHashMap<LifecycleState> patchLifecycleBefore =
             new IntObjectHashMap<>();
-    private Thread owner;
+    private volatile Thread owner;
     private boolean orderBatchMutationScope;
 
-    void assertOwner() {
+    void bindOwner() {
         Thread current = Thread.currentThread();
         if (owner == null) owner = current;
         else if (owner != current) throw new IllegalStateException("treasury runtime is bound to another thread");
     }
 
+    void assertOwner() {
+        if (owner != Thread.currentThread()) bindOwner();
+    }
+
+    void handoffTo(Thread successor) {
+        if (successor == null) throw new IllegalArgumentException("treasury successor is required");
+        assertOwner();
+        owner = successor;
+    }
+
     void releaseOwnerForHandoff() {
+        if (owner != null && owner != Thread.currentThread()) {
+            throw new IllegalStateException("treasury ownership can only be released by its owner");
+        }
         owner = null;
     }
 

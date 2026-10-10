@@ -99,7 +99,7 @@ public final class AccountLaneState {
     private long matcherSettlementOperations;
     private long matcherSettlementLatencyNanos;
     private long matcherSettlementMaxLatencyNanos;
-    private Thread owner;
+    private volatile Thread owner;
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
 
     AccountLaneState(int laneId, int queueCapacity) {
@@ -112,11 +112,30 @@ public final class AccountLaneState {
         this.localFundsHash = computeFundsHash();
     }
 
-    public void bindOwner() {}
+    public void bindOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == null) owner = current;
+        else if (owner != current) throw new IllegalStateException("account lane is bound to another thread");
+    }
 
-    public void releaseOwnerForHandoff() {}
+    /** Bind the startup successor before starting it; no foreign thread can claim an unowned gap. */
+    void handoffTo(Thread successor) {
+        if (successor == null) throw new IllegalArgumentException("account lane successor is required");
+        assertOwner();
+        owner = successor;
+    }
 
-    void assertOwner() {}
+    /** Only initialization and a stopped worker may release account ownership. */
+    public void releaseOwnerForHandoff() {
+        if (owner != null && owner != Thread.currentThread()) {
+            throw new IllegalStateException("account lane ownership can only be released by its owner");
+        }
+        owner = null;
+    }
+
+    void assertOwner() {
+        if (owner != Thread.currentThread()) bindOwner();
+    }
 
     void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
                       int depth, int highWater) {
