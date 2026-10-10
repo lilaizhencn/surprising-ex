@@ -1681,8 +1681,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 包含尚未提升 revision 的 Lane 修改，失败时也必须回滚。 */
     public boolean hasUncommittedCommandChanges() {
         assertOwner();
-        return snapshotProjectionStateDirty() || !treasury.changedAssets().isEmpty()
-                || !treasury.changedFundingSymbols().isEmpty() || !treasury.changedLifecycleSymbols().isEmpty();
+        return snapshotProjectionStateDirty() || treasury.hasChangedValues();
     }
 
     boolean snapshotProjectionStateDirty() {
@@ -1820,9 +1819,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void beginOrderBatchMutationScope() {
         assertOwner();
         if (orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
-        if (snapshotProjectionStateDirty() || !treasury.changedAssets().isEmpty()
-                || !treasury.changedFundingSymbols().isEmpty()
-                || !treasury.changedLifecycleSymbols().isEmpty()) {
+        if (snapshotProjectionStateDirty() || treasury.hasChangedValues()) {
             throw new IllegalStateException("order batch requires a clean command mutation set");
         }
         orderBatchMutationScope = true;
@@ -3846,30 +3843,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LaneBalancePatches balances : accountRollback.patchBalancesBeforeByLane) {
             appendBalanceFundsDelta(balances, accumulator);
         }
-        treasury.changedAssets().forEach(assetId -> {
-            TreasuryRuntime.AssetState before = treasury.patchAssetBefore(assetId);
-            TreasuryRuntime.AssetState after = treasuryAssetValue(assetId);
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.FEE, Math.subtractExact(fee(after), fee(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.INSURANCE,
-                    Math.subtractExact(insurance(after), insurance(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.DEFICIT,
-                    Math.negateExact(Math.subtractExact(deficit(after), deficit(before))));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.LIQUIDATION_FEE,
-                    Math.subtractExact(liquidationFee(after), liquidationFee(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.FUNDING_RESIDUAL,
-                    Math.subtractExact(fundingResidual(after), fundingResidual(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.ROUNDING_RESIDUAL,
-                    Math.subtractExact(roundingResidual(after), roundingResidual(before)));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
-                    FundsPosting.Subledger.CLEARING_PNL,
-                    Math.subtractExact(clearingPnl(after), clearingPnl(before)));
-        });
+        treasury.appendFundsDelta(accumulator);
     }
 
     static void prepareBalanceFundsDelta(LaneBalancePatches patches,
@@ -3907,55 +3881,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return value == null ? 0 : value.lockedUnits();
     }
 
-    static long fee(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.fee();
-    }
-
-    static long insurance(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.insurance();
-    }
-
-    static long deficit(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.deficit();
-    }
-
-    static long liquidationFee(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.liquidationFee();
-    }
-
-    static long fundingResidual(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.fundingResidual();
-    }
-
-    static long roundingResidual(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.roundingResidual();
-    }
-
-    static long clearingPnl(TreasuryRuntime.AssetState value) {
-        return value == null ? 0 : value.clearingPnl();
-    }
-
     public PositionRuntime currentPatchPositionBefore(long positionKey) {
         return accountRollback.currentPositionBefore(positionKey);
     }
 
     public OrderRuntime currentPatchOrderBefore(long orderId) {
         return accountRollback.currentOrderBefore(orderId);
-    }
-
-    TreasuryRuntime.AssetState treasuryAssetValue(int assetId) {
-        long fee = treasury.fee(assetId);
-        long insurance = treasury.insurance(assetId);
-        long deficit = treasury.insuranceDeficit(assetId);
-        long liquidationFee = treasury.liquidationFee(assetId);
-        long fundingResidual = treasury.fundingResidual(assetId);
-        long roundingResidual = treasury.roundingResidual(assetId);
-        long clearingPnl = treasury.clearingPnl(assetId);
-        if ((fee | insurance | deficit | liquidationFee | fundingResidual | roundingResidual | clearingPnl) == 0) {
-            return null;
-        }
-        return new TreasuryRuntime.AssetState(fee, insurance, deficit, liquidationFee,
-                fundingResidual, roundingResidual, clearingPnl);
     }
 
     public void clearChangedKeys() {

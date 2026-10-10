@@ -14,8 +14,124 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class RuntimeTreasuryDeltaTest {
+
+    @Test
+    void recordsFirstTreasuryValuesAndIncludesAllSevenSubledgersInFundsAndRollback() {
+        TreasuryRuntime treasury = new TreasuryRuntime();
+        treasury.setFee(7, 90);
+        treasury.setInsurance(7, 500, 20);
+        treasury.setLiquidationFee(7, 1);
+        treasury.setFundingResidual(7, 4);
+        treasury.setRoundingResidual(7, 5);
+        treasury.setClearingPnl(7, -100);
+        treasury.clearChangedKeys();
+
+        treasury.setFee(7, 95);
+        treasury.setFee(7, 100);
+        treasury.setInsurance(7, 450, 25);
+        treasury.setLiquidationFee(7, 3);
+        treasury.setFundingResidual(7, 0);
+        treasury.setRoundingResidual(7, 6);
+        treasury.setClearingPnl(7, -54);
+
+        assertThat(treasury.patchAssetBefore(7)).isEqualTo(
+                new TreasuryRuntime.AssetState(90, 500, 20, 1, 4, 5, -100));
+        RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+        treasury.appendFundsDelta(funds);
+        funds.requireConserved(false);
+        assertThat(funds.toDelta().postings()).containsExactly(
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 10),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, -50),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.DEFICIT, -5),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.LIQUIDATION_FEE, 2),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FUNDING_RESIDUAL, -4),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.ROUNDING_RESIDUAL, 1),
+                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.CLEARING_PNL, 46));
+
+        treasury.rollbackChangedValues();
+
+        assertThat(treasury.fee(7)).isEqualTo(90);
+        assertThat(treasury.insurance(7)).isEqualTo(500);
+        assertThat(treasury.insuranceDeficit(7)).isEqualTo(20);
+        assertThat(treasury.liquidationFee(7)).isEqualTo(1);
+        assertThat(treasury.fundingResidual(7)).isEqualTo(4);
+        assertThat(treasury.roundingResidual(7)).isEqualTo(5);
+        assertThat(treasury.clearingPnl(7)).isEqualTo(-100);
+        assertThat(treasury.hasChangedValues()).isFalse();
+        assertThat(treasury.patchAssetBefore(7)).isNull();
+    }
+
+    @Test
+    void keepsSeparateAssetBeforeValuesAcrossRepeatedTransactions() {
+        TreasuryRuntime treasury = new TreasuryRuntime();
+        for (int asset = 0; asset < 25; asset++) treasury.setFee(asset, asset);
+        treasury.clearChangedKeys();
+        for (int transaction = 0; transaction < 3; transaction++) {
+            for (int asset = 24; asset >= 0; asset--) {
+                treasury.setFee(asset, 100 + asset);
+                treasury.setFee(asset, 200 + asset);
+                treasury.setInsurance(asset, 300 + asset, asset);
+            }
+            RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator(75);
+            treasury.appendFundsDelta(funds);
+            var postings = funds.toDelta().postings();
+            for (int asset = 0; asset < 25; asset++) {
+                assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
+                        FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 200));
+                assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
+                        FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, 300 + asset));
+            }
+            treasury.rollbackChangedValues();
+            for (int asset = 0; asset < 25; asset++) {
+                assertThat(treasury.fee(asset)).isEqualTo(asset);
+                assertThat(treasury.insurance(asset)).isZero();
+                assertThat(treasury.insuranceDeficit(asset)).isZero();
+            }
+            assertThat(treasury.hasChangedValues()).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = FundsPosting.Subledger.class, names = {
+            "FEE", "INSURANCE", "DEFICIT", "FUNDING_RESIDUAL", "ROUNDING_RESIDUAL", "CLEARING_PNL"})
+    void rejectsOverflowInSingleOrLaterAssetBeforeWritingAnyFunds(FundsPosting.Subledger subledger) {
+        for (boolean anotherAsset : new boolean[] { false, true }) {
+            TreasuryRuntime treasury = new TreasuryRuntime();
+            treasury.setFee(1, 4);
+            RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
+            if (anotherAsset) delta.addFee(1, 3);
+            switch (subledger) {
+                case FEE -> { treasury.setFee(2, Long.MAX_VALUE); delta.addFee(2, 1); }
+                case INSURANCE -> { treasury.setInsurance(2, Long.MAX_VALUE, 0); delta.addInsurance(2, 1); }
+                case DEFICIT -> { treasury.setDeficit(2, Long.MAX_VALUE); delta.addDeficit(2, 1); }
+                case FUNDING_RESIDUAL -> { treasury.setFundingResidual(2, Long.MAX_VALUE); delta.addFundingResidual(2, 1); }
+                case ROUNDING_RESIDUAL -> { treasury.setRoundingResidual(2, Long.MIN_VALUE); delta.addRoundingResidual(2, -1); }
+                case CLEARING_PNL -> { treasury.setClearingPnl(2, Long.MIN_VALUE); delta.addClearing(2, -1); }
+                default -> throw new AssertionError("unexpected Treasury subledger");
+            }
+            treasury.clearChangedKeys();
+
+            assertThatThrownBy(() -> delta.apply(treasury)).isInstanceOf(ArithmeticException.class);
+
+            assertThat(treasury.fee(1)).isEqualTo(4);
+            assertThat(treasury.hasChangedValues()).isFalse();
+            long unchanged = switch (subledger) {
+                case FEE -> treasury.fee(2);
+                case INSURANCE -> treasury.insurance(2);
+                case DEFICIT -> treasury.insuranceDeficit(2);
+                case FUNDING_RESIDUAL -> treasury.fundingResidual(2);
+                case ROUNDING_RESIDUAL -> treasury.roundingResidual(2);
+                case CLEARING_PNL -> treasury.clearingPnl(2);
+                default -> throw new AssertionError("unexpected Treasury subledger");
+            };
+            assertThat(unchanged).isEqualTo(subledger == FundsPosting.Subledger.ROUNDING_RESIDUAL
+                    || subledger == FundsPosting.Subledger.CLEARING_PNL ? Long.MIN_VALUE : Long.MAX_VALUE);
+        }
+    }
 
     @Test
     void clearingTwicePreservesFundsAndCapturesTheNextBeforeValue() {

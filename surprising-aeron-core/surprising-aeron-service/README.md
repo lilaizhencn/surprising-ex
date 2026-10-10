@@ -22,3 +22,13 @@ Matcher 在 `MatcherSettlementEvent.notifyDirectPublication()` 中先校验结�
 普通用户余额、持仓和挂单在 `surprising.realtime.enabled=true` 时继续通过 `ValkeyUserQueries` 读取 Redis/Valkey 投影。下单资金校验和结算使用核心权威账户状态，投影用于外部读取；投影的就绪状态和导出序号由实时模块检查。
 
 `AccountLaneWorker` 与 `SystemLedgerLane` 已提供常驻独占写线程、有界 SPSC 队列、背压和故障交接。当前 `TradingRuntimeState.startAccountLanes()` 仍只登记初始化标记，生产运行时尚未接入这些工作线程，Owner 资金写入迁移仍在实施，不能据此宣称生产账户并行或吞吐已恢复。相关定向测试共 87 项通过，包含四个分区的冷状态权威、业务拒绝回滚、触发单索引、风险查询和线程交接；按当前任务约束没有运行快照或恢复场景。
+
+### Treasury 结算的分配与溢出边界（2026-10-11）
+
+`TreasuryRuntime` 复用七列原语事务前值，首次写入捕获，成功提交或普通事务回滚后清空并保留容量。它直接向 `RuntimeFundsAccumulator` 追加七个子账的资金变更；`TradingRuntimeState.appendFundsDelta` 不再物化 Treasury 前后值对象或复制变更资产集合。这个缓冲只由 Treasury 所属线程访问，不是 Owner 的资金镜像。
+
+`RuntimeTreasuryDelta.apply` 在写入前检查整笔资金的溢出。单资产结算先计算六个结果到局部变量，全部通过后写入；多资产结算先检查全部资产再应用，不增加逐命令临时对象。回归覆盖手续费、保险、负债、强平费、资金费残差、舍入残差、清算盈亏，及单资产/多资产拒绝时不发生部分落账。
+
+`TreasurySettlementAllocationBenchmark` 单独测量写入、资金变更生成及逐资产守恒，使用 HotSpot JDK 27。修改前后 `applyAndClear` 的 JMH 对比中，1/16 资产轮转的分配分别从约 96/68 B/次降至约 0.0007/0.0011 B/次；包含七个子账与守恒校验的两组 300 万次循环，ThreadMXBean 均测得 0 字节线程分配，JFR 未捕获 Treasury 热路径分配。该结果仅覆盖 Treasury 局部路径，不能替代真实 Aeron 单节点业务吞吐或整个核心的分配验收。SystemLedgerLane 的生产接线和 Owner 退出资金写入仍需继续。
+
+外部余额、持仓、当前挂单查询在 realtime 启用时仍走 Redis/Valkey 投影；Account Lane 的读取面向内部风控、预留、结算和显式核验。
