@@ -83,6 +83,11 @@ final class CoreMatchingFlow {
                 && owner.pendingMatching.isSubmissionHead(sequence, shard);
         CommandSlot current = owner.pendingMatching.get(sequence);
         if (current != null) {
+            if (current.replacementAdmission() != null) {
+                if (!current.replacementAdmission().complete())
+                    throw new IllegalStateException("terminal command has incomplete replacement admission");
+                owner.runtimeState.releaseReplacementAdmission(current.takeReplacementAdmission());
+            }
             if (current.placeAdmission() != null && !current.placeAdmissionOwnerCollected()
                     && !collectPlaceAdmissionIfReady(current)) {
                 throw new IllegalStateException("terminal command has an incomplete place admission");
@@ -208,6 +213,7 @@ final class CoreMatchingFlow {
                 && pending.orderBatch.nextIndex > 0 && pending.isMatchingSubmitted();
         if (pending.crossShardCancellationStarted
                 || !batchContinuation && owner.matchingProgress.submissionDeferred(pending.sequence())) return;
+        if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
         pending.prepareLaneResultTarget(owner.responseArena);
         if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
             if (!collectPlaceAdmissionIfReady(pending)
@@ -404,6 +410,27 @@ final class CoreMatchingFlow {
     boolean placeAdmissionOutstanding(CommandSlot pending) {
         OrderBatchPending batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
+    }
+
+    boolean collectReplacementAdmissionIfReady(CommandSlot pending) {
+        var event = pending.replacementAdmission();
+        if (event == null || pending.matchingAdmission() != null || pending.hasMatchingRejection()) return true;
+        if (!event.complete()) { owner.runtimeState.assertAccountLanesHealthy(); return false; }
+        RuntimeException rejection = event.rejection();
+        try {
+            if (rejection != null) throw rejection;
+            var admission = event.admission();
+            if (admission.resolved().orderId() != admission.originalOrderId())
+                owner.requireOrderIdentityAvailable(admission.userId(), admission.command());
+            pending.withAdmission(admission);
+            pending.withPreMatchingCancellations(owner.admissions.replacementPreMatchingCancellations(pending));
+        } catch (com.surprising.aeron.service.exception.CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
+            pending.rejectMatching(failure instanceof com.surprising.aeron.service.exception.CoreStateRejectedException rejected
+                    ? CoreResultCode.fromRejectionCode(rejected.code())
+                    : failure instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
+            owner.matchingProgress.submissionCompleted(pending);
+        }
+        return true;
     }
 
     /** Collect a completed PLACE admission once before ordered commit. */

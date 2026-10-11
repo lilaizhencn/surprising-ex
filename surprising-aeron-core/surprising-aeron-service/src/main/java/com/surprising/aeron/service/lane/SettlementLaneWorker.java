@@ -513,6 +513,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
             return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.state.PlaceBatchAdmissionEvent event)
             return event.coreSequence();
+        if (command instanceof com.surprising.aeron.service.state.ReplacementAdmissionEvent event)
+            return event.coreSequence();
         return 0;
     }
 

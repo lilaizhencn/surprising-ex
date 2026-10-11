@@ -171,6 +171,7 @@ final class MatchingCommandAdmission {
         List<Long> preMatchingCancellations = List.of();
         ResolvedMatchingAdmission admission = null;
         com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission = null;
+        com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission = null;
         owner.resultBuilder.beginCommand();
         owner.commits.beginCommitPublicationBatch();
         try {
@@ -182,15 +183,16 @@ final class MatchingCommandAdmission {
                             message.header().commandId(), sequence, clusterTimestamp, clusterPosition);
                 }
                 case CANCEL -> validatePendingCancel(message, decodedCommand);
-                case REPLACE -> admission = validatePendingReplace(message, decodedCommand, false);
-                case AMEND -> admission = validatePendingReplace(message, decodedCommand, true);
+                case REPLACE -> replacementAdmission = dispatchReplacementAdmission(message, decodedCommand, false, sequence);
+                case AMEND -> replacementAdmission = dispatchReplacementAdmission(message, decodedCommand, true, sequence);
                 case TRIGGER -> validatePendingTrigger(decodedCommand);
                 case LIQUIDATION -> validatePendingLiquidation(decodedCommand);
                 case LIQUIDATION_BATCH -> validatePendingLiquidationBatch(decodedCommand);
                 case SETTLEMENT -> validatePendingSettlement(decodedCommand);
             }
-            preMatchingCancellations = preMatchingCloseCapacityCancellations(
-                    operation, message, decodedCommand, admission, placeAdmission);
+            if (replacementAdmission == null)
+                preMatchingCancellations = preMatchingCloseCapacityCancellations(
+                        operation, message, decodedCommand, admission, placeAdmission);
         } catch (CoreStateRejectedException exception) {
             if (owner.commits.commitPublicationDirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
@@ -239,6 +241,7 @@ final class MatchingCommandAdmission {
             pending.activateDeferredMatching();
         }
         if (placeAdmission != null) pending.placeAdmission(placeAdmission);
+        if (replacementAdmission != null) pending.replacementAdmission(replacementAdmission);
         registerPendingLifecycle(pending);
         if (deferredPending == null) {
             owner.appliedCommandCount = sequence;
@@ -304,11 +307,11 @@ final class MatchingCommandAdmission {
         owner.resultBuilder.setSingleChangedOrder(command.orderId());
     }
 
-    ResolvedMatchingAdmission validatePendingReplace(
-            CoreMessage message, DecodedMatchingCommand decodedCommand, boolean amend) {
+    com.surprising.aeron.service.state.ReplacementAdmissionEvent dispatchReplacementAdmission(
+            CoreMessage message, DecodedMatchingCommand decodedCommand, boolean amend, long sequence) {
         long originalOrderId = amend ? decodedCommand.amendOrder().originalOrderId()
                 : decodedCommand.replaceOrder().originalOrderId();
-        var order = owner.runtimeState.order(originalOrderId);
+        var order = owner.activeOrderIndex.activeOrderRuntime(originalOrderId);
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         if (order.userId() != message.header().userId()) {
             throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
@@ -319,21 +322,31 @@ final class MatchingCommandAdmission {
         if (amend && order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
         }
-        PlaceOrderCommand replacement = owner.matchingFlow.replacementFor(decodedCommand,
-                amend ? CommandSlot.Operation.AMEND : CommandSlot.Operation.REPLACE, order);
-        if (replacement.orderId() != originalOrderId) {
-            owner.requireOrderIdentityAvailable(message.header().userId(), replacement);
-        }
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                owner.identities, message.header().userId(), replacement, owner.currentClusterTimestamp);
-        long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
-                owner.runtimeState, owner.identities, message.header().userId(), resolved,
-                owner.openInterestIndex.openInterestSteps(replacement.instrumentId()), owner.activeOrderIndex, originalOrderId);
+        String instrumentId = amend ? owner.identities.instrumentId(order.symbolId())
+                : decodedCommand.replaceOrder().replacement().instrumentId();
+        var decision = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
+                message.header().userId(), instrumentId, owner.currentClusterTimestamp);
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
-        var user = owner.runtimeState.user(message.header().userId());
-        return new ResolvedMatchingAdmission(message.header().userId(), originalOrderId, order.revision(),
-                user == null ? 0 : user.revision(), replacement, resolved, requiredReservation);
+        return owner.runtimeState.dispatchReplacementAdmission(sequence, message.header().userId(), originalOrderId,
+                amend ? decodedCommand.amendOrder() : null, amend ? null : decodedCommand.replaceOrder(),
+                decision, owner.openInterestIndex.openInterestSteps(instrumentId),
+                owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
+    }
+
+    List<Long> replacementPreMatchingCancellations(CommandSlot pending) {
+        var admission = pending.matchingAdmission();
+        var close = pending.replacementAdmission().closeCapacityCancellations();
+        long[] selfTrade = preMatchingSelfTradeCancellations(admission.userId(), admission.command(),
+                admission.originalOrderId(), admission.resolved().matchingPriceTicks());
+        if (close.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);
+        if (selfTrade.length == 0) return close;
+        var ids = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
+        for (int i = 0; i < close.size(); i++)
+            ids.add(close instanceof ImmutableLongArrayList primitive ? primitive.valueAt(i) : close.get(i));
+        for (long id : selfTrade) ids.add(id);
+        long[] sorted = ids.toArray(); java.util.Arrays.sort(sorted);
+        return ImmutableLongArrayList.takeOwnership(sorted);
     }
 
     void validatePendingTrigger(DecodedMatchingCommand decodedCommand) {

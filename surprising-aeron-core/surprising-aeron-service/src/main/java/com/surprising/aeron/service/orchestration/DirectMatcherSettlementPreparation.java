@@ -103,7 +103,6 @@ final class DirectMatcherSettlementPreparation {
 
     private MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
         var admission = owner.requireMatchingAdmission(pending);
-        owner.requireUnchangedAdmissionState(admission);
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
                 pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
                 pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,

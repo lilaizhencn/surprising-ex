@@ -368,6 +368,17 @@ public final class RuntimeIdentityRegistry {
 
     public long findClientKeyValue(long userId, String clientOrderId) {
         assertOwner();
+        return findPreparedClientKeyValue(userId, clientOrderId);
+    }
+
+    long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId))
+            throw new IllegalStateException("client lookup crossed Account Lane");
+        return findPreparedClientKeyValue(userId, clientOrderId);
+    }
+
+    private long findPreparedClientKeyValue(long userId, String clientOrderId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return 0;
         long key = deterministicKey(userId, clientOrderId);

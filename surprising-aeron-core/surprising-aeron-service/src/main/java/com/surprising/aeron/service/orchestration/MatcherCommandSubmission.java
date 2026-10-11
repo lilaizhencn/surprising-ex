@@ -68,9 +68,7 @@ final class MatcherCommandSubmission {
                     || pending.operation() == CommandSlot.Operation.AMEND)
                     && direct != null) {
                 ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
-                owner.requireUnchangedAdmissionState(admission);
-                var order = owner.runtimeOrder(admission.originalOrderId());
-                String instrumentId = owner.runtimeOrderSymbol(order);
+                String instrumentId = admission.command().instrumentId();
                 return directWithCancellations(pending, direct, preMatchingCancellations,
                         admission.resolved().orderId(), pending.prepareReplaceMatching(
                                 owner, owner.matchingFlow.matcherShard(pending), admission.resolved().orderId(), userId,
@@ -111,8 +109,7 @@ final class MatcherCommandSubmission {
                 }
                 case REPLACE, AMEND -> {
                     ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
-                    var order = owner.runtimeOrder(admission.originalOrderId());
-                    String instrumentId = owner.runtimeOrderSymbol(order);
+                    String instrumentId = admission.command().instrumentId();
                     yield new MatchingSubmission(admission.resolved().orderId(),
                             () -> owner.matchingAdapter.replaceOrder(userId, admission.originalOrderId(),
                                     instrumentId, admission.resolved()));

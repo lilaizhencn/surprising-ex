@@ -194,7 +194,7 @@ final class MatchingPipelineProgress {
 
     /** Drain completion cursors only to wake the batch dispatcher or ordered commit head. */
     void drainPlaceAdmissionNotifications() {
-        readyShardMask |= owner.runtimeState.takePlaceBatchAdmissionReadyShardMask();
+        readyShardMask |= owner.runtimeState.takeAccountAdmissionReadyShardMask();
     }
 
     void submitDeferredMatchingAfterBatch() {

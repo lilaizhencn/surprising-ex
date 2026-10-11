@@ -129,7 +129,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 永久运行的各账户 Lane 工作线程；承担所有多核真并发结算。 */
     public final SettlementLaneWorker[] laneWorkers;
     /** 批量准入完成的 shard 唤醒位；批上下文本身保存唯一完成事实。 */
-    private final java.util.concurrent.atomic.AtomicLong placeBatchAdmissionReadyShards =
+    private final java.util.concurrent.atomic.AtomicLong accountAdmissionReadyShards =
             new java.util.concurrent.atomic.AtomicLong();
     /** Admission payload stays in its command event; this queue only wakes the exact Owner slot. */
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
@@ -161,6 +161,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 可复用的 placeAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
+            new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<ReplacementAdmissionEvent> replacementAdmissionEventPool =
             new java.util.ArrayDeque<>();
     /** 可复用的 placeBatchAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
@@ -1181,6 +1183,33 @@ public final class TradingRuntimeState implements AutoCloseable {
         placeAdmissionEventPool.addFirst(event);
     }
 
+    public ReplacementAdmissionEvent dispatchReplacementAdmission(long sequence, long userId,
+            long originalOrderId, com.surprising.aeron.protocol.AmendOrderCommand amend,
+            com.surprising.aeron.protocol.ReplaceOrderCommand replace,
+            com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision,
+            long openInterestSteps, int matcherShard, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        int laneId = topology.accountLaneId(userId);
+        ensureLaneWorkerCapacity(1L << laneId);
+        ReplacementAdmissionEvent event = replacementAdmissionEventPool.pollFirst();
+        if (event == null) event = new ReplacementAdmissionEvent();
+        event.prepare(sequence, userId, originalOrderId, amend, replace, decision,
+                openInterestSteps, matcherShard, this, identities);
+        if (!accountLanesStarted) event.execute(accountLanes[laneId]);
+        else {
+            releaseOwnerLaneAccess();
+            laneWorkers[laneId].submit(event);
+        }
+        return event;
+    }
+
+    public void releaseReplacementAdmission(ReplacementAdmissionEvent event) {
+        assertOwner();
+        if (event == null) return;
+        event.clear();
+        replacementAdmissionEventPool.addFirst(event);
+    }
+
     public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
             long coreSequence, long userId, java.util.UUID commandId,
             ResolvedPlaceOrder[] orders, long[] openInterestSteps,
@@ -1340,18 +1369,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         return placeAdmissionReadyQueues[laneId].poll();
     }
 
-    /** Batch admission retains its legacy Owner notification cursor until batch routing is migrated. */
-    void publishPlaceBatchAdmissionReady(int matcherShard) {
+    /** Account admission wakes the matching submission head without transferring business data. */
+    void publishAccountAdmissionReadyShard(int matcherShard) {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("invalid matcher shard");
         }
-        placeBatchAdmissionReadyShards.getAndAccumulate(1L << matcherShard, SET_READY_BITS);
+        accountAdmissionReadyShards.getAndAccumulate(1L << matcherShard, SET_READY_BITS);
         signalOwnerCompletion();
     }
 
-    public long takePlaceBatchAdmissionReadyShardMask() {
+    public long takeAccountAdmissionReadyShardMask() {
         assertOwner();
-        return placeBatchAdmissionReadyShards.getAndSet(0L);
+        return accountAdmissionReadyShards.getAndSet(0L);
     }
 
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
@@ -1371,7 +1400,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Owner 只探测本阶段就绪标记；队列仍是实际结果的唯一来源。 */
     public boolean hasPlaceAdmissionNotifications() {
-        return placeBatchAdmissionReadyShards.get() != 0;
+        return accountAdmissionReadyShards.get() != 0;
     }
 
     public boolean hasSettlementNotifications() {

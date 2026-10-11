@@ -152,7 +152,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         TradingRuntimeState completionRuntime = runtime;
         completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         completed = true;
-        completionRuntime.publishPlaceBatchAdmissionReady(matcherShard);
+        completionRuntime.publishAccountAdmissionReadyShard(matcherShard);
     }
 
     void clear() {

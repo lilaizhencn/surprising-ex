@@ -45,6 +45,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** Normal PLACE admission runs alongside the settlement continuation. */
     private PlaceAdmissionEvent placeAdmission;
     private boolean placeAdmissionOwnerCollected;
+    private com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
@@ -316,6 +317,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         cancelContinuation = null;
         placeAdmission = null;
         placeAdmissionOwnerCollected = false;
+        replacementAdmission = null;
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
@@ -385,6 +387,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     RuntimeFundsAccumulator fundsAccumulator() { return fundsAccumulator; }
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission matchingAdmission() { return admission; }
+    com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission() { return replacementAdmission; }
+    void replacementAdmission(com.surprising.aeron.service.state.ReplacementAdmissionEvent event) {
+        if (event == null || replacementAdmission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
+            throw new IllegalStateException("invalid replacement admission slot");
+        replacementAdmission = event;
+    }
+    com.surprising.aeron.service.state.ReplacementAdmissionEvent takeReplacementAdmission() {
+        var value = replacementAdmission; replacementAdmission = null; return value;
+    }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
         return continuationKind == ContinuationKind.SETTLEMENT ? settlementContinuation : null;
     }
@@ -510,6 +521,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         cancelContinuation = null;
         placeAdmission = null;
         placeAdmissionOwnerCollected = false;
+        replacementAdmission = null;
         settlementPlan = null;
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
@@ -829,6 +841,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitContextActive = false;
         matchingRejection = null;
         placeAdmission = null;
+        replacementAdmission = null;
         matchingLifecycle = MATCHING_ADMITTED;
         deferredClusterTimestamp = 0;
         deferredClusterPosition = 0;

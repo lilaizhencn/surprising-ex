@@ -89,6 +89,18 @@ public final class RuntimeOrderAdmission {
                 0, clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
+    static long requiredReplacementReservationPrepared(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
+        OrderRuntime original = runtime.order(excludedOrderId);
+        String originalSymbol = original != null && original.symbolId() == order.symbolId()
+                ? order.instrumentId() : null;
+        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+                excludedOrderId, clientKey, order.symbolId(), positionKey,
+                lifecycleSettled, fundingInProgress, originalSymbol);
+    }
+
     private static long requiredReservation(
             TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,

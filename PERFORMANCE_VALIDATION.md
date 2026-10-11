@@ -5169,3 +5169,30 @@ HotSpot Corretto JDK27/G1，248项资金/并发回归及50项源码/协议/bench
 失败记录保留：`matcher-ledger-recycle-final` 误从已移除活动订单中读取测试夹具，改为启动 worker 前保留引用后通过；首轮 `matcher-ledger-receipt-jmh` 两个参数重复使用 Core 序号被拒绝，虽进程返回 0 但有效结果为 0，标为失败；修正版递增序号并启用 `-foe true`。
 
 结论为局部回执边界已验证，生产 `SystemLedgerLane` 尚未接线，Owner 全部资金职责退出、L1 全部状态归属、整链路零分配及真实容量仍未完成。未测生产接线/native、快照、恢复、wallet；依据为路径尚未激活及用户明确排除场景。当前 Owner 的资金费、保险、強平、提交/查询等路径仍需迁移。结构化证据见 `docs/validation/matcher-ledger-receipt-20261011.json`，所有命令与失败/成功结果保留在同一 artifactRoot。
+
+
+## 2026-10-11 普通改单准入移交 Lane：采集前计划
+
+基于 master `59c6508e` 的本轮未提交修改。Owner 用已有 ActiveOrderIndex 路由并捕获不可变币对、价格和费率参数；所属 Lane 执行原订单/账户版本、持仓、杠杆、风险限额及所需冻结检查。Owner 仅观察事件完成并提交撮合。准入对象随命令保留到终态，结算 Lane 保留原版本校验。批量改单和剩余 Owner 读取、完整生产 Ledger 接线不在本模块的完成声明内。
+
+验证门槛：Owner 读取账户表时直接失败的边界测试通过；阻塞该 Lane 时其它 Lane 仍推进；未完成准入不能回收；拒绝后槽位重用正确；相关六产品线资金/订单/协议/源码边界通过。新增实际 Account worker 上复用改单准入的 JMH，256 技术准入槽，1/4 workers，1 fork/1 thread，3×1s 预热、5×1s 测量；无 profiler 主分数与独立 `-prof gc` 分开，保留不可变业务输入/结果的真实分配量，不宣称全 Core 零分配。真实 LP MIXED 固定 1 节点/1 Matcher/4 Lane、global/session256、batch20、128 币对、60s 预热/60s 测量、G1。目标稳定终态 50 万业务项/s，限频则容量证据无效；必须 accepted=terminal、unfinished/backlog=0、资金差=0、业务错误/超时=0。仅当前源码，旧提交不作为性能对照。另跑同配置 native JFR 对齐测量窗口，运行期间不构建、测试、分析或压缩。本轮排除快照、恢复、wallet，完整命令保存在同一 artifactRoot 的 `replacement-lane-plan.json`。
+
+
+#### 普通改单 JFR 覆盖补充计划（采集前）
+
+固定 MIXED 负载正式窗口没有持续普通 AMEND/REPLACE，整链路 JFR 用于现状归因，不能验证该路径热点消失。补采 `ReplacementAdmissionBenchmark.admitAmendments`：256 槽、4 个实际 Lane，1 fork/thread、3×1s 预热、5×1s 测量，profile 设置、maxsize32m。整个 fork 包含启动和预热，单列技术路径覆盖及 DataLoss，不作为 Core 容量或精确零分配证据。计划详见本轮 artifact `replacement-admission-stage-profile-plan.json`，继续排除快照/恢复/wallet。
+
+
+#### 普通 AMEND/REPLACE Lane 准入：结果与范围（2026-10-11）
+
+当前 master `59c6508e` 加本轮未提交改动，只验证当前代码，不检出旧版本。Owner 以现有 ActiveOrderIndex 路由并捕获不可变市场元数据；所属 Lane 只读原订单、账户、冻结、持仓和杠杆，构造保留到终态的结果；Owner 读取完成标记后发 Matcher，实际撤单/冻结/版本核验仍在 Lane。复用现有按 Matcher 分片的 AtomicLong 就绪字，不新增全局业务镜像或序号通知队列。新事件负责真实跨线程准入/生命周期边界，池只复用技术槽，CommandSlot 保留同一份解析结果，没有额外业务快照。
+
+HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacement-lane-boundaries-verified`44项、`replacement-lane-benchmark-boundaries`6项，共347项执行全部通过，源码在各轮执行中一致。覆盖六产品资金/撮合/保险/ADL/交割行权及协议、线程、实时投影契约；新增拦截Owner读取账户表、独立Lane进展、提前回收拒绝、失败后的同槽复用。20模块干净构建通过，1807个源码文件指纹、1763项服务/压测JAR类字节核对一致。此前错误Owner身份访问器导致Lane退出的失败、测试夹具编译/限额错误均留档，初始失败轮的旧XML不得当作通过证据；最终源码和结果见 `replacement-lane-admission-20261011.json`。
+
+`ReplacementAdmissionBenchmark.admitAmendments`：256在途技术槽，1/4实际Lane，1fork/thread，3×1s预热、5×1s测量。无采样分别2084337.415±186240.519与1728342.909±327691.404 technical preflights/s；独立gc轮分别152.003012和152.003497B/次、GC5/4。输入/市场元数据为常驻夹具，不包括Matcher、结算或解码，不作Core吞吐/全链路零分配声明。单独profile fork覆盖实际Lane的resolve和execute，主要分配为PlaceOrderCommand与ResolvedMatchingAdmission；包含启动预热，ExecutionSample351、DataLoss0，不能用它的总分配当稳定Core窗口。
+
+真实单节点固定原负载：LP MIXED、1Matcher、4Lane BUSY_SPIN、Owner/Matcher ADAPTIVE、service YIELDING、global/session256、batch20、symbols128、seed25620、60s预热/60s测量、G1。无采样正式窗口60.031177s，terminal business18541442、Core1772802、308863.544业务项/s、29531.355Core消息/s；排空5.652728ms另完成2686项/254消息，最终offered=terminal=18544128项/1773056消息、unfinished0、fundsDiff0、持仓/预留/终态核对通过。256窗口背压时间比例约86.98%，只有队列高水位而无增长时间序列；固定输出未给单独accepted计数及分业务完整尾延迟，明确缺口。测量CPU_Speed_Limit56/58/60，容量验收无效，不按限频比例外推50万。
+
+独立整链路JFR同构建、同配置，正式窗口1791704222358–1791704282393，292547.789业务项/s、27977.572Core消息/s，资金/终态通过；限频58/60/62，容量同样无效。按窗口内59次ThreadAllocationStatistics首末差约58.798s估算线程分配速率，再除正式业务速率，Core约342653133.644B/s、1171.272B/业务项；这是近似值，采样不能当精确对象数。GCPhasePause68次/434632259ns、最大10334812ns；DataLoss0，窗口内未记录Owner/Lane监视器进入，不能证明synchronized不存在或阈值以下竞争为0。preparedOrder、OrderRuntime.snapshot、MatcherResult.from、resolveValues和协议解码仍为主要分配站点。该fixed MIXED正式窗口没有持续普通AMEND/REPLACE，因此整链路数据只验证现状及正确性，不证明该路径的吞吐收益。
+
+结论：普通改单准备路径的Lane读表边界通过，整体性能及完整Shared-Nothing只属部分验证。批量改单/触发、Owner其余权威账户读取、生产SystemLedgerLane及Treasury资金写入退出仍未完成，pendingReservation监视器仍保留。短测不证明长期稳定或无泄漏；本轮按用户要求不测snapshot/recovery/wallet。所有本轮压测进程已结束，本轮临时data/aeron/client-aeron及另4个生成目录清理；4份JFRgzip保留并校验解压SHA后删除raw，记录见 `replacement-admission-cleanup.json`。原始历史路径仅作定位，保留summary/view、正式窗口分析、命令/环境、源/JAR指纹及各失败记录。

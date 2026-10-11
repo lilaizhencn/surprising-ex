@@ -1230,16 +1230,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return admission;
     }
 
-    void requireUnchangedAdmissionState(ResolvedMatchingAdmission admission) {
-        OrderRuntime original = runtimeOrder(admission.originalOrderId());
-        var user = runtimeState.user(admission.userId());
-        long userRevision = user == null ? 0 : user.revision();
-        if (original == null || original.revision() != admission.originalOrderRevision()
-                || userRevision != admission.userRevision()) {
-            throw new IllegalStateException("replace admission state changed before matcher completion");
-        }
-    }
-
     CoreMatchingOrder matchingOrder(long orderId) {
         com.surprising.aeron.service.state.OrderRuntime order = runtimeOrder(orderId);
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "runtime order is missing");

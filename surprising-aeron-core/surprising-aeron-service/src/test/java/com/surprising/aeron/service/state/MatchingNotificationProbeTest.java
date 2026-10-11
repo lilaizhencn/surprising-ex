@@ -51,11 +51,11 @@ class MatchingNotificationProbeTest {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 2, 0, 1, 2,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (var runtime = new TradingRuntimeState(topology)) {
-            runtime.publishPlaceBatchAdmissionReady(1);
-            runtime.publishPlaceBatchAdmissionReady(0);
-            runtime.publishPlaceBatchAdmissionReady(1);
+            runtime.publishAccountAdmissionReadyShard(1);
+            runtime.publishAccountAdmissionReadyShard(0);
+            runtime.publishAccountAdmissionReadyShard(1);
             assertThat(runtime.hasMatchingNotifications()).isTrue();
-            assertThat(runtime.takePlaceBatchAdmissionReadyShardMask()).isEqualTo(3);
+            assertThat(runtime.takeAccountAdmissionReadyShardMask()).isEqualTo(3);
             assertThat(runtime.hasMatchingNotifications()).isFalse();
         }
     }
