@@ -21,6 +21,8 @@ JMH metadataAndSequenceFanout（1线程/每配置1fork，3×1s预热+5×1s测量
 
 Treasury 前值捕获与资金差计算已改为复用 primitive 数组，单/多资产溢出在首笔写入前拒绝；240项资金回归+50项边界执行及20模块clean package通过。局部四组共1200万事务ThreadMXBean增量均为0，资金守恒通过。最新无采样425088.514业务项/s、资金差/unfinished0；正式窗口限频70/72/75，容量无效。独立整链路JFR约1172.21B/业务项、GC pause92次/总453.10ms/最大9.15ms、DataLoss0；Owner监视器样本来自JFR内部StringPool。整链路仍分配订单/快照/撮合与协议对象，生产SystemLedgerLane接线仍未完成，详见[资金原语缓冲验证](docs/validation/treasury-primitives-20261011.json)。
 
+SystemLedgerLane 原账本队列基础已验证：248项资金/并发+50项边界执行通过，新增32768次槽位复用和512次停驻窗口发布；固定256槽七子账本JMH约0.00115B/事务，独立8388608事务生产者/Ledger线程计数均0B。**生产Runtime尚未启动此Ledger，Owner资金交接未完成**；局部队列分数不作Core容量。详见[账本基础验证](docs/validation/system-ledger-foundation-20261011.json)。
+
 pendingReservationSequences监视器暂留，待剩余Owner读取迁入Lane并落实所有权断言后一起移除。Owner仍有权威读取、Treasury写入及风险/输出职责，不宣称所有权已彻底切开。按用户范围，本轮不执行快照、恢复或wallet场景。
 
 证据与范围见 [验证记录](docs/validation/lane-owned-scopes-wakeup-20261011.json)。原始数据位于 ../performance-artifacts/lane-parallel-20261010T144735Z/，保留源码/JAR SHA、日志、测量/资金指标、系统采样、XML、JMH及JFR窗口聚合；单因素汇总见current-factors-results.json，最新JFR见l5-current-scopes-jfr-window-analysis.json。

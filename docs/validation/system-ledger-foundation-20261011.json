@@ -1,0 +1,82 @@
+{
+  "at": "2026-10-11T06:13:44.008074+00:00",
+  "status": "Mailbox foundation verified; production SystemLedgerLane runtime wiring and Owner money handoff NOT complete",
+  "baseHead": "f606cf63c6648fde5286f8de27912a54fb8bf9d2",
+  "comparisonCommit": "not applicable; only current master tested",
+  "sourceFiles": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TreasuryRuntime.java": "dbc0e6bd9727289ad259356922f9907f1663a2a29b1edf1166c2f5eab4bad937",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/SystemLedgerLane.java": "27bf1153ccdfe07bfdd1e9049cbb577345270a026fef931ec3c0a3e255a4dc9b",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/SystemLedgerLaneTest.java": "4b45624fd55a110278c38401f6e1f761198bb30c34f74d01789259fc5c8921dc",
+    "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/state/SystemLedgerAllocationBenchmark.java": "cef7c0384fc8906031cfef8e69a40bdf1f2cafdd4778175657c91bd94da9c589"
+  },
+  "ownership": "The standalone lane takes the existing Treasury instance, never mirrors balances; Entry readiness precedes writes, Entry completion precedes slot reuse; normal/fatal shutdown joins the worker before ownership returns",
+  "tests": [
+    {
+      "run": "system-ledger-foundation-financial",
+      "totals": {
+        "tests": 248,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    },
+    {
+      "run": "system-ledger-foundation-boundaries",
+      "totals": {
+        "tests": 50,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    }
+  ],
+  "newConcurrencyTests": {
+    "slotTransactions": 32768,
+    "deterministicParkingWindows": 512,
+    "testMethods": 8
+  },
+  "cleanPackage": {
+    "modules": 20,
+    "sourceFiles": 1802,
+    "jarClassChecks": 1747,
+    "passed": true
+  },
+  "jmh": {
+    "run": "system-ledger-mailbox-jmh",
+    "scope": "mailbox stage with actual seven-subledger postings, not full Core capacity",
+    "fixedWindow": 256,
+    "operationsPerInvocation": 256,
+    "gc": "G1",
+    "forks": 1,
+    "threads": 1,
+    "warmup": "3x1s",
+    "measure": "5x1s",
+    "transactionsPerSecond": 5523904.56335797,
+    "error": 167842.54287238495,
+    "bytesPerTransaction": 0.001143901953203555,
+    "gcCount": 0.0
+  },
+  "probe": {
+    "warmupTransactions": 1048576,
+    "transactions": 8388608,
+    "producerAllocatedBytes": 0,
+    "ledgerAllocatedBytes": 0,
+    "fundsVerified": true,
+    "formalDuration": "PT1.553727212S",
+    "ledgerExecutionSamples": 72,
+    "ledgerAllocationEvents": 0,
+    "dataLoss": 0,
+    "scope": "warmed standalone Ledger worker plus Owner producer; no production/Core zero-allocation or leak claim"
+  },
+  "startupFailure": "First probe lacked required Agrona internal.misc exports/opens; failure command/log retained and corrected probe rerun successfully",
+  "next": "Wire all matching/control/financial admission, commit/rollback/query paths before activating this worker in production; avoid a per-order global qualification barrier",
+  "excluded": [
+    "snapshot",
+    "recovery",
+    "wallet"
+  ],
+  "artifactRoot": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z",
+  "cleanup": "system-ledger-foundation-cleanup.json"
+}

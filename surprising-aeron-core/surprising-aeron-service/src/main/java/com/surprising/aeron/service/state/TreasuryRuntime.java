@@ -37,7 +37,7 @@ public final class TreasuryRuntime {
             new IntObjectHashMap<>();
     private final IntObjectHashMap<LifecycleState> patchLifecycleBefore =
             new IntObjectHashMap<>();
-    private Thread owner;
+    private volatile Thread owner;
     private boolean orderBatchMutationScope;
 
     void assertOwner() {
@@ -46,7 +46,18 @@ public final class TreasuryRuntime {
         else if (owner != current) throw new IllegalStateException("treasury runtime is bound to another thread");
     }
 
+    void bindOwner() { assertOwner(); }
+
+    /** Transfer the original ledger before starting its permanent worker. */
+    void handoffTo(Thread nextOwner) {
+        assertOwner();
+        if (nextOwner == null || nextOwner.isAlive())
+            throw new IllegalArgumentException("ledger handoff requires an unstarted owner thread");
+        owner = nextOwner;
+    }
+
     void releaseOwnerForHandoff() {
+        assertOwner();
         owner = null;
     }
 

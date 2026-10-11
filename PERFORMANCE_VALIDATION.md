@@ -5134,3 +5134,18 @@ HotSpot Corretto27/Maven3.9.16：最新232项资金/顺序/并发回归和50项�
 结论：资金原语缓冲、整笔溢出预检和局部预热后零分配已通过；整链路/所有权仅部分验证，50万容量未验收。Owner资金写入、跨Lane读取和完整Shared-Nothing边界仍需继续迁移。短轮不提供native/heap长期增长斜率或无泄漏证明；本轮不声称全场景尾延迟验收通过。详细数值/置信区间与作用域见 `docs/validation/treasury-primitives-20261011.json`。
 
 清理：本轮原生进程已结束；仅删除native8和本轮profile自己的Archive/Aeron/tmp及本地探针编译类。四份原始JFR以gzip保存，逐份解压SHA256与原始完全一致后删除raw，配置/summary/事件/正式窗口聚合/日志/指标/源文件保留。可复核清理清单为 `treasury-current-final-cleanup.json` 与 `treasury-current-verified-jfr-archives.json`，artifact根目录 `../performance-artifacts/lane-parallel-20261010T144735Z/`。
+
+
+## 2026-10-11 SystemLedgerLane 原账本队列边界（仅基础能力，未接通生产）
+
+预锁计划 `system-ledger-production-plan.json` 基于 master f606cf63：同一Treasury实例移交给唯一常驻Ledger线程，Owner单生产者SPSC投递；输入ready读取账户完成标记，所有金融校验在写入前，完成release之前准备结果，槽位只在获得完成后复用。parked宣布后复查队列/ready，100µs兜底；正常停止排空ready项，未ready财务任务或未捕获异常进入fatal，关闭等待线程终止后才归还所有权。没有复制资金Map，也没有新增生产开关或inline Ledger回退。本模块只是为后续全入口迁移建立邮件队列；当前生产Runtime尚未启动此Ledger，Owner资金退出未完成。
+
+HotSpot Corretto JDK27/G1，248项资金/并发回归及50项源码/协议/benchmark边界执行通过，源码稳定。8个新增测试含32768次财务槽位复用、512次停驻窗口内发布、ready顺序、满队列/异线程生产者/关闭拒收、原账本单写者、溢出fatal与未ready关闭失败；七子账本及实际资金函数在单节点业务六产品线回归中仍通过。20模块clean package、1802源文件指纹和1747项JAR类字节核验通过。
+
+独立JMH `SystemLedgerAllocationBenchmark.settleAndConserve` 固定256复用槽，每次调用真实执行256次Ledger资金事务，`OperationsPerInvocation=256`；1fork/1thread、3×1s warm/5×1s measure、G1、-prof gc，5523904.563±167842.543事务/s、约0.00115B/事务、GC0。它只测账本队列、七个资金子账本写入/资金守恒，未测Aeron整链路，不是Core容量。分数没有独立系统限频证据用于容量验收。
+
+独立本地JFR最大64MiB，1048576次预热后测8388608次事务，测量窗口约1.554s；ThreadMXBean生产者与Ledger线程分配增量均为0，七子账本期末金额与完成事务数完全匹配。捕获72个Ledger执行样本、0个Ledger分配事件、DataLoss0，精确分配增量来自线程计数而非分配采样事件。第一轮探针启动因未添加Agrona所需internal.misc exports/opens失败，完整失败日志/命令已保留；修正为Maven/JMH同参数后重跑通过。短探针不提供长期heap/native/泄漏结论。
+
+具体命令、JDK/JVM、开始/结束、源/JAR SHA、测试XML、JMH JSON、探针源码/结果、JFR summary/事件见 artifact `../performance-artifacts/lane-parallel-20261010T144735Z/` 的 `system-ledger-*` 与 build9记录。原始149172B JFR以gzip保存，解压SHA核验一致后删除raw；仅删除自己的探针编译类，全部原始生成进程终止。清理为 `system-ledger-foundation-cleanup.json`，紧凑报告为 `docs/validation/system-ledger-foundation-20261011.json`。
+
+结论：基础邮件队列的单写者/顺序/唤醒/异常/预热后零分配已验证；生产成交、批量、保险、资金费、强平、ADL、交割的准入与完成/回滚/查询仍需一起迁移。没有把基础测试或局部微基准写作全L2、Shared-Nothing或50万验收。本模块不执行快照、恢复或wallet，未重复无业务路径改动的真实Aeron压测；生产接线完成后再锁定最新构建真实单节点与独立JFR。
