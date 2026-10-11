@@ -5115,3 +5115,22 @@ HotSpot Corretto27/Maven3.9.16：最新232项资金/顺序/并发回归和50项�
 完整命令、环境、源码/JAR、系统样本、业务/资金输出和测试XML/JMH/JFR归因见 ../performance-artifacts/lane-parallel-20261010T144735Z/lane-close-validation-{plan,results}.json、l1-owner-routing-{6,7}-*.json及l1-lane-close-jfr-*。仓库摘要docs/validation/lane-place-close-capacity-20261011.json。本模块不运行快照、恢复或wallet。前八轮确认本轮进程退出后已校验保留日志/指标/JFR SHA并清除Aeron/tmp，清理证明current-eight-runs-final-cleanup.json；本三轮临时目录将在下条清理记录补充。
 
 本增量清理完成：三轮运行的原始交易日志/指标/协议命令和录制SHA核验通过，进程已退出，Aeron/tmp目录已清除，见lane-close-final-cleanup.json。前后3次独立JFR的9份原始录制已以gzip归档，解压后的SHA逐份与原录制完全一致后删除原文件，见three-profiles-verified-jfr-archives.json。测量期间没有构建、测试、分析或压缩并行运行。源码/JAR、测试XML、完整日志/JMH、JFR聚合和可还原的录制保留。
+
+
+## 2026-10-11 Treasury 原语前值与资金差计算（当前 master，部分验证）
+
+计划：基于 master `5695b76b`，仅恢复 `TreasuryRuntime` 的 primitive before-images 和资金差遍历，以及 `RuntimeTreasuryDelta` 的整笔溢出预检。历史 `7ccf6b48` 只作为选定源码补丁的只读参考，没有检出或压测旧代码，没有恢复旧 inline Lane/ThreadLocal 执行模型。Treasury 前值仅由其当前所有者写入，首次修改捕获、提交/回滚清空且保留容量。先计算单资产全部结果或检查多资产全部行，再写入；溢出拒绝不产生部分账本修改。Owner 到生产 SystemLedgerLane 的资金写入交接仍未接通。
+
+采集前计划见外部 artifact `treasury-primitives-current-plan.json`。HotSpot Corretto JDK27/G1；局部 JMH 每配置1fork/1thread、3×1s warmup +5×1s measurement、`-prof gc`，1/16 assets；独立本地 JFR 每场景70万预热+300万事务测量、最大64MiB，并以 ThreadMXBean 计算精确线程分配增量。随后仅当前最新构建运行真实单节点 U 本位永续，MIXED/batch20/128 symbol、1 Matcher/4 Lane、global/session window256、Owner/Matcher ADAPTIVE、Lane BUSY_SPIN、service YIELDING，60s warm/60s measure；独立同配置 JFR 归因。正确性要求资金差和unfinished为0、持仓/预留/订单终态与强平/保险/ADL初始化通过；明显限频使容量无效。对照 commit 不适用（仅验证当前master）。未运行快照、恢复或wallet。
+
+资金/顺序回归240项及边界/基准回归50项执行通过，0失败/错误/跳过，执行源码稳定。20模块clean package通过，1799个源码指纹和1736项服务/基准JAR类字节核验一致。完整命令及时间/PID/环境、源码/JAR SHA、XML、系统采样、指标见 `l1-owner-routing-8-*`、`treasury-primitives-current-*`、`treasury-current-*`。
+
+局部JMH：applyAndClear单资产约1986万、16资产轮转1041万事务/s；七子账本结算单资产666万、16资产轮转430万事务/s；一次完整单资产事务643万、一次完整16资产事务13.36万事务/s。各项GC计数0，约0.00032–0.04760B/事务，完整16资产的每事务包含16资产，不能当作Core吞吐。独立探针四组各300万次共1200万事务，ThreadMXBean增量均为0，七子账本资金守恒通过；JFR捕获1436个Treasury执行样本、0个Treasury分配样本、DataLoss0。此结论仅覆盖预热后有足够容量的这些资金路径，不证明整链路零分配或长期无泄漏。
+
+最新无采样真实压测：425088.514终态业务项/s、40600.776 Core消息/s、60.008114s，资金差/unfinished0，持仓/预留/强平亏损/保险/ADL核验通过，源码不变。正式窗口CPU_Speed_Limit为70/72/75，容量验收无效，不折算不限频成绩。当前工作负载不用于证明手续费热点的吞吐增益；实际七子账本资金路径由局部JMH/探针覆盖。
+
+独立整链路JFR：391083.034业务项/s、37362.035 Core消息/s、60.002273s；正式窗口1791697612377–1791697672379，CPU限频72/75，资金差/unfinished0。每线程60个ThreadAllocationStatistics样本，首末样本跨度59.710s，汇总Owner/Matcher/4Lane/clustered-service约458.43MB/s、1172.21B/业务项。采样区间与业务窗口略有偏差，该值为近似，不能视为精确对象数；没有整链路零分配结论。主要分配来自preparedOrder、OrderRuntime.snapshot、MatcherResult.from、准入解析与协议解码等。GC pause92次、总453.10ms、最长9.15ms；DataLoss0。2个监视器事件均为JFR内部StringPool（archive 2.96ms，Owner 233.19µs），未捕获Lane或业务监视器争用。
+
+结论：资金原语缓冲、整笔溢出预检和局部预热后零分配已通过；整链路/所有权仅部分验证，50万容量未验收。Owner资金写入、跨Lane读取和完整Shared-Nothing边界仍需继续迁移。短轮不提供native/heap长期增长斜率或无泄漏证明；本轮不声称全场景尾延迟验收通过。详细数值/置信区间与作用域见 `docs/validation/treasury-primitives-20261011.json`。
+
+清理：本轮原生进程已结束；仅删除native8和本轮profile自己的Archive/Aeron/tmp及本地探针编译类。四份原始JFR以gzip保存，逐份解压SHA256与原始完全一致后删除raw，配置/summary/事件/正式窗口聚合/日志/指标/源文件保留。可复核清理清单为 `treasury-current-final-cleanup.json` 与 `treasury-current-verified-jfr-archives.json`，artifact根目录 `../performance-artifacts/lane-parallel-20261010T144735Z/`。

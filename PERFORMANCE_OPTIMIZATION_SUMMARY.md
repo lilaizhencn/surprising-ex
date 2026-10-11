@@ -19,6 +19,8 @@ JMH metadataAndSequenceFanout（1线程/每配置1fork，3×1s预热+5×1s测量
 
 普通PLACE平仓容量检查已迁入所属Lane，仅通过完成收据交出撤单ID；Matcher在资金准入成功后合并自成交撤单并撮合。余额不足保留原单，post-only拒绝的新单正确提交已执行的撤单前缀。最新232项资金/顺序回归与50项边界测试执行、20模块clean package通过。相同最新build6的两轮观测417,223.030和428,543.832业务项/s，资金差/未完成0，CPU限频仍使容量无效。独立JFR约1189.92B/业务项，仍无整体分配下降证据；Owner两次监视器事件均来自JFR内部StringPool。局部平仓决策有8/64个存量订单时分配560/3904B/次，下一步需要削减其集合物化成本。详见[普通下单验证](docs/validation/lane-place-close-capacity-20261011.json)。
 
+Treasury 前值捕获与资金差计算已改为复用 primitive 数组，单/多资产溢出在首笔写入前拒绝；240项资金回归+50项边界执行及20模块clean package通过。局部四组共1200万事务ThreadMXBean增量均为0，资金守恒通过。最新无采样425088.514业务项/s、资金差/unfinished0；正式窗口限频70/72/75，容量无效。独立整链路JFR约1172.21B/业务项、GC pause92次/总453.10ms/最大9.15ms、DataLoss0；Owner监视器样本来自JFR内部StringPool。整链路仍分配订单/快照/撮合与协议对象，生产SystemLedgerLane接线仍未完成，详见[资金原语缓冲验证](docs/validation/treasury-primitives-20261011.json)。
+
 pendingReservationSequences监视器暂留，待剩余Owner读取迁入Lane并落实所有权断言后一起移除。Owner仍有权威读取、Treasury写入及风险/输出职责，不宣称所有权已彻底切开。按用户范围，本轮不执行快照、恢复或wallet场景。
 
 证据与范围见 [验证记录](docs/validation/lane-owned-scopes-wakeup-20261011.json)。原始数据位于 ../performance-artifacts/lane-parallel-20261010T144735Z/，保留源码/JAR SHA、日志、测量/资金指标、系统采样、XML、JMH及JFR窗口聚合；单因素汇总见current-factors-results.json，最新JFR见l5-current-scopes-jfr-window-analysis.json。

@@ -1,0 +1,220 @@
+{
+  "at": "2026-10-11T05:50:25.222303+00:00",
+  "status": "partial validation; warmed Treasury transaction allocation verified; production SystemLedgerLane wiring and Owner funds handoff pending",
+  "baseHead": "5695b76b5001c64e831d84c57d3f429e9eaee33e",
+  "comparisonCommit": "not applicable; only current master tested",
+  "sourceFiles": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TreasuryRuntime.java": "bdbcb01c6b4d2e947b4e2b0625b532e4faf921720d29652c147edeb461b47a08",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeTreasuryDelta.java": "2af1cd07aa30c6936f7b90241b9f711e14acde47027e24906fe67c0ba96e800e",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "e42cffdae925121e9ff4441c1317dfeadd4c8267972f60ed0fe39fedbe8ee7c0",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeTreasuryDeltaTest.java": "8fbc61eb134d326ae75147692177872491712317752fd852d247b617afc83a12",
+    "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/state/TreasurySettlementAllocationBenchmark.java": "9af3f25d82da86de6ac2e8b286f989aea9dd1189b03be885732e040620540b6d"
+  },
+  "cleanPackage": {
+    "modules": 20,
+    "sourceFiles": 1799,
+    "jarClassChecks": 1736,
+    "passed": true
+  },
+  "tests": [
+    {
+      "run": "treasury-primitives-current-financial",
+      "totals": {
+        "tests": 240,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    },
+    {
+      "run": "treasury-primitives-current-boundaries",
+      "totals": {
+        "tests": 50,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    }
+  ],
+  "nativeRuns": [
+    {
+      "run": "l1-owner-routing-8",
+      "profile": false,
+      "businessOpsPerSec": 425088.514,
+      "coreMessagesPerSec": 40600.776,
+      "seconds": 60.008114,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4670 businessHash=31727a243ab10c9f",
+        "mixedCapacity=PASS elapsedSeconds=60.013 terminalBusinessOperations=25511437 offeredBusinessOperations=25511437 terminalCoreMessages=2436621 offeredCoreMessages=2436621 businessOpsPerSec=425099.549 coreMessagesPerSec=40601.652 fills=6072320 fillsPerSec=101183.657 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2372 totalCycles=4670 triggerExecutions=0"
+      ],
+      "cpuSpeedLimits": [
+        70,
+        72,
+        75
+      ],
+      "sourceUnchangedDuringRun": true,
+      "capacityAcceptance": false
+    },
+    {
+      "run": "treasury-current-core-jfr",
+      "profile": true,
+      "businessOpsPerSec": 391083.034,
+      "coreMessagesPerSec": 37362.035,
+      "seconds": 60.002273,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4293 businessHash=526a51cd314ec245",
+        "mixedCapacity=PASS elapsedSeconds=60.006 terminalBusinessOperations=23468559 offeredBusinessOperations=23468559 terminalCoreMessages=2242063 offeredCoreMessages=2242063 businessOpsPerSec=391101.473 coreMessagesPerSec=37363.783 fills=5585920 fillsPerSec=93088.866 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2182 totalCycles=4293 triggerExecutions=0"
+      ],
+      "cpuSpeedLimits": [
+        72,
+        75
+      ],
+      "sourceUnchangedDuringRun": true,
+      "capacityAcceptance": false
+    }
+  ],
+  "jmhSource": "treasury-primitives-current-jmh.json",
+  "localTreasuryProbe": {
+    "windows": [
+      {
+        "assets": 1,
+        "allAssets": false,
+        "operations": 3000000,
+        "allocatedBytes": 0,
+        "elapsedNanos": 730960275,
+        "checksum": 3000010500000
+      },
+      {
+        "assets": 16,
+        "allAssets": false,
+        "operations": 3000000,
+        "allocatedBytes": 0,
+        "elapsedNanos": 816268759,
+        "checksum": 3000010500000
+      },
+      {
+        "assets": 1,
+        "allAssets": true,
+        "operations": 3000000,
+        "allocatedBytes": 0,
+        "elapsedNanos": 752549241,
+        "checksum": 3000010500000
+      },
+      {
+        "assets": 16,
+        "allAssets": true,
+        "operations": 3000000,
+        "allocatedBytes": 0,
+        "elapsedNanos": 29849722442,
+        "checksum": 3000010500000
+      }
+    ],
+    "totalTransactions": 12000000,
+    "threadAllocatedBytesTotal": 0,
+    "treasuryExecutionSamples": 1436,
+    "treasuryAllocationEvents": 0,
+    "dataLoss": 0,
+    "scope": "Actual current Treasury funds code; warm capacity only; not full Core allocation or long-run leak proof",
+    "rawJfrBytes": 170609,
+    "rawJfrSha256": "bc66d894ca34952569bda8e8c871a41477869c98d4407a86b9721b7d9ce93124"
+  },
+  "wholeCoreJfr": {
+    "formalWindowEpochMillis": [
+      1791697612377,
+      1791697672379
+    ],
+    "allocationMethod": "ThreadAllocationStatistics per-thread first/last formal sample deltas; sums Owner, Matcher, four Lanes and clustered-service; approximate, not object count",
+    "coreBytesPerSecond": 458431243.545,
+    "coreBytesPerBusinessOperation": 1172.2094892641137,
+    "allocationSamplesPerThread": 60,
+    "allocationSampleSeconds": 59.71,
+    "gcPauses": {
+      "count": 92,
+      "totalNanos": 453103377,
+      "maxNanos": 9151343
+    },
+    "dataLossWholeRecording": 0,
+    "monitors": "2 JFR internal StringPool events; Owner 233.188us and archive 2.957146ms; no Lane/business monitor captured",
+    "topAllocationSites": [
+      "com.surprising.aeron.service.state.TradingRuntimeState.preparedOrder:4178",
+      "com.surprising.aeron.service.state.OrderRuntime.snapshot:227",
+      "exchange.core2.core.common.MatcherResult.from:48",
+      "com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolveValues:123",
+      "com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode:30",
+      "java.lang.invoke.DirectMethodHandle.allocateInstance:503",
+      "com.surprising.aeron.service.state.TradingRuntimeState.placeOrderInLane:4212",
+      "org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.allocateTable:1279"
+    ],
+    "notLongRunLeakProof": true
+  },
+  "excluded": [
+    "snapshot",
+    "recovery",
+    "wallet"
+  ],
+  "artifactRoot": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z",
+  "cleanup": [
+    "treasury-current-final-cleanup.json",
+    "treasury-current-verified-jfr-archives.json"
+  ],
+  "jmh": [
+    {
+      "method": "applyAndClear",
+      "assets": 1,
+      "transactionsPerSecond": 19858000.727661364,
+      "error": 581423.1747975386,
+      "bytesPerTransaction": 0.0003195277611556371,
+      "gcCount": 0.0
+    },
+    {
+      "method": "applyAndClear",
+      "assets": 16,
+      "transactionsPerSecond": 10411673.727320988,
+      "error": 641453.5855653189,
+      "bytesPerTransaction": 0.0006096448002714348,
+      "gcCount": 0.0
+    },
+    {
+      "method": "settleAllAssets",
+      "assets": 1,
+      "transactionsPerSecond": 6426312.674247948,
+      "error": 302268.5088148161,
+      "bytesPerTransaction": 0.0009861555390289283,
+      "gcCount": 0.0
+    },
+    {
+      "method": "settleAllAssets",
+      "assets": 16,
+      "transactionsPerSecond": 133594.66234774183,
+      "error": 11682.551488486923,
+      "bytesPerTransaction": 0.047604318080148054,
+      "gcCount": 0.0
+    },
+    {
+      "method": "settleFeesAndResiduals",
+      "assets": 1,
+      "transactionsPerSecond": 6659323.244997725,
+      "error": 397175.8284242605,
+      "bytesPerTransaction": 0.0009519987192875485,
+      "gcCount": 0.0
+    },
+    {
+      "method": "settleFeesAndResiduals",
+      "assets": 16,
+      "transactionsPerSecond": 4301507.994480034,
+      "error": 159187.55451312332,
+      "bytesPerTransaction": 0.0014776356298216546,
+      "gcCount": 0.0
+    }
+  ]
+}

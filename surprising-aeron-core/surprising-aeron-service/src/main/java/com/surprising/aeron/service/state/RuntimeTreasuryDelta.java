@@ -126,6 +126,32 @@ public final class RuntimeTreasuryDelta {
 
     public void apply(TreasuryRuntime treasury) {
         if (treasury == null) throw new IllegalArgumentException("treasury is required");
+        // Ordinary settlement touches one asset. Compute every result before writing without reading it twice.
+        if (size == 1) {
+            int assetId = assetAt(0);
+            long fee = Math.addExact(treasury.fee(assetId), feeAt(0));
+            long insurance = Math.addExact(treasury.insurance(assetId), insuranceAt(0));
+            long deficit = Math.addExact(treasury.insuranceDeficit(assetId), deficitAt(0));
+            long fundingResidual = Math.addExact(treasury.fundingResidual(assetId), fundingResidualAt(0));
+            long roundingResidual = Math.addExact(treasury.roundingResidual(assetId), roundingResidualAt(0));
+            long clearing = Math.addExact(treasury.clearingPnl(assetId), clearingAt(0));
+            treasury.setFee(assetId, fee);
+            treasury.setInsurance(assetId, insurance, deficit);
+            treasury.setFundingResidual(assetId, fundingResidual);
+            treasury.setRoundingResidual(assetId, roundingResidual);
+            treasury.setClearingPnl(assetId, clearing);
+            return;
+        }
+        // One ledger owner performs both passes. Reject any overflow before the first asset is written.
+        for (int index = 0; index < size; index++) {
+            int assetId = assetAt(index);
+            Math.addExact(treasury.fee(assetId), feeAt(index));
+            Math.addExact(treasury.insurance(assetId), insuranceAt(index));
+            Math.addExact(treasury.insuranceDeficit(assetId), deficitAt(index));
+            Math.addExact(treasury.fundingResidual(assetId), fundingResidualAt(index));
+            Math.addExact(treasury.roundingResidual(assetId), roundingResidualAt(index));
+            Math.addExact(treasury.clearingPnl(assetId), clearingAt(index));
+        }
         for (int index = 0; index < size; index++) {
             int assetId = assetAt(index);
             treasury.setFee(assetId, Math.addExact(treasury.fee(assetId), feeAt(index)));
