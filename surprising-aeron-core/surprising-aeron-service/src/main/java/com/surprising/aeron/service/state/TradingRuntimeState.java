@@ -62,10 +62,9 @@ public final class TradingRuntimeState implements AutoCloseable {
      * the probe's equals method, so the mutable key never enters the map and is
      * safe to reuse on the owning thread.
      */
-    private static final ThreadLocal<LeverageLookup> LEVERAGE_LOOKUP =
-            ThreadLocal.withInitial(LeverageLookup::new);
+    private final LeverageLookup ownerLeverageLookup = new LeverageLookup();
 
-    private static final class LeverageLookup {
+    static final class LeverageLookup {
         long userId;
         String instrumentId;
         CoreMarginMode marginMode;
@@ -320,6 +319,10 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public int laneCount() {
         return accountLanes.length;
+    }
+
+    public int accountLaneId(long userId) {
+        return topology.accountLaneId(userId);
     }
 
     public int laneWorkerDepth(int laneId) {
@@ -2560,7 +2563,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userId <= 0 || canonicalSymbol == null || marginMode == null) {
             throw new IllegalArgumentException("invalid runtime leverage lookup");
         }
-        LeverageLookup lookup = LEVERAGE_LOOKUP.get();
+        AccountLaneState scopedLane = laneCommandScope.get();
+        LeverageLookup lookup = scopedLane == null ? ownerLeverageLookup : scopedLane.leverageLookup;
         lookup.set(userId, canonicalSymbol, marginMode);
         try {
             return accountLanes[topology.accountLaneId(userId)].cold.leverages.get(lookup);

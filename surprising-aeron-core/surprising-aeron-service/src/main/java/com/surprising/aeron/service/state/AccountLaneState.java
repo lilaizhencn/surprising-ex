@@ -54,6 +54,15 @@ public final class AccountLaneState {
     final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
     /** 风险、清算、杠杆、算法单和触发单等低频结构与热状态分离。 */
     final LaneColdState cold = new LaneColdState();
+    final TradingRuntimeState.LeverageLookup leverageLookup = new TradingRuntimeState.LeverageLookup();
+    final RuntimeIdentityRegistry.LookupScratch identityLookupScratch = new RuntimeIdentityRegistry.LookupScratch();
+    final RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator derivativeSettlementAccumulator =
+            new RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator();
+    final RuntimeSpotMatchProcessor.SpotSettlementAccumulator spotSettlementAccumulator =
+            new RuntimeSpotMatchProcessor.SpotSettlementAccumulator();
+    final RiskLaneProcessor.PositionRiskScratch positionRiskScratch = new RiskLaneProcessor.PositionRiskScratch();
+    final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
+    final RuntimeDerivativeFillCalculator.FillCursor takerFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
     CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
         CoreTriggerOrderState previous = cold.triggerOrders.put(value.triggerOrderId(), value);

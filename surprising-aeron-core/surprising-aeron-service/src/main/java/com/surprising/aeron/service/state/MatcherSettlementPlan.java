@@ -63,7 +63,7 @@ public final class MatcherSettlementPlan {
     private com.surprising.aeron.protocol.CoreOrderSide directTakerSide;
     private int directTakerSymbolId;
     private CoreInstrument directTakerInstrument;
-    private static final ThreadLocal<LongHashSet> DIRECT_ORDER_KEYS = ThreadLocal.withInitial(LongHashSet::new);
+    private final LongHashSet directOrderKeys = new LongHashSet();
     /** Read-only view owned by this plan; it remains valid until the enclosing context is recycled. */
     private final List<Long> orderIdView = new OrderIdView(this);
 
@@ -78,6 +78,7 @@ public final class MatcherSettlementPlan {
         directTakerSide = null;
         directTakerSymbolId = 0;
         directTakerInstrument = null;
+        directOrderKeys.clear();
     }
 
     /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
@@ -120,7 +121,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = result.matcherEvents();
         int capacity = Math.addExact(matcherEvents.size(), Math.addExact(result.cancellations().size(), 1));
         if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
-        LongHashSet keys = DIRECT_ORDER_KEYS.get();
+        LongHashSet keys = directOrderKeys;
         keys.clear();
         try {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);
@@ -207,7 +208,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = result.events();
         int capacity = Math.addExact(matcherEvents.size(), 1);
         if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
-        LongHashSet keys = DIRECT_ORDER_KEYS.get();
+        LongHashSet keys = directOrderKeys;
         keys.clear();
         try {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);

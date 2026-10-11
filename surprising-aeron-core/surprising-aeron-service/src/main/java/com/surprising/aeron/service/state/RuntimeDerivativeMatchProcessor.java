@@ -11,9 +11,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 public final class RuntimeDerivativeMatchProcessor {
 
-    private static final ThreadLocal<DerivativeSettlementAccumulator> ACCUMULATOR =
-            ThreadLocal.withInitial(DerivativeSettlementAccumulator::new);
-
     private RuntimeDerivativeMatchProcessor() {
     }
 
@@ -205,7 +202,8 @@ public final class RuntimeDerivativeMatchProcessor {
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
                                              OrderRuntime localTaker) {
-        DerivativeSettlementAccumulator accumulator = ACCUMULATOR.get();
+        DerivativeSettlementAccumulator accumulator =
+                runtime.accountLanes[laneId].derivativeSettlementAccumulator;
         accumulator.reset(runtime, identities, instrument, settleAssetId, commitTimestamp, commitPosition);
         try {
             for (int index = plan.firstMatcherEvent(laneId); index >= 0;
@@ -226,7 +224,7 @@ public final class RuntimeDerivativeMatchProcessor {
     }
 
     /** Coalesces derivative maker and taker fills into one immutable publish per order. */
-    private static final class DerivativeSettlementAccumulator {
+    static final class DerivativeSettlementAccumulator {
         private final LongObjectHashMap<RuntimeDerivativeFillCalculator.FillCursor> cursors =
                 new LongObjectHashMap<>();
         private final LongLongHashMap activeOrderByUser = new LongLongHashMap();

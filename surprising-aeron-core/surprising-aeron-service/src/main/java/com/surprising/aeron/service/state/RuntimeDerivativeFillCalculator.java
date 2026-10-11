@@ -74,7 +74,8 @@ public final class RuntimeDerivativeFillCalculator {
 
         MarkPriceRuntime riskMark = runtime.markPrice(order.symbolId());
         if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(riskMark);
-        FillCursor cursor = SINGLE.get();
+        int laneId = runtime.accountLaneId(order.userId());
+        FillCursor cursor = runtime.accountLanes[laneId].singleFillCursor;
         try {
             cursor.reset(instrument, order, reservation, current, balance.availableUnits(),
                     balance.lockedUnits(), settleAssetId, riskMark);
@@ -82,9 +83,6 @@ public final class RuntimeDerivativeFillCalculator {
             cursor.publish(runtime, positionKey, treasuryDelta);
         } finally { cursor.clear(); }
     }
-
-    private static final ThreadLocal<FillCursor> SINGLE = ThreadLocal.withInitial(FillCursor::new);
-    private static final ThreadLocal<FillCursor> TAKER = ThreadLocal.withInitial(FillCursor::new);
 
     /** Lane-local scalar state for one taker order; never published or shared with another Lane. */
     static final class FillCursor {
@@ -204,7 +202,8 @@ public final class RuntimeDerivativeFillCalculator {
     static FillCursor beginTaker(TradingRuntimeState runtime, CoreInstrument instrument,
                                 OrderRuntime order, long positionKey, long leverage, int assetId,
                                 long timestamp, long position) {
-        FillCursor cursor = TAKER.get();
+        int laneId = runtime.accountLaneId(order.userId());
+        FillCursor cursor = runtime.accountLanes[laneId].takerFillCursor;
         if (cursor.originalOrder != null) throw new IllegalStateException("nested taker fill cursor");
         try {
             begin(cursor, runtime, instrument, order, positionKey, leverage, assetId, timestamp, position);

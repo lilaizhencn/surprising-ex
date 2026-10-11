@@ -15,9 +15,6 @@ import java.util.NavigableSet;
 
 /** 仅在账户所属 Lane 执行估值及已有清算状态更新，不分配全局编号或修改全局扫描游标。 */
 final class RiskLaneProcessor {
-    /** 每条永久 Lane 复用一份计算临时变量，不跨线程共享。 */
-    private static final ThreadLocal<PositionRiskScratch> POSITION_RISK =
-            ThreadLocal.withInitial(PositionRiskScratch::new);
     private RiskLaneProcessor() { }
     static Page scan(TradingRuntimeState runtime, RiskScanRuntime initial,
                                         PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
@@ -73,7 +70,7 @@ final class RiskLaneProcessor {
         long isolatedMargin = scan.riskIsolatedMarginUnits();
         long isolatedReservation = scan.riskIsolatedReservationUnits();
         long wallet = Long.MIN_VALUE;
-        PositionRiskScratch positionRisk = POSITION_RISK.get();
+        PositionRiskScratch positionRisk = runtime.accountLanes[scan.accountLaneId()].positionRiskScratch;
         // A mark-price continuation may run on the same permanent Lane thread
         // after the previous scan was invalidated. Tie the small market cache to
         // the runtime market revision so it cannot reuse an older mark.
@@ -315,7 +312,7 @@ final class RiskLaneProcessor {
     }
 
     /** 当前持仓估值的线程内临时值，处理下一持仓时覆盖。 */
-    private static final class PositionRiskScratch {
+    static final class PositionRiskScratch {
         /** 本次计算使用的币对及价格序列。 */
         private CoreInstrument instrument;
         private MarkPriceRuntime mark;

@@ -101,6 +101,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         RiskCommandContext, LiquidationCommandContext, SettlementCommandContext,
         FeePolicyCommandContext, TriggerCommandContext {
 
+    final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
+
 
     /** 交割与期权等币对到期结算：沿用产品结算处理器，并登记受影响账户。 */
     final InstrumentSettlementCommands instrumentSettlement = new InstrumentSettlementCommands(this);

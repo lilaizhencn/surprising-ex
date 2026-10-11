@@ -12,11 +12,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class RuntimeIdentityRegistry {
-    // Lookup-only keys never enter a map. Lanes and owner each borrow their own probe.
-    private static final ThreadLocal<PositionLookup> POSITION_LOOKUP = ThreadLocal.withInitial(PositionLookup::new);
+    private final LookupScratch ownerLookupScratch = new LookupScratch();
+
+    /** Owner and each Account Lane reuse separate probes; other query readers borrow local probes. */
+    private LookupScratch lookupScratch() {
+        if (Thread.currentThread() == owner) return ownerLookupScratch;
+        AccountLaneState lane = clientRuntime == null ? null : clientRuntime.laneCommandScope.get();
+        return lane == null ? new LookupScratch() : lane.identityLookupScratch;
+    }
+
+    static final class LookupScratch {
+        private final PositionLookup position = new PositionLookup();
+        private final ClientLookup client = new ClientLookup();
+        private final PositionMapLookup positionMap = new PositionMapLookup();
+    }
 
     private Long findPositionIdentity(long userId, String key) {
-        PositionLookup lookup = POSITION_LOOKUP.get();
+        PositionLookup lookup = lookupScratch().position;
         lookup.userId = userId;
         lookup.key = key;
         try { return positionKeys.get(lookup); }
@@ -86,9 +98,6 @@ public final class RuntimeIdentityRegistry {
     /** Lane 创建、回滚和回收；Owner 仅在撮合前校验/查询边界读取不可变 identity。
      * 并发容器用于这些必要读者；引用计数仅由账户 Lane 修改。Fact 不再反查此表。 */
     private final Map<ClientMapKey, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
-    /** 只用于查找，永不插入字典；每个 Owner/Lane/读取线程独享探针。 */
-    private static final ThreadLocal<ClientLookup> CLIENT_LOOKUP = ThreadLocal.withInitial(ClientLookup::new);
-
     private static final class ClientLookup {
         /** 当前查找的原始身份键，哈希与字典中的 Long 一致。 */
         long value;
@@ -109,8 +118,8 @@ public final class RuntimeIdentityRegistry {
         }
     }
 
-    private static ClientLookup clientLookup(long key) {
-        ClientLookup lookup = CLIENT_LOOKUP.get();
+    private ClientLookup clientLookup(long key) {
+        ClientLookup lookup = lookupScratch().client;
         lookup.value = key;
         return lookup;
     }
@@ -126,8 +135,6 @@ public final class RuntimeIdentityRegistry {
     private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
     /** Position entries are read on every derivative fill; probe by primitive key without boxing. */
     private final Map<PositionMapKey, PositionEntry> positions = new ConcurrentHashMap<>();
-    private static final ThreadLocal<PositionMapLookup> POSITION_MAP_LOOKUP =
-            ThreadLocal.withInitial(PositionMapLookup::new);
 
     private static final class PositionMapKey {
         final long value;
@@ -148,7 +155,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     private PositionEntry positionEntry(long key) {
-        PositionMapLookup lookup = POSITION_MAP_LOOKUP.get();
+        PositionMapLookup lookup = lookupScratch().positionMap;
         lookup.value = key;
         return positions.get(lookup);
     }

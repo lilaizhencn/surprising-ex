@@ -67,7 +67,7 @@ final class MatchingCommandAdmission {
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command) {
-        return newPendingMatching(sequence, operation, command, CommandFingerprint.of(command));
+        return newPendingMatching(sequence, operation, command, owner.fingerprints.of(command));
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
@@ -86,7 +86,7 @@ final class MatchingCommandAdmission {
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
-        return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
+        return owner.pendingMatching.acquire(sequence, operation, command, owner.fingerprints.of(command),
                 preMatchingCancellations,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
                 owner.decodeMatchingCommand(command), null);
@@ -96,7 +96,7 @@ final class MatchingCommandAdmission {
                                                CoreMessage command, List<Long> preMatchingCancellations,
                                                DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
-        return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
+        return owner.pendingMatching.acquire(sequence, operation, command, owner.fingerprints.of(command),
                 preMatchingCancellations,
                 owner.commandFundsAccumulator, decodedCommand, admission);
     }

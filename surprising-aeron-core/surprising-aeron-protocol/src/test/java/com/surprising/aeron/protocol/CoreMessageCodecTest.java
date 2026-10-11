@@ -39,6 +39,19 @@ class CoreMessageCodecTest {
     }
 
     @Test
+    void reusedFingerprintCalculatorsPreserveCanonicalBytesAndEarlierResults() {
+        CoreMessage first = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
+        CoreMessage second = command(UUID.randomUUID(), 43, 100, 9);
+        var producerA = new CommandFingerprint.Calculator();
+        var producerB = new CommandFingerprint.Calculator();
+        var retained = producerA.of(first);
+        assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
+        assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
+        assertThat(producerA.of(first)).isEqualTo(retained);
+        assertThat(retained.toString()).isEqualTo("0eade47bc3ab8192eec285041e562c2e8703e54f1b8fdf9a84cd8084efbf06c1");
+    }
+
+    @Test
     void encodesIntoReusableDestinationWithoutTouchingItsTail() {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
         byte[] destination = new byte[256];

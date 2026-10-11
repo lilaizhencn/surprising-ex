@@ -31,6 +31,8 @@ import org.springframework.stereotype.Component;
 public final class AeronTradingClusterService implements ClusteredService {
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
+    private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
+    private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     private final ClusterCoreSnapshotTransfer snapshotTransfer = new ClusterCoreSnapshotTransfer();
     private Cluster cluster;
 
@@ -90,7 +92,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         CoreMessage command;
         try {
             // 将 Aeron 收到的协议帧解码为 Core 消息；解码失败时没有可信的命令内容可继续处理。
-            command = CoreMessageFlyweightDecoder.decode(buffer, offset, length);
+            command = messageDecoder.decode(buffer, offset, length);
         } catch (IllegalArgumentException invalid) {
             // 非法帧直接丢弃，不进入 Owner 命令队列。
             return;
@@ -100,7 +102,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         // Cluster 时间和日志位置；只有业务命令才计算指纹，用于命令幂等/冲突识别。
         owner.enqueue(command, session == null ? null : egress.transportSession(session), timestamp,
                 header.position(), command.header().kind() == WireMessageKind.COMMAND
-                        ? CommandFingerprint.of(command) : null);
+                        ? fingerprints.of(command) : null);
 
         // 立即尝试发送 Owner 已经准备好的响应；仍在异步处理中的命令稍后由后台轮询继续发送。
         owner.drainResponses();

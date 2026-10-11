@@ -380,6 +380,8 @@ public class ClusteredBatchTradingBenchmark {
 
     @State(Scope.Thread)
     public static class Workload implements AutoCloseable {
+        private final com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder messageDecoder =
+                new com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder();
         @Param({"LINEAR_PERPETUAL", "SPOT"}) public ProductLine productLine;
         @Param("4") public int accountLanes;
         /** 订单簿分区数；账户路由和资金共享规则独立于该参数。 */
@@ -560,7 +562,7 @@ public class ClusteredBatchTradingBenchmark {
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
                     TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 120)));
             byte[] makerBytes = CoreMessageCodec.encode(maker);
-            service.enqueueCommittedCommand(null, com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode(
+            service.enqueueCommittedCommand(null, messageDecoder.decode(
                             new UnsafeBuffer(makerBytes), 0, makerBytes.length),
                     1_700_000_000_000L, header.position(), null);
             drain();
@@ -1052,7 +1054,7 @@ public class ClusteredBatchTradingBenchmark {
                     || message.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH)
                 batchRequestSizes.put(message.header().correlationId(), responseBatchSize);
             byte[] bytes = CoreMessageCodec.encode(message);
-            service.enqueueCommittedCommand(session, com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder.decode(
+            service.enqueueCommittedCommand(session, messageDecoder.decode(
                             new UnsafeBuffer(bytes), 0, bytes.length),
                     1_700_000_000_000L, header.position(), null);
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());

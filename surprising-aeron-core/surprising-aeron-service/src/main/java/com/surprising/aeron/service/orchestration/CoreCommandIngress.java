@@ -204,7 +204,7 @@ final class CoreCommandIngress {
 
     private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
-                ? preparedIngressFingerprint : CommandFingerprint.of(message);
+                ? preparedIngressFingerprint : runtime.fingerprints.of(message);
         CoreResponse replayResponse = checkCommandReplay(message, fingerprint);
         if (replayResponse != null) return replayResponse;
 

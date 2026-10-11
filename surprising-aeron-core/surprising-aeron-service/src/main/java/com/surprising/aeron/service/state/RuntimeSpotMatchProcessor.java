@@ -19,9 +19,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 
 public final class RuntimeSpotMatchProcessor {
 
-    private static final ThreadLocal<SpotSettlementAccumulator> ACCUMULATOR =
-            ThreadLocal.withInitial(SpotSettlementAccumulator::new);
-
     private RuntimeSpotMatchProcessor() {
     }
 
@@ -174,7 +171,7 @@ public final class RuntimeSpotMatchProcessor {
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
                                              OrderRuntime localTaker) {
-        SpotSettlementAccumulator accumulator = ACCUMULATOR.get();
+        SpotSettlementAccumulator accumulator = runtime.accountLanes[laneId].spotSettlementAccumulator;
         accumulator.reset(runtime, instrument, baseAssetId, quoteAssetId, commitTimestamp, commitPosition);
         try {
             for (int index = plan.firstMatcherEvent(laneId); index >= 0;
@@ -274,7 +271,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     /** Coalesces all fills for a touched spot order before publishing its immutable state. */
-    private static final class SpotSettlementAccumulator {
+    static final class SpotSettlementAccumulator {
         private final LongObjectHashMap<SpotFillCursor> cursors = new LongObjectHashMap<>();
         private final LongObjectHashMap<IntObjectHashMap<SpotBalanceState>> balances = new LongObjectHashMap<>();
         private final java.util.ArrayDeque<SpotFillCursor> free = new java.util.ArrayDeque<>();

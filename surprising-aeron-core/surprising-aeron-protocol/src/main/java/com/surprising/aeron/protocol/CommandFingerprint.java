@@ -10,7 +10,6 @@ public final class CommandFingerprint {
     public static final int LENGTH = 32;
     private static final int CANONICAL_VERSION = 1;
     private static final int HEADER_LENGTH = Integer.BYTES * 8 + Long.BYTES;
-    private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
     private final byte[] value;
 
     private CommandFingerprint(byte[] value) {
@@ -25,26 +24,34 @@ public final class CommandFingerprint {
     }
 
     public static CommandFingerprint of(CoreMessage message) {
-        Objects.requireNonNull(message, "message");
-        CoreMessageHeader header = message.header();
-        byte[] payload = message.payloadUnsafe();
-        Scratch scratch = SCRATCH.get();
-        MessageDigest digest = scratch.digest;
-        digest.reset();
-        int offset = 0;
-        offset = putInt(scratch.header, offset, CANONICAL_VERSION);
-        offset = putInt(scratch.header, offset, header.schemaVersion());
-        offset = putInt(scratch.header, offset, header.messageType().wireCode());
-        offset = putInt(scratch.header, offset, ProductLineWireCode.encode(header.productLine()));
-        offset = putInt(scratch.header, offset, header.route().shardCode());
-        offset = putInt(scratch.header, offset, header.route().version());
-        offset = putInt(scratch.header, offset, header.source().wireCode());
-        offset = putLong(scratch.header, offset, header.userId());
-        offset = putInt(scratch.header, offset, payload.length);
-        if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
-        digest.update(scratch.header, 0, offset);
-        digest.update(payload);
-        return new CommandFingerprint(digest.digest(), true);
+        return new Calculator().of(message);
+    }
+
+    /** One serial producer owns the digest and header; returned fingerprints own their bytes. */
+    public static final class Calculator {
+        private final MessageDigest digest = newDigest();
+        private final byte[] header = new byte[HEADER_LENGTH];
+
+        public CommandFingerprint of(CoreMessage message) {
+            Objects.requireNonNull(message, "message");
+            CoreMessageHeader header = message.header();
+            byte[] payload = message.payloadUnsafe();
+            digest.reset();
+            int offset = 0;
+            offset = putInt(this.header, offset, CANONICAL_VERSION);
+            offset = putInt(this.header, offset, header.schemaVersion());
+            offset = putInt(this.header, offset, header.messageType().wireCode());
+            offset = putInt(this.header, offset, ProductLineWireCode.encode(header.productLine()));
+            offset = putInt(this.header, offset, header.route().shardCode());
+            offset = putInt(this.header, offset, header.route().version());
+            offset = putInt(this.header, offset, header.source().wireCode());
+            offset = putLong(this.header, offset, header.userId());
+            offset = putInt(this.header, offset, payload.length);
+            if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
+            digest.update(this.header, 0, offset);
+            digest.update(payload);
+            return new CommandFingerprint(digest.digest(), true);
+        }
     }
 
     /**
@@ -143,8 +150,4 @@ public final class CommandFingerprint {
         return offset + Long.BYTES;
     }
 
-    private static final class Scratch {
-        private final MessageDigest digest = newDigest();
-        private final byte[] header = new byte[HEADER_LENGTH];
-    }
 }

@@ -14,15 +14,14 @@ import java.util.UUID;
 import org.agrona.DirectBuffer;
 
 public final class CoreMessageFlyweightDecoder {
+    /** Owned by one serial ingress callback or benchmark producer. */
+    private final DirectMessageReader messageReader = new DirectMessageReader();
 
-    private static final ThreadLocal<DirectMessageReader> READER_HOLDER =
-            ThreadLocal.withInitial(DirectMessageReader::new);
-
-    public static DirectMessageReader reader(DirectBuffer buffer, int offset, int length) {
-        return READER_HOLDER.get().wrap(buffer, offset, length);
+    public DirectMessageReader reader(DirectBuffer buffer, int offset, int length) {
+        return messageReader.wrap(buffer, offset, length);
     }
 
-    public static CoreMessage decode(DirectBuffer buffer, int offset, int length) {
+    public CoreMessage decode(DirectBuffer buffer, int offset, int length) {
         DirectMessageReader reader = reader(buffer, offset, length);
         UUID commandId = new UUID(reader.commandIdMsb(), reader.commandIdLsb());
         CoreRoute route = CoreRoute.fromWireCodes(reader.shardCode(), reader.routeVersion());

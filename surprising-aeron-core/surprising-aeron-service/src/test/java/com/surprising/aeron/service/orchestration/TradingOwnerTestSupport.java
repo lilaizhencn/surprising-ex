@@ -22,6 +22,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 /** Test-only callback and response fixture for the real trading Owner. */
 final class TradingOwnerTestSupport implements ClusteredService {
     private final TradingCoreOwner owner;
+    private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private Cluster cluster;
     private final DeferredSessionResponses responses = new DeferredSessionResponses();
 
@@ -61,7 +62,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
             Header header) {
         CoreMessage request;
         try {
-            request = CoreMessageFlyweightDecoder.decode(buffer, offset, length);
+            request = messageDecoder.decode(buffer, offset, length);
         } catch (IllegalArgumentException invalid) {
             return;
         }
