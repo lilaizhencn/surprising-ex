@@ -5206,3 +5206,25 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 ### service 等待策略：部分对照结果
 
 同一dcd6896f业务源码和build13 JAR，A(YIELDING)409570.075业务项/s、39123.085Core/s、60.024178s；B(BACKOFF)418533.436业务项/s、39976.032Core/s、60.023066s。两轮资金差0、未完成0，测量均有限频；A限频72/75，B实测值见service-idle-backoff-b-analysis-cleanup.json。约2.19%差异不能证明收益，用户随后要求继续Owner迁移，C及专项profile未执行，计划偏差如实留档，维持默认YIELDING。bash -n和既有3项等待策略配置测试通过，node.command核对两轮参数正确；压测JMH continuousOperations结果另留档。未改业务Java/JAR/匹配负载，记录只提供已达负载，不作50万或完整性能验收。两轮进程均结束，本轮临时集群、Archive和driver/tmp目录已清理，保留指标、源码/JAR指纹和诊断配置。
+
+
+## 2026-10-11 批量改单准入迁出 Owner（采集前计划，master a69ed805 + 本轮改动）
+
+- 业务：Owner 按已有订单路由派发 AMEND_ORDER_BATCH 当前项；所属 Lane 读取原订单、余额、冻结、持仓及客户标识并返回准入结果，完成前保留池化事件；原批次逐项依赖及结算修订校验保留。现货资金不足在撮合前拒绝。
+- 批次 OI 使用已完成 Lane 发布的不可变持仓变更和既有风险索引计算，不再在 Owner 查询 Lane 当前持仓，不新增账户 Map。AMEND 不再创建/重复更新 Owner 的 BatchAdmissionOrderIndex。
+- 本轮只测当前 master：JDK 27 HotSpot/G1，单节点/1 matcher/4 Lane/256 窗口；固定 MIXED/batch20/128 symbol/60s 预热/60s 正式窗口，500000 business/s 目标，CPU 限频时容量无效。MIXED 不持续执行改单，不能代替真实改动路径验收。
+- 受影响 JMH：LINEAR_PERPETUAL/SPOT 的实际 Lane 改单准入（1/4 Lane），以及 0/128 项已完成持仓变更的 OI 计算；1 fork、3x1s 预热、5x1s 测量，plain 与 gc 分开。另做 SPOT 准入 JFR 和真实单成员现货顺序批次改单/资金验证 JFR；后者是 SingleShot 功能覆盖，逐请求等待，仅作正确性诊断，不计容量。
+- 按用户要求不测快照/恢复/wallet。前两轮宽选既有 CoreOrderedOrderBatchTest 误含原快照断言，保留历史偏差；后续按方法筛选排除。一次空 selector 启动已终止，加入非空断言，未纳入验收计数。
+- 未完成：SystemLedgerLane 生产接线、批次最终响应/元数据路径仍有 Owner 查询、强平/保险/ADL 及其它 L1 全边界；不得声称 Owner 已完全退出资金或整链路零分配。完整计划见 batch-amend-plan.json。
+
+### 本轮结果与剩余边界
+
+- 最终按方法筛选排除快照/恢复：资金与业务回归268次、源码边界44次、基准边界7次，共319次测试执行通过；均无失败/错误/跳过。20模块干净构建通过，1809份源码指纹、1771项class/JAR校验。真实现货改单夹具的旧非数字instrumentId已修正，128组单成员资金/冻结/改单/撤单场景通过。
+- 无profiler局部准入：永续1/4 Lane约231.95/195.70万技术项/s，现货1/4 Lane约267.99/131.67万技术项/s，4 Lane现货误差较大；这些不执行Matcher/结算/传输，不代表Core容量。独立gc：永续约152.003–152.004B/项、现货128.002–128.004B/项；OI计算0/128项变更约0.000055/0.004304B/技术次（GC均0），属于接近零分配的局部结果。
+- 当前永续单节点正式窗口60.003526s：421537.125 business/s、40262.467 Core messages/s、100346.102 fills/s，终态增量25293714业务项/2415890 Core消息。排空4.323514ms、2684业务项；最终offered=terminal=25296398业务项/2416142 Core消息，unfinished=0、资金差0；256窗口受限约86.11%，最大各业务p99为18268µs。正式CPU限频70/72/75，因此容量验收无效，不能归因相对前轮收益、不能宣称达到50万+。
+- 独立JFR：396026.885 business/s、37832.735 Core messages/s，正确性及排空通过，正式CPU限频72/75。正式窗口1791730470543–1791730530555，Owner/Matcher/4 Lane/clustered-service的ThreadAllocationStatistics每线程60点、端点区间59.590s，合计464272592.582B/s，约1172.326B/业务项；与前轮约1171B接近，整链路分配未显著下降。GC93次、总暂停452.914699ms、p50/p95/p99/max=4.879475/5.194545/5.485127/5.485127ms，DataLoss=0，执行样本13274。记录到的Owner/Lane监视器进入为0，阈值事件不能证明无同步，pending-reservation监视器仍在。
+- 主要分配点仍为preparedOrder、OrderRuntime.snapshot、MatcherResult.from、resolveValues及协议解码；具体阶段/线程、队列、客户端分业务延迟、JVM/NMT/系统记录保留在本轮artifact。固定MIXED正式窗口不持续发AMEND，不能代替改动路径性能证明；真实现货SingleShot是逐请求功能诊断，包含初始化/查询，不计容量。未做长稳或泄漏证明，不测试快照/恢复/wallet。
+- micro/JFR build14与最新build15仅差真实现货基准的instrumentId夹具；服务和局部基准class字节逐项相同，绑定证明已归档。失败、空selector中止及旧宽选测试误含快照断言均保留偏差记录，不纳入最终319次计数。
+- 6份JFR经gzip并验证解压SHA，分析后删除原文件；本轮进程已停止，14个独立临时目录已清理，原始路径仅作历史定位。未删除实验worktree或其他运行产物。
+- 本轮完成批量改单准入迁出Owner、现货资金准入Lane化及批次OI读边界。生产SystemLedgerLane、Owner手续费/保险/资金费写入、批次最终响应与元数据、触发/强平/ADL和L1其余路径仍未完成；不得宣称完整最小Owner或整链路零堆分配。
+- 持久验证：[batch-amend-lane-admission-20261011.json](docs/validation/batch-amend-lane-admission-20261011.json)；artifact根目录：`/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z`，重点文件batch-amend-plan.json、batch-amend-final-report.json、batch-amend-cleanup.json及l1-owner-routing-15-source/jars.json。

@@ -335,8 +335,11 @@ final class MatchingCommandAdmission {
     }
 
     List<Long> replacementPreMatchingCancellations(CommandSlot pending) {
-        var admission = pending.matchingAdmission();
-        var close = pending.replacementAdmission().closeCapacityCancellations();
+        return replacementPreMatchingCancellations(pending.matchingAdmission(),
+                pending.replacementAdmission().closeCapacityCancellations());
+    }
+
+    List<Long> replacementPreMatchingCancellations(ResolvedMatchingAdmission admission, List<Long> close) {
         long[] selfTrade = preMatchingSelfTradeCancellations(admission.userId(), admission.command(),
                 admission.originalOrderId(), admission.resolved().matchingPriceTicks());
         if (close.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);

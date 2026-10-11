@@ -265,6 +265,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     // At most one sequential item is awaiting account publication; no copied item state.
     com.surprising.aeron.service.state.MatcherSettlementEvent itemSettlementEvent;
     com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacementAdmission;
+    com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmissionEvent;
     java.util.function.BooleanSupplier itemAdmission;
     long itemAdmissionRevision;
     com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
@@ -417,6 +418,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         lastMatchingResult = null;
         itemSettlementEvent = null;
         replacementAdmission = null;
+        replacementAdmissionEvent = null;
         itemAdmission = null;
         itemAdmissionRevision = 0;
         laneCommitEvent = null;

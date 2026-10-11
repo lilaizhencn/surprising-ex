@@ -11,6 +11,8 @@ import java.util.TreeMap;
 public final class OpenInterestIndex {
 
     private final Map<String, MutableTotals> totals = new HashMap<>();
+    /** Owner-only scratch over completed Lane changes; never retains account state after the calculation. */
+    private final PendingPositions pendingPositions = new PendingPositions();
 
     public OpenInterestIndex(TradingCoreState state) {
         rebuild(state);
@@ -50,6 +52,55 @@ public final class OpenInterestIndex {
     public long shortQuantityNormalized(String instrumentId) {
         MutableTotals value = totals.get(instrumentId);
         return value == null ? 0 : value.shortQuantity;
+    }
+
+    /** Includes sequential batch fills which have completed on Lanes but are not yet journaled. */
+    public long pendingOpenInterestSteps(String instrumentId, TradingRuntimeState runtime,
+            AdlPositionIndex committedPositions, RuntimeIdentityRegistry identities) {
+        runtime.assertOwner();
+        var pending = pendingPositions;
+        if (pending.instrumentId != null) throw new IllegalStateException("nested pending open interest calculation");
+        pending.instrumentId = instrumentId;
+        pending.committedPositions = committedPositions;
+        pending.identities = identities;
+        pending.longQuantity = longQuantityNormalized(instrumentId);
+        pending.shortQuantity = shortQuantityNormalized(instrumentId);
+        try {
+            // The Owner owns this adopted buffer. Async settlements already prepared immutable
+            // position index values on their Lanes; no live Account Lane table is queried here.
+            runtime.changedPositions.forEachIndexed(pending);
+            if (pending.longQuantity < 0 || pending.shortQuantity < 0)
+                throw new IllegalStateException("pending open interest is negative");
+            return Math.max(pending.longQuantity, pending.shortQuantity);
+        } finally {
+            pending.instrumentId = null;
+            pending.committedPositions = null;
+            pending.identities = null;
+        }
+    }
+
+    private static final class PendingPositions
+            implements RuntimeIndexedChangeBuffer.Consumer<PositionRuntime, RuntimePositionIndexValue> {
+        private String instrumentId;
+        private AdlPositionIndex committedPositions;
+        private RuntimeIdentityRegistry identities;
+        private long longQuantity, shortQuantity;
+
+        @Override public void accept(long key, PositionRuntime published, boolean hasPrepared,
+                RuntimePositionIndexValue prepared) {
+            var previous = committedPositions.value(key);
+            // Synchronous control changes use immutable publication values in the same buffer.
+            var current = hasPrepared ? prepared : published == null ? null
+                    : RuntimePositionIndexValue.from(published, identities);
+            if (previous != null && instrumentId.equals(previous.instrumentId())) {
+                longQuantity = Math.subtractExact(longQuantity, longQuantity(previous.signedQuantitySteps()));
+                shortQuantity = Math.subtractExact(shortQuantity, shortQuantity(previous.signedQuantitySteps()));
+            }
+            if (current != null && instrumentId.equals(current.instrumentId())) {
+                longQuantity = Math.addExact(longQuantity, longQuantity(current.signedQuantitySteps()));
+                shortQuantity = Math.addExact(shortQuantity, shortQuantity(current.signedQuantitySteps()));
+            }
+        }
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {

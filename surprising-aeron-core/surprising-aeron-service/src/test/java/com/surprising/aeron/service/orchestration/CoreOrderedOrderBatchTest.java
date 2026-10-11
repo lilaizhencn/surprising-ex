@@ -1096,6 +1096,15 @@ class CoreOrderedOrderBatchTest {
             long sequence = state.matchingSequence(commandId);
             // Inject at the actual Matcher -> Lane boundary. An Owner-supplied token is no
             // longer authoritative once the command has a direct settlement event.
+            long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while (state.pendingMatching(sequence).orderBatch.itemSettlementEvent == null) {
+                var pending = state.pendingMatching(sequence);
+                if (!pending.orderBatch.activated())
+                    state.batches.activateOrderBatch(pending.orderBatch, pending, true);
+                state.runtimeState.assertAccountLanesHealthy();
+                if (System.nanoTime() >= admissionDeadline) throw new AssertionError("amend admission timeout");
+                Thread.onSpinWait();
+            }
             var event = state.pendingMatching(sequence).orderBatch.itemSettlementEvent;
             assertThat(event).isNotNull();
             var nativeCancellation = nativeResult(CommandResultCode.SUCCESS, 12_101);
@@ -1130,6 +1139,153 @@ class CoreOrderedOrderBatchTest {
                     org.assertj.core.api.Assertions.catchThrowable(closeable::close);
             }
         }
+    }
+
+    @Test
+    void amendBatchRejectsReplacementIdOnAnotherLaneBeforeCancelingOriginal() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            applyBalance(state, 1002, 10_000, 2);
+            assertThat(state.runtimeState.topology().accountLaneId(1001))
+                    .isNotEqualTo(state.runtimeState.topology().accountLaneId(1002));
+            for (int index = 0; index < 2; index++) {
+                long user = 1001 + index, order = 13_211 + index;
+                assertThat(drainBatch(state, command(
+                        CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3 + index,
+                        TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                place(order, "cross-lane-" + user, 1_000)))), user)).status())
+                        .isEqualTo(ResponseStatus.APPLIED);
+            }
+            var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.AMEND_ORDER_BATCH,
+                    UUID.randomUUID(), 5, TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(13_211, 13_212, "occupied", 900L, 1L, CoreTimeInForce.GTC, false))))));
+            var item = TradingOrderBatchCodec.decodeResult(response.data()).items().getFirst();
+            assertThat(item.resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
+            assertThat(item.executions()).isEmpty();
+            assertThat(state.tradingState().order(13_211).userId()).isEqualTo(1001);
+            assertThat(state.tradingState().order(13_212).userId()).isEqualTo(1002);
+            for (long user : new long[]{1001, 1002}) {
+                var balance = state.tradingState().user(user).balances().get("USDT");
+                assertThat(balance.availableUnits()).isEqualTo(9_000);
+                assertThat(balance.lockedUnits()).isEqualTo(1_000);
+            }
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected() throws Exception {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 1_000);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_201, "lane-amend-original", 1_000))))));
+            state.activate();
+            Object[] lanes = field(state.runtimeState, "accountLanes");
+            Object[] workers = field(state.runtimeState, "laneWorkers");
+            int laneId = state.runtimeState.topology().accountLaneId(1001);
+            var worker = (com.surprising.aeron.service.lane.SettlementLaneWorker) workers[laneId];
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            worker.submit(lane -> {
+                entered.countDown();
+                try {
+                    if (!release.await(3, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("Lane gate timed out");
+                } catch (InterruptedException failure) { throw new AssertionError(failure); }
+            });
+            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var accountLane = lanes[laneId];
+            String[] names = {"orders", "reservations", "users", "positions", "balances"};
+            Object[] original = new Object[names.length];
+            Thread ownerThread = Thread.currentThread();
+            try {
+                for (int index = 0; index < names.length; index++) {
+                    var table = accountLane.getClass().getDeclaredField(names[index]); table.setAccessible(true);
+                    original[index] = table.get(accountLane);
+                    table.set(accountLane, ownerReadGuard(original[index], ownerThread));
+                }
+                var batch = state.batches.acquireOrderBatchPending(
+                        com.surprising.aeron.service.command.order.OrderBatchKind.AMEND,
+                        1, 2_000, 3, CommandSlot.Operation.AMEND);
+                batch.sequence = 1_000;
+                var amend = new AmendOrderCommand(13_201, 13_202, "lane-amend", 900L, 1L, CoreTimeInForce.GTC, false);
+                batch.addItem(13_202, 13_201, 13_202, amend);
+                state.batches.prepareOrderBatchItem(batch, batch.items.getFirst(), 1001, UUID.randomUUID());
+                var event = batch.replacementAdmissionEvent;
+                assertThat(event).isNotNull();
+                assertThat(event.complete()).isFalse();
+                assertThat(batch.admissionOrderIndex).isNull();
+                assertThatThrownBy(() -> state.runtimeState.releaseReplacementAdmission(event))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
+                var independent = new java.util.concurrent.CountDownLatch(1);
+                ((com.surprising.aeron.service.lane.SettlementLaneWorker) workers[(laneId + 1) % lanes.length])
+                        .submit(lane -> independent.countDown());
+                assertThat(independent.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                release.countDown();
+                awaitBatchAmendAdmission(state, event);
+                assertThat(event.rejection()).isNull();
+                assertThat(event.admission().requiredReservationUnits()).isEqualTo(900);
+                state.batches.releaseOrderBatchPending(batch);
+                assertThat(event.complete()).isFalse();
+
+                var rejected = state.batches.acquireOrderBatchPending(
+                        com.surprising.aeron.service.command.order.OrderBatchKind.AMEND,
+                        1, 2_001, 4, CommandSlot.Operation.AMEND);
+                rejected.sequence = 1_001;
+                rejected.addItem(13_203, 13_201, 13_203, new AmendOrderCommand(
+                        13_201, 13_203, "unaffordable-lane", 1_100L, 1L, CoreTimeInForce.GTC, false));
+                state.batches.prepareOrderBatchItem(rejected, rejected.items.getFirst(), 1001, UUID.randomUUID());
+                assertThat(rejected.replacementAdmissionEvent).isSameAs(event);
+                awaitBatchAmendAdmission(state, event);
+                assertThat(event.rejection()).isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class)
+                        .hasMessageContaining("insufficient");
+                state.batches.releaseOrderBatchPending(rejected);
+            } finally {
+                release.countDown();
+                for (int index = 0; index < names.length; index++) {
+                    if (original[index] == null) continue;
+                    var table = accountLane.getClass().getDeclaredField(names[index]); table.setAccessible(true);
+                    table.set(accountLane, original[index]);
+                }
+            }
+            assertThat(state.tradingState().user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(state.tradingState().order(13_201)).isNotNull();
+            assertThat(state.tradingState().order(13_202)).isNull();
+        }
+    }
+
+    private static void awaitBatchAmendAdmission(TradingCoreRuntime state,
+            com.surprising.aeron.service.state.ReplacementAdmissionEvent event) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (!event.complete()) {
+            state.runtimeState.assertAccountLanesHealthy();
+            if (System.nanoTime() >= deadline) throw new AssertionError("batch amend admission timeout");
+            Thread.onSpinWait();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object ownerReadGuard(Object original, Thread ownerThread) {
+        if (original instanceof org.agrona.collections.Long2ObjectHashMap<?> source) {
+            var guard = new org.agrona.collections.Long2ObjectHashMap<Object>() {
+                @Override public Object get(long key) {
+                    if (Thread.currentThread() == ownerThread) throw new AssertionError("Owner read Account Lane table");
+                    return super.get(key);
+                }
+            };
+            guard.putAll((org.agrona.collections.Long2ObjectHashMap<Object>) source);
+            return guard;
+        }
+        var guard = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Object>() {
+            @Override public Object get(long key) {
+                if (Thread.currentThread() == ownerThread) throw new AssertionError("Owner read Account Lane table");
+                return super.get(key);
+            }
+        };
+        guard.putAll((org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Object>) original);
+        return guard;
     }
 
     @Test

@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 public class ReplacementAdmissionBenchmark {
     private static final int WINDOW = 256;
     @Param({"1", "4"}) public int laneCount;
+    @Param({"LINEAR_PERPETUAL", "SPOT"}) public String productLine;
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
     private CoreOrderDecisionResolver.Context decision;
@@ -35,8 +36,10 @@ public class ReplacementAdmissionBenchmark {
     private long sequence;
 
     @Setup public void setup() {
-        var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+        var product = ProductLine.valueOf(productLine);
+        var instrument = CoreInstrument.from(product,
+                new RegisterInstrumentCommand("1", product == ProductLine.SPOT
+                        ? ContractType.SPOT.ordinal() : ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
                         0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 10_000,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));
@@ -44,11 +47,11 @@ public class ReplacementAdmissionBenchmark {
         var orders = new HashMap<Long, CoreOrderState>();
         for (int i = 0; i < WINDOW; i++) {
             long user = i + 1, original = 1_000 + user;
-            users.put(user, new CoreUserState(ProductLine.LINEAR_PERPETUAL, user, 1,
+            users.put(user, new CoreUserState(product, user, 1,
                     Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                    Map.of(original, OrderReservation.create(original, "1", ReservationKind.DERIVATIVE_MARGIN,
+                    Map.of(original, OrderReservation.create(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
                             "USDT", 100, 1)), Map.of()));
-            orders.put(original, new CoreOrderState(original, ProductLine.LINEAR_PERPETUAL, user, "1",
+            orders.put(original, new CoreOrderState(original, product, user, "1",
                     CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "original", new UUID(1, user),
                     0, 0, CoreOrderStatus.OPEN, 1));
@@ -57,7 +60,7 @@ public class ReplacementAdmissionBenchmark {
         }
         identities = new RuntimeIdentityRegistry();
         // Initialize the fixture once; there is no snapshot or restore operation in measurement.
-        runtime = RuntimeStateProjector.project(new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+        runtime = RuntimeStateProjector.project(new TradingCoreState(product, 1,
                 users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty()),
                 identities, new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, laneCount,
                         LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));

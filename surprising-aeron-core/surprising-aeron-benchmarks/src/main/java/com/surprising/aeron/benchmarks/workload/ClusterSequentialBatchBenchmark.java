@@ -33,7 +33,7 @@ public class ClusterSequentialBatchBenchmark {
                 System.getProperty("surprising.aeron.egress-hostname", "127.0.0.1"), Duration.ofSeconds(10))) {
             for (int i = 0; i < 128; i++) {
                 long user = 1001 + i * 2L, maker = user + 1, id = 10000 + i * 10L;
-                String asset = "B" + i, instrumentId = asset + "-USDT";
+                String asset = "B" + i, instrumentId = Integer.toString(i + 1);
                 if (args[0].equals("run")) {
                     send(client, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
                             new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(), asset, "USDT", "USDT",

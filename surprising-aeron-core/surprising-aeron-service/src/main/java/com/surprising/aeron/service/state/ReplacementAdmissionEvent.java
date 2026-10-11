@@ -62,6 +62,14 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
                     runtime, userId, this, openInterestSteps, lane.admissionOrderIndex(symbolId()),
                     originalOrderId, identities.findClientKeyValueInLane(lane, userId, clientOrderId()), positionKey,
                     decision.lifecycleSettled(), decision.fundingInProgress());
+            if (amend != null && runtime.productLine() == com.surprising.product.api.ProductLine.SPOT) {
+                var reservation = lane.reservations.get(originalOrderId);
+                if (reservation == null || !reservationAsset().equals(identities.asset(reservation.assetId())))
+                    throw new IllegalStateException("spot amend original reservation is missing or mismatched");
+                var balance = runtime.balance(userId, reservation.assetId());
+                if (balance == null || required > Math.addExact(balance.availableUnits(), reservation.reservedUnits()))
+                    throw rejected("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient for amended order");
+            }
             PositionRuntime position = positionKey == 0 ? null : lane.positions.get(positionKey);
             if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
                     && position != null && position.signedQuantitySteps() != 0

@@ -52,3 +52,10 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 
 
 压测service等待策略可用 `ASYNC_SERVICE_IDLE_STRATEGY=BACKOFF` 做独立诊断，默认YIELDING，实际值写入strategy.txt和node.command。只改变既有生产idle策略，不能与业务代码改动混做吞吐归因。2026-10-11同代码两轮40.96/41.85万业务项/s且有限频，第三轮未执行，不据此确认收益或改变默认。
+
+
+### 批量改单迁移的受影响性能证据
+
+`ReplacementAdmissionBenchmark` 新增 LINEAR_PERPETUAL/SPOT 参数，测量实际 Account workers 上的改单只读准入，包含现货撮合前的资金判断。`PendingOpenInterestBenchmark` 测量0/128项已完成不可变持仓变更上的批次OI计算，初始化及市场输入是常驻夹具；这些技术阶段都不代表整链路容量。当前独立gc约152B/永续准入、128B/现货准入，OI计算接近零分配。
+
+`ClusterSequentialBatchBenchmark.proceedsAndAmendOnLane` 使用规范数字 instrumentId，在真实单成员现货节点验证128组交易收入再冻结、改单、撤单及资金核对。SingleShot含初始化/查询并逐请求等待，只作为改动路径功能/JFR诊断，不计持续吞吐。当前永续固定MIXED窗口观测42.15万business/s，但限频导致容量验收无效，正式窗口不持续执行AMEND。整链路JFR约1172B/业务项、DataLoss=0，未达全链路零堆分配，也未做长稳。记录见根 PERFORMANCE_VALIDATION.md 和 [验证JSON](../../docs/validation/batch-amend-lane-admission-20261011.json)。

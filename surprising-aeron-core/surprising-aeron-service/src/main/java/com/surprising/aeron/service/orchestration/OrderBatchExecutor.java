@@ -234,7 +234,7 @@ final class OrderBatchExecutor {
                             userId, command.instrumentId(), owner.currentClusterTimestamp);
                     var instrument = context.instrument();
                     decision = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision(context,
-                            batchOpenInterestSteps(batch, command.instrumentId()),
+                            batchOpenInterestSteps(command.instrumentId()),
                             owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
                             owner.identities.assetId(instrument.settleAsset()));
                     contextIndex = batch.preparedSymbols.size();
@@ -354,13 +354,20 @@ final class OrderBatchExecutor {
         batch.sequentialAdmission = true;
         while (batch.nextIndex < batch.items.size()) {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
-            long runtimeRevisionBefore = batch.itemAdmission == null
+            boolean admissionPending = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
+            long runtimeRevisionBefore = !admissionPending
                     ? owner.runtimeState.revision() : batch.itemAdmissionRevision;
             try {
-                if (batch.itemAdmission == null) {
+                if (!admissionPending) {
                     batch.itemAdmissionRevision = runtimeRevisionBefore;
                     prepareOrderBatchItem(batch, item, pending.command().header().userId(),
                             pending.command().header().commandId());
+                }
+                if (batch.replacementAdmissionEvent != null && !collectBatchAmendAdmission(batch, pending.command().header().userId())) {
+                    batch.sequentialAdmission = true;
+                    batch.activated(false);
+                    owner.suspendMatchingCommitContext(pending);
+                    return null;
                 }
                 if (batch.itemAdmission != null) {
                     if (!batch.itemAdmission.getAsBoolean()) {
@@ -381,7 +388,8 @@ final class OrderBatchExecutor {
                 // A reservation failure is reported by the owning Lane after it has validated
                 // and rolled back the item.  Other Lanes may have committed meanwhile, so the
                 // global runtime revision is not a valid unchanged-state check here.
-                boolean laneAdmissionFailure = batch.itemAdmission != null;
+                boolean laneAdmissionFailure = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
+                releaseBatchAmendAdmission(batch);
                 batch.itemAdmission = null;
                 if (!laneAdmissionFailure)
                     requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
@@ -389,7 +397,8 @@ final class OrderBatchExecutor {
                         CoreResultCode.fromRejectionCode(exception.code()));
                 batch.nextIndex++;
             } catch (ArithmeticException | IllegalArgumentException exception) {
-                boolean laneAdmissionFailure = batch.itemAdmission != null;
+                boolean laneAdmissionFailure = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
+                releaseBatchAmendAdmission(batch);
                 batch.itemAdmission = null;
                 if (!laneAdmissionFailure)
                     requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
@@ -416,7 +425,7 @@ final class OrderBatchExecutor {
                 owner.identities, userId, command, owner.currentClusterTimestamp);
         long required = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                 owner.runtimeState, owner.identities, userId, resolved,
-                batchOpenInterestSteps(batch, command.instrumentId()), batch.admissionOrderIndex, 0);
+                batchOpenInterestSteps(command.instrumentId()), batch.admissionOrderIndex, 0);
         int assetId = owner.identities.assetId(resolved.reservationAsset());
         long sequence = batch.sequence;
         int laneId = owner.runtimeState.topology().accountLaneId(userId);
@@ -448,7 +457,7 @@ final class OrderBatchExecutor {
 
     void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
                                        UUID commandId) {
-        if (batch.admissionOrderIndex == null) {
+        if (batch.kind == OrderBatchKind.PLACE && batch.admissionOrderIndex == null) {
             batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
             batch.admissionOrderIndex.reset(userId);
         }
@@ -478,51 +487,47 @@ final class OrderBatchExecutor {
                 }
                 case AMEND -> {
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
-                    OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                    if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-                    if (order.userId() != userId) {
+                    var route = owner.activeOrderIndex.activeOrderRoute(command.originalOrderId());
+                    if (route == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                    if (route.userId() != userId)
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-                    }
-                    if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
-                            || order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
-                        throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
-                    }
-                    if (owner.runtimeState.order(command.replacementOrderId()) != null) {
+                    if (command.replacementOrderId() == command.originalOrderId())
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
-                    }
-                    PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
-                    ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                            owner.identities, userId, replacement, owner.currentClusterTimestamp);
-                    long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
-                            owner.runtimeState, owner.identities, userId, resolved,
-                            batchOpenInterestSteps(batch, replacement.instrumentId()), batch.admissionOrderIndex,
-                            command.originalOrderId());
-                    if (owner.productLine == ProductLine.SPOT) {
-                        var reservation = owner.runtimeState.reservation(command.originalOrderId());
-                        int assetId = owner.identities.assetId(resolved.reservationAsset());
-                        if (reservation == null || reservation.assetId() != assetId) {
-                            throw new IllegalStateException("spot amend original reservation is missing or mismatched");
-                        }
-                        // The previous item has crossed its completion fence; its published scalar
-                        // is current. Do not enqueue another Lane task just to preflight available funds.
-                        long available = owner.runtimeState.publishedAvailableBalance(userId, assetId);
-                        if (available == Long.MIN_VALUE || requiredReservation > Math.addExact(
-                                available, reservation.reservedUnits())) {
-                            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                                    "available balance is insufficient for amended order");
-                        }
-                    }
-                    batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
-                            userId, replacement, command.originalOrderId());
-                    batch.replacementAdmission = new com.surprising.aeron.service.command.order.ResolvedMatchingAdmission(
-                            userId, command.originalOrderId(), order.revision(), owner.runtimeState.user(userId).revision(),
-                            replacement, resolved, requiredReservation);
+                    var decision = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
+                            userId, route.instrumentId(), owner.currentClusterTimestamp);
+                    batch.replacementAdmissionEvent = owner.runtimeState.dispatchReplacementAdmission(
+                            batch.sequence, userId, command.originalOrderId(), command, null, decision,
+                            batchOpenInterestSteps(route.instrumentId()),
+                            owner.matchingAdapter.matcherShardId(route.instrumentId()), owner.identities);
                 }
             }
         } finally {
             owner.currentClusterTimestamp = previousTimestamp;
             owner.currentClusterPosition = previousPosition;
         }
+    }
+
+    private boolean collectBatchAmendAdmission(OrderBatchPending batch, long userId) {
+        var event = batch.replacementAdmissionEvent;
+        if (!event.complete()) { owner.runtimeState.assertAccountLanesHealthy(); return false; }
+        if (event.rejection() != null) throw event.rejection();
+        var admission = event.admission();
+        // Lane admission sees only its own account state. Order IDs are globally unique;
+        // the Owner's existing route index catches an active ID owned by another Lane.
+        if (owner.activeOrderIndex.activeOrderRoute(admission.command().orderId()) != null)
+            throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
+        owner.requireOrderIdentityAvailable(userId, admission.command());
+        batch.replacementAdmission = admission;
+        batch.currentPreMatchingCancellationOrderIds = owner.admissions.replacementPreMatchingCancellations(
+                admission, event.closeCapacityCancellations());
+        return true;
+    }
+
+    private void releaseBatchAmendAdmission(OrderBatchPending batch) {
+        if (batch.replacementAdmissionEvent == null) return;
+        owner.runtimeState.releaseReplacementAdmission(batch.replacementAdmissionEvent);
+        batch.replacementAdmissionEvent = null;
+        batch.replacementAdmission = null;
     }
 
     void submitOrderBatchMatching(CommandSlot pending) {
@@ -760,13 +765,15 @@ final class OrderBatchExecutor {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         try {
             batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
-            for (int index = 0; index < batch.itemChangedOrderIds.size(); index++) {
-                long orderId = batch.itemChangedOrderIds.valueAt(index);
-                batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
-                        owner.runtimeOrder(orderId));
+            if (batch.admissionOrderIndex != null) {
+                for (int index = 0; index < batch.itemChangedOrderIds.size(); index++) {
+                    long orderId = batch.itemChangedOrderIds.valueAt(index);
+                    batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
+                            owner.runtimeOrder(orderId));
+                }
             }
             if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(batch, item, status, resultCode);
-            batch.replacementAdmission = null;
+            releaseBatchAmendAdmission(batch);
             item.cancelSymbol = null;
             batch.nextIndex++;
         } catch (RuntimeException exception) {
@@ -822,34 +829,9 @@ final class OrderBatchExecutor {
         batch.matchingApplied(true);
     }
 
-    long batchOpenInterestSteps(OrderBatchPending batch, String instrumentId) {
-        long longQuantity = owner.openInterestIndex.longQuantityNormalized(instrumentId);
-        long shortQuantity = owner.openInterestIndex.shortQuantityNormalized(instrumentId);
-        for (int index = 0; index < batch.changedUserIds.size(); index++) {
-            long userId = batch.changedUserIds.valueAt(index);
-            long before = batchPositionQuantityBefore(userId, instrumentId);
-            long current = owner.runtimePositionQuantity(userId, instrumentId);
-            if (before > 0) longQuantity = Math.subtractExact(longQuantity, before);
-            else if (before < 0) shortQuantity = Math.subtractExact(shortQuantity, Math.negateExact(before));
-            if (current > 0) longQuantity = Math.addExact(longQuantity, current);
-            else if (current < 0) shortQuantity = Math.addExact(shortQuantity, Math.negateExact(current));
-        }
-        return Math.max(longQuantity, shortQuantity);
-    }
-
-    long batchPositionQuantityBefore(long userId, String instrumentId) {
-        long quantity = 0;
-        var instrument = owner.runtimeState.instrument(instrumentId);
-        if (instrument == null) return 0;
-        for (com.surprising.aeron.protocol.CorePositionSide side
-                : com.surprising.aeron.protocol.CorePositionSide.values()) {
-            long positionKey = owner.identities.findPositionKeyValue(userId, instrument, side);
-            if (positionKey == 0) continue;
-            com.surprising.aeron.service.state.PositionRuntime position =
-                    owner.runtimeState.currentPatchPositionBefore(positionKey);
-            if (position != null) quantity = Math.addExact(quantity, position.signedQuantitySteps());
-        }
-        return quantity;
+    long batchOpenInterestSteps(String instrumentId) {
+        return owner.openInterestIndex.pendingOpenInterestSteps(instrumentId,
+                owner.runtimeState, owner.adlPositionIndex, owner.identities);
     }
 
     void rollbackOrderBatchMutations(OrderBatchPending batch, boolean endScope) {
@@ -1266,6 +1248,7 @@ final class OrderBatchExecutor {
     void releaseOrderBatchPending(OrderBatchPending batch) {
         if (batch == null) return;
         unregisterPipelinedBatchSymbols(batch);
+        releaseBatchAmendAdmission(batch);
         batch.clear();
         if (orderBatchPendingPool.size() < TradingCoreRuntime.MAX_PENDING_MATCHING) orderBatchPendingPool.addFirst(batch);
     }
@@ -1311,10 +1294,8 @@ final class OrderBatchExecutor {
             }
             case AMEND -> {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
-                OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
-                orderId = replacement.orderId();
-                String instrumentId = owner.runtimeOrderSymbol(order);
+                orderId = batch.replacementAdmission.resolved().orderId();
+                String instrumentId = batch.replacementAdmission.command().instrumentId();
                 var resolvedReplacement = batch.replacementAdmission.resolved();
                 submission = () -> owner.matchingAdapter.replaceOrder(
                         pending.command().header().userId(), command.originalOrderId(), instrumentId, resolvedReplacement);
@@ -1331,8 +1312,7 @@ final class OrderBatchExecutor {
                         pending.command().header().userId(), matchingOrder, direct);
             } else {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
-                OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                String instrumentId = owner.runtimeOrderSymbol(order);
+                String instrumentId = batch.replacementAdmission.command().instrumentId();
                 var resolvedReplacement = batch.replacementAdmission.resolved();
                 directSubmission = () -> owner.matchingAdapter.replaceDirect(
                         shard, pending.sequence(), pending.command().header().commandId(),
