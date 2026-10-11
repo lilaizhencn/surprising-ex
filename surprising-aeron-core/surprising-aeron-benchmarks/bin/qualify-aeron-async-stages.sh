@@ -37,6 +37,7 @@ MATCHER_WAIT_STRATEGY="${ASYNC_MATCHER_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_W
 MATCHER_PIPELINE_WAIT_STRATEGY="${ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_PIPELINE_WAIT_STRATEGY:-ADAPTIVE}}"
 OWNER_WAIT_STRATEGY="${ASYNC_OWNER_WAIT_STRATEGY:-${AERON_BASELINE_OWNER_WAIT_STRATEGY:-ADAPTIVE}}"
 OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
+SERVICE_IDLE_STRATEGY="${ASYNC_SERVICE_IDLE_STRATEGY:-YIELDING}"
 COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
 ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
 # Optional single-factor UDP receive-buffer diagnostic, applied to both drivers.
@@ -87,6 +88,7 @@ fi
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
 printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
   "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
+printf 'serviceIdleStrategy=%s\n' "${SERVICE_IDLE_STRATEGY}" >> "${ROOT}/strategy.txt"
 
 NODE_PID=""
 NODE_LANES="${ACCOUNT_LANES}"
@@ -121,7 +123,7 @@ start_node() {
     "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
     "-Dsurprising.aeron.owner-wait-strategy=${OWNER_WAIT_STRATEGY}"
     "-Dsurprising.aeron.owner-input-batch-size=${OWNER_INPUT_BATCH_SIZE}"
-    -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
+    -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK "-Dsurprising.aeron.service.idle-strategy=${SERVICE_IDLE_STRATEGY}"
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
   if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then args+=("-Daeron.socket.so_rcvbuf=${SOCKET_RCVBUF_BYTES}"); fi
   if [[ "${ENABLE_JFR}" == true ]]; then

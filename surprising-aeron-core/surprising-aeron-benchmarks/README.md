@@ -49,3 +49,6 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 ### 普通改单 Lane 准入基准
 
 `ReplacementAdmissionBenchmark.admitAmendments` 使用 256 个在途准入槽和 1/4 个实际 Account workers。初始化一次账户和静态原订单，只测 Lane 只读 AMEND 校验、完成通知及池回收；每次新建的不可变业务结果包含在分配统计中，输入和市场元数据是常驻夹具。它不执行 Matcher 或资金结算，也不代表 Core 吞吐。无 profiler 和独立 `-prof gc` 两轮使用 JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量；完整 Core 分配另由真实单节点 JFR 核对。
+
+
+压测service等待策略可用 `ASYNC_SERVICE_IDLE_STRATEGY=BACKOFF` 做独立诊断，默认YIELDING，实际值写入strategy.txt和node.command。只改变既有生产idle策略，不能与业务代码改动混做吞吐归因。2026-10-11同代码两轮40.96/41.85万业务项/s且有限频，第三轮未执行，不据此确认收益或改变默认。

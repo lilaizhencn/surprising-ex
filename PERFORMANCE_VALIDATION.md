@@ -5196,3 +5196,13 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 独立整链路JFR同构建、同配置，正式窗口1791704222358–1791704282393，292547.789业务项/s、27977.572Core消息/s，资金/终态通过；限频58/60/62，容量同样无效。按窗口内59次ThreadAllocationStatistics首末差约58.798s估算线程分配速率，再除正式业务速率，Core约342653133.644B/s、1171.272B/业务项；这是近似值，采样不能当精确对象数。GCPhasePause68次/434632259ns、最大10334812ns；DataLoss0，窗口内未记录Owner/Lane监视器进入，不能证明synchronized不存在或阈值以下竞争为0。preparedOrder、OrderRuntime.snapshot、MatcherResult.from、resolveValues和协议解码仍为主要分配站点。该fixed MIXED正式窗口没有持续普通AMEND/REPLACE，因此整链路数据只验证现状及正确性，不证明该路径的吞吐收益。
 
 结论：普通改单准备路径的Lane读表边界通过，整体性能及完整Shared-Nothing只属部分验证。批量改单/触发、Owner其余权威账户读取、生产SystemLedgerLane及Treasury资金写入退出仍未完成，pendingReservation监视器仍保留。短测不证明长期稳定或无泄漏；本轮按用户要求不测snapshot/recovery/wallet。所有本轮压测进程已结束，本轮临时data/aeron/client-aeron及另4个生成目录清理；4份JFRgzip保留并校验解压SHA后删除raw，记录见 `replacement-admission-cleanup.json`。原始历史路径仅作定位，保留summary/view、正式窗口分析、命令/环境、源/JAR指纹及各失败记录。
+
+
+## 2026-10-11 Aeron service 等待策略：采集前单因素计划
+
+用户追问吞吐下降后，固定当前 master `dcd6896f` 的业务代码及build13 JAR，先验证线程等待竞争。只开放压测脚本既有生产service参数：`ASYNC_SERVICE_IDLE_STRATEGY`，默认仍YIELDING。按YIELDING(A)→BACKOFF(B)→YIELDING(C)运行；1node/1Matcher/4Lane/global-session256/G1、固定MIXED/batch20/symbol128、60s预热/60s正式测量，其它配置与前轮一致。每轮启动前至少30s空闲并记录CPU_Speed_Limit100，不能由启动空闲推出测量不限频。全程不并行构建/测试/分析。业务门槛资金差0、未完成0、offered=terminal、无异常超时；容量50万目标仍要求正式窗口无throttling和完整指标。A/C差异超过5%或频率不可比时吞吐因果结论不成立；不按限频百分比外推。固定负载的accepted计数、分业务完整尾延迟和队列增长采样缺口仍保留，排除snapshot/recovery/wallet。细节见artifact `service-idle-diagnostic-plan.json`。
+
+
+### service 等待策略：部分对照结果
+
+同一dcd6896f业务源码和build13 JAR，A(YIELDING)409570.075业务项/s、39123.085Core/s、60.024178s；B(BACKOFF)418533.436业务项/s、39976.032Core/s、60.023066s。两轮资金差0、未完成0，测量均有限频；A限频72/75，B实测值见service-idle-backoff-b-analysis-cleanup.json。约2.19%差异不能证明收益，用户随后要求继续Owner迁移，C及专项profile未执行，计划偏差如实留档，维持默认YIELDING。bash -n和既有3项等待策略配置测试通过，node.command核对两轮参数正确；压测JMH continuousOperations结果另留档。未改业务Java/JAR/匹配负载，记录只提供已达负载，不作50万或完整性能验收。两轮进程均结束，本轮临时集群、Archive和driver/tmp目录已清理，保留指标、源码/JAR指纹和诊断配置。
