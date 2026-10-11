@@ -253,7 +253,7 @@ public final class RuntimeSpotMatchProcessor {
         long valueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(order.executedValueHigh(), order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
         long valueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
         OrderRuntime nextOrder;
-        if (runtime.laneCommandScope.get() != null && runtime.matcherSettlementChangesScope.get() != null) {
+        if (runtime.currentLaneCommandScope() != null && runtime.currentMatcherSettlementChangesScope() != null) {
             runtime.updateReservationInLane(order.orderId(),
                     Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
             nextOrder = runtime.updateOrderInLane(order.orderId(), nextExecuted, nextRemaining,
@@ -442,7 +442,7 @@ public final class RuntimeSpotMatchProcessor {
                 if (fills == 0) return;
                 CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
                 long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
-                if (state.laneCommandScope.get() != null && state.matcherSettlementChangesScope.get() != null) {
+                if (state.currentLaneCommandScope() != null && state.currentMatcherSettlementChangesScope() != null) {
                     state.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
                     OrderRuntime nextOrder = state.updateOrderInLane(originalOrder.orderId(), executed, remaining,
                             feeDelta, executedValueHigh, executedValueLow, status, Math.addExact(originalOrder.revision(), fills),
@@ -492,7 +492,7 @@ public final class RuntimeSpotMatchProcessor {
         OrderRuntime order = runtime.order(orderId);
         if (order == null || !order.canceled()) return;
         long releaseUnits = runtime.reservation(orderId).reservedUnits();
-        if (runtime.matcherSettlementChangesScope.get() != null) runtime.releaseTerminalReservationInLane(orderId);
+        if (runtime.currentMatcherSettlementChangesScope() != null) runtime.releaseTerminalReservationInLane(orderId);
         else runtime.releaseTerminalReservation(orderId);
         if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
     }

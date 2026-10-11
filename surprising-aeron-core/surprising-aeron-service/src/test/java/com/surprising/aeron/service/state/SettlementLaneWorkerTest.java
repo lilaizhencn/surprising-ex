@@ -8,6 +8,39 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 256})
+    void admissionPublishedAfterParkingAnnouncementKeepsMakingProgress(int spins) throws Exception {
+        String strategyKey = "surprising.aeron.settlement-wait-strategy";
+        String spinKey = "surprising.aeron.settlement-spin-limit";
+        String previousStrategy = System.getProperty(strategyKey), previousSpin = System.getProperty(spinKey);
+        System.setProperty(strategyKey, "BLOCKING");
+        System.setProperty(spinKey, Integer.toString(spins));
+        try (var worker = new SettlementLaneWorker("admission-wakeup", new AccountLaneState(0, 8), 8)) {
+            var parked = SettlementLaneWorker.class.getDeclaredField("parked");
+            parked.setAccessible(true);
+            var executed = new AtomicInteger();
+            for (int round = 0; round < 512; round++) {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                boolean announced = false;
+                while (!(announced = parked.getBoolean(worker)) && System.nanoTime() < deadline) Thread.onSpinWait();
+                assertThat(announced).isTrue();
+                var completed = new CountDownLatch(1);
+                int expected = round;
+                worker.submitAdmission(lane -> {
+                    if (executed.getAndIncrement() != expected) throw new AssertionError("admission reordered");
+                    completed.countDown();
+                });
+                assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+                worker.assertHealthy();
+            }
+            assertThat(executed.get()).isEqualTo(512);
+        } finally {
+            if (previousStrategy == null) System.clearProperty(strategyKey); else System.setProperty(strategyKey, previousStrategy);
+            if (previousSpin == null) System.clearProperty(spinKey); else System.setProperty(spinKey, previousSpin);
+        }
+    }
+
     @org.junit.jupiter.api.Test
     @org.junit.jupiter.api.Timeout(15)
     void ownerObservesNonNegativeDepthWhileMatcherAndLaneAdvance() throws Exception {

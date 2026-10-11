@@ -46,8 +46,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             new InMemorySerializationProcessor();
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
-    /** Matcher user registry is primitive and guarded only at the async API boundary. */
-    private final LongHashSet users = new LongHashSet();
     private final Set<Integer> registeredSymbols = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final LaneTopology topology;
@@ -66,19 +64,41 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private static final class MatcherCommandScope {
         long aeronTimestamp;
         boolean active;
+        final LongHashSet users = new LongHashSet();
     }
 
-    private final ThreadLocal<MatcherCommandScope> commandScope =
-            ThreadLocal.withInitial(MatcherCommandScope::new);
+    /** Each activated shard owns its command scratch and user registry. */
+    private MatcherCommandScope[] shardCommandScopes;
+    private Thread[] shardThreads;
+    private final Thread standaloneThread = Thread.currentThread();
+    private final MatcherCommandScope standaloneCommandScope = new MatcherCommandScope();
 
-    private synchronized void recordUser(long userId) {
-        users.add(userId);
+    private void initializeCommandScopes() {
+        shardCommandScopes = new MatcherCommandScope[topology.matchingEngineCount()];
+        shardThreads = new Thread[shardCommandScopes.length];
+        for (int i = 0; i < shardCommandScopes.length; i++) shardCommandScopes[i] = new MatcherCommandScope();
+    }
+
+    private MatcherCommandScope currentCommandScope() {
+        Thread current = Thread.currentThread();
+        for (int i = 0; i < shardThreads.length; i++) {
+            if (shardThreads[i] == current) return shardCommandScopes[i];
+        }
+        if (current == standaloneThread) return standaloneCommandScope;
+        throw new IllegalStateException("matcher command must run on its owning shard thread");
+    }
+
+    private void recordUser(long userId) {
+        currentCommandScope().users.add(userId);
     }
 
     /** Snapshot/hash are cold boundaries; materialize the protocol Set only here. */
-    private synchronized Set<Long> snapshotUsers() {
+    private Set<Long> snapshotUsers() {
         Set<Long> snapshot = new java.util.TreeSet<>();
-        users.forEach((long userId) -> snapshot.add(userId));
+        standaloneCommandScope.users.forEach((long userId) -> snapshot.add(userId));
+        for (MatcherCommandScope scope : shardCommandScopes) {
+            scope.users.forEach((long userId) -> snapshot.add(userId));
+        }
         return snapshot;
     }
 
@@ -101,6 +121,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
                     snapshotPersistence) {
         this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
+        initializeCommandScopes();
         this.matcherEvidence = new MatcherEvidenceLedger(topology);
         this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
@@ -141,6 +162,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         try {
             snapshot.verifyCoreState(state, coreSequence, expectedCoreBusinessStateHash);
             this.topology = snapshot.topology();
+            initializeCommandScopes();
             this.matcherEvidence = new MatcherEvidenceLedger(
                     topology, 0, snapshot.matcherShardProgress());
             serializationProcessor.importSnapshot(snapshot.modules());
@@ -153,7 +175,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             });
             // 路由表也含尚未创建订单簿的 instrumentId，不能作为 native 注册完成的证据。
             // 恢复后的首次使用仍经 ensureSymbol；native 对已有订单簿的注册是幂等操作。
-            snapshot.users().forEach(users::add);
+            snapshot.users().forEach(standaloneCommandScope.users::add);
             List<CoreOrderState> restoredOrders = new ArrayList<>();
             activeOrders.forEach(restoredOrders::add);
             restoredSnapshot = snapshot;
@@ -193,6 +215,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("matcher shard is outside configured topology");
         }
+        shardThreads[shardId] = Thread.currentThread();
         if (topology.matchingEngineCount() == 1) {
             synchronized (this) {
                 if (activationComplete) return;
@@ -265,7 +288,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
                 command.matchingPriceTicks(), command.maxSlippagePpm());
         return engine(symbolId).place(
-                commandScope.get().aeronTimestamp, command.orderId(), 0,
+                currentCommandScope().aeronTimestamp, command.orderId(), 0,
                 price, command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId);
@@ -277,7 +300,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
                 command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.instrument().contractType().productLine()));
         return engine(symbolId).place(
-                commandScope.get().aeronTimestamp, command.orderId(), 0,
+                currentCommandScope().aeronTimestamp, command.orderId(), 0,
                 price, command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command.orderType(), command.timeInForce()), symbolId, userId);
@@ -754,7 +777,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private MatcherCommandScope beginSynchronousCommand(long aeronTimestamp) {
         Throwable failure = matcherFailure.get();
         if (failure != null) throw new IllegalStateException("matcher is poisoned by an earlier command", failure);
-        MatcherCommandScope scope = commandScope.get();
+        MatcherCommandScope scope = currentCommandScope();
         if (scope.active) throw new IllegalStateException("nested synchronous matcher command");
         scope.active = true;
         scope.aeronTimestamp = aeronTimestamp;
@@ -785,7 +808,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             return CompletableFuture.failedFuture(exhausted);
         }
         CompletableFuture<CoreMatchingResult> pipeline = executeWithEvidenceNow(
-                coreSequence, commandId, orderId, aeronTimestamp, controlShard, command);
+            coreSequence, commandId, orderId, aeronTimestamp, controlShard, command);
         NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
         pipeline.whenComplete((result, completionFailure) -> {
             dispatchInFlight.decrementAndGet();
@@ -806,7 +829,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
         CompletableFuture<CoreMatchingResult> submitted;
-        MatcherCommandScope scope = commandScope.get();
+        MatcherCommandScope scope = currentCommandScope();
         try {
             if (scope.active) {
                 throw new IllegalStateException("nested synchronous matcher command");
@@ -883,7 +906,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return completedMatcher(() -> {
             long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
                     command.matchingPriceTicks(), command.maxSlippagePpm());
-            return engine(symbolId).place(commandScope.get().aeronTimestamp, command.orderId(), 0,
+            return engine(symbolId).place(currentCommandScope().aeronTimestamp, command.orderId(), 0,
                     price, command.matchingPriceTicks(), command.quantitySteps(),
                     command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                     orderType(command), symbolId, userId);
@@ -1064,7 +1087,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> submitDirectCancel(
             long userId, long orderId, int symbolId) {
         return completedMatcher(() -> engine(symbolId).cancel(
-                commandScope.get().aeronTimestamp, orderId, symbolId, userId));
+                currentCommandScope().aeronTimestamp, orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
@@ -1083,7 +1106,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, String instrumentId) {
         int symbolId = ensureSymbol(instrumentId);
         recordUser(userId);
-        return engine(symbolId).cancel(commandScope.get().aeronTimestamp, orderId, symbolId, userId);
+        return engine(symbolId).cancel(currentCommandScope().aeronTimestamp, orderId, symbolId, userId);
     }
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String instrumentId,
@@ -1160,7 +1183,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> submitDirectMove(
             long userId, long orderId, int symbolId, long newPriceTicks) {
         return completedMatcher(() -> engine(symbolId).move(
-                commandScope.get().aeronTimestamp, newPriceTicks, orderId, symbolId, userId));
+                currentCommandScope().aeronTimestamp, newPriceTicks, orderId, symbolId, userId));
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
@@ -1529,6 +1552,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private void startShard(int shardId, MatcherSnapshot snapshot) {
+        shardThreads[shardId] = Thread.currentThread();
         InitialStateConfiguration initialState = snapshot == null
                 ? InitialStateConfiguration.cleanStart("aeron-authoritative-book")
                 : InitialStateConfiguration.fromSnapshotOnly(

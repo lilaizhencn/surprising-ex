@@ -67,7 +67,7 @@ public final class RuntimeOrderStateTransitions {
     public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
             AdmissionIdentity identity, long clientKey, int assetId) {
-        AccountLaneState lane = runtime.laneCommandScope.get();
+        AccountLaneState lane = runtime.currentLaneCommandScope();
         if (lane == null) {
             int laneId = runtime.topology().accountLaneId(userId);
             AccountLaneState targetLane = runtime.accountLanes[laneId];
@@ -91,7 +91,7 @@ public final class RuntimeOrderStateTransitions {
     public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
             long clientKey, int assetId, long coreSequence) {
-        AccountLaneState lane = runtime.laneCommandScope.get();
+        AccountLaneState lane = runtime.currentLaneCommandScope();
         if (lane == null) {
             int laneId = runtime.topology().accountLaneId(userId);
             AccountLaneState targetLane = runtime.accountLanes[laneId];

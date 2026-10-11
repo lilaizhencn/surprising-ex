@@ -162,7 +162,7 @@ public final class RuntimeDerivativeFillCalculator {
             if (fills == 0) return null;
             CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
             long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
-            if (runtime.laneCommandScope.get() != null && runtime.matcherSettlementChangesScope.get() != null) {
+            if (runtime.currentLaneCommandScope() != null && runtime.currentMatcherSettlementChangesScope() != null) {
                 // Lane-owned settlement mutates the existing primitive state. The helper methods
                 // append one immutable after-image to LaneCommitDelta; no replacement chain is built.
                 runtime.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);

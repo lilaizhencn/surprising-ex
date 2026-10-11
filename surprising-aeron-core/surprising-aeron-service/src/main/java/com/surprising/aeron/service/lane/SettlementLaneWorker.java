@@ -53,6 +53,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
+    /** Announced before every park and before rechecking all publication sources. */
+    private volatile boolean parked;
     private long idleWaitNanos;
     private long notReadyWaitNanos;
     private long handoffWaitNanos;
@@ -125,6 +127,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
         signalWork();
     }
 
+    public Thread thread() { return thread; }
+
     public long submit(Command command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();
@@ -184,18 +188,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return position + 1;
     }
 
-    /** Unpark is idempotent; the consumer rechecks every volatile cursor after waking. */
+    /** Publish work first; the volatile parking handshake avoids a syscall for an active Lane. */
     public void signalWork() {
-        // An unconditional unpark is intentional.  LockSupport coalesces permits, and the
-        // consumer rechecks every volatile cursor after waking. Conditioning the wake-up on a
-        // racy consumer-state read can lose the only admission notification in the handoff
-        // window (the Matcher then waits for a receipt that the Lane never observes).
-        LockSupport.unpark(thread);
+        if (parked) LockSupport.unpark(thread);
     }
 
     /** Matcher publishes a direct payload; this is separate from the normal Owner submission path. */
     public void signalDirectReady() {
-        LockSupport.unpark(thread);
+        signalWork();
     }
 
     public int depth() {
@@ -262,7 +262,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                             case BUSY_SPIN -> Thread.onSpinWait();
                             case YIELDING -> Thread.yield();
                             case BLOCKING -> {
-                                if (running && resumedHandoff < completedHandoff) LockSupport.parkNanos(this, 100_000L);
+                                parkUntilWork(true);
                             }
                         }
                         continue;
@@ -285,10 +285,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
                     enterWaitPhase(WaitPhase.NOT_READY);
                     if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                        if (running && !ready(direct)) {
-                            if (WAIT_DIAGNOSTICS) parkCount++;
-                            LockSupport.parkNanos(this, 100_000L);
-                        }
+                        parkUntilWork(false);
                         directReadySpins = 0;
                     } else {
                         Thread.onSpinWait();
@@ -321,11 +318,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     enterWaitPhase(WaitPhase.NOT_READY);
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
                         if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                            if (running && next < producerSequence.value
-                                    && !ready(commands[(int) next & indexMask])) {
-                                if (WAIT_DIAGNOSTICS) parkCount++;
-                                LockSupport.parkNanos(this, 100_000L);
-                            }
+                            parkUntilWork(false);
                             directReadySpins = 0;
                         } else {
                             Thread.onSpinWait();
@@ -342,11 +335,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                             idleSpins++;
                             Thread.onSpinWait();
                         } else {
-                            if (running && (next >= producerSequence.value
-                                    || !ready(commands[(int) next & indexMask]))) {
-                                if (WAIT_DIAGNOSTICS) parkCount++;
-                                LockSupport.parkNanos(this, 100_000L);
-                            }
+                            parkUntilWork(false);
                         }
                     }
                 }
@@ -359,6 +348,31 @@ public final class SettlementLaneWorker implements AutoCloseable {
         } finally {
             finishWaitPhase();
             lane.releaseOwnerForHandoff();
+        }
+    }
+
+    private void parkUntilWork(boolean waitingForHandoff) {
+        parked = true;
+        try {
+            // A producer either observes parked=true, or its earlier volatile publication is
+            // visible in these rechecks. Admission must be checked even behind an unready fact.
+            if (!running || admissionConsumerSequence.value < admissionProducerSequence.value) return;
+            if (waitingForHandoff) {
+                if (resumedHandoff >= completedHandoff) return;
+            } else {
+                Command main = consumerSequence.value < producerSequence.value
+                        ? commands[(int) consumerSequence.value & indexMask] : null;
+                MatcherSettlementEvent direct = peekMatcherSettlement();
+                if (direct != null && shouldRunMatcherSettlement(direct, main)) {
+                    if (ready(direct)) return;
+                } else if (main != null && ready(main)) {
+                    return;
+                }
+            }
+            if (WAIT_DIAGNOSTICS) parkCount++;
+            LockSupport.parkNanos(this, 100_000L);
+        } finally {
+            parked = false;
         }
     }
 

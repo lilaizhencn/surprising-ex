@@ -34,12 +34,12 @@ final class ControlLaneDispatcher {
     boolean pending() { return pending; }
 
     boolean active() {
-        AccountLaneState lane = owner.laneCommandScope.get();
+        AccountLaneState lane = owner.currentLaneCommandScope();
         return lane != null && tasks != null && tasks[lane.laneId()].executing;
     }
 
     void recordRevisionDelta() {
-        AccountLaneState lane = owner.laneCommandScope.get();
+        AccountLaneState lane = owner.currentLaneCommandScope();
         if (lane == null || !tasks[lane.laneId()].executing)
             throw new IllegalStateException("account revision must belong to its control Lane");
         LaneControlTask task = tasks[lane.laneId()];

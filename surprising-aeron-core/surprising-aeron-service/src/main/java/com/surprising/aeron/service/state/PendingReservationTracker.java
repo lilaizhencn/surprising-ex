@@ -127,7 +127,7 @@ final class PendingReservationTracker {
 
     /** Control task writes its account only; Owner registers the receipt after publication. */
     void markInCurrentLane(long userId, long orderId, long coreSequence) {
-        AccountLaneState lane = owner.laneCommandScope.get();
+        AccountLaneState lane = owner.currentLaneCommandScope();
         if (lane == null || lane.laneId() != owner.topology.accountLaneId(userId))
             throw new IllegalStateException("pending reservation requires its Account Lane");
         ReservationRuntime reservation = lane.reservations.get(orderId);
@@ -216,7 +216,7 @@ final class PendingReservationTracker {
         List<PendingReservationBatchCompletion> completions = preflightPendingReservationCompletions(
                 coreSequence, refs);
         owner.executeOwnerSettlements(completions, PendingReservationBatchCompletion::userId, laneId -> {
-            AccountLaneState lane = owner.laneCommandScope.get();
+            AccountLaneState lane = owner.currentLaneCommandScope();
             for (PendingReservationBatchCompletion completion : completions) {
                 if (owner.topology.accountLaneId(completion.userId()) != laneId) continue;
                 lane.completePendingReservation(completion.orderId(), coreSequence);
@@ -315,7 +315,7 @@ final class PendingReservationTracker {
 
     boolean pendingReservation(long orderId, long userId) {
         owner.assertOwner();
-        AccountLaneState scoped = owner.laneCommandScope.get();
+        AccountLaneState scoped = owner.currentLaneCommandScope();
         if (scoped != null) {
             if (scoped.laneId() != owner.topology.accountLaneId(userId)) {
                 throw new IllegalStateException("pending reservation query crossed its owner lane");
@@ -343,7 +343,7 @@ final class PendingReservationTracker {
 
     int pendingReservationCount(long userId) {
         owner.assertOwner();
-        AccountLaneState scoped = owner.laneCommandScope.get();
+        AccountLaneState scoped = owner.currentLaneCommandScope();
         if (scoped != null) {
             if (scoped.laneId() != owner.topology.accountLaneId(userId)) {
                 throw new IllegalStateException("pending reservation count crossed its owner lane");

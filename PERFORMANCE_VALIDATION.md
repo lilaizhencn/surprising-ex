@@ -5065,3 +5065,27 @@ JFR60秒窗节点ThreadAllocationStatistics估算230.844 MB/s、1165.08 B/业务
 收尾补验：受影响 service 11 类397项，396通过、0失败/错误，1项诊断开关条件跳过；单独打开开关后发现旧 OwnerSettlementMerge 镜像合并事件断言已不适用，保留该失败，更新为当前已有 OwnerPublication/SettlementLatency/OwnerHead/Boundary/Turn 完整核对后单项通过。采集后只改测试/汇总/文档及 ControlLaneDispatcher EOF空白；交易运行时与两份被测JAR指纹仍一致，未把采集后测试修改伪写成采集前源码。
 
 本轮清理完成：所有本轮进程已退出，删除独立临时源码/构建/Cluster/Archive/JFR/日志/测试报告目录 /private/tmp/surprising-core-allocation-20261010-125104（5094文件，12375454068逻辑bytes）及本轮Python缓存；其他任务、工作区target和未提交部署改动保留。原始路径仅作历史定位；命令、源码/JAR/录制指纹、失败与修复后日志、JFR summary/view、作用域聚合、系统采样、测试用例及实际恢复证据已保存到上述JSON。
+
+
+## 2026-10-11 Owner 路由、常驻控制 Lane 与 scratch 验证（部分验证）
+
+当前 master 模块提交 c1fdbae7、b89673f9、cd9b026b。211 个定向回归与 28 个边界补测通过，均有源码指纹与 XML 归档。当前仍有 Owner 权威读取及系统资金写入，不能宣称 L1/L2 已完成或整链路零分配。
+
+最新源码同配置真实单节点永续 MIXED：l1-owner-routing-1 为 414,908.527、l1-owner-routing-2 为 404,704.514 终态业务项/s；测量约 60 秒，1 Matcher / 4 Lane、global/session 256、batch20、128 symbol，Owner/Matcher ADAPTIVE、Lane BUSY_SPIN、service YIELDING、G1。两轮终态/资金/冻结/持仓核对通过，unfinished=0、fundsDiff=0。CPU_Speed_Limit 第一轮 70/72/75、第二轮 68/70/72，使容量及因果对照证据无效。没有折算不限频吞吐。
+
+独立同源码 JFR 诊断 l1-control-scratch-jfr：359,885.616 业务项/s；测量 epochMillis 1791689866397–1791689926403，同机客户端时钟。窗口内主要 Core 线程 ThreadAllocationStatistics 首尾差分估算 427,232,252.645 bytes/s、约 1,187.13 bytes/business op，各线程实际观察区间略异，非精确对象数。窗口内 GC pause 85 次、总 416.80ms、最长 9.42ms；Owner/Lane JavaMonitorEnter=0；完整录制 DataLoss=0。Lane 在 SettlementLaneWorker.run 的空闲自旋占较多执行样本，只能说明消耗，不能单独证明等待根因。未提供有效不限频吞吐/完整尾延迟/长期驻留验收。
+
+完整运行命令、JVM/环境、初始化、PID/源码/JAR SHA、资金/测量窗口/清理记录在 ../performance-artifacts/lane-parallel-20261010T144735Z/ 的 l1-owner-routing-{1,2}-*.json、l1-control-scratch-jfr-*.json；JFR 时窗聚合见 l1-control-scratch-jfr-window-analysis.json、window.tsv。本轮未执行快照、恢复或 wallet。后续计划已锁定 owned-scopes-wakeup-validation-plan.json：验证每分片独享 scratch 与 Lane parked 唤醒握手，扩大受影响回归，再运行 Lane JMH -prof gc 和当前源码真实 Cluster；全局窗口固定 256。性能目标 50 万业务项/s、恢复门槛 38 万/s，仅在环境/正确性与必采证据有效时评估。
+
+
+## 2026-10-11 最后三处ThreadLocal与L5唤醒握手（部分验证）
+
+业务步骤：Matcher分片进入自己的命令scope、记录时间戳/用户、产生不可变成交事实并退出；Lane进入自己的执行scope、消费准入/结算、发布完成并清空scope。Owner同步控制scope单独保存，不能清掉活动Lane的scope，无关线程在进入前拒绝。Lane停车先公布标记再复查全部邮箱/交接条件；发布者仅在该标记为true时unpark。保留100µs兜底和关闭唤醒。
+
+最新修复源码HotSpot JDK27：226回归+50账户/撮合准入/源码边界及benchmark测试执行通过（并非276个唯一用例），源码指纹不变；20模块clean package、1797文件源码指纹、1722服务/基准类字节核验通过。JMH AccountLaneCommitBenchmark.metadataAndSequenceFanout，1线程/1fork每配置、4Lane/256，3×1s预热+5×1s测量、G1、-prof gc：BUSY_SPIN 814531.136±52095.011技术提交项/s、1472.047B/项；BLOCKING 784347.812±37947.371、1472.049B/项，99.9%区间重叠；非Core业务吞吐或零分配证明。
+
+真实Aeron l1-owner-routing-5：1成员/1Matcher/4Lane、MIXED/batch20/symbol128、global/session256、warm60/measure60、Owner/Matcher ADAPTIVE、Lane BUSY_SPIN、service YIELDING、G1。正式窗口60.016552秒，408903.948终态业务项/s、39058.242 Core消息/s；offered/terminal business24543688、Core2344392，排空后unfinished0，fundsDiff0、持仓/预留/订单核对通过。源码运行中未变。CPU_Speed_Limit低于100使容量证据无效，仅功能通过，未验收50万目标。完整命令/环境及测量系统样本/原始日志/校验/清理见同一证据目录 l1-owner-routing-5-*.json。
+
+之前native4观测393216.691业务项/s、资金差/未完成0，CPU68/70/72/75且运行期间Gateway测试辅助文件漂移，whole-tree sourceUnchanged=false；运行JAR事后SHA一致，但不据此认定源码整体稳定。该轮还先于Owner/Lane作用域交叉清除修复，最终验收只看后续修复轮。资格说明存 l1-owner-routing-4-source-drift-qualification.json。
+
+Owner权威业务读取和系统资金写入未迁完；拒绝无独占写者的新路由Map，pendingReservationSequences保护暂留。真实Shared-Nothing和整链路零heap未完成。独立JFR此前正式窗估算1187B/业务项，不把删ThreadLocal当作删对象。下步已锁定current-factors-plan.json：同一最新build5只改Lane数2vs4、service BACKOFF及Owner等待策略；任何资金/终态错误仍判业务失败。按用户要求不运行快照、恢复或wallet。临时集群data已在校验保留日志/指标后清除，余下本轮Aeron/tmp目录将在全部测量结束后清理并追加状态。

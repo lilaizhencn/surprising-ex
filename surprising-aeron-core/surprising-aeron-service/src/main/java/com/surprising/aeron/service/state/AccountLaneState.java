@@ -108,8 +108,9 @@ public final class AccountLaneState {
     private long matcherSettlementOperations;
     private long matcherSettlementLatencyNanos;
     private long matcherSettlementMaxLatencyNanos;
-    private Thread owner;
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
+    boolean commandScopeActive;
+    MatcherSettlementChanges matcherSettlementChanges;
 
     AccountLaneState(int laneId, int queueCapacity) {
         if (laneId < 0 || laneId >= Long.SIZE || queueCapacity <= 0) {

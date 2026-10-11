@@ -97,6 +97,7 @@ class MatcherPipelineGroupTest {
         System.setProperty("surprising.aeron.matching-engines", "4");
         DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false);
         MatcherPipelineGroup pipelines = pipelines(4, 16, false, 1, 2);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
         try {
             pipelines.start(adapter::activateShard);
             String firstSymbol = "39";
@@ -114,25 +115,30 @@ class MatcherPipelineGroupTest {
             }
             assertThat(secondSymbol).isNotNull();
             CountDownLatch firstStarted = new CountDownLatch(1);
-            CountDownLatch releaseFirst = new CountDownLatch(1);
             CoreMatchingOrder first = order(1, firstSymbol);
             CoreMatchingOrder second = order(2, secondSymbol);
 
-            pipelines.submit(firstShard, 1, () -> {
-                firstStarted.countDown();
-                await(releaseFirst);
-                return adapter.executeWithEvidenceSync(1, UUID.randomUUID(), 1, 1_000,
-                        () -> adapter.place(101, first));
-            });
+            pipelines.submit(firstShard, 1, () -> adapter.executeWithEvidenceSync(
+                    1, UUID.randomUUID(), 1, 1_000, () -> {
+                        // Keep this shard's command scope active while another shard completes.
+                        firstStarted.countDown();
+                        await(releaseFirst);
+                        return adapter.place(101, first);
+                    }));
             assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
             pipelines.submit(secondShard, 2, () -> adapter.executeWithEvidenceSync(
                     2, UUID.randomUUID(), 2, 1_001, () -> adapter.place(102, second)));
 
-            assertThat(await(pipelines, 2, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+            var secondResult = await(pipelines, 2, TimeUnit.SECONDS.toNanos(5));
+            assertThat(secondResult.accepted()).isTrue();
+            assertThat(secondResult.nativeMatcherResult().timestamp()).isEqualTo(1_001);
             assertThat(pipelines.poll(1)).isNull();
             releaseFirst.countDown();
-            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+            var firstResult = await(pipelines, 1, TimeUnit.SECONDS.toNanos(5));
+            assertThat(firstResult.accepted()).isTrue();
+            assertThat(firstResult.nativeMatcherResult().timestamp()).isEqualTo(1_000);
         } finally {
+            releaseFirst.countDown();
             pipelines.closeShards(adapter::closeShard);
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
             else System.setProperty("surprising.aeron.matching-engines", previous);

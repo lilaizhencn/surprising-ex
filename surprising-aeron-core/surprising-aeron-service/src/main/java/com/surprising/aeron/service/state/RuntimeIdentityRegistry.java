@@ -17,7 +17,7 @@ public final class RuntimeIdentityRegistry {
     /** Owner and each Account Lane reuse separate probes; other query readers borrow local probes. */
     private LookupScratch lookupScratch() {
         if (Thread.currentThread() == owner) return ownerLookupScratch;
-        AccountLaneState lane = clientRuntime == null ? null : clientRuntime.laneCommandScope.get();
+        AccountLaneState lane = clientRuntime == null ? null : clientRuntime.currentLaneCommandScope();
         return lane == null ? new LookupScratch() : lane.identityLookupScratch;
     }
 
@@ -77,7 +77,7 @@ public final class RuntimeIdentityRegistry {
     public long prepareClientKeyInCurrentLane(long userId, String name) {
         if (clientRuntime == null)
             throw new IllegalStateException("client identity requires a runtime");
-        AccountLaneState lane = clientRuntime.laneCommandScope.get();
+        AccountLaneState lane = clientRuntime.currentLaneCommandScope();
         if (lane == null) {
             int laneId = clientRuntime.topology().accountLaneId(userId);
             lane = clientRuntime.accountLanes[laneId];
@@ -88,7 +88,7 @@ public final class RuntimeIdentityRegistry {
     public void rollbackClientKeyInCurrentLane(long userId, String name, long key) {
         if (clientRuntime == null)
             throw new IllegalStateException("client identity requires a runtime");
-        AccountLaneState lane = clientRuntime.laneCommandScope.get();
+        AccountLaneState lane = clientRuntime.currentLaneCommandScope();
         if (lane == null) {
             int laneId = clientRuntime.topology().accountLaneId(userId);
             lane = clientRuntime.accountLanes[laneId];

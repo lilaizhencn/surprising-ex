@@ -41,7 +41,7 @@ final class RuntimeAccountRollback {
     private static final PatchReservationBefore ABSENT_RESERVATION_BEFORE = new PatchReservationBefore(null, false);
 
     void captureUserBefore(long userId) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         LaneLongCaptures<UserRuntime> captured =
                 patchUsersBeforeByLane[state.topology.accountLaneId(userId)];
         if (!captured.containsKey(userId)) captured.put(userId, state.user(userId));
@@ -193,12 +193,12 @@ final class RuntimeAccountRollback {
     }
 
     void captureBalanceBefore(long userId, int assetId) {
-        MatcherSettlementChanges changes = state.matcherSettlementChangesScope.get();
+        MatcherSettlementChanges changes = state.currentMatcherSettlementChangesScope();
         LaneBalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[state.topology.accountLaneId(userId)]
                 : changes.balancePatches[state.topology.accountLaneId(userId)];
         if (captured.contains(userId, assetId)) return;
-        AccountLaneState scoped = state.laneCommandScope.get();
+        AccountLaneState scoped = state.currentLaneCommandScope();
         if (scoped != null) {
             captureBalanceBefore(scoped, captured, userId, assetId);
             return;
@@ -217,7 +217,7 @@ final class RuntimeAccountRollback {
     }
 
     void captureBalanceAfter(AccountLaneState lane, long userId, int assetId) {
-        MatcherSettlementChanges changes = state.matcherSettlementChangesScope.get();
+        MatcherSettlementChanges changes = state.currentMatcherSettlementChangesScope();
         LaneBalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[lane.laneId()]
                 : changes.balancePatches[lane.laneId()];
@@ -231,7 +231,7 @@ final class RuntimeAccountRollback {
     }
 
     void captureOrderBefore(long orderId, long userId) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         if (capturedOrderBefore(orderId) != null) return;
         OrderRuntime value = state.order(orderId);
         long resolvedUserId = userId > 0 ? userId : (value == null ? 0 : value.userId());
@@ -248,7 +248,7 @@ final class RuntimeAccountRollback {
     }
 
     void captureReservationBefore(long orderId, long userId) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         if (capturedReservationBefore(orderId) != null) return;
         ReservationRuntime value = state.reservation(orderId);
         long resolvedUserId = userId > 0 ? userId : (value == null ? 0 : value.userId());
@@ -261,7 +261,7 @@ final class RuntimeAccountRollback {
     }
 
     int captureLane(long entityId, long userId) {
-        AccountLaneState scoped = state.laneCommandScope.get();
+        AccountLaneState scoped = state.currentLaneCommandScope();
         if (scoped != null) return scoped.laneId();
         if (userId > 0) return state.topology.accountLaneId(userId);
         return Math.floorMod(Long.hashCode(entityId), state.accountLanes.length);
@@ -288,7 +288,7 @@ final class RuntimeAccountRollback {
     }
 
     void capturePositionBefore(long positionKey, long fallbackUserId) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         PositionRuntime before = state.position(positionKey);
         long userId = before == null ? fallbackUserId : before.userId();
         if (userId > 0) {
@@ -299,7 +299,7 @@ final class RuntimeAccountRollback {
     }
 
     void captureClientOrderBefore(long userId, long clientKey) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         LaneClientOrderCaptures captured = patchClientOrdersBeforeByLane[state.topology.accountLaneId(userId)];
         if (!captured.contains(userId, clientKey)) {
             captured.add(userId, clientKey, state.orderIdByClient(userId, clientKey));
@@ -307,7 +307,7 @@ final class RuntimeAccountRollback {
     }
 
     void captureTriggerOrderBefore(long triggerOrderId, long userId) {
-        if (state.matcherSettlementChangesScope.get() != null) return;
+        if (state.currentMatcherSettlementChangesScope() != null) return;
         LaneLongCaptures<CoreTriggerOrderState> captured =
                 patchTriggersBeforeByLane[state.topology.accountLaneId(userId)];
         if (!captured.containsKey(triggerOrderId)) {
