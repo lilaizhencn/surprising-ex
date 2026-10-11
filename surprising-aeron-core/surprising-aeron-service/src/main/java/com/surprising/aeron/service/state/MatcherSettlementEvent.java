@@ -7,11 +7,14 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+
 /**
  * Immutable matcher fact routed once to every Account Lane it touches.
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
 public final class MatcherSettlementEvent implements
+        SettlementLaneWorker.Command,
         com.surprising.aeron.service.matching.MatchingResult {
     /** Diagnostic only: no clocks or additional objects on the default trading path. */
     public static final boolean LATENCY_DIAGNOSTICS = Boolean.getBoolean("core.settlementLatencyDiagnostics");
@@ -446,11 +449,14 @@ public final class MatcherSettlementEvent implements
         try {
             boolean cancellationAccepted = nativeAccepted(cancellation);
             boolean placementAccepted = cancellationAccepted && nativeAccepted(result);
+            boolean businessRejection = cancellationAccepted && !placementAccepted
+                    && result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_POST_ONLY_FAILED;
             OrderRuntime admitted = batchStorage.admittedOrders[0];
             if (admitted == null) throw new IllegalStateException("replacement order is missing");
             batchPlans[0].buildDirectNative(directCoreSequence, admitted,
                     batchInstruments[0], result, runtime);
-            if (cancellationAccepted) batchPlans[0].acceptedReplacementCancellation(replacement.originalOrderId());
+            if (placementAccepted || businessRejection)
+                batchPlans[0].acceptedReplacementCancellation(replacement.originalOrderId());
             batchPlans[0].acceptedPreCancellations(
                     directAcceptedCancellations, directAcceptedCancellationCount);
             if (!placementAccepted) batchPlans[0].omitUnplacedOrder();
@@ -603,8 +609,12 @@ public final class MatcherSettlementEvent implements
         return directNativeStateChanged;
     }
     @Override public com.surprising.aeron.service.matching.MatchingResult.Outcome outcome() {
-        if (directNativeStateChanged)
-            return com.surprising.aeron.service.matching.MatchingResult.Outcome.KNOWN_PREFIX_APPLIED;
+        if (directNativeStateChanged) {
+            return directNativeResult != null
+                    && directNativeResult.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_POST_ONLY_FAILED
+                    ? com.surprising.aeron.service.matching.MatchingResult.Outcome.KNOWN_PREFIX_APPLIED
+                    : com.surprising.aeron.service.matching.MatchingResult.Outcome.FATAL_DIVERGENCE;
+        }
         return directNativeAccepted
                 ? com.surprising.aeron.service.matching.MatchingResult.Outcome.APPLIED
                 : com.surprising.aeron.service.matching.MatchingResult.Outcome.REJECTED_UNCHANGED;
@@ -1029,7 +1039,7 @@ public final class MatcherSettlementEvent implements
     }
 
     public void ensureLanesExecuted() {
-        if (!ready() || runtime == null || !runtime.inOwnerThread() || direct && !dispatched) return;
+        if (!ready() || runtime == null || runtime.accountLanesStarted || direct && !dispatched) return;
         long remaining = routedLaneMask() & ~completedLaneMask();
         while (remaining != 0) {
             int laneId = Long.numberOfTrailingZeros(remaining);

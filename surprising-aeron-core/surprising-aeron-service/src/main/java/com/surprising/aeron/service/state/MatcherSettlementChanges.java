@@ -99,13 +99,9 @@ final class MatcherSettlementChanges {
     void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime) {
         applyUserRevisions(laneId, lane);
         LaneCommitDelta changes = laneDeltas[laneId];
-        // Freeze only the final value for each changed key. A single settlement can update
-        // an order, reservation, or position several times before the Owner sees it.
-        changes.orders.capturePublicationValues();
-        changes.reservations.capturePublicationValues();
-        // Terminal identity is a Lane fact. Capture its primitive fields before the
-        // publication handoff so the Owner never has to walk changed orders again merely
-        // to update the bounded tombstone window.
+        // The Owner applies and commits these changes serially. Keep terminal identity
+        // receipts for the bounded tombstone window; order and reservation counters
+        // already live in the authoritative runtime values.
         changes.orders.forEach((orderId, order) -> {
             if (order == null || !order.status().terminal()) return;
             changes.recordTerminalOrder(order);

@@ -60,7 +60,6 @@ final class OrderedCommitCoordinator {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || !owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
-        CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
         var direct = pending.settlementEvent();
         if (pending.isMatchingSubmitted()) {
             // Lane rejection can race with the Matcher admission fence. Keep the ordered
@@ -68,11 +67,11 @@ final class OrderedCommitCoordinator {
             // earlier lets the worker publish into a newly claimed sequence.
             if (direct != null && direct.direct()) {
                 if (!direct.complete()) return null;
-            } else if (laneContext.matchingResult() == null && laneContext.matchingCompletion() == null) {
+            } else if (pending.matchingResult() == null && pending.matchingCompletion() == null) {
                 return null;
             }
         }
-        CoreResultCode resultCode = owner.laneCommandContexts.required(sequence).matchingRejection();
+        CoreResultCode resultCode = pending.matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.matchingFlow.commitMatchingSequence(sequence);
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
@@ -95,8 +94,8 @@ final class OrderedCommitCoordinator {
             }
             owner.runtimeState.discardMatcherSettlement(pending.takeSettlementEvent());
         } else if (pending.isMatchingSubmitted()) {
-            MatchingResult matcherResult = laneContext.matchingResult();
-            if (matcherResult == null) matcherResult = laneContext.matchingCompletion();
+            MatchingResult matcherResult = pending.matchingResult();
+            if (matcherResult == null) matcherResult = pending.matchingCompletion();
             if (matcherResult != null) {
                 validateMatchingEvidence(pending, matcherResult);
                 applyMatcherProgress(matcherResult);
@@ -129,11 +128,10 @@ final class OrderedCommitCoordinator {
         clusterTimestamp = pending.commitFenceTimestamp();
         clusterPosition = pending.commitFenceClusterPosition();
         owner.currentClusterPosition = clusterPosition;
-        CommandSlot laneContext = owner.laneCommandContexts.required(sequence);
         // Matcher releases the route before publishing Lane readiness. A command slot cannot
         // be recycled while its producer still owns it; transport retirement is independent.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct()
-                && laneContext.submittedMatcherShard() != -1) return null;
+                && pending.submittedMatcherShard() != -1) return null;
         if (pending.controlPending) {
             owner.restoreMatchingCommitContext(pending);
             try {
@@ -150,7 +148,7 @@ final class OrderedCommitCoordinator {
                     // A suspended control may accumulate users across several risk pages/Lanes.
                     // Register the complete commit input, not just the last page's runtime delta.
                     for (long userId : owner.resultBuilder.commandChangedUserIds)
-                        laneContext.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
+                        pending.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
                                 validAccountLaneMask());
                     pending.commitEvent = owner.runtimeState.dispatchLaneMutation(sequence,
                             owner.resultBuilder.commandChangedUserIds,
@@ -166,11 +164,11 @@ final class OrderedCommitCoordinator {
                     long laneMask = pending.commitEvent.requiredLaneMask();
                     owner.runtimeState.releaseLaneCommit(pending.commitEvent);
                     pending.commitEvent = null;
-                    laneContext.completeLanes(laneMask);
+                    pending.completeLanes(laneMask);
                 }
                 pending.controlWork = null;
                 pending.controlPending = false;
-                return finishAppliedMatching(pending, matchingResult, laneContext, null, pending.controlStartedNanos, true);
+                return finishAppliedMatching(pending, matchingResult, null, pending.controlStartedNanos, true);
             } catch (RuntimeException failure) {
                 throw owner.failMatching(pending, "control Lane continuation failed", failure);
             }
@@ -184,16 +182,18 @@ final class OrderedCommitCoordinator {
             waitingBatch.nextIndex = waitingBatch.items.size();
             waitingBatch.matchingApplied(true);
         }
-        if (waitingBatch != null && (waitingBatch.itemSettlementEvent != null
-                || waitingBatch.laneCommitEvent != null)) {
-            try { owner.runtimeState.assertAccountLanesHealthy(); }
-            catch (RuntimeException failure) {
+        if (waitingBatch != null) {
+            try {
+                if (waitingBatch.itemSettlementEvent != null || waitingBatch.laneCommitEvent != null) {
+                    owner.runtimeState.assertAccountLanesHealthy();
+                }
+                // 尚未完成的 Lane 工作仍拥有挂起的上下文，不能提前占用 owner 发布批次。
+                if (!waitingBatch.laneWorkComplete()) return null;
+            } catch (RuntimeException failure) {
                 throw owner.batches.failOrderBatch(waitingBatch, pending, "batch item Lane failed", failure);
             }
         }
-        // 尚未完成的 Lane 工作仍拥有挂起的上下文，不能提前占用 owner 发布批次。
-        if (waitingBatch != null && !waitingBatch.laneWorkComplete()) return null;
-        if (waitingBatch != null && laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
+        if (waitingBatch != null && pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
         if (waitingBatch != null && pending.clusterIndependent
                 && waitingBatch.kind == OrderBatchKind.CANCEL && !waitingBatch.commitStarted()) {
             owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
@@ -231,7 +231,7 @@ final class OrderedCommitCoordinator {
             if (waitingBatch.pipelined && !waitingBatch.commitStarted()) {
                 owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
             }
-            if (laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
+            if (pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
             return owner.batches.finishOrderBatch(waitingBatch, pending, clusterTimestamp, clusterPosition);
         }
         if (waitingBatch != null && waitingBatch.matchingApplied()) {
@@ -240,8 +240,8 @@ final class OrderedCommitCoordinator {
         }
         if (pending.cancelEvent() != null) {
             if (!pending.cancelEvent().complete()) return null;
-            if (laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
-            return completeDispatchedCancel(pending, matchingResult, laneContext);
+            if (pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
+            return completeDispatchedCancel(pending, matchingResult);
         }
         if (pending.settlementEvent() != null) {
             if (!pending.settlementEvent().complete()) return null;
@@ -252,10 +252,10 @@ final class OrderedCommitCoordinator {
                 if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
                     return completeRejectedMatching(pending.sequence());
             }
-            if (pending.settlementEvent().direct() && !laneContext.hasCommitContext()) {
+            if (pending.settlementEvent().direct() && !pending.hasCommitContext()) {
                 validateMatchingEvidence(pending, matchingResult);
                 applyMatcherProgress(matchingResult);
-                laneContext.result(matchingResult, pending.settlementEvent().requiredLaneMask(), validAccountLaneMask());
+                pending.result(matchingResult, pending.settlementEvent().requiredLaneMask(), validAccountLaneMask());
                 owner.resultBuilder.clearOrderViews();
                 owner.resultBuilder.commandChangedUserIds = List.of();
                 owner.resultBuilder.commandChangedOrderIds = List.of();
@@ -267,10 +267,10 @@ final class OrderedCommitCoordinator {
                 owner.setCommandFunds(pending.fundsAccumulator());
                 owner.activateFactContext(pending.command(), pending.fingerprint());
                 beginCommitPublicationBatch();
-                return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
+                return completeDispatchedMatcherSettlement(pending, matchingResult);
             }
-            if (laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
-            return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
+            if (pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
+            return completeDispatchedMatcherSettlement(pending, matchingResult);
         }
         if (waitingBatch != null && waitingBatch.pipelined && !waitingBatch.commitStarted()) {
             owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
@@ -298,10 +298,10 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan =
                 initialMatcherSettlementPlan(pending, matchingResult);
         if (settlementPlan != null) {
-            laneContext.result(matchingResult, settlementPlan.requiredLaneMask(),
+            pending.result(matchingResult, settlementPlan.requiredLaneMask(),
                     validAccountLaneMask());
         } else {
-            laneContext.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
+            pending.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
         }
         owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
@@ -321,7 +321,7 @@ final class OrderedCommitCoordinator {
                     var command = pending.decodedCommand().placeOrder();
                     boolean dispatchOnly = pending.isDispatchOnly();
                     settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
-                            pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
+                            pending, settlementPlan, sequence, matchingResult, applyStartNanos);
                     pending.takeDispatchOnly();
                     if (settlementTreasuryDelta == null || dispatchOnly) {
                         owner.suspendMatchingCommitContext(pending);
@@ -350,7 +350,7 @@ final class OrderedCommitCoordinator {
                     if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
                             "trigger order not found");
                     settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
-                            pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
+                            pending, settlementPlan, sequence, matchingResult, applyStartNanos);
                     if (settlementTreasuryDelta == null) return null;
                     requestCommitPublication();
                     owner.resultBuilder.markLaneCommitIdsSeeded();
@@ -375,7 +375,7 @@ final class OrderedCommitCoordinator {
                                 chunk.orders().size());
                         if (owner.runtimeState.asynchronousCommands()) {
                             var work = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
-                                    .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
+                                     .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
                                             owner.runtimeState, owner.identities);
                             pending.liquidationWork(work);
                             pending.deferLiquidationExecutionControl(this, work, progress);
@@ -389,7 +389,7 @@ final class OrderedCommitCoordinator {
                 }
                 case LIQUIDATION_BATCH -> {
                     var command = pending.decodedCommand().liquidationBatch();
-                    applyLiquidationBatch(command, matchingResult, laneContext);
+                    applyLiquidationBatch(command, matchingResult, pending);
                 }
                 case SETTLEMENT -> {
                     var command = pending.decodedCommand().settlement();
@@ -425,14 +425,14 @@ final class OrderedCommitCoordinator {
         } catch (ArithmeticException | IllegalArgumentException exception) {
             throw owner.failMatching(pending, "Core and matcher state diverged", exception);
         }
-        return finishAppliedMatching(pending, matchingResult, laneContext, settlementTreasuryDelta, applyStartNanos);
+        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, applyStartNanos);
     }
 
     /** 已校验撮合证据，账户阶段完成后只进入一次终态提交。 */
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
-            CommandSlot laneContext, RuntimeTreasuryDelta settlementTreasuryDelta,
+            RuntimeTreasuryDelta settlementTreasuryDelta,
             long applyStartNanos) {
-        return finishAppliedMatching(pending, matchingResult, laneContext, settlementTreasuryDelta,
+        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta,
                 applyStartNanos, false);
     }
 
@@ -468,7 +468,7 @@ final class OrderedCommitCoordinator {
     }
 
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
-            CommandSlot laneContext, RuntimeTreasuryDelta settlementTreasuryDelta,
+            RuntimeTreasuryDelta settlementTreasuryDelta,
             long applyStartNanos, boolean lanesCommitted) {
         long sequence = pending.sequence();
         long clusterTimestamp = pending.commitFenceTimestamp();
@@ -500,13 +500,13 @@ final class OrderedCommitCoordinator {
                 long laneMask = pending.commitEvent.requiredLaneMask();
                 owner.runtimeState.releaseLaneCommit(pending.commitEvent);
                 pending.commitEvent = null;
-                laneContext.completeLanes(laneMask);
+                pending.completeLanes(laneMask);
             }
         }
-            if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
+            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw owner.failMatching(pending, "account lane mask differs from immutable matcher result", null);
             }
-            requireCompleteAccountLanes(laneContext);
+            requireCompleteAccountLanes(pending);
             // A settlement that finishes in this poll seeded primitive Lane changes, but
             // never took the deferred completion path that publishes these result views.
             owner.resultBuilder.materializeChangeAccumulators();
@@ -534,8 +534,7 @@ final class OrderedCommitCoordinator {
 
     CoreResponse completeDispatchedMatcherSettlement(
             CommandSlot pending,
-            MatchingResult matchingResult,
-            CommandSlot laneContext) {
+            MatchingResult matchingResult) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null || !event.complete()) return null;
         owner.captureRealtimeTrades(pending);
@@ -545,7 +544,7 @@ final class OrderedCommitCoordinator {
                     event, owner.commandFundsAccumulator, owner.terminalRetention,
                     owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
             owner.resultBuilder.markLaneCommitIdsSeeded();
-            laneContext.completeLanes(event.requiredLaneMask());
+            pending.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case CANCEL -> { /* Lane 已按撮合结论完成解冻和撤单。 */ }
                 case PLACE -> {
@@ -587,10 +586,10 @@ final class OrderedCommitCoordinator {
             requestCommitPublication();
             owner.resultBuilder.materializeChangeAccumulators();
             long committedLaneMask = event.requiredLaneMask();
-            if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
+            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw owner.failMatching(pending, "account lane completion differs from immutable matcher fact", null);
             }
-            requireCompleteAccountLanes(laneContext);
+            requireCompleteAccountLanes(pending);
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()
                     || pending.operation() == CommandSlot.Operation.CANCEL
                     || pending.operation() == CommandSlot.Operation.REPLACE
@@ -627,23 +626,22 @@ final class OrderedCommitCoordinator {
 
     CoreResponse completeDispatchedCancel(
             CommandSlot pending,
-            MatchingResult matchingResult,
-            CommandSlot laneContext) {
+            MatchingResult matchingResult) {
         com.surprising.aeron.service.state.LaneCancelEvent event = pending.cancelEvent();
         if (event == null || !event.complete()) return null;
         try {
             owner.runtimeState.collectCancel(event, owner.commandFundsAccumulator, owner.terminalRetention,
                     owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
             owner.resultBuilder.markLaneCommitIdsSeeded();
-            laneContext.completeLanes(event.requiredLaneMask());
+            pending.completeLanes(event.requiredLaneMask());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.addExact(owner.runtimeState.revision(), event.orderCount()));
             requestCommitPublication();
             owner.resultBuilder.materializeChangeAccumulators();
-            if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
+            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw owner.failMatching(pending, "account lane completion differs from cancel fact", null);
             }
-            requireCompleteAccountLanes(laneContext);
+            requireCompleteAccountLanes(pending);
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) owner.resultBuilder.materializeCommandOrderViews(pending);
             completeCommitPublicationBatch();
             owner.validateFundsConservation(pending.command());
@@ -793,15 +791,15 @@ final class OrderedCommitCoordinator {
     }
 
     boolean controlPending(long sequence) {
-        if (!owner.laneCommandContexts.claimed(sequence)) return false;
-        CommandSlot slot = owner.laneCommandContexts.required(sequence);
+        if (!owner.pendingMatching.claimed(sequence)) return false;
+        CommandSlot slot = owner.pendingMatching.required(sequence);
         return slot.controlPending && (slot.controlWork != null || slot.commitEvent != null);
     }
 
     void applyLiquidationBatch(
             com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand batch,
             MatchingResult matchingResult,
-            CommandSlot laneContext) {
+            CommandSlot pending) {
         // Every action contributes to the immutable result's Lane mask, including actions
         // skipped as obsolete or deferred by the cancellation budget. Complete those Lane
         // acknowledgements even when their balances and orders do not change.
@@ -819,7 +817,7 @@ final class OrderedCommitCoordinator {
             return;
         }
         var work = new java.util.function.BooleanSupplier() {
-            int index, applied, pending, obsolete, processedOrders;
+            int index, applied, pendingCount, obsolete, processedOrders;
             int remaining = batch.maxCancelOrders();
             java.util.function.BooleanSupplier accountWork;
             List<com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
@@ -846,7 +844,7 @@ final class OrderedCommitCoordinator {
                         continue;
                     }
                     if (remaining == 0) {
-                        pending++;
+                        pendingCount++;
                         continue;
                     }
                     ExecuteLiquidationCommand single = new ExecuteLiquidationCommand(action.liquidationId(),
@@ -874,7 +872,7 @@ final class OrderedCommitCoordinator {
                         processedOrders += orders.size();
                         remaining -= orders.size();
                     }
-                    if (nextCursor == 0) applied++; else pending++;
+                    if (nextCursor == 0) applied++; else pendingCount++;
                     if (owner.runtimeState.asynchronousCommands()) {
                         executionRequests.add(new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
                                 .ExecutionRequest(single, orders, nextCursor));
@@ -909,7 +907,7 @@ final class OrderedCommitCoordinator {
                             completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(batch.maxRiskScanUsers(),
                                     owner.positionUserIndex, owner.runtimeState, owner.identities);
                             if (completedRiskWork > 0) owner.runtimeState.acceptChangedUserIds(userId ->
-                                    laneContext.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
+                                    pending.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
                                             validAccountLaneMask()));
                             if (owner.runtimeState.revision() != beforeRiskRevision) requestCommitPublication();
                         }
@@ -922,11 +920,11 @@ final class OrderedCommitCoordinator {
                 }
                 owner.resultBuilder.materializeChangeAccumulators();
                 owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(
-                        batch.actions().size(), applied, pending, obsolete, processedOrders, completedRiskWork);
+                        batch.actions().size(), applied, pendingCount, obsolete, processedOrders, completedRiskWork);
                 return true;
             }
         };
-        if (owner.runtimeState.asynchronousCommands()) laneContext.deferControl(work);
+        if (owner.runtimeState.asynchronousCommands()) pending.deferControl(work);
         else if (!work.getAsBoolean()) throw new IllegalStateException("synchronous liquidation batch suspended");
     }
 
@@ -1055,16 +1053,14 @@ final class OrderedCommitCoordinator {
             if (!pending.isMatchingSubmitted()) return true;
             if (pending.settlementEvent() != null && pending.settlementEvent().direct())
                 return pending.settlementEvent().complete();
-            CommandSlot context = owner.laneCommandContexts.required(pending.sequence());
-            return context.matchingResult() != null || context.hasMatchingCompletion();
+            return pending.matchingResult() != null || pending.hasMatchingCompletion();
         }
         // Direct Matcher->Lane events have no Owner matching-result slot.  Their Lane completion
         // bit is the authoritative ordered-commit readiness signal.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct())
             return pending.settlementEvent().complete();
         if (pending.hasLaneContinuation()) return pending.laneContinuationComplete();
-        CommandSlot context = pending;
-        return context.hasMatchingCompletion() || context.matchingResult() != null;
+        return pending.hasMatchingCompletion() || pending.matchingResult() != null;
     }
 
     void drainMatcherSettlementCompletions() {
@@ -1108,12 +1104,11 @@ final class OrderedCommitCoordinator {
      * Reads the one authoritative matching result for a pending command.  Direct settlements keep
      * the result on the settlement event; ordinary commands take it from the sequence context.
      */
-    private MatchingResult matchingResult(
-            CommandSlot pending, CommandSlot context) {
+    private MatchingResult matchingResult(CommandSlot pending) {
         MatchingResult matching =
                 pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                         || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
-                ? pending.orderBatch.lastMatchingResult : context.matchingResult();
+                ? pending.orderBatch.lastMatchingResult : pending.matchingResult();
         if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
             matching = pending.settlementEvent().directResult();
         }
@@ -1127,7 +1122,7 @@ final class OrderedCommitCoordinator {
         }
         if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
                 && pending.cancelEvent() == null) {
-            matching = context.takeMatchingCompletion();
+            matching = pending.takeMatchingCompletion();
         }
         return matching;
     }
@@ -1224,13 +1219,11 @@ final class OrderedCommitCoordinator {
                     && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
                 if (!pending.settlementEvent().complete()) return null;
             } else if (pending.isMatchingSubmitted()) {
-                CommandSlot context = owner.laneCommandContexts.required(sequence);
-                if (context.matchingResult() == null && context.takeMatchingCompletion() == null) return null;
+                if (pending.matchingResult() == null && pending.takeMatchingCompletion() == null) return null;
             }
             return completeRejectedMatching(sequence);
         }
-        CommandSlot context = owner.laneCommandContexts.required(sequence);
-        MatchingResult matching = matchingResult(pending, context);
+        MatchingResult matching = matchingResult(pending);
         return matching == null ? null
                 : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
     }
@@ -1343,12 +1336,11 @@ final class OrderedCommitCoordinator {
             // this partition predispatch pass would advance exchange-core past earlier Core
             // sequences whose Lane admission has not yet been collected.
             if (pending.settlementEvent() == null || !pending.settlementEvent().direct()) return;
-            CommandSlot laneContext = pending;
             if (pending.placeAdmission() != null && !owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return;
             if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return;
-            com.surprising.aeron.service.matching.CoreMatchingResult matching = laneContext.matchingCompletion();
+            com.surprising.aeron.service.matching.CoreMatchingResult matching = pending.matchingCompletion();
             if (matching == null || !matching.accepted()) return;
-            matching = laneContext.takeMatchingCompletion();
+            matching = pending.takeMatchingCompletion();
             pending.establishCommitFence(clusterTimestamp, clusterPosition);
             pending.dispatchOnly();
             CoreResponse response = completeMatching(

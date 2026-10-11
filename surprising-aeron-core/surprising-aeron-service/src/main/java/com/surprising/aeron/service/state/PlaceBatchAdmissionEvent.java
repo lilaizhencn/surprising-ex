@@ -4,8 +4,10 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import java.util.UUID;
 
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+
 /** One-way admission for one user's PLACE batch, owned by exactly one Account Lane. */
-public final class PlaceBatchAdmissionEvent {
+public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Command {
     private long coreSequence;
     private long timestamp, position;
     private long userId;

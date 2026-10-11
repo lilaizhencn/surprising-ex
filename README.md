@@ -122,3 +122,10 @@ The unit and example configuration are in [`deployment/test-single-node`](deploy
 ### 价格时效与用户端错误提示（2026-10-09）
 
 指数/标记价推送采样、杠杆拒绝码及相关验证见 [排查记录](docs/validation/price-leverage-errors-20261009.md)。普通杠杆调整仍要求该保证金模式下没有持仓或挂单；已确认拒绝使用 409 和结构化业务代码，内部传输异常不作为产品提示。新增 Core 返回码需要相关客户端与 Core 配套升级。
+
+
+### 多线程 Lane 结算版本采用（2026-10-11）
+
+主线采用 `experiments/surprising-ex-async-lanes` 的已修复实现，来源为 `2ca69ba6` 加该目录已有低分配改动及本次单笔、批量撤单读取边界修复。Owner 定序并使用已有活跃订单索引校验归属，Matcher 将确定性成交及撤单事件直接投递到各 Lane 的 SPSC 队列，所属 `SettlementLaneWorker` 应用账户结算，实际完成后才按序回包。未新增账户或订单镜像，符号缓存及 DirectBuffer 读取保留；全局控制操作沿用该实现的所有权交接。本次采用不代表所有控制路径已完成 Owner 资金写入退出，也未证明全链路零堆分配。
+
+JDK 27 的 20 模块干净构建和 167 项资金、撮合、撤单、并发顺序、协议及实时投影契约回归通过；543 个服务编译类、632 个基准编译类与实验修复构建逐字节一致。真实 U 本位永续单节点使用 1 Matcher、4 Account Lane、window256、batch20、128 币对、1385 用户、60 秒预热及 60 秒测量。实验目录同构建两轮为 430144.054 和 416470.407 业务操作/秒，资金差为 0、未完成数为 0，持仓、预留和订单终态核验通过；两轮测量窗口 CPU_Speed_Limit 为 70/72/75，不能按限频比例推算不限频吞吐。主线迁入后第一轮独立实测为 382629.744 业务操作/秒，资金及终态核验通过，测量窗口 CPU_Speed_Limit 为 68/70/72/75；采用前主线同参数复测为 179497.542 业务操作/秒。详细记录见 [采用验证](docs/validation/experimental-lanes-adoption-20261011.json)。本轮未测试 Aeron Cluster 快照或恢复场景，也未启动 wallet。

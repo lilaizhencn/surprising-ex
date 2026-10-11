@@ -75,6 +75,81 @@ public final class RealtimeFrameCodec {
         if (!traceId.isEmpty()) CoreStateQueryCodec.putText(b, traceId, true, TraceIds.MAX_LENGTH);
         return b.array();
     }
+
+    public static byte[] encodeLongPayload(ProductLine productLine, RealtimeFrame.Kind kind, long userId, long sequence,
+                                           int ordinal, long timestamp, long snapshotId, String symbolValue,
+                                           String entityId, long value, String traceId) {
+        traceId = TraceIds.validate(traceId);
+        int symbolLength = CoreStateQueryCodec.utf8Length(symbolValue);
+        int entityLength = CoreStateQueryCodec.utf8Length(entityId);
+        int length = Math.addExact(64 + (traceId.isEmpty() ? 0 : 4 + traceId.length()), Math.addExact(symbolLength, Math.addExact(entityLength, Long.BYTES)));
+        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(MAGIC).putInt(traceId.isEmpty() ? 1 : 2).putInt(productLine.ordinal()).putInt(kind.ordinal());
+        b.putLong(userId).putLong(sequence).putInt(ordinal);
+        b.putLong(timestamp).putLong(snapshotId);
+        CoreStateQueryCodec.putText(b, symbolValue, true, 128);
+        CoreStateQueryCodec.putText(b, entityId, true, 256);
+        b.putInt(Long.BYTES).putLong(value);
+        if (!traceId.isEmpty()) CoreStateQueryCodec.putText(b, traceId, true, TraceIds.MAX_LENGTH);
+        return b.array();
+    }
+
+    public static byte[] encodeTradePayload(ProductLine productLine, long sequence, int ordinal, long timestamp,
+                                            long snapshotId, String symbolValue, String entityId,
+                                            long price, long quantity, long matcherSequence, byte takerSideOrdinal, String traceId) {
+        traceId = TraceIds.validate(traceId);
+        int symbolLength = CoreStateQueryCodec.utf8Length(symbolValue);
+        int entityLength = CoreStateQueryCodec.utf8Length(entityId);
+        int length = Math.addExact(64 + (traceId.isEmpty() ? 0 : 4 + traceId.length()), Math.addExact(symbolLength, Math.addExact(entityLength, 25)));
+        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(MAGIC).putInt(traceId.isEmpty() ? 1 : 2).putInt(productLine.ordinal()).putInt(RealtimeFrame.Kind.TRADE.ordinal());
+        b.putLong(0L).putLong(sequence).putInt(ordinal);
+        b.putLong(timestamp).putLong(snapshotId);
+        CoreStateQueryCodec.putText(b, symbolValue, true, 128);
+        CoreStateQueryCodec.putText(b, entityId, true, 256);
+        b.putInt(25).putLong(price).putLong(quantity).putLong(matcherSequence).put(takerSideOrdinal);
+        if (!traceId.isEmpty()) CoreStateQueryCodec.putText(b, traceId, true, TraceIds.MAX_LENGTH);
+        return b.array();
+    }
+
+    public static byte[] encodeExecutionPayload(ProductLine productLine, long userId, long sequence, int ordinal,
+                                                long timestamp, long snapshotId, String symbolValue, String entityId,
+                                                long orderId, long price, long quantity, byte sideOrdinal, boolean maker, String traceId) {
+        traceId = TraceIds.validate(traceId);
+        int symbolLength = CoreStateQueryCodec.utf8Length(symbolValue);
+        int entityLength = CoreStateQueryCodec.utf8Length(entityId);
+        int length = Math.addExact(64 + (traceId.isEmpty() ? 0 : 4 + traceId.length()), Math.addExact(symbolLength, Math.addExact(entityLength, 26)));
+        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(MAGIC).putInt(traceId.isEmpty() ? 1 : 2).putInt(productLine.ordinal()).putInt(RealtimeFrame.Kind.EXECUTION.ordinal());
+        b.putLong(userId).putLong(sequence).putInt(ordinal);
+        b.putLong(timestamp).putLong(snapshotId);
+        CoreStateQueryCodec.putText(b, symbolValue, true, 128);
+        CoreStateQueryCodec.putText(b, entityId, true, 256);
+        b.putInt(26).putLong(orderId).putLong(price).putLong(quantity).put(sideOrdinal).put((byte) (maker ? 1 : 0));
+        if (!traceId.isEmpty()) CoreStateQueryCodec.putText(b, traceId, true, TraceIds.MAX_LENGTH);
+        return b.array();
+    }
+
+    public static byte[] encodeRiskPayload(ProductLine productLine, long userId, long sequence, int ordinal,
+                                           long timestamp, long snapshotId, String symbolValue, String entityId,
+                                           long priceSequence, long equity, long unrealizedPnl, long maintenanceMargin,
+                                           long marginRatioPpm, byte positionSideOrdinal, byte statusOrdinal, String traceId) {
+        traceId = TraceIds.validate(traceId);
+        int symbolLength = CoreStateQueryCodec.utf8Length(symbolValue);
+        int entityLength = CoreStateQueryCodec.utf8Length(entityId);
+        int length = Math.addExact(64 + (traceId.isEmpty() ? 0 : 4 + traceId.length()), Math.addExact(symbolLength, Math.addExact(entityLength, 42)));
+        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(MAGIC).putInt(traceId.isEmpty() ? 1 : 2).putInt(productLine.ordinal()).putInt(RealtimeFrame.Kind.RISK.ordinal());
+        b.putLong(userId).putLong(sequence).putInt(ordinal);
+        b.putLong(timestamp).putLong(snapshotId);
+        CoreStateQueryCodec.putText(b, symbolValue, true, 128);
+        CoreStateQueryCodec.putText(b, entityId, true, 256);
+        b.putInt(42).putLong(priceSequence).putLong(equity).putLong(unrealizedPnl)
+                .putLong(maintenanceMargin).putLong(marginRatioPpm)
+                .put(positionSideOrdinal).put(statusOrdinal);
+        if (!traceId.isEmpty()) CoreStateQueryCodec.putText(b, traceId, true, TraceIds.MAX_LENGTH);
+        return b.array();
+    }
     public static RealtimeFrame decode(byte[] bytes) {
         if (bytes == null) throw new IllegalArgumentException("invalid realtime frame size");
         return decode(ByteBuffer.wrap(bytes));

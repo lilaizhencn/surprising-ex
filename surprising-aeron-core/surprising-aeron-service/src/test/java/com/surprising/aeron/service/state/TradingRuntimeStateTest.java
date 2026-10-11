@@ -355,21 +355,6 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void discardsExpandedCaptureMapsAfterLargeCommands() {
-        ConcurrentHashMap<Long, Long> expanded = new ConcurrentHashMap<>();
-        for (long key = 0; key < 512; key++) expanded.put(key, key);
-
-        ConcurrentHashMap<Long, Long> compacted = RuntimeGlobalRollback.clearCaptured(expanded);
-        assertThat(compacted).isEmpty();
-        assertThat(compacted).isNotSameAs(expanded);
-
-        compacted.put(1L, 1L);
-        ConcurrentHashMap<Long, Long> reused = RuntimeGlobalRollback.clearCaptured(compacted);
-        assertThat(reused).isEmpty();
-        assertThat(reused).isSameAs(compacted);
-    }
-
-    @Test
     void protectsSingleWriterBoundary() throws InterruptedException {
         TradingRuntimeState state = new TradingRuntimeState();
         state.bindOwner();

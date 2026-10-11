@@ -132,7 +132,8 @@ final class DirectMatcherSettlementPreparation {
     }
 
     private MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
-        OrderRuntime canceledOrder = owner.runtimeOrder(pending.decodedCommand().cancelOrder().orderId());
+        OrderRuntime canceledOrder = owner.activeOrderIndex.activeOrderRuntime(
+                pending.decodedCommand().cancelOrder().orderId());
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
                 pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());

@@ -60,6 +60,7 @@ public final class RuntimeAlgoOrderStateTransitions {
                 }
             }
         }
+        runtime.requireRevisionCapacity();
         runtime.putAlgoOrder(next);
         runtime.incrementCommandRevision();
     }

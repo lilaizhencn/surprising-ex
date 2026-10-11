@@ -297,8 +297,7 @@ final class MatchingPipelineProgress {
     }
 
     private boolean ownerHasPendingMatchingRejection(CommandSlot pending) {
-        return pending != null && owner.laneCommandContexts.claimed(pending.sequence())
-                && owner.laneCommandContexts.required(pending.sequence()).hasMatchingRejection();
+        return pending != null && pending.hasMatchingRejection();
     }
 
     boolean hasNotifications() {

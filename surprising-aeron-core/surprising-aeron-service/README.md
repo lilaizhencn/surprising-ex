@@ -9,26 +9,10 @@ HotSpot JDK 27 下 `CommittedFundingReplayTest` 覆盖 U 本位及币本位永�
 
 ## Matcher 结果与账户结算交接
 
-账户分区仍按 `LaneTopology` 隔离，当前账户状态由 Owner 串行更新。`MatcherSettlementDispatcher.dispatchOwnerControlled` 登记派发；Matcher 未发布结果时不执行账户结算，Owner 后续通过 `MatcherSettlementEvent.complete()` 推进已就绪且已登记的事件。直接调用事件的测试需要显式执行未登记的分区。
+账户分区按 `LaneTopology` 隔离，由对应的 `SettlementLaneWorker` 多线程消费。主线采用实验目录已修复的实现：Owner 定序并准备命令，Matcher 产生确定性撮合结果，`MatcherSettlementDispatcher.publishMatcherOwned` 通过每个 Lane 的分片 SPSC 队列直接发布成交及撤单结果，所属 Lane 串行应用账户结算；完成回执到达后，Owner 按提交顺序发布终态响应。
 
-Matcher 在 `MatcherSettlementEvent.notifyDirectPublication()` 中先校验结果、登记派发、释放提交路由，再以 volatile 就绪位交给 Owner。就绪位是池化事件的所有权交接边界：此后 Matcher 只能用已捕获的 runtime 和 lane mask 唤醒 Owner，不能继续读写事件；Owner 可以立即完成结算并回收复用。`MatcherCommandPipeline.run()` 将包括最终发布在内的工作循环异常传给 Owner，避免工作线程退出后命令仍等待超时。
+Matcher 在 `MatcherSettlementEvent.notifyDirectPublication()` 中校验结果并完成 Lane 投递，再发布就绪位。池化事件必须等实际消费者完成后才能复用。工作线程异常传给 Owner，避免命令在消费者退出后继续等待。全局控制命令沿用该实现已有的 Lane 所有权交接边界。
 
-`MatcherSettlementPlanTest` 覆盖未就绪预派发、生产者最后访问与回收复用的顺序、发布异常传递；业务及性能验证见仓库 `PERFORMANCE_VALIDATION.md`。
+单笔及批量撤单的 Owner 入口只通过现有 `ActiveOrderIndex` 校验归属并准备路由，不读取 Lane 正在增删的 `orders` 普通 HashMap。`cancelIdentityAndPreparationNeverReadLaneOrderTables` 确定性禁止这类读取；跨用户仍拒绝，缺失订单仍返回 `ORDER_NOT_FOUND`，实际取消和释放冻结由所属 Lane 完成。编码层符号缓存、DirectBuffer 读取及实验目录已有低分配改动一并保留。
 
-## 账户状态权威与查询边界
-
-余额、订单、预留、持仓及冷状态由所属 `AccountLaneState` 保存。清算、风险状态、算法单和触发单的 Owner `published*` 镜像已经删除；`TradingRuntimeState` 的内部读取通过 Lane 作用域访问权威数据。`LaneCommitDelta` 保留本命令的输出及变更信息，命令结束即清理，不再更新第二份长期业务 Map。业务拒绝时由所属 Lane 应用 before-image 并恢复本地索引。
-
-普通用户余额、持仓和挂单在 `surprising.realtime.enabled=true` 时继续通过 `ValkeyUserQueries` 读取 Redis/Valkey 投影。下单资金校验和结算使用核心权威账户状态，投影用于外部读取；投影的就绪状态和导出序号由实时模块检查。
-
-`AccountLaneWorker` 与 `SystemLedgerLane` 已提供常驻独占写线程、有界 SPSC 队列、背压和故障交接。当前 `TradingRuntimeState.startAccountLanes()` 仍只登记初始化标记，生产运行时尚未接入这些工作线程，Owner 资金写入迁移仍在实施，不能据此宣称生产账户并行或吞吐已恢复。相关定向测试共 87 项通过，包含四个分区的冷状态权威、业务拒绝回滚、触发单索引、风险查询和线程交接；按当前任务约束没有运行快照或恢复场景。
-
-### Treasury 结算的分配与溢出边界（2026-10-11）
-
-`TreasuryRuntime` 复用七列原语事务前值，首次写入捕获，成功提交或普通事务回滚后清空并保留容量。它直接向 `RuntimeFundsAccumulator` 追加七个子账的资金变更；`TradingRuntimeState.appendFundsDelta` 不再物化 Treasury 前后值对象或复制变更资产集合。这个缓冲只由 Treasury 所属线程访问，不是 Owner 的资金镜像。
-
-`RuntimeTreasuryDelta.apply` 在写入前检查整笔资金的溢出。单资产结算先计算六个结果到局部变量，全部通过后写入；多资产结算先检查全部资产再应用，不增加逐命令临时对象。回归覆盖手续费、保险、负债、强平费、资金费残差、舍入残差、清算盈亏，及单资产/多资产拒绝时不发生部分落账。
-
-`TreasurySettlementAllocationBenchmark` 单独测量写入、资金变更生成及逐资产守恒，使用 HotSpot JDK 27。修改前后 `applyAndClear` 的 JMH 对比中，1/16 资产轮转的分配分别从约 96/68 B/次降至约 0.0007/0.0011 B/次；包含七个子账与守恒校验的两组 300 万次循环，ThreadMXBean 均测得 0 字节线程分配，JFR 未捕获 Treasury 热路径分配。该结果仅覆盖 Treasury 局部路径，不能替代真实 Aeron 单节点业务吞吐或整个核心的分配验收。SystemLedgerLane 的生产接线和 Owner 退出资金写入仍需继续。
-
-外部余额、持仓、当前挂单查询在 realtime 启用时仍走 Redis/Valkey 投影；Account Lane 的读取面向内部风控、预留、结算和显式核验。
+HotSpot JDK 27 的干净构建及 167 项撮合、资金、并发顺序、撤单、协议和实时投影契约回归通过；其中六产品线的单笔和批量撤单均有覆盖。本轮未执行 Aeron Cluster 快照或恢复场景，也未启动 wallet。吞吐和限频记录见主 README 的本次采用说明；本轮未据此宣称全链路零堆分配。

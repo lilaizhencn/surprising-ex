@@ -5,8 +5,10 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+
 /** One-way place admission owned and completed by exactly one Account Lane. */
-public final class PlaceAdmissionEvent extends ResolvedPlaceOrder {
+public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
     private long coreSequence;
     private long timestamp, position;
     private long userId;
@@ -77,7 +79,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder {
         return this;
     }
 
-    void clear() {
+    @Override
+    public void clear() {
         if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
         if (matcherWaitRequired && !matcherConsumed) {
             throw new IllegalStateException("cannot recycle a place admission before matcher handoff");

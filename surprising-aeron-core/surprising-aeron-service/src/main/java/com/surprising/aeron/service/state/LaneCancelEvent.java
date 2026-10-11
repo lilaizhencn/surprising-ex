@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+
 /** Sequence-local cancellation applied entirely by the order owner's Account Lane. */
-public final class LaneCancelEvent {
+public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     private TradingRuntimeState runtime;
     private MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;

@@ -38,8 +38,8 @@ final class CoreTestCompletion {
                         + " independent=" + independent + " requested=" + requestedSequence
                         + " first=" + owner.firstPendingMatchingSequence()
                         + " control=" + owner.commits.controlPending(requestedSequence)
-                        + " completion=" + owner.laneCommandContexts.required(requestedSequence).hasMatchingCompletion()
-                        + " result=" + owner.laneCommandContexts.required(requestedSequence).matchingResult()
+                        + " completion=" + owner.pendingMatching.required(requestedSequence).hasMatchingCompletion()
+                        + " result=" + owner.pendingMatching.required(requestedSequence).matchingResult()
                         + " submitted=" + owner.pendingMatching(requestedSequence).isMatchingSubmitted());
                 Thread.onSpinWait();
             }
@@ -79,7 +79,7 @@ final class CoreTestCompletion {
                                 ? pending.orderBatch.lastMatchingResult
                                 : pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
                                 || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
-                                ? owner.laneCommandContexts.required(sequence).matchingResult()
+                                ? owner.pendingMatching.required(sequence).matchingResult()
                                 : awaitMatchingResult(owner, sequence);
                 if (matching == null) matching = awaitMatchingResult(owner, sequence);
                 if (matching == null && owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
@@ -133,7 +133,7 @@ final class CoreTestCompletion {
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
             state.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
-            CommandSlot context = state.laneCommandContexts.required(sequence);
+            CommandSlot context = state.pendingMatching.required(sequence);
             com.surprising.aeron.service.matching.MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result == null) {

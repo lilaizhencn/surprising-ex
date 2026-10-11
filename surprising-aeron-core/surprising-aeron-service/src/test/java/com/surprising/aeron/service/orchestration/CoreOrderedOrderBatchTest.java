@@ -626,10 +626,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(batchSequence, first, 2_000, 3)).isNull();
             var second = awaitMatching(state, batchSequence);
 
-            var contextsField = TradingCoreRuntime.class.getDeclaredField("laneCommandContexts");
-            contextsField.setAccessible(true);
-            CommandSlotRing contexts = (CommandSlotRing) contextsField.get(state);
-            assertThat(contexts.required(laterSequence).hasMatchingCompletion()).isFalse();
+            assertThat(state.pendingMatching.required(laterSequence).hasMatchingCompletion()).isFalse();
 
             CoreResponse batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
             assertThat(batchResponse).isNotNull();
@@ -931,8 +928,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
             finishCurrentItemSettlement(state, fatalSequence, 2_900, 4);
             assertThat(runtime.order(11_004)).isNotNull();
-            CommandSlotRing contexts = field(state, "laneCommandContexts");
-            CommandSlot claimedContext = contexts.required(fatalSequence);
+            CommandSlot claimedContext = state.pendingMatching.required(fatalSequence);
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
             assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
@@ -1106,9 +1102,14 @@ class CoreOrderedOrderBatchTest {
             var nativePlacement = nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, 12_102);
             event.publishDirectNativeReplacement(nativeCancellation, nativePlacement, sequence,
                     commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                    12_102, 1, 0);
-            Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
-                    () -> completeEventually(state, sequence, event, 2_000, 4));
+                    12_102, 2, 0);
+            CoreResponse completed = null;
+            Throwable divergence = null;
+            try {
+                completed = completeEventually(state, sequence, event, 2_000, 4);
+            } catch (Throwable t) {
+                divergence = t;
+            }
 
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
@@ -1128,6 +1129,105 @@ class CoreOrderedOrderBatchTest {
                 if (worker instanceof AutoCloseable closeable)
                     org.assertj.core.api.Assertions.catchThrowable(closeable::close);
             }
+        }
+    }
+
+    @Test
+    void cancelIdentityAndPreparationNeverReadLaneOrderTables() throws Exception {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            applyBalance(state, 1002, 100_000, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_101, "route-own", 1_000)))), 1001));
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_102, "route-foreign", 1_000)))), 1002));
+            TradingCoreState before = state.tradingState();
+            long appliedBefore = state.appliedCommandCount();
+            Object[] lanes = field(state.runtimeState, "accountLanes");
+            var ordersField = lanes[0].getClass().getDeclaredField("orders");
+            ordersField.setAccessible(true);
+            Object[] originalTables = new Object[lanes.length];
+            for (int index = 0; index < lanes.length; index++) {
+                originalTables[index] = ordersField.get(lanes[index]);
+                // A Lane may be mutating or resizing this table at ingress. Fail deterministically
+                // on any Owner lookup; routing must use the existing Owner-owned active index.
+                ordersField.set(lanes[index], new org.agrona.collections.Long2ObjectHashMap<
+                        com.surprising.aeron.service.state.OrderRuntime>() {
+                    @Override public com.surprising.aeron.service.state.OrderRuntime get(long key) {
+                        throw new AssertionError("Owner read a Lane order table");
+                    }
+                });
+            }
+            try {
+                var single = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_101)), 1001);
+                var decoded = com.surprising.aeron.service.command.order.DecodedMatchingCommand.decode(single);
+                state.admissions.validatePendingCancel(single, decoded);
+                assertThat(state.admissions.matchingSymbol(single, CommandSlot.Operation.CANCEL, decoded))
+                        .isEqualTo("1");
+                var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
+                assertThatThrownBy(() -> state.admissions.validatePendingCancel(foreignSingle,
+                        com.surprising.aeron.service.command.order.DecodedMatchingCommand.decode(foreignSingle)))
+                        .isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class)
+                        .hasMessageContaining("another user");
+                for (int round = 0; round < 4; round++) {
+                    var own = state.batches.acquireOrderBatchPending(
+                            com.surprising.aeron.service.command.order.OrderBatchKind.CANCEL,
+                            1, 2_000, 5, CommandSlot.Operation.CANCEL);
+                    own.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
+                    state.batches.validateOrderBatchIdentity(own, 1001);
+                    state.batches.prepareOrderBatchItem(own, own.items.getFirst(), 1001, UUID.randomUUID());
+                    state.batches.releaseOrderBatchPending(own);
+
+                    var foreign = state.batches.acquireOrderBatchPending(
+                            com.surprising.aeron.service.command.order.OrderBatchKind.CANCEL,
+                            2, 2_000, 5, CommandSlot.Operation.CANCEL);
+                    foreign.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
+                    foreign.addItem(13_102, 0, 0, new CancelOrderCommand(13_102));
+                    assertThatThrownBy(() -> state.batches.validateOrderBatchIdentity(foreign, 1001))
+                            .isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class)
+                            .hasMessageContaining("another user's order");
+                    state.batches.releaseOrderBatchPending(foreign);
+
+                    var amend = state.batches.acquireOrderBatchPending(
+                            com.surprising.aeron.service.command.order.OrderBatchKind.AMEND,
+                            1, 2_000, 5, CommandSlot.Operation.AMEND);
+                    amend.addItem(13_103, 13_102, 13_103, new Object());
+                    assertThatThrownBy(() -> state.batches.validateOrderBatchIdentity(amend, 1001))
+                            .isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class)
+                            .hasMessageContaining("another user's order");
+                    state.batches.releaseOrderBatchPending(amend);
+
+                    var missing = state.batches.acquireOrderBatchPending(
+                            com.surprising.aeron.service.command.order.OrderBatchKind.CANCEL,
+                            1, 2_000, 5, CommandSlot.Operation.CANCEL);
+                    missing.addItem(999_999, 0, 0, new CancelOrderCommand(999_999));
+                    state.batches.validateOrderBatchIdentity(missing, 1001);
+                    assertThatThrownBy(() -> state.batches.prepareOrderBatchItem(
+                            missing, missing.items.getFirst(), 1001, UUID.randomUUID()))
+                            .isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class)
+                            .hasMessageContaining("active order");
+                    state.batches.releaseOrderBatchPending(missing);
+                }
+            } finally {
+                for (int index = 0; index < lanes.length; index++)
+                    ordersField.set(lanes[index], originalTables[index]);
+            }
+            assertThat(state.tradingState()).isEqualTo(before);
+            assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
+            var response = drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 5,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(13_101)))), 1001));
+            assertThat(TradingOrderBatchCodec.decodeResult(response.data()).items().getFirst().status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(100_000);
+            assertThat(state.tradingState().order(13_102).status())
+                    .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
         }
     }
 

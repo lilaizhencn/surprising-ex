@@ -23,6 +23,7 @@ public final class RuntimeRiskStateTransitions {
             throw new CoreStateRejectedException("STALE_RISK_SCAN_CONTROL_VERSION",
                     "risk scan control version does not match");
         }
+        runtime.requireRevisionCapacity();
         runtime.setRiskScanControl(new CoreRiskScanControlView(
                 Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
                 command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),

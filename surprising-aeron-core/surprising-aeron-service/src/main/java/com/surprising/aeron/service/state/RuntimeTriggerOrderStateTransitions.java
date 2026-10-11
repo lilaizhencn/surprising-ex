@@ -31,6 +31,7 @@ public final class RuntimeTriggerOrderStateTransitions {
     public static void upsert(TradingRuntimeState runtime, long userId,
                        CoreTriggerOrderStateView view, int symbolId,
                        long positionKey, boolean instrumentSettled) {
+        runtime.requireRevisionCapacity();
         CoreTriggerOrderState trigger = preparePlacement(runtime, userId, view, symbolId, positionKey, instrumentSettled);
         runtime.putTriggerOrder(trigger);
         runtime.incrementCommandRevision();
@@ -245,6 +246,7 @@ public final class RuntimeTriggerOrderStateTransitions {
     private static void update(TradingRuntimeState runtime, CoreTriggerOrderState current,
                                CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                long triggeredPriceTicks, String rejectReason, long updatedAt) {
+        runtime.requireRevisionCapacity();
         runtime.putTriggerOrder(transition(current, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, updatedAt));
         runtime.incrementCommandRevision();

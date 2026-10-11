@@ -154,6 +154,120 @@ public final class CoreStateQueryCodec {
         return writer.toByteArray();
     }
 
+    public static byte[] encodeSingleBalanceUserState(ProductLine productLine, long userId, String asset, long available, long locked) {
+        int length = Integer.BYTES * 4 + Long.BYTES * 2 + textLength(asset) + Long.BYTES * 2 + Integer.BYTES * 3;
+        Writer writer = new Writer(length);
+        writer.intValue(VERSION);
+        writer.intValue(ProductLineWireCode.encode(productLine));
+        writer.longValue(userId);
+        writer.longValue(0);
+        writer.intValue(CorePositionMode.ONE_WAY.wireCode());
+        writer.intValue(1);
+        writer.text(asset);
+        writer.longValue(available);
+        writer.longValue(locked);
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(0);
+        return writer.toByteArray();
+    }
+
+    public static byte[] encodeSingleReservationUserState(ProductLine productLine, long userId, long orderId, String instrumentId,
+                                                           ReservationKind kind, String asset, long reserved, long released, long consumed, long orderSteps) {
+        int length = Integer.BYTES * 4 + Long.BYTES * 2
+                + Integer.BYTES
+                + Integer.BYTES + Long.BYTES + textLength(instrumentId) + Integer.BYTES + textLength(asset) + Long.BYTES * 4
+                + Integer.BYTES
+                + Integer.BYTES;
+        Writer writer = new Writer(length);
+        writer.intValue(VERSION);
+        writer.intValue(ProductLineWireCode.encode(productLine));
+        writer.longValue(userId);
+        writer.longValue(0);
+        writer.intValue(CorePositionMode.ONE_WAY.wireCode());
+        writer.intValue(0);
+        writer.intValue(1);
+        writer.longValue(orderId);
+        writer.text(instrumentId);
+        writer.intValue(kind.wireCode());
+        writer.text(asset);
+        writer.longValue(reserved);
+        writer.longValue(released);
+        writer.longValue(consumed);
+        writer.longValue(orderSteps);
+        writer.intValue(0);
+        writer.intValue(0);
+        return writer.toByteArray();
+    }
+
+    public static byte[] encodeSinglePositionUserState(ProductLine productLine, long userId, String instrumentId, String marginAsset,
+                                                        CoreMarginMode marginMode, CorePositionSide positionSide, long signedQuantitySteps,
+                                                        long entryPriceTicks, long entryValueTicks, long realizedPnlUnits, long positionMarginUnits) {
+        int length = Integer.BYTES * 4 + Long.BYTES * 2
+                + Integer.BYTES
+                + Integer.BYTES
+                + Integer.BYTES + textLength(instrumentId) + textLength(marginAsset) + Integer.BYTES * 2 + Long.BYTES * 5
+                + Integer.BYTES;
+        Writer writer = new Writer(length);
+        writer.intValue(VERSION);
+        writer.intValue(ProductLineWireCode.encode(productLine));
+        writer.longValue(userId);
+        writer.longValue(0);
+        writer.intValue(CorePositionMode.ONE_WAY.wireCode());
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(1);
+        writer.text(instrumentId);
+        writer.text(marginAsset);
+        writer.intValue(marginMode.wireCode());
+        writer.intValue(positionSide.wireCode());
+        writer.longValue(signedQuantitySteps);
+        writer.longValue(entryPriceTicks);
+        writer.longValue(entryValueTicks);
+        writer.longValue(realizedPnlUnits);
+        writer.longValue(positionMarginUnits);
+        writer.intValue(0);
+        return writer.toByteArray();
+    }
+
+    public static byte[] encodeSingleLeverageUserState(ProductLine productLine, long userId, String instrumentId,
+                                                        CoreMarginMode marginMode, long leveragePpm) {
+        int length = Integer.BYTES * 4 + Long.BYTES * 2
+                + Integer.BYTES
+                + Integer.BYTES
+                + Integer.BYTES
+                + Integer.BYTES + textLength(instrumentId) + Integer.BYTES + Long.BYTES;
+        Writer writer = new Writer(length);
+        writer.intValue(VERSION);
+        writer.intValue(ProductLineWireCode.encode(productLine));
+        writer.longValue(userId);
+        writer.longValue(0);
+        writer.intValue(CorePositionMode.ONE_WAY.wireCode());
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(1);
+        writer.text(instrumentId);
+        writer.intValue(marginMode.wireCode());
+        writer.longValue(leveragePpm);
+        return writer.toByteArray();
+    }
+
+    public static byte[] encodeUserMetadataState(ProductLine productLine, long userId, long revision, CorePositionMode positionMode) {
+        int length = Integer.BYTES * 4 + Long.BYTES * 2 + Integer.BYTES * 4;
+        Writer writer = new Writer(length);
+        writer.intValue(VERSION);
+        writer.intValue(ProductLineWireCode.encode(productLine));
+        writer.longValue(userId);
+        writer.longValue(revision);
+        writer.intValue(positionMode.wireCode());
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(0);
+        writer.intValue(0);
+        return writer.toByteArray();
+    }
+
     public static int encodedUserStateLength(CoreUserStateView state) {
         if (state == null) throw new IllegalArgumentException("user state is required");
         long length = Integer.BYTES * 4L + Long.BYTES * 2L;

@@ -71,6 +71,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
             }
             default -> throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_ACTION", "unsupported action");
         }
+        runtime.requireRevisionCapacity();
         runtime.putCancelAllAfterTimer(key, next);
         runtime.incrementCommandRevision();
     }

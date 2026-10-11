@@ -20,8 +20,8 @@ public class ResolvedPlaceOrder {
     private long makerFeeRatePpm;
     private long takerFeeRatePpm;
 
-    /** Only a pooled subtype may start empty and initialize before publication. */
-    protected ResolvedPlaceOrder() {
+    /** Allows pooled or slot-owned instances to be created and reused across commands. */
+    public ResolvedPlaceOrder() {
     }
 
     public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
@@ -42,7 +42,21 @@ public class ResolvedPlaceOrder {
                 0, 0, reservationKind, reservationAsset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
-    protected final void initializeResolvedOrder(
+    public void resolve(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
+                        long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
+                        long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
+                        String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
+        clearResolvedOrder();
+        initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
+                makerFeeRatePpm, takerFeeRatePpm);
+    }
+
+    public void clear() {
+        clearResolvedOrder();
+    }
+
+    public final void initializeResolvedOrder(
             PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
             long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
             long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
@@ -71,7 +85,7 @@ public class ResolvedPlaceOrder {
         this.takerFeeRatePpm = takerFeeRatePpm;
     }
 
-    protected final void clearResolvedOrder() {
+    public final void clearResolvedOrder() {
         intent = null;
         instrument = null;
         symbolId = 0;
@@ -82,7 +96,7 @@ public class ResolvedPlaceOrder {
         makerFeeRatePpm = takerFeeRatePpm = 0;
     }
 
-    protected final boolean resolvedOrderInitialized() { return intent != null; }
+    public final boolean resolvedOrderInitialized() { return intent != null; }
     public PlaceOrderCommand intent() { return intent; }
     public CoreInstrument instrument() { return instrument; }
     public int symbolId() { return symbolId; }

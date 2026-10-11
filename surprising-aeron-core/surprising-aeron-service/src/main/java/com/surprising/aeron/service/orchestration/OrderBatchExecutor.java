@@ -468,15 +468,13 @@ final class OrderBatchExecutor {
                 case CANCEL -> {
                     batch.currentPreMatchingCancellationOrderIds = List.of();
                     CancelOrderCommand command = (CancelOrderCommand) item.command;
-                    OrderRuntime order = owner.runtimeOrder(command.orderId());
+                    var route = owner.activeOrderIndex.activeOrderRoute(command.orderId());
+                    OrderRuntime order = route == null ? null : route.runtime();
                     if (order == null || order.status().terminal())
                         throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order does not exist");
                     if (order.userId() != userId) {
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
                     }
-                    var route = owner.activeOrderIndex.activeOrderRoute(command.orderId());
-                    if (route == null || route.runtime() == null)
-                        throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order route does not exist");
                 }
                 case AMEND -> {
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
@@ -518,7 +516,7 @@ final class OrderBatchExecutor {
                             userId, replacement, command.originalOrderId());
                     batch.replacementAdmission = new com.surprising.aeron.service.command.order.ResolvedMatchingAdmission(
                             userId, command.originalOrderId(), order.revision(), owner.runtimeState.user(userId).revision(),
-                            replacement, resolved, owner.matchingOrder(userId, replacement), requiredReservation);
+                            replacement, resolved, requiredReservation);
                 }
             }
         } finally {
@@ -601,7 +599,7 @@ final class OrderBatchExecutor {
         // also publishes the submitting Lane's final sequence; no second Lane task is needed.
         boolean finalChunk = true;
         for (int index = end; index < batch.items.size(); index++) {
-            if (owner.runtimeOrder(batch.items.get(index).orderId) != null) {
+            if (owner.activeOrderIndex.activeOrderRoute(batch.items.get(index).orderId) != null) {
                 finalChunk = false;
                 break;
             }
@@ -871,8 +869,8 @@ final class OrderBatchExecutor {
                 + " detail=" + detail);
         owner.admissions.queuedMatching.clear();
         owner.pendingMatching.forEach(value -> {
-            if (owner.laneCommandContexts.claimed(value.sequence())) {
-                owner.laneCommandContexts.required(value.sequence()).resetMatchingContinuation();
+            if (value.claimed) {
+                value.resetMatchingContinuation();
             }
         });
         owner.runtimeState.endOrderBatchMutationScope();
@@ -959,7 +957,6 @@ final class OrderBatchExecutor {
             owner.setCommandFunds(pending.fundsAccumulator());
             batch.finishing(true);
         }
-        CommandSlot laneContext = owner.laneCommandContexts.required(batch.sequence);
         initializeOrderBatchLaneContext(batch, pending);
         if (dispatchOrderBatchLaneWork(batch, pending, clusterTimestamp, clusterPosition)) {
             owner.suspendMatchingCommitContext(pending);
@@ -973,7 +970,7 @@ final class OrderBatchExecutor {
             owner.runtimeState.collectCancel(
                     batch.cancelEvent, owner.commandFundsAccumulator, owner.terminalRetention);
             if (batch.cancelEvent.commitsLane()) {
-                laneContext.completeLanes(batch.cancelEvent.requiredLaneMask());
+                pending.completeLanes(batch.cancelEvent.requiredLaneMask());
                 batch.laneCommitCompleted(true);
             }
             owner.runtimeState.releaseCancel(batch.cancelEvent);
@@ -993,7 +990,7 @@ final class OrderBatchExecutor {
             owner.runtimeState.releaseMatcherSettlement(batch.settlementEvent);
             batch.settlementsCollected(true);
             if (finalLaneCommit) {
-                laneContext.completeLanes(settlementLaneMask);
+                pending.completeLanes(settlementLaneMask);
                 batch.laneCommitCompleted(true);
             }
             owner.commits.requestCommitPublication();
@@ -1010,7 +1007,7 @@ final class OrderBatchExecutor {
                     owner.suspendMatchingCommitContext(pending);
                     return null;
                 }
-                laneContext.completeLanes(batch.laneCommitEvent.requiredLaneMask());
+                pending.completeLanes(batch.laneCommitEvent.requiredLaneMask());
                 owner.runtimeState.releaseLaneCommit(batch.laneCommitEvent);
                 batch.laneCommitEvent = null;
                 owner.commits.requestCommitPublication();
@@ -1020,17 +1017,17 @@ final class OrderBatchExecutor {
         // 批量响应直接消费 batch；全局发布消费 runtime 变更，不能再复制到普通单结果容器。
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
-        if (laneContext.expectedLaneMask() != batch.actualLaneMask) {
+        if (pending.expectedLaneMask() != batch.actualLaneMask) {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
         try {
             if (batch.treasuryDelta != null) batch.treasuryDelta.apply(owner.runtimeState.treasury());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
-            if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
+            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
             }
-            owner.commits.requireCompleteAccountLanes(laneContext);
+            owner.commits.requireCompleteAccountLanes(pending);
         } catch (RuntimeException validationFailure) {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
@@ -1277,8 +1274,10 @@ final class OrderBatchExecutor {
         if (batch.kind == OrderBatchKind.PLACE) return;
         for (OrderBatchItem item : batch.items) {
             long orderId = batch.kind == OrderBatchKind.CANCEL ? item.orderId : item.originalOrderId;
-            OrderRuntime order = owner.runtimeOrder(orderId);
-            if (order != null && order.userId() != userId) {
+            // Owner validates the immutable identity in its existing routing index. Account
+            // Lane order tables are mutated by their worker and cannot be probed at ingress.
+            var route = owner.activeOrderIndex.activeOrderRoute(orderId);
+            if (route != null && route.userId() != userId) {
                 throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH",
                         "order batch contains another user's order");
             }
@@ -1316,9 +1315,9 @@ final class OrderBatchExecutor {
                 PlaceOrderCommand replacement = owner.matchingFlow.replacementForAmend(command, order);
                 orderId = replacement.orderId();
                 String instrumentId = owner.runtimeOrderSymbol(order);
-                var matchingOrder = batch.replacementAdmission.matchingOrder();
+                var resolvedReplacement = batch.replacementAdmission.resolved();
                 submission = () -> owner.matchingAdapter.replaceOrder(
-                        pending.command().header().userId(), command.originalOrderId(), instrumentId, matchingOrder);
+                        pending.command().header().userId(), command.originalOrderId(), instrumentId, resolvedReplacement);
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
         }
@@ -1334,12 +1333,12 @@ final class OrderBatchExecutor {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
                 OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
                 String instrumentId = owner.runtimeOrderSymbol(order);
-                var matchingOrder = batch.replacementAdmission.matchingOrder();
+                var resolvedReplacement = batch.replacementAdmission.resolved();
                 directSubmission = () -> owner.matchingAdapter.replaceDirect(
                         shard, pending.sequence(), pending.command().header().commandId(),
-                        matchingOrder.orderId(), pending.command().header().submittedAtEpochMillis(),
+                        resolvedReplacement.orderId(), pending.command().header().submittedAtEpochMillis(),
                         pending.command().header().userId(), command.originalOrderId(), instrumentId,
-                        matchingOrder, direct);
+                        resolvedReplacement, direct);
             }
             return owner.matcherCommands.directWithCancellations(
                     pending, direct, preMatchingCancellations, orderId, directSubmission);

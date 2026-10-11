@@ -1,5 +1,17 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.util.UUID;
 
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -33,11 +45,59 @@ public class OwnerPublicationBenchmark {
     private final com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedIds =
             new com.surprising.aeron.service.command.support.PrimitiveLongChangeSet(20);
     private long coreSequence;
+    private MatcherSettlementChanges settlement;
+    private AccountLaneState settlementLane;
+    private final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+    private final OrderRuntime[] settlementOrders = new OrderRuntime[20];
+    private final ReservationRuntime[] settlementReservations = new ReservationRuntime[20];
 
     @Setup public void setup() {
         for (int i = 0; i < users.length; i++) {
             users[i] = new UserRuntime(i + 1);
+            runtime.accountLanes[runtime.topology().accountLaneId(i + 1L)].users.put(i + 1, users[i]);
         }
+        int laneId = runtime.topology().accountLaneId(7);
+        settlementLane = runtime.accountLanes[laneId];
+        settlement = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
+        settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
+        var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        for (int i = 0; i < settlementOrders.length; i++) {
+            boolean terminal = i % 4 == 0;
+            settlementOrders[i] = new OrderRuntime(i + 1, ProductLine.LINEAR_PERPETUAL,
+                    7, 0, instrument, CoreOrderSide.BUY, 100, 100, 1, terminal ? 1 : 0,
+                    terminal ? 0 : 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + i,
+                    new UUID(1, i + 1), 0, 0, 0, 1000, 1000, 2000,
+                    terminal ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN, 1);
+            settlementReservations[i] = new ReservationRuntime(i + 1, 7, 0,
+                    ReservationKind.DERIVATIVE_MARGIN, 0, 100, 0, terminal ? 100 : 0, 1);
+        }
+    }
+
+    /** One actual preparation of 20 already-applied order/reservation changes; no trading or transport. */
+    @Benchmark public int prepareOrderSettlement() {
+        int laneId = settlementLane.laneId();
+        var changes = settlement.laneDeltas[laneId];
+        for (int i = 0; i < settlementOrders.length; i++) {
+            changes.putOrder(i + 1, settlementOrders[i]);
+            changes.putReservation(i + 1, settlementReservations[i]);
+        }
+        settlement.prepareLaneTerminal(laneId, identities, settlementLane, runtime);
+        int terminals = changes.terminalOrderCount();
+        changes.clear();
+        return terminals;
+    }
+
+    /** Twenty actual account lookups with Owner scope entry/exit; no matching or transport. */
+    @Benchmark public long readAccountsInOwnerScopes() {
+        long result = 0;
+        for (var user : users) {
+            long userId = user.userId();
+            result += runtime.onLane(userId, lane -> runtime.requireUser(userId)).userId();
+        }
+        return result;
     }
 
     /** Empty recycled buffers must not rescan their retained hash-table capacity. */

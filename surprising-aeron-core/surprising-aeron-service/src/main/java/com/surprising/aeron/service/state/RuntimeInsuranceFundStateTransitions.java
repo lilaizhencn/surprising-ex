@@ -21,6 +21,7 @@ public final class RuntimeInsuranceFundStateTransitions {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "insurance fund balance is insufficient");
         }
+        runtime.requireRevisionCapacity();
         runtime.treasury().adjustInsurance(assetId, command.deltaUnits());
         runtime.incrementCommandRevision();
     }

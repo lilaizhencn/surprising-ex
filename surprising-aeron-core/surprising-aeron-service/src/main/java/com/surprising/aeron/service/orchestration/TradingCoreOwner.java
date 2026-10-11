@@ -354,7 +354,7 @@ public final class TradingCoreOwner {
     }
 
     /** Capture the existing Owner and worker state only when progress has already failed. */
-    private String stalledCommandDiagnostics() {
+    String stalledCommandDiagnostics() {
         var window = commandPipeline.commandWindow();
         var head = window.size() == 0 ? null : window.get(0);
         var pending = state.pendingMatching.head();

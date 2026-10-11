@@ -28,6 +28,7 @@ public final class RuntimeInstrumentStateTransitions {
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());
+            runtime.requireRevisionCapacity();
             runtime.registerInstrument(instrument);
         } else {
             if (!sameInstrumentIdentity(current, instrument)) {
@@ -38,6 +39,7 @@ public final class RuntimeInstrumentStateTransitions {
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());
+            runtime.requireRevisionCapacity();
             runtime.updateInstrumentConfiguration(current, instrument);
         }
         runtime.incrementCommandRevision();
@@ -110,6 +112,7 @@ public final class RuntimeInstrumentStateTransitions {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "finish the active lifecycle operation first");
         }
+        runtime.requireRevisionCapacity();
         runtime.updateInstrumentMaintenance(instrument, after);
         runtime.incrementCommandRevision();
     }

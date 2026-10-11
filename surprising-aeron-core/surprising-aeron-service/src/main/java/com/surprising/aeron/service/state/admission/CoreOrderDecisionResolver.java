@@ -39,8 +39,8 @@ public final class CoreOrderDecisionResolver {
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
     }
 
-    /** Resolves the ordinary PLACE directly into its existing pooled admission event. */
-    public static PlaceAdmissionEvent resolveInto(PlaceAdmissionEvent target,
+    /** Resolves the ordinary PLACE directly into its existing pooled admission event or reusable resolved order. */
+    public static <T extends ResolvedPlaceOrder> T resolveInto(T target,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
             long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (target == null || runtime == null || identities == null || intent == null
@@ -55,6 +55,13 @@ public final class CoreOrderDecisionResolver {
         resolveValues(target, instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.resolveFee(userId, intent.instrumentId(), clusterTimestamp, instrument),
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
+        return target;
+    }
+
+    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, PlaceOrderCommand intent) {
+        if (target == null || context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
+        resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.fee(),
+                context.clusterTimestamp(), context.lifecycleSettled(), intent);
         return target;
     }
 
@@ -82,7 +89,7 @@ public final class CoreOrderDecisionResolver {
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
     }
 
-    private static ResolvedPlaceOrder resolveValues(PlaceAdmissionEvent target,
+    private static ResolvedPlaceOrder resolveValues(ResolvedPlaceOrder target,
                                                     CoreInstrument instrument, int symbolId,
                                                     MarkPriceRuntime mark, CoreFeeRate fee,
                                                     long clusterTimestamp, boolean lifecycleSettled,

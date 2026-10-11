@@ -53,7 +53,7 @@ final class MatcherCommandSubmission {
             }
             if (pending.operation() == CommandSlot.Operation.CANCEL && direct != null) {
                 var command = pending.decodedCommand().cancelOrder();
-                var order = owner.runtimeState.order(command.orderId());
+                var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
                 if (order != null) {
                     String instrumentId = owner.identities.instrumentId(order.symbolId());
                     int shard = owner.matchingFlow.matcherShard(pending);
@@ -72,7 +72,7 @@ final class MatcherCommandSubmission {
                 return directWithCancellations(pending, direct, preMatchingCancellations,
                         admission.resolved().orderId(), pending.prepareReplaceMatching(
                                 owner, owner.matchingFlow.matcherShard(pending), admission.resolved().orderId(), userId,
-                                admission.originalOrderId(), instrumentId, admission.matchingOrder(), direct));
+                                admission.originalOrderId(), instrumentId, admission.resolved(), direct));
             }
             if (pending.operation() == CommandSlot.Operation.TRIGGER
                     && direct != null) {
@@ -102,7 +102,7 @@ final class MatcherCommandSubmission {
                 }
                 case CANCEL -> {
                     var command = pending.decodedCommand().cancelOrder();
-                    var order = owner.runtimeState.order(command.orderId());
+                    var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
                     String instrumentId = order == null ? "" : owner.identities.instrumentId(order.symbolId());
                     yield new MatchingSubmission(command.orderId(),
                             () -> owner.matchingAdapter.cancelForContinuation(userId, command.orderId(), instrumentId));
@@ -113,7 +113,7 @@ final class MatcherCommandSubmission {
                     String instrumentId = owner.runtimeOrderSymbol(order);
                     yield new MatchingSubmission(admission.resolved().orderId(),
                             () -> owner.matchingAdapter.replaceOrder(userId, admission.originalOrderId(),
-                                    instrumentId, admission.matchingOrder()));
+                                    instrumentId, admission.resolved()));
                 }
                 case TRIGGER -> {
                     long[] execute = pending.decodedCommand().trigger();

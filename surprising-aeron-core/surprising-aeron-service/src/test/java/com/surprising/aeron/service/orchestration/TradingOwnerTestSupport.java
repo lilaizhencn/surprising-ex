@@ -145,6 +145,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
     }
 
     int pendingCommandCount() { return owner.pendingCommandCount(); }
+    String stalledCommandDiagnostics() { return owner.stalledCommandDiagnostics(); }
     boolean ownerWorkAvailable() { return owner.ownerWorkAvailable(); }
     boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
     void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }

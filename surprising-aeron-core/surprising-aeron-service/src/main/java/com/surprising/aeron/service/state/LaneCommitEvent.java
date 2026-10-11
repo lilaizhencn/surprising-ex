@@ -3,8 +3,10 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+
 /** Sequence-local fan-out that advances every affected Account Lane without an owner-side per-lane barrier. */
-public final class LaneCommitEvent {
+public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private static final int CACHE_LINE_LONGS = 16;
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
     private static final boolean LATENCY_DIAGNOSTICS = MatcherSettlementEvent.LATENCY_DIAGNOSTICS;

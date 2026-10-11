@@ -451,4 +451,13 @@ final class PendingMatchingRing {
     boolean isEmpty() { return size == 0; }
     int capacity() { return contexts.capacity(); }
     CommandSlotRing contexts() { return contexts; }
+
+    CommandSlot required(long sequence) { return contexts.required(sequence); }
+    boolean claimed(long sequence) { return contexts.claimed(sequence); }
+    CommandSlot claim(long sequence) { return contexts.claim(sequence); }
+    void release(long sequence) { contexts.release(sequence); }
+    void discard(long sequence) { contexts.discard(sequence); }
+    int inFlight() { return contexts.inFlight(); }
+    int highWaterMark() { return contexts.highWaterMark(); }
+    CommandSlot contextAt(int slot) { return contexts.contextAt(slot); }
 }

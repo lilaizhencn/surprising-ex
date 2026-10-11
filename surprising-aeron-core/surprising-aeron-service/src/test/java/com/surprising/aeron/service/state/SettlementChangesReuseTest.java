@@ -1,9 +1,66 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import static org.assertj.core.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
 class SettlementChangesReuseTest {
+    @Test void mixedSettlementKeepsFinalCountersAndTerminalCleanupAcrossReuse() {
+        try (var runtime = new TradingRuntimeState()) {
+            int laneId = runtime.topology().accountLaneId(7);
+            var lane = runtime.accountLanes[laneId];
+            var changes = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
+            changes.ensureOrderCapacity(2, 1L << laneId);
+            var delta = changes.laneDeltas[laneId];
+            var identities = new RuntimeIdentityRegistry();
+            var open = CoreStateTestFixtures.order(11, 7, 0, 10);
+            var filled = CoreStateTestFixtures.order(12, 7, 0, 10);
+            var openReservation = CoreStateTestFixtures.reservation(11, 7, 0, 100);
+            var filledReservation = CoreStateTestFixtures.reservation(12, 7, 0, 100);
+            lane.putOrder(open);
+            lane.putOrder(filled);
+            lane.reservations.put(11, openReservation);
+            lane.reservations.put(12, filledReservation);
+            delta.putOrder(11, open);
+            delta.putOrder(12, filled);
+            delta.putReservation(11, openReservation);
+            delta.putReservation(12, filledReservation);
+            lane.updateOrderInPlace(11, 4, 6, 7, CoreOrderStatus.OPEN,
+                    2, 1000, 2000);
+            lane.updateOrderInPlace(12, 10, 0, 3, CoreOrderStatus.FILLED,
+                    2, 1000, 2000);
+            openReservation.consumeInPlace(40);
+            filledReservation.consumeInPlace(100);
+
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            assertThat(lane.orders.get(12)).isNull();
+            assertThat(lane.reservations.get(12)).isNull();
+            assertThat(delta.reservations.get(11).consumedUnits()).isEqualTo(40);
+            assertThat(lane.reservations.get(11).reservedUnits()).isEqualTo(60);
+            assertThat(delta.terminalOrderCount()).isEqualTo(1);
+            assertThat(delta.terminalOrderId(0)).isEqualTo(12);
+            delta.commitTerminalToOwner(runtime, laneId, null, 1, null, null);
+            assertThat(runtime.changedOrderValue(11).executedQuantitySteps()).isEqualTo(4);
+            assertThat(runtime.changedOrderValue(11).cumulativeFeeUnits()).isEqualTo(7);
+            assertThat(runtime.changedOrderValue(12).remainingQuantitySteps()).isZero();
+            runtime.clearChangedKeys();
+            delta.clear();
+
+            lane.updateOrderInPlace(11, 4, 6, 0, CoreOrderStatus.CANCELED, 3, 1001, 2001);
+            openReservation.releaseInPlace(60);
+            delta.putOrder(11, open);
+            delta.putReservation(11, openReservation);
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            assertThat(delta.terminalOrderCount()).isEqualTo(1);
+            assertThat(delta.terminalOrderId(0)).isEqualTo(11);
+            assertThat(lane.orders.get(11)).isNull();
+            assertThat(lane.reservations.get(11)).isNull();
+            delta.commitTerminalToOwner(runtime, laneId, null, 2, null, null);
+            assertThat(runtime.changedOrderValue(11).cumulativeFeeUnits()).isEqualTo(7);
+            assertThat(runtime.changedOrderValue(12)).isNull();
+        }
+    }
+
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
             var delta = new LaneCommitDelta();

@@ -112,7 +112,18 @@ final class FundsCommandIndex implements AutoCloseable {
     }
 
     private static byte[] key(UUID id) {
-        return ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array();
+        byte[] bytes = new byte[16];
+        long msb = id.getMostSignificantBits();
+        long lsb = id.getLeastSignificantBits();
+        for (int i = 7; i >= 0; i--) {
+            bytes[i] = (byte) msb;
+            msb >>>= 8;
+        }
+        for (int i = 15; i >= 8; i--) {
+            bytes[i] = (byte) lsb;
+            lsb >>>= 8;
+        }
+        return bytes;
     }
 
     @Override

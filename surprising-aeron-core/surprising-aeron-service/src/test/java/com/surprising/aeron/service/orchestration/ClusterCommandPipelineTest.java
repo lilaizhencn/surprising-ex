@@ -388,7 +388,7 @@ class ClusterCommandPipelineTest {
                     assertThat(state.batches.orderBatchMatcherShard(pending.orderBatch))
                             .isEqualTo(state.matchingAdapter.matcherShardId("1"));
                 }
-                assertThat(state.laneCommandContexts.required(sequence).hasMatchingCompletion()).isFalse();
+                assertThat(state.pendingMatching.required(sequence).hasMatchingCompletion()).isFalse();
                 assertThat(live.responses).isEmpty();
                 assertThat(event.plan().tradeCount()).isPositive();
                 for (int item = 0; item < (batch ? 20 : 1); item++) {
@@ -1194,10 +1194,7 @@ class ClusterCommandPipelineTest {
             long timestamp = command.header().submittedAtEpochMillis();
             state.applyClusterCommand(command, timestamp, 0);
             long sequence = state.matchingSequence(command.header().commandId());
-            var contextField = TradingCoreRuntime.class.getDeclaredField("laneCommandContexts");
-            contextField.setAccessible(true);
-            var contexts = (CommandSlotRing) contextField.get(state);
-            var context = contexts.required(sequence);
+            var context = state.pendingMatching.required(sequence);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!context.hasMatchingCompletion() && System.nanoTime() < deadline) state.drainMatchingCompletions();
             assertThat(context.hasMatchingCompletion()).isTrue();

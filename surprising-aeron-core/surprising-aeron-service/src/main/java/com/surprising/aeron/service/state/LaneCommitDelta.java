@@ -3,10 +3,11 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class LaneCommitDelta {
-    /** 本 Lane 的提交结果只供本命令输出使用，不生成 Owner 业务镜像。 */
+    /** Owner 串行应用后的变更集合与终态回执，提交完成前保留运行态引用。 */
     private boolean publicationPrepared;
     /** Lane 准备的终态原语收据；Owner 不再重新遍历订单或创建 OrderRuntime 快照。 */
     private long[] terminalOrderIds = new long[4];
@@ -35,8 +36,6 @@ public final class LaneCommitDelta {
 
     void preparePublication() {
         if (publicationPrepared) throw new IllegalStateException("Lane publication already prepared");
-        orders.capturePublicationValues();
-        reservations.capturePublicationValues();
         if (terminalOrderCount == 0) {
             orders.forEach((orderId, order) -> {
                 if (order != null && order.status().terminal()) recordTerminalOrder(order);
@@ -57,9 +56,9 @@ public final class LaneCommitDelta {
     /** 本次需要发布的用户变化。 */
     final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
     /** 本次需要发布的订单变化。 */
-    final OrderChangeBuffer orders = new OrderChangeBuffer();
+    final RuntimeIndexedChangeBuffer<OrderRuntime, Void> orders = new RuntimeIndexedChangeBuffer<>();
     /** 本次需要发布的预留变化。 */
-    final ReservationChangeBuffer reservations = new ReservationChangeBuffer();
+    final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
     /** 本次需要发布的持仓变化。 */
     final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = new RuntimeIndexedChangeBuffer<>();
     /** 本次需要发布的清算变化。 */
@@ -111,7 +110,10 @@ public final class LaneCommitDelta {
     void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
     void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
-    void drainTo(com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
+    void drainTo(int laneId,
+                 LongObjectHashMap<LiquidationRuntime> targetLiquidations,
+                 LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
+                 com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
             users.forEach((userId, ignored) -> {
@@ -133,8 +135,8 @@ public final class LaneCommitDelta {
         orders.clear();
         reservations.clear();
         positions.clear();
-        liquidations.clear();
-        riskSnapshots.clear();
+        liquidations.drainToEclipseMap(targetLiquidations);
+        riskSnapshots.drainToEclipseMap(targetRiskSnapshots);
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
@@ -152,8 +154,14 @@ public final class LaneCommitDelta {
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this, coreSequence);
-        liquidations.drainTo(state.changedLiquidations::put);
-        riskSnapshots.drainTo(state.changedRiskSnapshots::put);
+        liquidations.drainTo((id, value) -> {
+            state.changedLiquidations.put(id, value);
+            TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, value);
+        });
+        riskSnapshots.drainTo((key, value) -> {
+            state.changedRiskSnapshots.put(key, value);
+            TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, key, value);
+        });
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
     }
@@ -220,7 +228,10 @@ public final class LaneCommitDelta {
 
     void publishTriggersToOwner(TradingRuntimeState state) {
         if (triggers == null || triggers.isEmpty()) return;
-        triggers.forEach(state.changedTriggerOrders::put);
+        triggers.forEach((id, value) -> {
+            TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, value);
+            state.changedTriggerOrders.put(id, value);
+        });
         triggers.clear();
     }
 

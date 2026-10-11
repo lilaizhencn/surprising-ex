@@ -33,6 +33,7 @@ final class ControlLaneDispatcher {
 
     void dispatch(long laneMask, AccountLaneOperationType type, java.util.function.IntFunction<Object> operation) {
         owner.assertOwner();
+        owner.requireRevisionCapacity();
         if (!owner.accountLanesStarted) throw new IllegalStateException("control work requires running Account Lanes");
         int laneCount = owner.accountLanes == null ? 0 : owner.accountLanes.length;
         long validMask = laneCount == 64 ? -1L : (1L << laneCount) - 1;

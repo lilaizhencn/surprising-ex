@@ -939,7 +939,7 @@ class TradingCoreOwnerTest {
             if (service.pendingCommandCount() == 0) return;
             java.util.concurrent.locks.LockSupport.parkNanos(100_000);
         } while (System.nanoTime() < deadline);
-        throw new AssertionError("asynchronous command completion timeout");
+        throw new AssertionError("asynchronous command completion timeout: " + service.stalledCommandDiagnostics());
     }
 
     private static Header aeronHeader() {

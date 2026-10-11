@@ -67,13 +67,10 @@ public final class RealtimeStateCapture {
         snapshotId = snapshot;
         ordinal = 0;
         outbox.begin();
-        if (snapshot == 0)
-            emit(
-                    RealtimeFrame.Kind.COMMIT_BEGIN,
-                    0,
-                    "",
-                    "",
-                    encodeLittleEndianLong(previousExportSequence));
+        if (snapshot == 0) {
+            outbox.stage(RealtimeFrameCodec.encodeLongPayload(
+                    product, RealtimeFrame.Kind.COMMIT_BEGIN, 0, sequence, ordinal++, timestamp, snapshotId, "", "", previousExportSequence, traceId));
+        }
     }
 
     public boolean active() {
@@ -91,27 +88,10 @@ public final class RealtimeStateCapture {
                 abort();
                 return;
             }
-            emit(
-                    RealtimeFrame.Kind.COMMIT_END,
-                    0,
-                    "",
-                    "",
-                    encodeLittleEndianLong(exportSequence));
+            outbox.stage(RealtimeFrameCodec.encodeLongPayload(
+                    product, RealtimeFrame.Kind.COMMIT_END, 0, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence, traceId));
         }
         outbox.commit();
-    }
-
-    private static byte[] encodeLittleEndianLong(long value) {
-        byte[] bytes = new byte[8];
-        bytes[0] = (byte) value;
-        bytes[1] = (byte) (value >> 8);
-        bytes[2] = (byte) (value >> 16);
-        bytes[3] = (byte) (value >> 24);
-        bytes[4] = (byte) (value >> 32);
-        bytes[5] = (byte) (value >> 40);
-        bytes[6] = (byte) (value >> 48);
-        bytes[7] = (byte) (value >> 56);
-        return bytes;
     }
 
     public void abort() {
@@ -205,15 +185,8 @@ public final class RealtimeStateCapture {
         snapshot.orders().forEach(this::order);
         snapshot.triggers().forEach(this::trigger);
         snapshot.risks().forEach(this::risk);
-        emit(
-                RealtimeFrame.Kind.SNAPSHOT_END,
-                userId,
-                "",
-                "",
-                ByteBuffer.allocate(8)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(exportSequence)
-                        .array());
+        outbox.stage(RealtimeFrameCodec.encodeLongPayload(
+                product, RealtimeFrame.Kind.SNAPSHOT_END, userId, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence, traceId));
     }
 
     public void user(CoreUserStateView view) {
@@ -229,15 +202,13 @@ public final class RealtimeStateCapture {
         if (ordersAndTradesOnly) return;
         if (!active()) return;
         try {
-            var view = new CoreBalanceView(identities.asset(assetId), available, locked);
+            String assetName = identities.asset(assetId);
             emit(
                     RealtimeFrame.Kind.BALANCE,
                     userId,
                     "",
-                    view.asset(),
-                    CoreStateQueryCodec.encodeUserState(
-                            new CoreUserStateView(
-                                    product, userId, 0, List.of(view), List.of(), List.of())));
+                    assetName,
+                    CoreStateQueryCodec.encodeSingleBalanceUserState(product, userId, assetName, available, locked));
         } catch (RuntimeException failure) {
             failed();
         }
@@ -251,61 +222,35 @@ public final class RealtimeStateCapture {
                 u.userId(),
                 "",
                 "user",
-                CoreStateQueryCodec.encodeUserState(
-                        new CoreUserStateView(
-                                product,
-                                u.userId(),
-                                u.revision(),
-                                u.positionMode(),
-                                List.of(),
-                                List.of(),
-                                List.of(),
-                                List.of())));
+                CoreStateQueryCodec.encodeUserMetadataState(product, u.userId(), u.revision(), u.positionMode()));
     }
 
     public void reservation(ReservationRuntime r) {
         if (ordersAndTradesOnly) return;
         if (!active() || r == null) return;
-        var v =
-                new CoreReservationView(
-                        r.orderId(),
-                        identities.instrumentId(r.symbolId()),
-                        r.kind(),
-                        identities.asset(r.assetId()),
-                        r.totalReservedUnits(),
-                        r.releasedUnits(),
-                        r.consumedUnits(),
-                        r.orderQuantitySteps());
+        String instrumentId = identities.instrumentId(r.symbolId());
+        String asset = identities.asset(r.assetId());
         emit(
                 RealtimeFrame.Kind.RESERVATION,
                 r.userId(),
-                v.instrumentId(),
+                instrumentId,
                 Long.toString(r.orderId()),
-                CoreStateQueryCodec.encodeUserState(
-                        new CoreUserStateView(
-                                product, r.userId(), 0, List.of(), List.of(v), List.of())));
+                CoreStateQueryCodec.encodeSingleReservationUserState(
+                        product, r.userId(), r.orderId(), instrumentId, r.kind(), asset,
+                        r.totalReservedUnits(), r.releasedUnits(), r.consumedUnits(), r.orderQuantitySteps()));
     }
 
     public void leverage(CoreLeverageKey key, long value) {
         if (ordersAndTradesOnly) return;
         if (!active()) return;
         try {
-            var v = new CoreLeverageView(key.instrumentId(), key.marginMode(), value);
             emit(
                     RealtimeFrame.Kind.LEVERAGE,
                     key.userId(),
                     key.instrumentId(),
                     key.instrumentId() + ":" + key.marginMode(),
-                    CoreStateQueryCodec.encodeUserState(
-                            new CoreUserStateView(
-                                    product,
-                                    key.userId(),
-                                    0,
-                                    CorePositionMode.ONE_WAY,
-                                    List.of(),
-                                    List.of(),
-                                    List.of(),
-                                    List.of(v))));
+                    CoreStateQueryCodec.encodeSingleLeverageUserState(
+                            product, key.userId(), key.instrumentId(), key.marginMode(), value));
         } catch (RuntimeException failure) {
             failed();
         }
@@ -314,43 +259,32 @@ public final class RealtimeStateCapture {
     public void removedPosition(PositionRuntime p) {
         if (ordersAndTradesOnly) return;
         if (!active() || p == null) return;
-        position(
-                new PositionRuntime(
-                        p.userId(),
-                        p.symbolId(),
-                        p.assetId(),
-                        p.marginMode(),
-                        p.positionSide(),
-                        p.instrument(),
-                        0,
-                        0,
-                        0,
-                        p.realizedPnlUnits(),
-                        0));
+        String instrumentId = identities.instrumentId(p.symbolId());
+        String asset = identities.asset(p.assetId());
+        emit(
+                RealtimeFrame.Kind.POSITION,
+                p.userId(),
+                instrumentId,
+                instrumentId + ":" + p.positionSide(),
+                CoreStateQueryCodec.encodeSinglePositionUserState(
+                        product, p.userId(), instrumentId, asset, p.marginMode(), p.positionSide(),
+                        0, 0, 0, p.realizedPnlUnits(), 0));
     }
 
     public void position(PositionRuntime p) {
         if (ordersAndTradesOnly) return;
         if (!active() || p == null) return;
-        var view =
-                new CorePositionView(
-                        identities.instrumentId(p.symbolId()),
-                        identities.asset(p.assetId()),
-                        p.marginMode(),
-                        p.positionSide(),
-                        p.signedQuantitySteps(),
-                        p.entryPriceTicks(),
-                        p.entryValueTicks(),
-                        p.realizedPnlUnits(),
-                        p.positionMarginUnits());
+        String instrumentId = identities.instrumentId(p.symbolId());
+        String asset = identities.asset(p.assetId());
         emit(
                 RealtimeFrame.Kind.POSITION,
                 p.userId(),
-                view.instrumentId(),
-                view.instrumentId() + ":" + view.positionSide(),
-                CoreStateQueryCodec.encodeUserState(
-                        new CoreUserStateView(
-                                product, p.userId(), 0, List.of(), List.of(), List.of(view))));
+                instrumentId,
+                instrumentId + ":" + p.positionSide(),
+                CoreStateQueryCodec.encodeSinglePositionUserState(
+                        product, p.userId(), instrumentId, asset, p.marginMode(), p.positionSide(),
+                        p.signedQuantitySteps(), p.entryPriceTicks(), p.entryValueTicks(),
+                        p.realizedPnlUnits(), p.positionMarginUnits()));
     }
 
     public void order(OrderRuntime o) {
@@ -430,14 +364,6 @@ public final class RealtimeStateCapture {
             long makerOrderId,
             long makerUserId) {
         if (!active() || takerUserId <= 0 || takerOrderId <= 0 || takerSymbolId < 0 || takerSide == null) return;
-        byte[] data =
-                ByteBuffer.allocate(25)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(price)
-                        .putLong(quantity)
-                        .putLong(matcherSequence)
-                        .put((byte) takerSide.ordinal())
-                        .array();
         String id =
                 product
                         + ":"
@@ -449,7 +375,9 @@ public final class RealtimeStateCapture {
                         + ":"
                         + fillIndex;
         String instrumentId = identities.instrumentId(takerSymbolId);
-        emit(RealtimeFrame.Kind.TRADE, 0, instrumentId, id, data);
+        outbox.stage(RealtimeFrameCodec.encodeTradePayload(
+                product, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
+                price, quantity, matcherSequence, (byte) takerSide.ordinal(), traceId));
         execution(
                 takerUserId,
                 takerOrderId,
@@ -479,38 +407,20 @@ public final class RealtimeStateCapture {
             long quantity,
             CoreOrderSide side,
             boolean maker) {
-        byte[] payload =
-                ByteBuffer.allocate(26)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(order)
-                        .putLong(price)
-                        .putLong(quantity)
-                        .put((byte) side.ordinal())
-                        .put((byte) (maker ? 1 : 0))
-                        .array();
-        emit(RealtimeFrame.Kind.EXECUTION, user, instrumentId, id, payload);
+        outbox.stage(RealtimeFrameCodec.encodeExecutionPayload(
+                product, user, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
+                order, price, quantity, (byte) side.ordinal(), maker, traceId));
     }
 
     public void risk(RiskSnapshotRuntime risk) {
         if (ordersAndTradesOnly) return;
         if (!active() || risk == null) return;
-        byte[] payload =
-                ByteBuffer.allocate(42)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(risk.priceSequence())
-                        .putLong(risk.equityUnits())
-                        .putLong(risk.unrealizedPnlUnits())
-                        .putLong(risk.maintenanceMarginUnits())
-                        .putLong(risk.marginRatioPpm())
-                        .put((byte) risk.positionSide().ordinal())
-                        .put((byte) risk.status().ordinal())
-                        .array();
         String instrumentId = identities.instrumentId(risk.symbolId());
-        emit(
-                RealtimeFrame.Kind.RISK,
-                risk.userId(),
-                instrumentId,
+        outbox.stage(RealtimeFrameCodec.encodeRiskPayload(
+                product, risk.userId(), sequence, ordinal++, timestamp, snapshotId, instrumentId,
                 instrumentId + ":" + risk.positionSide(),
-                payload);
+                risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
+                risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
+                (byte) risk.positionSide().ordinal(), (byte) risk.status().ordinal(), traceId));
     }
 }

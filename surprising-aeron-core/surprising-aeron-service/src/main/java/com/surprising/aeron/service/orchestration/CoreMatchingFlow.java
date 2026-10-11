@@ -57,7 +57,7 @@ final class CoreMatchingFlow {
                     MatchingCommandAdmission.matchingOperation(message.header().messageType()),
                     message, fingerprint);
             putPendingMatching(pending);
-            owner.laneCommandContexts.required(sequence).rejectMatching(resultCode);
+            pending.rejectMatching(resultCode);
             owner.pendingMatching.completeSubmission(sequence);
             owner.appliedCommandCount = sequence;
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
@@ -293,7 +293,7 @@ final class CoreMatchingFlow {
         if (result == null || result.nativeCoreSequence() != sequence) {
             throw new IllegalStateException("synchronous matcher returned an invalid result");
         }
-        owner.laneCommandContexts.required(sequence).publishMatchingCompletion(result);
+        owner.pendingMatching.required(sequence).publishMatchingCompletion(result);
         owner.pendingMatching.progressChanged();
     }
 
@@ -384,15 +384,14 @@ final class CoreMatchingFlow {
         if (owner.fatalFailure != null || !owner.pendingMatching.contains(sequence)) return null;
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null) return null;
-        CommandSlot context = owner.laneCommandContexts.required(sequence);
-        if (context.matchingResult() != null) return context.matchingResult();
+        if (pending.matchingResult() != null) return pending.matchingResult();
         var direct = pending.settlementEvent();
         if (direct == null && pending.orderBatch != null) {
             direct = pending.orderBatch.itemSettlementEvent != null
                     ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
         }
         if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
-        return context.takeMatchingCompletion();
+        return pending.takeMatchingCompletion();
     }
 
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
@@ -450,8 +449,8 @@ final class CoreMatchingFlow {
     }
 
     boolean hasPendingMatchingRejection(long sequence) {
-        return owner.laneCommandContexts.claimed(sequence)
-                && owner.laneCommandContexts.required(sequence).hasMatchingRejection();
+        return owner.pendingMatching.claimed(sequence)
+                && owner.pendingMatching.required(sequence).hasMatchingRejection();
     }
 
     CompletableFuture<Integer> matchingStateHashAsync() {

@@ -74,7 +74,7 @@ final class PendingReservationTracker {
             int count = 0;
             for (int i = 0; i < batch.count; i++) {
                 OrderRuntime order = batch.orders[i];
-                if (order == null || lane.pendingReservationSequences.getIfAbsent(order.orderId(), 0) != sequence) continue;
+                if (order == null || lane.pendingReservationSequence(order.orderId()) != sequence) continue;
                 ReservationRuntime reservation = lane.reservations.get(order.orderId());
                 owner.accountRollback.captureBalanceBefore(batch.userId, reservation.assetId());
                 lane.completePendingReservation(order.orderId(), sequence);

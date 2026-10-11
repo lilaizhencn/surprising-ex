@@ -95,6 +95,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation();
     /** Fixed wrapper for a resolved ordinary REPLACE/AMEND Matcher submission. */
     private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation();
+    /** Slot-owned resolved place order instance reused for zero-allocation amends/replaces. */
+    private final ResolvedPlaceOrder reusableResolvedOrder = new ResolvedPlaceOrder();
+
+    ResolvedPlaceOrder reusableResolvedOrder() {
+        return reusableResolvedOrder;
+    }
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
 
     boolean controlPending;
@@ -174,6 +180,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId,
             long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
+            MatcherSettlementEvent direct) {
+        replaceMatching.prepare(owner, matcherShard, orderId, userId,
+                originalOrderId, instrumentId, replacement, direct);
+        return replaceMatching;
+    }
+
+    java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
+            int matcherShard, long orderId, long userId,
+            long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
             MatcherSettlementEvent direct) {
         replaceMatching.prepare(owner, matcherShard, orderId, userId,
                 originalOrderId, instrumentId, replacement, direct);
@@ -505,6 +520,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         deferredClusterPosition = 0;
         deferredSourceKey = null;
         cachedMatcherShard = -1;
+        reusableResolvedOrder.clear();
     }
     void dispatchOnly() { dispatchOnly = true; }
     boolean isDispatchOnly() { return dispatchOnly; }
@@ -970,8 +986,23 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private long userId;
         private long originalOrderId;
         private String instrumentId;
+        private ResolvedPlaceOrder resolvedReplacement;
         private CoreMatchingOrder replacement;
         private MatcherSettlementEvent direct;
+
+        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
+                     long userId, long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
+                     MatcherSettlementEvent direct) {
+            this.owner = Objects.requireNonNull(owner);
+            this.matcherShard = matcherShard;
+            this.orderId = orderId;
+            this.userId = userId;
+            this.originalOrderId = originalOrderId;
+            this.instrumentId = Objects.requireNonNull(instrumentId);
+            this.resolvedReplacement = Objects.requireNonNull(replacement);
+            this.replacement = null;
+            this.direct = direct;
+        }
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
                      long userId, long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
@@ -983,6 +1014,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.originalOrderId = originalOrderId;
             this.instrumentId = Objects.requireNonNull(instrumentId);
             this.replacement = Objects.requireNonNull(replacement);
+            this.resolvedReplacement = null;
             this.direct = direct;
         }
 
@@ -993,12 +1025,25 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             userId = 0;
             originalOrderId = 0;
             instrumentId = null;
+            resolvedReplacement = null;
             replacement = null;
             direct = null;
         }
 
         @Override
         public Object get() {
+            if (resolvedReplacement != null) {
+                if (direct != null) {
+                    return owner.matchingAdapter.replaceDirect(
+                            matcherShard, coreSequence, command.header().commandId(), orderId,
+                            command.header().submittedAtEpochMillis(), userId,
+                            originalOrderId, instrumentId, resolvedReplacement, direct);
+                }
+                return owner.matchingAdapter.replaceWithEvidence(
+                        matcherShard, coreSequence, command.header().commandId(), orderId,
+                        command.header().submittedAtEpochMillis(), userId,
+                        originalOrderId, instrumentId, resolvedReplacement);
+            }
             if (direct != null) {
                 return owner.matchingAdapter.replaceDirect(
                         matcherShard, coreSequence, command.header().commandId(), orderId,

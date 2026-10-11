@@ -395,6 +395,36 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
+    public exchange.core2.core.common.MatcherResult replaceDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
+            ResolvedPlaceOrder replacement,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || instrumentId == null || instrumentId.isBlank() || replacement == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher replacement");
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            exchange.core2.core.common.MatcherResult cancellation =
+                    cancelNative(userId, originalOrderId, instrumentId);
+            exchange.core2.core.common.MatcherResult result = nativeAccepted(cancellation)
+                    ? placeNative(userId, replacement) : cancellation;
+            int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
+            if (nativeShard != shardId)
+                throw new IllegalStateException("native matcher replacement crossed its evidence partition");
+            return matcherEvidence.publishReplacement(coreSequence, commandId, orderId, aeronTimestamp,
+                    matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+                    cancellation, result, target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
     public exchange.core2.core.common.MatcherResult placeDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
@@ -549,6 +579,29 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CoreMatchingResult replaceWithEvidence(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, long userId, long originalOrderId,
             String instrumentId, CoreMatchingOrder replacement) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()
+                || instrumentId == null || instrumentId.isBlank() || replacement == null) {
+            throw new IllegalArgumentException("invalid native matcher replacement");
+        }
+        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            CoreMatchingResult result = replaceOrder(userId, originalOrderId, instrumentId, replacement);
+            long sequence = matcherEvidence.nextSequence(shardId);
+            return bindMatcherEvidence(coreSequence, commandId, orderId,
+                    aeronTimestamp, sequence, shardId, result);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    public CoreMatchingResult replaceWithEvidence(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, long aeronTimestamp, long userId, long originalOrderId,
+            String instrumentId, ResolvedPlaceOrder replacement) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || instrumentId == null || instrumentId.isBlank() || replacement == null) {
             throw new IllegalArgumentException("invalid native matcher replacement");
@@ -1078,6 +1131,23 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 placed.nativeMatcherResult(), events, placed.marketData());
     }
 
+    public CoreMatchingResult replaceOrder(long userId, long orderId, String instrumentId,
+                                           ResolvedPlaceOrder replacement) {
+        recordUser(userId);
+        CoreMatchingResult cancelled = cancel(userId, orderId, instrumentId);
+        if (!cancelled.accepted()) return cancelled;
+        CoreMatchingResult placed = place(userId, replacement);
+        List<CoreCancellationResult> cancellations = List.of(
+                new CoreCancellationResult(orderId, true, cancelled.resultCode()));
+        List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
+                CoreMatchingResult.concatenateEvents(cancelled.matcherEvents(), placed.matcherEvents());
+        return new CoreMatchingResult(placed.accepted(), placed.resultCode(), cancellations, 1,
+                !placed.accepted(), placed.nativeCoreSequence(), placed.nativeCommandIdMostSignificantBits(),
+                placed.nativeCommandIdLeastSignificantBits(), placed.nativeOrderId(), placed.nativeSequence(),
+                placed.nativeMatcherSequence(), placed.nativeAeronTimestamp(), placed.nativeMatcherShardId(),
+                placed.nativeMatcherResult(), events, placed.marketData());
+    }
+
     public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String instrumentId,
                                                                long newPriceTicks) {
         Integer symbolId = symbols.get(instrumentId);
@@ -1534,12 +1604,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private static <T> CancelBatchOutcome cancelBatchOrdered(
             List<T> orders, Function<T, CoreMatchingResult> cancellation) {
-        List<CoreMatchingResult> results = new ArrayList<>(
-                java.util.Collections.nCopies(orders.size(), notSubmitted()));
-        List<CoreMatchingResult> successfulPrefix = new ArrayList<>();
+        if (orders.isEmpty()) {
+            return new CancelBatchOutcome(List.of(), List.of(), null, null);
+        }
+        int size = orders.size();
+        List<CoreMatchingResult> results = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            results.add(notSubmitted());
+        }
+        List<CoreMatchingResult> successfulPrefix = new ArrayList<>(size);
         CoreMatchingResult failed = null;
         Throwable exception = null;
-        for (int index = 0; index < orders.size(); index++) {
+        for (int index = 0; index < size; index++) {
             try {
                 CoreMatchingResult result = cancellation.apply(orders.get(index));
                 results.set(index, result);

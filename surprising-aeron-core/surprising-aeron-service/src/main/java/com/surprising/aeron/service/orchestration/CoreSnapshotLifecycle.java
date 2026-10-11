@@ -123,8 +123,8 @@ final class CoreSnapshotLifecycle {
                 CommandSlot pending = owner.pendingMatching.get(sequence);
                 MatchingResult result =
                         pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null)
-                                ? owner.laneCommandContexts.required(sequence).matchingResult()
-                                : owner.laneCommandContexts.required(sequence).takeMatchingCompletion();
+                                ? pending.matchingResult()
+                                : pending.takeMatchingCompletion();
                 if (result == null && pending != null && pending.settlementEvent() != null
                         && pending.settlementEvent().direct() && pending.settlementEvent().ready())
                     result = pending.settlementEvent().directResult();
@@ -132,7 +132,7 @@ final class CoreSnapshotLifecycle {
                 if (owner.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
                 owner.drainMatchingCompletions();
             }
-            if (owner.laneCommandContexts.inFlight() != 0) {
+            if (owner.pendingMatching.inFlight() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
             if (owner.snapshotHasPendingCommands()

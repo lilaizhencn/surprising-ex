@@ -295,7 +295,7 @@ final class MatchingCommandAdmission {
 
     void validatePendingCancel(CoreMessage message, DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.cancelOrder();
-        var order = owner.runtimeState.order(command.orderId());
+        var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         if (order.userId() != message.header().userId()) {
             throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
@@ -332,11 +332,8 @@ final class MatchingCommandAdmission {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         var user = owner.runtimeState.user(message.header().userId());
-        var matchingOrder = new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(),
-                resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(),
-                resolved.quantitySteps(), CoreMatchingOrder.slippagePpm(owner.productLine));
         return new ResolvedMatchingAdmission(message.header().userId(), originalOrderId, order.revision(),
-                user == null ? 0 : user.revision(), replacement, resolved, matchingOrder, requiredReservation);
+                user == null ? 0 : user.revision(), replacement, resolved, requiredReservation);
     }
 
     void validatePendingTrigger(DecodedMatchingCommand decodedCommand) {
@@ -715,7 +712,7 @@ final class MatchingCommandAdmission {
             case PLACE -> decodedCommand.placeOrder().instrumentId();
             case CANCEL -> {
                 var command = decodedCommand.cancelOrder();
-                var order = owner.runtimeState.order(command.orderId());
+                var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
                 yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
             }
             case REPLACE, AMEND -> {

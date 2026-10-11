@@ -980,7 +980,7 @@ class RuntimeCommitRecoveryTest {
         assertThat(state.factContextActive).isFalse();
         assertThat(state.hasPendingDirectCommand()).isFalse();
         assertThat(state.pendingMatchingCount()).isZero();
-        assertThat(state.laneCommandContexts.inFlight()).isZero();
+        assertThat(state.pendingMatching.inFlight()).isZero();
         state.runtimeState.requireSnapshotFenceReady();
     }
 

@@ -276,10 +276,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** 各命令来源已应用序号，供来源去重及恢复使用。 */
     final SourceSequenceIndex lastSourceSequences;
-    /** 在途命令环；保存日志顺序及准入、撮合、结算的关联。 */
+    /** 在途命令环；统一保存日志顺序、准入、撮合、Lane 上下文与结算关联。 */
     final PendingMatchingRing pendingMatching;
-    /** 每个在途序号的 Lane 提交上下文，与 pendingMatching 同生命周期。 */
-    final CommandSlotRing laneCommandContexts;
     /** 撮合派发和完成通知通道；只在完成边界交接数据。 */
     final MatcherPipelineGroup matcherPipeline;
     /** 真实撮合器适配器；命令经 matcher 队列推进。 */
@@ -497,11 +495,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 matchingAdapter.topology().accountLaneCount());
         commits.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
         commits.initializeMatcherProgress(matcherSnapshot);
-        this.laneCommandContexts = pendingMatching.contexts();
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
-                        matchingAdapter.topology().matchingCompletionCapacity()), false, laneCommandContexts);
+                        matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts());
         snapshots.matcherSnapshotCapture = matcherSnapshotCapture == null
                 ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture;
         if (snapshotEncoder == null) {
@@ -920,8 +917,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 matcherPipeline.submissionDepth(), matcherPipeline.capacity(),
                 matcherPipeline.submissionHighWaterMark(), matcherPipeline.completionDepth(),
                 matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
-                laneCommandContexts.inFlight(), laneCommandContexts.capacity(),
-                laneCommandContexts.highWaterMark(), committedCoreSequence);
+                pendingMatching.inFlight(), pendingMatching.capacity(),
+                pendingMatching.highWaterMark(), committedCoreSequence);
         for (int laneId = 0; laneId < count; laneId++) {
             runtimeState.writeAccountLaneMetrics(laneId, encoder);
         }
@@ -1101,7 +1098,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return key == null ? null : runtimeState.position(key);
     }
     boolean snapshotHasPendingCommands() {
-        return factContextActive || directCommand.active() || laneCommandContexts.inFlight() != 0;
+        return factContextActive || directCommand.active() || pendingMatching.inFlight() != 0;
     }
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
         return runtimeState.feePoliciesSnapshot();
@@ -1291,14 +1288,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
             com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan,
             long coreSequence,
             com.surprising.aeron.service.matching.MatchingResult matchingResult,
-            CommandSlot laneContext,
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
             if (realtimeCapture != null && realtimeCapture.active() && pending.realtimeTakerOrder == null)
                 pending.realtimeTakerOrder = runtimeOrder(settlementPlan.takerOrderId());
             event = runtimeState.dispatchMatcherSettlement(
-                    coreSequence, laneContext.expectedLaneMask(), coreSequence,
+                    coreSequence, pending.expectedLaneMask(), coreSequence,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
                     matchingResult, identities);
             pending.settlement(event, settlementPlan, applyStartNanos);
@@ -1311,7 +1307,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         event, commandFundsAccumulator, terminalRetention,
                         resultBuilder.changedUserIds, resultBuilder.changedOrderIds);
         resultBuilder.markLaneCommitIdsSeeded();
-        laneContext.completeLanes(event.requiredLaneMask());
+        pending.completeLanes(event.requiredLaneMask());
         return delta;
     }
 
